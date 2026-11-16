@@ -12,8 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-const Revision = "v1beta"
-
 type InteractionRequest struct {
 	Source     oif.Document
 	Model      string
@@ -109,10 +107,6 @@ func ParseInteractionResponse(body []byte, maxBytes int) (InteractionResponse, e
 	return InteractionResponse{Source: doc, ID: id, Status: status}, nil
 }
 
-func (r InteractionResponse) WithID(id string) ([]byte, error) {
-	return r.WithProjection(id, "", "")
-}
-
 func (r InteractionResponse) WithProjection(id, previous, route string) ([]byte, error) {
 	changes := []oif.Change{{Pointer: "/id", Value: quoted(id), Origin: oif.ResourceBinding, Reason: "owner-scoped Gemini interaction"}}
 	if route != "" {
@@ -192,10 +186,6 @@ func ParseInteractionEvent(data []byte, maxBytes int) (InteractionEvent, error) 
 		return InteractionEvent{}, errors.New("interaction event has no bounded resource ID")
 	}
 	return event, nil
-}
-
-func (e InteractionEvent) WithID(id string) ([]byte, error) {
-	return e.WithProjection(id, "", "")
 }
 
 func (e InteractionEvent) WithProjection(id, previous, route string) ([]byte, error) {

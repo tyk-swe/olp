@@ -12,4 +12,3 @@ go tool oapi-codegen -generate types,client -package guardrails -o "$output_root
 pnpm --dir console exec openapi-typescript ../guardrails/guardrails.json -o "$output_root/guardrails/schema.d.ts"
 
 node scripts/generate-inference-contract.mjs "$output_root/inference/client.gen.go"
-pnpm --dir console exec openapi-typescript ../inference/inference.json -o "$output_root/inference/schema.d.ts"

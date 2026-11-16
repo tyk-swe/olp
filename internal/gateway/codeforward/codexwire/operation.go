@@ -11,23 +11,15 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-const MaxBody = codewire.MaxBody
-
-type Request = codemode.Request
-
-func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
-	return codewire.Decode(raw, encoding, limit)
-}
-
-func Classify(body []byte, headers http.Header, path string, websocket bool) (Request, error) {
-	return ClassifyWith(body, path, websocket, func(root oif.Value) (codemode.Identity, error) { return Identity(headers, root) }, headers)
+func Classify(body []byte, headers http.Header, path string, websocket bool) (codemode.Request, error) {
+	return ClassifyWith(body, path, websocket, func(root oif.Value) (codemode.Identity, error) { return identityFrom(headers, root) }, headers)
 }
 
 // ClassifyWith classifies a Responses body whose conversation identity comes
 // from identity, which reads the parsed body and its own request headers.
-func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Value) (codemode.Identity, error), headers http.Header) (Request, error) {
-	var request Request
-	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
+func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Value) (codemode.Identity, error), headers http.Header) (codemode.Request, error) {
+	var request codemode.Request
+	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: codewire.MaxBody})
 	if err != nil || document.Root().Kind() != oif.Object {
 		return request, codemode.Refuse(400, "code_body_invalid")
 	}
@@ -101,7 +93,7 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 	return request, nil
 }
 
-func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
+func identityFrom(headers http.Header, root oif.Value) (codemode.Identity, error) {
 	if identity, generic, err := codewire.GenericIdentity(headers, root, codewire.CodexIdentity); generic || err != nil {
 		return identity, err
 	}
@@ -152,7 +144,7 @@ func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
 }
 
 func ConnectionIdentity(headers http.Header) (codemode.Identity, error) {
-	return Identity(headers, oif.Value{})
+	return identityFrom(headers, oif.Value{})
 }
 
 func field(value oif.Value, name string) oif.Value { child, _ := value.Lookup(name); return child }

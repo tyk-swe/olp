@@ -23,11 +23,6 @@ type CloudEvents struct {
 	Source string `json:"source,omitempty"`
 }
 
-func (JSONWebhook) Type() Type     { return contract.CreateExportSinkRequestTypeHttps }
-func (JSONWebhook) Format() Format { return contract.CreateExportSinkRequestFormatJson }
-func (CloudEvents) Type() Type     { return contract.CreateExportSinkRequestTypeHttps }
-func (CloudEvents) Format() Format { return contract.CreateExportSinkRequestFormatCloudevents }
-
 func parseJSONWebhook(_ Type, settings json.RawMessage) (Spec, error) {
 	return JSONWebhook{}, decodeSettings(contract.CreateExportSinkRequestFormatJson, settings, &struct{}{})
 }

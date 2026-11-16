@@ -23,8 +23,6 @@ const (
 )
 
 type Spec interface {
-	Type() Type
-	Format() Format
 	transport(credential []byte, strict bool) (transport, error)
 }
 

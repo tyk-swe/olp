@@ -1,7 +1,6 @@
 import { apiClient } from '#lib/management/client.js';
 import { ensureOk, unwrap } from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
-export type SAMLConfiguration = components['schemas']['SAMLConfiguration'];
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];
 export async function getSAML(signal?: AbortSignal) {
   const r = await apiClient.GET('/api/v1/saml/configuration', { signal });

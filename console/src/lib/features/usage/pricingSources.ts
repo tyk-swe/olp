@@ -8,7 +8,6 @@ type Schemas = components['schemas'];
 export type PricingSource = Schemas['PricingSource'];
 export type PricingSourceSnapshot = Schemas['PricingSourceSnapshot'];
 export type PricingSourceRefresh = Schemas['PricingSourceRefreshResponse'];
-export type PricingSourceDiff = Schemas['PricingSourceDiff'];
 export type PublishPricingSourceInput = Schemas['PublishPricingSourceRequest'];
 export type PricingSourceFormat = Schemas['PricingSourceFormat'];
 export type ReferenceCatalog = Schemas['ReferenceCatalog'];

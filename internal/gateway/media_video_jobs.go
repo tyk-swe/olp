@@ -82,7 +82,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		firstID, lastID = &first, &last
 	}
 	list := &media.VideoListResult{Jobs: results, FirstID: firstID, LastID: lastID, HasMore: page.More}
-	body, failure := media.EncodeVideoListResponse(list, "video")
+	body, failure := media.EncodeVideoListResponse(list)
 	if failure != nil {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message))
 		return

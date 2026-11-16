@@ -10,7 +10,6 @@ import {
 type Schemas = components['schemas'];
 export type MFAChallenge = Schemas['MFAChallenge'];
 export type MFAEnrollment = Schemas['MFAEnrollment'];
-export type MFAStatus = Schemas['MFAStatus'];
 export type MFAVerification =
   | Schemas['MFAEnrollmentComplete']
   | Schemas['MFABootstrapSession']

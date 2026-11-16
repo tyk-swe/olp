@@ -22,15 +22,14 @@ import (
 // Only a deployment setting names the directory, so nothing the
 // management API does enables the tier; an owner then permits each plugin.
 type Unconfined struct {
-	dir    string
-	limits Limits
-	log    *slog.Logger
+	dir string
+	log *slog.Logger
 }
 
-// NewUnconfined returns the unconfined tier whose executables live in dir,
-// whose calls stay within limits' time and log to log.
-func NewUnconfined(dir string, limits Limits, log *slog.Logger) *Unconfined {
-	return &Unconfined{dir: dir, limits: limits, log: log}
+// NewUnconfined returns the unconfined tier whose executables live in dir and
+// whose calls log to log.
+func NewUnconfined(dir string, log *slog.Logger) *Unconfined {
+	return &Unconfined{dir: dir, log: log}
 }
 
 // An ExecutableFile is an executable in the unconfined plugin directory.

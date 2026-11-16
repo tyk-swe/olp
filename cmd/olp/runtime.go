@@ -90,7 +90,7 @@ func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.P
 		}
 	}
 	if c.UnconfinedPluginDir != "" {
-		core.unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits(), log)
+		core.unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, log)
 	}
 	// Gateways and control's probes run signing hooks per upstream
 	// request, and unconfined plugins may carry the requests themselves,
@@ -101,7 +101,7 @@ func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.P
 	if c.Mode == Worker {
 		engine = plugins.Interpreted
 	}
-	hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits(), log)
+	hostRuntime, err := plugins.NewRuntime(startup, engine, log)
 	if err != nil {
 		return fail(err)
 	}

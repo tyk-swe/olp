@@ -42,8 +42,7 @@
 
   const report = createQuery(() => ({
     queryKey: usageKeys.reconciliation(range.first, range.last),
-    queryFn: ({ signal }) =>
-      getReconciliation(range.first, range.last, undefined, signal),
+    queryFn: ({ signal }) => getReconciliation(range.first, range.last, signal),
     enabled: canRead
   }));
 

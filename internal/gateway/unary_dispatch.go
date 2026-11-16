@@ -26,7 +26,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	finish := func() {
 		if trace != nil {
 			if u := fact.Usage; u != nil {
-				trace.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+				trace.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 			}
 			trace.Finish(fact.Class, fact.Status)
 		}

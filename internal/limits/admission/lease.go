@@ -45,8 +45,7 @@ type costHold struct {
 }
 
 type costReservation struct {
-	hold  scripts.CostHold
-	grace time.Duration
+	hold scripts.CostHold
 }
 
 func (le *Lease) Join(other *Lease) {
@@ -147,7 +146,7 @@ func (le *Lease) SettleCost(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 	defer cancel()
-	return errors.Join(err, le.limiter.scripts.SettleCost(ctx, held.hold, le.cost.actual, max(held.grace, time.Millisecond)))
+	return errors.Join(err, le.limiter.scripts.SettleCost(ctx, held.hold, le.cost.actual, costGrace))
 }
 
 func zeroAmount(amount string) bool {

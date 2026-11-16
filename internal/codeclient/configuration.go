@@ -139,8 +139,6 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		return ""
 	}() + func() string {
-		return ""
-	}() + func() string {
 		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
 			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
 		}

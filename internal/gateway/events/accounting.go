@@ -185,11 +185,15 @@ func UsageAttempt(e Envelope, index int) (usage.Attempt, error) {
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
 		}
+		var cardRevisionID *string
+		if fact.CardPinned && fact.CardRev != nil {
+			cardRevisionID = &fact.CardRev.ID
+		}
 		policy, err := json.Marshal(AttemptPolicy{
 			Commitment: fact.Commitment, CommitmentPinned: fact.CommitmentPinned,
 			DiscountID: discountID, DiscountPinned: pricingPinned,
 			Digest: fact.PolicyDigest, PricingPinned: pricingPinned,
-			RateCardPinned: fact.CardPinned, RateCardRevisionID: fact.CardRevisionID,
+			RateCardPinned: fact.CardPinned, RateCardRevisionID: cardRevisionID,
 			Strategy: fact.Strategy, VendorID: fact.VendorID,
 		})
 		if err == nil {

@@ -32,8 +32,6 @@ type Failure struct {
 	Message string
 }
 
-func (f *Failure) Error() string { return f.Code + ": " + f.Message }
-
 func HeaderEndUserDigest(auth any, r *http.Request, authority keyauthority.Authority) (string, *Failure) {
 	values := r.Header.Values("X-OLP-End-User")
 	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !keyauthority.ValidEndUserIdentifier(values[0]) {

@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -13,7 +14,7 @@ import (
 func TestDigestPurposesSeparateDomains(t *testing.T) {
 	key := NewAuthKey(bytes.Repeat([]byte{7}, 32), "install-a")
 	seen := map[string]DigestPurpose{}
-	for _, purpose := range DigestPurposes() {
+	for _, purpose := range digestPurposes() {
 		digest := key.Digest(purpose, "token-value")
 		if again := key.Digest(purpose, "token-value"); !bytes.Equal(again, digest) {
 			t.Fatalf("%s digest is not stable across calls", purpose)
@@ -27,19 +28,19 @@ func TestDigestPurposesSeparateDomains(t *testing.T) {
 		}
 	}
 	otherInstall := NewAuthKey(bytes.Repeat([]byte{7}, 32), "install-b")
-	for _, purpose := range DigestPurposes() {
+	for _, purpose := range digestPurposes() {
 		if bytes.Equal(otherInstall.Digest(purpose, "token-value"), key.Digest(purpose, "token-value")) {
 			t.Fatalf("%s digest ignores the installation", purpose)
 		}
 	}
-	if len(slices.Compact(slices.Sorted(slices.Values(purposeNames())))) != len(DigestPurposes())+len(SealPurposes()) {
+	if len(slices.Compact(slices.Sorted(slices.Values(purposeNames())))) != len(digestPurposes())+len(SealPurposes()) {
 		t.Fatal("purpose names must be unique")
 	}
 }
 
 func purposeNames() []string {
-	names := make([]string, 0, len(DigestPurposes())+len(SealPurposes()))
-	for _, purpose := range DigestPurposes() {
+	names := make([]string, 0, len(digestPurposes())+len(SealPurposes()))
+	for _, purpose := range digestPurposes() {
 		names = append(names, purpose.String())
 	}
 	for _, purpose := range SealPurposes() {
@@ -49,7 +50,7 @@ func purposeNames() []string {
 }
 
 func TestSealPurposesBindCiphertext(t *testing.T) {
-	ring, err := ParseRing([]byte(fmt.Sprintf(`{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32))))
+	ring, err := ParseRingWithUnwrapper(context.Background(), []byte(fmt.Sprintf(`{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32))), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestPurposeDocumentation(t *testing.T) {
 	}
 	end += start
 	var digests, seals []string
-	for _, purpose := range DigestPurposes() {
+	for _, purpose := range digestPurposes() {
 		digests = append(digests, "`"+purpose.String()+"`")
 	}
 	for _, purpose := range SealPurposes() {
@@ -130,4 +131,9 @@ func TestPurposeDocumentation(t *testing.T) {
 	if err = os.WriteFile(path, updated, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func digestPurposes() []DigestPurpose {
+	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
 }

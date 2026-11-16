@@ -121,10 +121,10 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 			}
 			previous = name
 			tuple := DefaultTuple(t.Connection.Transport())
-			err := p.Certify(ctx, t, name, tuple, BodyLimit)
+			err := p.Certify(ctx, t, name, tuple)
 			if err != nil && t.Connection.Document().Kind == connectors.KindAzureOpenAI {
 				tuple.Operation = "embeddings"
-				err = p.Certify(ctx, t, name, tuple, BodyLimit)
+				err = p.Certify(ctx, t, name, tuple)
 			}
 			if err != nil {
 				return nil, err

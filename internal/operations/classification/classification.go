@@ -23,10 +23,6 @@ type Scope struct {
 	Kind  string
 	Count int
 }
-type Sequence struct {
-	Source oif.Value
-	Pair   bool
-}
 
 type ModerationRequest struct {
 	source oif.Request
@@ -35,82 +31,38 @@ type ModerationRequest struct {
 
 func (r ModerationRequest) Schema() oif.Identity { return identity("moderation") }
 func (r ModerationRequest) Source() oif.Request  { return r.source }
-func (r ModerationRequest) Scope() Scope         { return r.scope }
 
-type Decision struct {
-	Position                                                   int
-	Categories, Scores, Flagged, AppliedInputTypes, Thresholds oif.Value
-}
-type ModerationResult struct {
-	source    oif.Result
-	scope     Scope
-	decisions []Decision
-}
+type ModerationResult struct{ source oif.Result }
 
-func (r ModerationResult) Schema() oif.Identity  { return identity("moderation") }
-func (r ModerationResult) Source() oif.Result    { return r.source }
-func (r ModerationResult) Scope() Scope          { return r.scope }
-func (r ModerationResult) Decisions() []Decision { return slices.Clone(r.decisions) }
+func (r ModerationResult) Schema() oif.Identity { return identity("moderation") }
+func (r ModerationResult) Source() oif.Result   { return r.source }
 
 type PredictRequest struct {
-	source    oif.Request
-	batch     bool
-	sequences []Sequence
-	rawScores oif.Value
+	source oif.Request
+	batch  bool
+	count  int
 }
 
-func (r PredictRequest) Schema() oif.Identity  { return identity("classification") }
-func (r PredictRequest) Source() oif.Request   { return r.source }
-func (r PredictRequest) Batch() bool           { return r.batch }
-func (r PredictRequest) Sequences() []Sequence { return slices.Clone(r.sequences) }
-func (r PredictRequest) RawScores() oif.Value  { return r.rawScores }
+func (r PredictRequest) Schema() oif.Identity { return identity("classification") }
+func (r PredictRequest) Source() oif.Request  { return r.source }
 
-type Prediction struct {
-	Position             int
-	Label, Score, Source oif.Value
-}
-type PredictionSet struct {
-	InputIndex int
-	Source     oif.Value
-	rows       []Prediction
-}
+type PredictResult struct{ source oif.Result }
 
-func (s PredictionSet) Predictions() []Prediction { return slices.Clone(s.rows) }
-
-type PredictResult struct {
-	source    oif.Result
-	batch     bool
-	rawScores oif.Value
-	sets      []PredictionSet
-}
-
-func (r PredictResult) Schema() oif.Identity  { return identity("classification") }
-func (r PredictResult) Source() oif.Result    { return r.source }
-func (r PredictResult) Batch() bool           { return r.batch }
-func (r PredictResult) RawScores() oif.Value  { return r.rawScores }
-func (r PredictResult) Sets() []PredictionSet { return slices.Clone(r.sets) }
+func (r PredictResult) Schema() oif.Identity { return identity("classification") }
+func (r PredictResult) Source() oif.Result   { return r.source }
 
 type ScoringRequest struct {
-	source                                oif.Request
-	sourceSentence, sentences, parameters oif.Value
+	source    oif.Request
+	sentences oif.Value
 }
 
-func (r ScoringRequest) Schema() oif.Identity  { return identity("scoring") }
-func (r ScoringRequest) Source() oif.Request   { return r.source }
-func (r ScoringRequest) Parameters() oif.Value { return r.parameters }
+func (r ScoringRequest) Schema() oif.Identity { return identity("scoring") }
+func (r ScoringRequest) Source() oif.Request  { return r.source }
 
-type Similarity struct {
-	InputIndex int
-	Score      oif.Value
-}
-type ScoringResult struct {
-	source oif.Result
-	scores []Similarity
-}
+type ScoringResult struct{ source oif.Result }
 
 func (r ScoringResult) Schema() oif.Identity { return identity("scoring") }
 func (r ScoringResult) Source() oif.Result   { return r.source }
-func (r ScoringResult) Scores() []Similarity { return slices.Clone(r.scores) }
 
 func Definitions() []operations.Dialect {
 	moderation := operations.Dialect{Identity: identity("openai-moderation"), Operation: identity("moderation"), Surface: "openai", Label: "OpenAI native moderation", Address: operations.Address{FamilyPath: "moderation"}, Documentation: "https://developers.openai.com/api/reference/typescript/resources/moderations/methods/create", Evidence: "openai-moderation-native-scope/1", Request: moderationRequest, Result: moderationResult, BindModel: bindModel, BindResultModel: operations.ModelChanges, InputText: moderationText, OutputText: outputText, Probe: func(model string) []byte {

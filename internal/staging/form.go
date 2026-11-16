@@ -67,8 +67,6 @@ func (f *Form) SourceFields() ([]Field, bool) {
 	return slices.Clone(f.source), f.normalized
 }
 
-func (f *Form) Handles() []Handle { return f.handles }
-
 func (f *Form) Disarm() {
 	f.armed = false
 	f.releaseLease()

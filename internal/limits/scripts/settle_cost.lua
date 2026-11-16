@@ -36,10 +36,7 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(normalized)
 end
 
-local function current_time(override)
-  if override > 0 then
-    return override
-  end
+local function current_time()
   local server_time = redis.call("TIME")
   if type(server_time) ~= "table" or #server_time ~= 2 then
     return nil
@@ -279,7 +276,7 @@ local release = amount_hi ~= nil and amount_hi == 0 and amount_lo == 0
 if not valid_lease(lease_id) or amount_hi == nil or ttl == nil or (not release and ttl < 1) then
   return failure("invalid_arguments")
 end
-local now_ms = current_time(0)
+local now_ms = current_time()
 if now_ms == nil then
   return failure("invalid_server_time")
 end

@@ -68,12 +68,12 @@ func TestLegacyCompletionsNativeAndStream(t *testing.T) {
 		input  string
 	}{{wire.Completions, native}, {wire.Chat, strings.ReplaceAll(strings.ReplaceAll(native, `"object":"text_completion"`, `"object":"chat.completion.chunk"`), `"text":"hello"`, `"delta":{"content":"hello"}`)}} {
 		var out strings.Builder
-		c, err = Stream(tc.source, wire.Completions, strings.NewReader(tc.input), 4096, "route", true, func(b []byte) error { out.Write(b); return nil })
+		c, err = Stream(tc.source, wire.Completions, strings.NewReader(tc.input), 4096, "route", func(b []byte) error { out.Write(b); return nil })
 		if err != nil || c.Usage == nil || c.Usage.TotalTokens != 3 || !strings.Contains(out.String(), `"text":"hello"`) || !strings.Contains(out.String(), "[DONE]") {
 			t.Fatalf("stream %s: %s %+v %v", tc.source, out.String(), c, err)
 		}
 		truncated := strings.ReplaceAll(tc.input, "data: [DONE]\n\n", "")
-		if _, err = Stream(tc.source, wire.Completions, strings.NewReader(truncated), 4096, "route", true, func([]byte) error { return nil }); err == nil {
+		if _, err = Stream(tc.source, wire.Completions, strings.NewReader(truncated), 4096, "route", func([]byte) error { return nil }); err == nil {
 			t.Fatal("truncated stream accepted")
 		}
 	}
@@ -184,7 +184,7 @@ func TestLegacyCompletionPreservesCacheWriteUsage(t *testing.T) {
 		if family == wire.Chat {
 			frame = strings.Replace(frame, `"object":"text_completion"`, `"object":"chat.completion.chunk"`, 1)
 		}
-		result, err = Stream(family, wire.Completions, strings.NewReader(frame), 4096, "route", true, func([]byte) error { return nil })
+		result, err = Stream(family, wire.Completions, strings.NewReader(frame), 4096, "route", func([]byte) error { return nil })
 		if err != nil || result.Usage.CacheWriteInputTokens == nil || *result.Usage.CacheWriteInputTokens != 3 {
 			t.Fatalf("stream %s cache write usage: %+v %v", family, result, err)
 		}
@@ -219,7 +219,7 @@ func TestLegacyCompletionRejectsInconsistentUsageEverywhere(t *testing.T) {
 				object = "chat.completion.chunk"
 			}
 			stream := `data: {"object":"` + object + `","model":"upstream","choices":[` + chunk + `],"usage":` + usage + `}` + "\n\ndata: [DONE]\n\n"
-			result, err := Stream(family, wire.Completions, strings.NewReader(stream), 4096, "route", true, func([]byte) error { return nil })
+			result, err := Stream(family, wire.Completions, strings.NewReader(stream), 4096, "route", func([]byte) error { return nil })
 			if err == nil || result != nil && result.UsageComplete {
 				t.Fatalf("stream %s accepted complete usage %s", family, usage)
 			}
@@ -235,7 +235,7 @@ func TestCompletionUsageContractDoesNotConstrainNativeChat(t *testing.T) {
 		t.Fatalf("native vendor total changed: %+v %v", c, err)
 	}
 	stream := `data: {"object":"chat.completion.chunk","model":"upstream","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],` + usage + `}` + "\n\ndata: [DONE]\n\n"
-	c, err = Stream(wire.Chat, wire.Chat, strings.NewReader(stream), 4096, "route", true, func([]byte) error { return nil })
+	c, err = Stream(wire.Chat, wire.Chat, strings.NewReader(stream), 4096, "route", func([]byte) error { return nil })
 	if err != nil || c.Usage.TotalTokens != 135 {
 		t.Fatalf("native vendor stream total changed: %+v %v", c, err)
 	}

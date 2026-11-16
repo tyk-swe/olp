@@ -375,3 +375,14 @@ func (w refWalker) document(block map[string]json.RawMessage) {
 	}
 	w.in.approx = true
 }
+
+func jsonArray(raw json.RawMessage) []json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return nil
+	}
+	return items
+}

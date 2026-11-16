@@ -49,24 +49,15 @@ type Execution struct {
 	Delivery, Lifetime, Submission string
 	Effects                        []string
 }
-type Requirement struct{ Pointer, Obligation, Description string }
-type Asset struct {
-	ID, Digest, MediaType string
-	Size                  int64
-}
 type Resource struct{ ID, Kind, Relation string }
 type Descriptor struct {
 	Operation, Dialect, Profile, Client Identity
 	Execution                           Execution
-	Requirements                        []Requirement
-	Assets                              []Asset
 	Resources                           []Resource
 }
 
 func (d Descriptor) clone() Descriptor {
 	d.Execution.Effects = append([]string(nil), d.Execution.Effects...)
-	d.Requirements = append([]Requirement(nil), d.Requirements...)
-	d.Assets = append([]Asset(nil), d.Assets...)
 	d.Resources = append([]Resource(nil), d.Resources...)
 	return d
 }

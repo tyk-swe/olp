@@ -42,7 +42,7 @@ func InspectInputText(r *wire.Request, fn TextSlot) (*wire.Request, error) {
 	if w.err != nil {
 		return nil, w.err
 	}
-	return r.WithFields(fields, oif.ExplicitTransform)
+	return r.WithFields(fields)
 }
 
 // inputFields walks the declared prompt text of a family's body and reports

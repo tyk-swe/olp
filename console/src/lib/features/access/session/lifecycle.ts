@@ -423,13 +423,9 @@ export class AuthenticationLifecycle {
     await this.transitionToAnonymous();
   }
 
-  async principalInvalidated(): Promise<void> {
-    await this.transitionToAnonymous();
-  }
-
   async signOut(
     request: PrincipalExitRequest,
-    destination = '/login'
+    destination: string
   ): Promise<void> {
     if (!(await this.runPrincipalExit(request))) return;
     const boundary = this.boundary;

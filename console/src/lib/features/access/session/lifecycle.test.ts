@@ -338,7 +338,7 @@ describe('authentication lifecycle', () => {
     );
     const signOut = vi.fn(async () => {});
 
-    await lifecycle.signOut(signOut);
+    await lifecycle.signOut(signOut, '/login');
 
     expect(signOut).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(previous.signal.aborted).toBe(true);
@@ -360,7 +360,7 @@ describe('authentication lifecycle', () => {
     await expect(
       lifecycle.signOut(async () => {
         throw new Error('Sign-out failed');
-      })
+      }, '/login')
     ).rejects.toThrow('Sign-out failed');
 
     expect(lifecycle.snapshot()).toMatchObject({

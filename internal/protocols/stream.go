@@ -21,8 +21,8 @@ var errStreamDone = errors.New("terminal native event")
 // Stream keeps the existing executor's backpressure and commitment boundary.
 // Native streams retain extensions. Translators retain at most maxEvent bytes
 // of text/tool state needed for the destination's terminal envelope.
-func Stream(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return StreamWithEvents(encodedWire, target, r, maxEvent, route, includeUsage, emit, nil)
+func Stream(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, emit wire.Emit) (*wire.Completion, error) {
+	return StreamWithEvents(encodedWire, target, r, maxEvent, route, true, emit, nil)
 }
 
 // StreamWithEvents exposes immutable native events before projection. The

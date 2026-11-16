@@ -37,13 +37,6 @@ func NewConnectionClientCache(capacity int) *ConnectionClientCache {
 	return &ConnectionClientCache{capacity: capacity, entries: make(map[[32]byte]*list.Element)}
 }
 
-// Client reuses connections within a standalone, single-authority cache.
-// Provider-serving call sites must use ClientScoped to isolate their providers,
-// revisions and credential principals even when network options are identical.
-func (c *ConnectionClientCache) Client(policy Policy, options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration) (*http.Client, error) {
-	return c.ClientScoped("standalone", policy, options, secret, defaultResponseHeaderTimeout)
-}
-
 // ClientScoped reuses a connection pool only within the caller's authority
 // scope. The scope must include provider/tenant ownership, serving revision and
 // credential principal identity as applicable; it must not contain secrets.

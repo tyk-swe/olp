@@ -380,16 +380,6 @@ func (v Vendor) Serves(p codemode.Protocol) bool {
 	return slices.ContainsFunc(v.endpoints, func(e Endpoint) bool { return e.Protocol == p })
 }
 
-func (v Vendor) Supports(client string) bool { _, ok := v.Client(client); return ok }
-
-// Reaches reports whether a client OLP generates configuration for reaches a
-// model through the adapter: the client speaks a protocol the adapter serves
-// the model on.
-func (v Vendor) Reaches(client, model string) bool {
-	_, ok := v.Protocol(client, model)
-	return ok
-}
-
 // Protocol returns the protocol a client OLP generates configuration for sends
 // a model on through the adapter: the first the client speaks that the adapter
 // serves the model on.

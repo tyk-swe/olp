@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -46,10 +45,6 @@ func ParseSource(data []byte) (oif.Document, error) {
 		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	return doc, nil
-}
-
-func ParseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
-	return ParseDocumentForModel(family, doc, "")
 }
 
 func ParseDocumentForModel(family wire.Format, doc oif.Document, model string) (*wire.Request, error) {
@@ -89,7 +84,7 @@ func parseDocument(family wire.Format, doc oif.Document, expectedModel string) (
 		return nil, err
 	}
 
-	r = r.WithValidation("openai")
+	r = r.Validated()
 	return r, nil
 }
 
@@ -529,13 +524,6 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 	return nil
 }
 
-// Encode produces the upstream document: the retained fields, provider
-// parameter defaults for absent keys, the upstream model, and usage reporting
-// for chat streams so accounting never depends on client options.
-func Encode(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage) ([]byte, error) {
-	return encode(r, upstreamModel, defaults, nil)
-}
-
 // EncodeFieldsWithProvenance gives the transformed dialect codec its owned
 // destination fields without a serialize/parse round trip. The source remains
 // immutable; profile-specific transformed lowering can inspect this working copy.
@@ -545,13 +533,6 @@ func EncodeFieldsWithProvenance(r *wire.Request, upstreamModel string, defaults 
 		provenance = append(provenance, oif.Provenance{Pointer: oif.Pointer("", name), Origin: oif.ProviderDefault, Reason: "absent caller field inherited provider default"})
 	})
 	return fields, provenance, err
-}
-func encode(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) ([]byte, error) {
-	fields, err := encodeFields(r, upstreamModel, defaults, applied)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(fields)
 }
 func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) (map[string]json.RawMessage, error) {
 	fields := r.Document()
@@ -593,7 +574,7 @@ func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]jso
 	// rewriting the route to an upstream identifier (which need not be a slug).
 	// Only the exact immutable document and dialect validated by Parse can
 	// reuse that result. Constructors, overlays and defaults still validate.
-	if len(defaults) > 0 || !r.ValidatedBy("openai") {
+	if len(defaults) > 0 || !r.IsValidated() {
 		validation := *r
 		if err := validateFields(&validation, out, oif.Value{}, ""); err != nil {
 			return nil, err
@@ -627,63 +608,6 @@ func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]jso
 		}
 	}
 	return out, nil
-}
-
-// Extensions lists JSON pointers of fields the gateway does not model. They
-// are forwarded verbatim; the list exists for diagnostics and tests.
-func Extensions(r *wire.Request) []string {
-	var paths []string
-	known := chatKnown
-	if r.Family == wire.Responses {
-		known = responsesKnown
-	}
-	walk(r.Document(), "", known, &paths)
-	slices.Sort(paths)
-	return paths
-}
-
-type shape map[string]shape
-
-var functionShape = shape{"name": nil, "description": nil, "parameters": nil}
-var chatKnown = shape{
-	"model": nil, "messages": shape{"*": shape{"role": nil, "content": shape{"*": shape{"type": nil, "text": nil, "image_url": nil, "input_audio": nil, "file": nil, "refusal": nil}}, "name": nil, "tool_calls": shape{"*": shape{"id": nil, "type": nil, "function": shape{"name": nil, "arguments": nil}}}, "tool_call_id": nil, "refusal": nil, "audio": nil, "function_call": nil}},
-	"stream": nil, "stream_options": nil, "max_tokens": nil, "max_completion_tokens": nil, "temperature": nil, "top_p": nil, "n": nil, "stop": nil,
-	"presence_penalty": nil, "frequency_penalty": nil, "logit_bias": nil, "logprobs": nil, "top_logprobs": nil, "user": nil, "seed": nil,
-	"tools": shape{"*": shape{"type": nil, "function": functionShape}}, "tool_choice": nil, "parallel_tool_calls": nil,
-	"response_format": shape{"type": nil, "json_schema": shape{"name": nil, "description": nil, "schema": nil, "strict": nil}},
-	"metadata":        nil, "store": nil, "reasoning_effort": nil, "modalities": nil, "audio": nil, "prediction": nil, "web_search_options": nil, "verbosity": nil, "prompt_cache_key": nil, "safety_identifier": nil,
-}
-var responsesKnown = shape{
-	"model": nil, "input": nil, "instructions": nil, "stream": nil, "stream_options": nil, "max_output_tokens": nil, "max_tool_calls": nil, "temperature": nil, "top_p": nil, "top_logprobs": nil,
-	"tools": nil, "tool_choice": nil, "parallel_tool_calls": nil, "text": nil, "reasoning": nil, "metadata": nil, "store": nil, "background": nil, "truncation": nil, "user": nil, "include": nil,
-	"previous_response_id": nil, "conversation": nil, "prompt": nil, "prompt_cache_key": nil, "safety_identifier": nil, "service_tier": nil,
-}
-
-func walk(fields map[string]json.RawMessage, prefix string, known shape, paths *[]string) {
-	for name, raw := range fields {
-		child, ok := known[name]
-		if !ok {
-			*paths = append(*paths, prefix+"/"+name)
-			continue
-		}
-		if child == nil {
-			continue
-		}
-		if wildcard, isList := child["*"]; isList {
-			var items []json.RawMessage
-			if json.Unmarshal(raw, &items) == nil {
-				for i, item := range items {
-					if nested, err := object(item); err == nil {
-						walk(nested, prefix+"/"+name+"/"+strconv.Itoa(i), wildcard, paths)
-					}
-				}
-			}
-			continue
-		}
-		if nested, err := object(raw); err == nil {
-			walk(nested, prefix+"/"+name, child, paths)
-		}
-	}
 }
 
 func object(data []byte) (map[string]json.RawMessage, error) {

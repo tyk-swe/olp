@@ -27,7 +27,7 @@ const (
 	MaxTotalPatternBytes = 16 << 10
 	MaxReplacementChars  = 128
 	DefaultReplacement   = "[REDACTED]"
-	MaxDecisions         = 64
+	maxDecisions         = 64
 )
 
 var ruleID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
@@ -218,8 +218,8 @@ func (c *Compiled) HasInput() bool { return c != nil && len(c.Input) > 0 }
 func (c *Compiled) HasOutput() bool { return c != nil && len(c.Output) > 0 }
 
 func ValidateDecisions(decisions []Decision) error {
-	if len(decisions) > MaxDecisions {
-		return fmt.Errorf("policy_decisions allows at most %d entries", MaxDecisions)
+	if len(decisions) > maxDecisions {
+		return fmt.Errorf("policy_decisions allows at most %d entries", maxDecisions)
 	}
 	for i, d := range decisions {
 		if !ValidRuleID(d.RuleID) {

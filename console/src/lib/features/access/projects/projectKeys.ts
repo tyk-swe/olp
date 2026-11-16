@@ -3,7 +3,6 @@ const membersRoot = [...root, 'members'] as const;
 
 export const projectKeys = {
   root,
-  page: (cursor?: string) => [...root, 'page', cursor ?? ''] as const,
   all: [...root, 'all'] as const,
   detail: (projectId: string) => [...root, 'detail', projectId] as const,
   membersRoot,

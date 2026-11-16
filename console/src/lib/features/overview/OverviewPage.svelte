@@ -16,7 +16,7 @@
     >
   </div>
 {:else if services.gatewayAvailable}
-  <Overview controlConnected />
+  <Overview />
 {:else}
   <ControlOverview />
 {/if}

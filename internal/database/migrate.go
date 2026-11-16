@@ -6,7 +6,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"slices"
 
 	"github.com/google/uuid"
@@ -21,10 +20,6 @@ var migrations embed.FS
 // both DDL and history on failure; rerunning the same migration is the recovery
 // path.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	return migrate(ctx, pool, migrations)
-}
-
-func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -43,7 +38,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
         )`); err != nil {
 		return errors.New("migration role cannot initialize the olp schema")
 	}
-	entries, err := fs.ReadDir(history, "migrations")
+	entries, err := migrations.ReadDir("migrations")
 	if err != nil {
 		return err
 	}
@@ -52,7 +47,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		known = append(known, name)
-		sql, err := fs.ReadFile(history, "migrations/"+name)
+		sql, err := migrations.ReadFile("migrations/" + name)
 		if err != nil {
 			return err
 		}
@@ -95,15 +90,11 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 // Installation returns the installation identity once the database holds
 // exactly this binary's migration history.
 func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
-	return installation(ctx, pool, migrations)
-}
-
-func installation(ctx context.Context, pool *pgxpool.Pool, history fs.FS) (string, error) {
 	var id string
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton").Scan(&id); err != nil {
 		return "", errors.New("olp installation is not initialized; run olp migrate using the migration role")
 	}
-	entries, err := fs.ReadDir(history, "migrations")
+	entries, err := migrations.ReadDir("migrations")
 	if err != nil {
 		return "", err
 	}
@@ -119,7 +110,7 @@ func installation(ctx context.Context, pool *pgxpool.Pool, history fs.FS) (strin
 		if err = rows.Scan(&version, &stored); err != nil {
 			return "", errors.New("cannot read olp migration history")
 		}
-		data, err := fs.ReadFile(history, "migrations/"+version)
+		data, err := migrations.ReadFile("migrations/" + version)
 		if err != nil {
 			return "", errors.New("database schema is newer than this olp binary")
 		}
@@ -137,5 +128,3 @@ func installation(ctx context.Context, pool *pgxpool.Pool, history fs.FS) (strin
 	}
 	return id, nil
 }
-
-func ValkeyNamespace(installation string) string { return "olp:" + installation + ":" }

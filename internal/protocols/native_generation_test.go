@@ -59,7 +59,7 @@ func TestCohereStreamFinishesAtDeliveredMessageEnd(t *testing.T) {
 				t.Error("read after the native terminal")
 				return 0, trailing
 			}))
-			completion, err := Stream(wire.CohereChat, wire.CohereChat, reader, 8192, "route", true, func(frame []byte) error {
+			completion, err := Stream(wire.CohereChat, wire.CohereChat, reader, 8192, "route", func(frame []byte) error {
 				_, err := emitted.Write(frame)
 				return err
 			})
@@ -87,13 +87,13 @@ func TestCohereStreamFinishesAtDeliveredMessageEnd(t *testing.T) {
 			t.Fatalf("terminal callback failure was lost: observer=%t error=%v", observerFails, err)
 		}
 	}
-	_, err := Stream(wire.CohereChat, wire.CohereChat, strings.NewReader(`data: {"type":"message-start","id":"cohere-stream"}`+"\n\n"), 8192, "route", true, func([]byte) error { return nil })
+	_, err := Stream(wire.CohereChat, wire.CohereChat, strings.NewReader(`data: {"type":"message-start","id":"cohere-stream"}`+"\n\n"), 8192, "route", func([]byte) error { return nil })
 	var protocolErr *wire.ProtocolError
 	if !errors.As(err, &protocolErr) || !protocolErr.Truncated {
 		t.Fatalf("missing terminal was accepted: %v", err)
 	}
 	invalid := strings.Replace(source, `"output_tokens":2`, `"output_tokens":-1`, 1)
-	_, err = Stream(wire.CohereChat, wire.CohereChat, strings.NewReader(invalid), 8192, "route", true, func([]byte) error { return nil })
+	_, err = Stream(wire.CohereChat, wire.CohereChat, strings.NewReader(invalid), 8192, "route", func([]byte) error { return nil })
 	if !errors.As(err, &protocolErr) {
 		t.Fatalf("invalid terminal was accepted: %v", err)
 	}

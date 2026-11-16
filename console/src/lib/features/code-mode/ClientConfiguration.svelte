@@ -4,28 +4,23 @@
   import { copyText } from '#lib/clipboard.js';
   import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
   import LoadError from './LoadError.svelte';
-  import type {
-    CodeClient,
-    CodeClientPlatform,
-    CodeClientConfiguration,
-    CodeClientSelection,
-    CodeRoute
+  import {
+    getCodeClientConfiguration,
+    type CodeClient,
+    type CodeClientPlatform,
+    type CodeClientConfiguration,
+    type CodeClientSelection,
+    type CodeRoute
   } from '#lib/features/code-mode/api.js';
   import { codeKeys } from './codeKeys';
   import { adapterLabel, clientLabel } from './presentation';
 
   let {
     route,
-    gatewayURL,
-    load
+    gatewayURL
   }: {
     route: CodeRoute;
     gatewayURL: string;
-    load: (
-      route: CodeRoute,
-      selection: CodeClientSelection,
-      signal?: AbortSignal
-    ) => Promise<CodeClientConfiguration>;
   } = $props();
   let copied = $state('');
 
@@ -49,17 +44,22 @@
   const configuration = createQuery(() => {
     const selectedRoute = route;
     const selected = selection;
-    const loader = load;
+    const selectedGatewayURL = gatewayURL;
     return {
       queryKey: codeKeys.configuration(
         selectedRoute.id,
         selectedRoute.revision_id,
-        gatewayURL,
+        selectedGatewayURL,
         selected
       ),
       queryFn: ({ signal }) =>
         untrack(async () => {
-          const result = await loader(selectedRoute, selected, signal);
+          const result = await getCodeClientConfiguration(
+            selectedRoute,
+            selectedGatewayURL,
+            selected,
+            signal
+          );
           shown = { revisionId: selectedRoute.revision_id, config: result };
           return result;
         })

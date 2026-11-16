@@ -373,7 +373,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 			return
 		}
 		if u := fact.Usage; u != nil {
-			atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+			atr.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 		}
 		atr.Finish(fact.Class, fact.Status)
 	}
@@ -439,7 +439,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	}
 	fact.Status = result.Status
 	if artifact := mediaArtifact(result.Payload); strictTemplate != nil && artifact != nil {
-		if strictBlob(bound.Descriptor, artifact) != nil {
+		if _, err := artifact.BlobReference(); err != nil {
 			return fail(classProtocol, &attemptFailure{dispatched: true})
 		}
 	}

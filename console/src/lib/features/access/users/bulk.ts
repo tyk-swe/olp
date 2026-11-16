@@ -3,16 +3,12 @@ import { updateUser, type User, type UserPatch } from './api';
 
 /** Each member retains its observed ETag and the ordinary API's safety checks.
  * Sequential requests keep partial outcomes clear if authority changes mid-run. */
-export async function updateMembers(
-  members: User[],
-  patch: UserPatch,
-  update: typeof updateUser = updateUser
-) {
+export async function updateMembers(members: User[], patch: UserPatch) {
   const updated: User[] = [];
   const failed: { user: User; message: string }[] = [];
   for (const user of members) {
     try {
-      updated.push(await update(user, patch));
+      updated.push(await updateUser(user, patch));
     } catch (cause) {
       failed.push({ user, message: errorMessage(cause) });
     }

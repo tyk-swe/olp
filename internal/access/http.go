@@ -44,8 +44,6 @@ type Config struct {
 	LimitsEnforced              bool
 	LocalLoginDisabled          bool
 	ManagementNetworkRestricted bool
-	RetentionEnforced           bool
-	NotificationsActive         bool
 	ResponseCacheConfigured     bool
 }
 
@@ -64,8 +62,6 @@ type Server struct {
 	limitsEnforced              bool
 	localLoginDisabled          bool
 	managementNetworkRestricted bool
-	retentionEnforced           bool
-	notificationsActive         bool
 	responseCacheConfigured     bool
 	passwordSlots               chan struct{}
 	dummyPassword               string
@@ -77,8 +73,7 @@ func New(cfg Config) *Server {
 		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: cfg.Bootstrap,
 		Egress: cfg.Egress, log: cfg.Log, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
 		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
-		managementNetworkRestricted: cfg.ManagementNetworkRestricted, retentionEnforced: cfg.RetentionEnforced,
-		notificationsActive: cfg.NotificationsActive, responseCacheConfigured: cfg.ResponseCacheConfigured,
+		managementNetworkRestricted: cfg.ManagementNetworkRestricted, responseCacheConfigured: cfg.ResponseCacheConfigured,
 		passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()),
 	}
 }

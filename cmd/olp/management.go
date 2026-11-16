@@ -68,15 +68,13 @@ import (
 	"github.com/tyk-swe/olp/internal/sinks"
 )
 
-// Management is everything the management API is composed from. Processes
-// and integration tests mount it the same way, so neither can drift from the
-// routes the contract declares.
+// Management is everything the management API is composed from, so processes
+// cannot drift from the routes the contract declares.
 type Management struct {
 	AgentTasks     *tasks.Store
 	AgentPeers     *a2a.Peers
 	AgentGrants    *personal.Store
 	IdentityClient *http.Client
-	Getenv         func(string) string
 	Access         *access.Server
 	Egress         *egress.Policy
 	Limits         *sharedLimits
@@ -153,7 +151,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Fleet = m.Limits.Fleet
 	}
 	providerServer := providers.New(providers.Deps{
-		Access: m.Access, Egress: m.Egress, Getenv: m.Getenv, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
+		Access: m.Access, Egress: m.Egress, Getenv: os.Getenv, ExternalSecrets: secretstore.New(*m.Egress, os.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {
@@ -241,16 +239,16 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 		},
 		ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
 		LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
-		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil, RetentionEnforced: in.limiter != nil, NotificationsActive: true,
+		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil,
 	})
 	// Installing reads a module's manifest once, which the
 	// interpreter is ready to do several times sooner.
-	pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
+	pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, log)
 	if err != nil {
 		return Management{}, err
 	}
 	return Management{
-		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants, Getenv: os.Getenv,
+		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants,
 		Access: control, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
 		Gateway: in.gateway, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
 		Log: log, PluginRuntime: pluginRuntime, PluginHost: core.pluginHost, Unconfined: core.unconfined,

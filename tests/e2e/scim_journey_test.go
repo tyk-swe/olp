@@ -12,9 +12,9 @@ import (
 func TestDirectoryProvisionsSearchesAndRemovesUsers(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	directory := s.installationToken(s.owner(), "directory")
+	directory := s.installationToken(s.Owner(), "directory")
 	provision := func(name string, emails ...any) string {
-		return s.want(directory, "POST", "/scim/v2/Users", map[string]any{
+		return s.Want(directory, "POST", "/scim/v2/Users", map[string]any{
 			"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:User"}, "userName": name + "@example.test", "displayName": name, "emails": emails,
 		}, nil, http.StatusCreated)["id"].(string)
 	}
@@ -24,7 +24,7 @@ func TestDirectoryProvisionsSearchesAndRemovesUsers(t *testing.T) {
 	provision("grace")
 	linus := provision("linus")
 	search := func(parameters url.Values) (float64, []string) {
-		page := s.want(directory, "GET", "/scim/v2/Users?"+parameters.Encode(), nil, nil, http.StatusOK)
+		page := s.Want(directory, "GET", "/scim/v2/Users?"+parameters.Encode(), nil, nil, http.StatusOK)
 		names := []string{}
 		for _, resource := range items(page["Resources"]) {
 			names = append(names, text(resource, "userName"))
@@ -40,7 +40,7 @@ func TestDirectoryProvisionsSearchesAndRemovesUsers(t *testing.T) {
 	}
 
 	patch := func(id string, operation map[string]any) map[string]any {
-		return s.want(directory, "PATCH", "/scim/v2/Users/"+id, map[string]any{
+		return s.Want(directory, "PATCH", "/scim/v2/Users/"+id, map[string]any{
 			"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}, "Operations": []any{operation},
 		}, nil, http.StatusOK)
 	}
@@ -57,8 +57,8 @@ func TestDirectoryProvisionsSearchesAndRemovesUsers(t *testing.T) {
 		t.Errorf("after deactivating one user, inactive users are %v", names)
 	}
 
-	s.want(directory, "DELETE", "/scim/v2/Users/"+linus, nil, nil, http.StatusNoContent)
-	s.want(directory, "GET", "/scim/v2/Users/"+linus, nil, nil, http.StatusNotFound)
+	s.Want(directory, "DELETE", "/scim/v2/Users/"+linus, nil, nil, http.StatusNoContent)
+	s.Want(directory, "GET", "/scim/v2/Users/"+linus, nil, nil, http.StatusNotFound)
 	if total, names := search(url.Values{}); total != 2 || slices.Contains(names, "linus@example.test") {
 		t.Errorf("after removing a user the directory lists %v of %v", names, total)
 	}

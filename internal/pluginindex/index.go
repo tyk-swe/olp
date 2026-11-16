@@ -160,12 +160,6 @@ type Signed struct {
 	KeyID  string
 }
 
-// Listing is a reviewed release found by its module digest.
-type Listing struct {
-	Plugin  *Plugin
-	Release *Release
-}
-
 // Load verifies an index document against its signature with keys, then
 // decodes and validates it.
 func Load(document, signature []byte, keys signing.Keyring) (*Signed, error) {
@@ -182,22 +176,6 @@ func Load(document, signature []byte, keys signing.Keyring) (*Signed, error) {
 	}
 	digest := sha256.Sum256(document)
 	return &Signed{Index: x, SHA256: hex.EncodeToString(digest[:]), KeyID: keyID}, nil
-}
-
-// Find returns the reviewed release with a module digest.
-func (s *Signed) Find(digest string) (Listing, bool) {
-	if s == nil {
-		return Listing{}, false
-	}
-	for i := range s.Index.Plugins {
-		plugin := &s.Index.Plugins[i]
-		for j := range plugin.Releases {
-			if plugin.Releases[j].Digest == digest {
-				return Listing{Plugin: plugin, Release: &plugin.Releases[j]}, true
-			}
-		}
-	}
-	return Listing{}, false
 }
 
 var (

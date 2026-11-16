@@ -70,10 +70,6 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 	if transport != codeadapter.HTTP || operation.Name == "compact" || operation.Name == "prewarm" {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
-	ledger, supported := f.ledger.(PaidLedger)
-	if !supported {
-		return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
-	}
 	target := route.PaidTarget(operation.Model, fallback)
 	provider, exists := release.Snapshot().FindCodePaidConnection(route.RevisionID + ":" + target.ProviderID)
 	slotIndex := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
@@ -133,7 +129,7 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
+	permit, err := f.ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
 	if err != nil {
 		return nil, err
 	}
@@ -297,12 +293,6 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 	for _, lease := range p.supplyLeases {
 		lease.SetActualCost(cost, cost)
 	}
-	cardID := func() *string {
-		if p.card != nil {
-			return &p.card.ID
-		}
-		return nil
-	}()
 	mode := func() string {
 		if p.stream {
 			return "streaming"
@@ -315,7 +305,7 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		}
 		return "failure"
 	}()
-	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.forwarder.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
+	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.forwarder.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
 	p.targetLease.Settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
 		quota.SettleKey(ctx, lease, a.dispatched, a.usage.Total, a.forwarder.log)

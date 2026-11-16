@@ -33,11 +33,6 @@ type FOCUS struct {
 	StartDate *string   `json:"start_date,omitempty"`
 }
 
-func (o Objects) Type() Type   { return o.Provider }
-func (Objects) Format() Format { return contract.CreateExportSinkRequestFormatJsonl }
-func (f FOCUS) Type() Type     { return f.Provider }
-func (FOCUS) Format() Format   { return contract.CreateExportSinkRequestFormatCsvGzip }
-
 func parseObjects(provider Type, settings json.RawMessage) (Spec, error) {
 	return Objects{Provider: provider}, decodeSettings(contract.CreateExportSinkRequestFormatJsonl, settings, &struct{}{})
 }

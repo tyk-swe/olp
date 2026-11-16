@@ -14,11 +14,10 @@ const (
 	CredentialCooldown = time.Minute
 	rateLimitCooldown  = 10 * time.Second
 	maxCooldown        = time.Minute
-	healthRetention    = 24 * time.Hour
 )
 
-// Tracker keeps in-memory provider circuit state, credential slot
-// cooldowns, and windowed attempt statistics for the health endpoint.
+// Tracker keeps in-memory provider circuit state and credential slot
+// cooldowns.
 type Tracker struct {
 	mu        sync.Mutex
 	providers map[string]*providerHealth
@@ -28,18 +27,11 @@ type Tracker struct {
 }
 
 type providerHealth struct {
-	buckets      map[int64]*bucket
-	last         time.Time
 	failures     int
 	firstFailure time.Time
 	openUntil    time.Time
 	probing      bool
 	cooldowns    map[string]time.Time
-}
-
-type bucket struct {
-	attempts, successes, rateLimits, serverErrors, transportErrors int64
-	latency                                                        time.Duration
 }
 
 func NewTracker(now func() time.Time) *Tracker {
@@ -49,7 +41,7 @@ func NewTracker(now func() time.Time) *Tracker {
 func (h *Tracker) provider(id string) *providerHealth {
 	p := h.providers[id]
 	if p == nil {
-		p = &providerHealth{buckets: map[int64]*bucket{}, cooldowns: map[string]time.Time{}}
+		p = &providerHealth{cooldowns: map[string]time.Time{}}
 		h.providers[id] = p
 	}
 	return p
@@ -109,7 +101,7 @@ func CooldownDuration(d time.Duration) time.Duration {
 	return min(d, maxCooldown)
 }
 
-// Record folds one attempt into the circuit and the health window. probe says
+// Record folds one attempt into the circuit. probe says
 // the attempt holds the half-open probe, which only its own completion releases.
 func (h *Tracker) Record(providerID string, fact events.AttemptFact, probe bool) {
 	h.mu.Lock()
@@ -119,33 +111,18 @@ func (h *Tracker) Record(providerID string, fact events.AttemptFact, probe bool)
 	if probe {
 		p.probing = false
 	}
-	p.last = now
-	minute := now.Unix() / 60
-	b := p.buckets[minute]
-	if b == nil {
-		b = &bucket{}
-		p.buckets[minute] = b
-		for k := range p.buckets {
-			if k < minute-int64(healthRetention/time.Minute) {
-				delete(p.buckets, k)
-			}
-		}
-		// Grant generations have separate cooldowns. Retire expired ones
-		// even when a gateway missed intermediate refresh notifications.
-		for key, until := range p.cooldowns {
-			if !now.Before(until) {
-				delete(p.cooldowns, key)
-			}
+	// Grant generations have separate cooldowns. Retire expired ones
+	// even when a gateway missed intermediate refresh notifications.
+	for key, until := range p.cooldowns {
+		if !now.Before(until) {
+			delete(p.cooldowns, key)
 		}
 	}
-	b.attempts++
-	b.latency += fact.Duration
 	if fact.LocalRefusal && fact.Class != events.ClassSuccess {
 		return
 	}
 	switch fact.Class {
 	case "success":
-		b.successes++
 		p.failures = 0
 		if !p.openUntil.IsZero() {
 			p.openUntil = time.Time{}
@@ -153,12 +130,8 @@ func (h *Tracker) Record(providerID string, fact events.AttemptFact, probe bool)
 		}
 		return
 	case "rate_limit":
-		b.rateLimits++
 		return
-	case "upstream_server":
-		b.serverErrors++
-	case "connect", "timeout", "protocol":
-		b.transportErrors++
+	case "upstream_server", "connect", "timeout", "protocol":
 	case "ambiguous":
 		// Ambiguity changes retry permission, not the evidence that the
 		// connection or provider failed to produce a usable response. That
@@ -167,11 +140,6 @@ func (h *Tracker) Record(providerID string, fact events.AttemptFact, probe bool)
 		// side-effecting operations leave their ambiguous failures out.
 		if fact.Interaction == nil && !fact.Carried {
 			return
-		}
-		if fact.Status >= 500 {
-			b.serverErrors++
-		} else {
-			b.transportErrors++
 		}
 	default:
 		return

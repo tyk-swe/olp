@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple connection.Capability, maxEventBytes int) error {
+func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple connection.Capability) error {
 	if !ConfigurationCertifiable(t.Connection.Transport(), tuple) || !t.Connection.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
 	}
@@ -28,10 +28,10 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 		return p.certifyRetained(ctx, t, model, tuple)
 	}
 	if t.Connection.Document().ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
-		return p.certifyGeminiInteraction(ctx, t, model, tuple.Mode, maxEventBytes)
+		return p.certifyGeminiInteraction(ctx, t, model, tuple.Mode)
 	}
 	if t.Connection.Document().ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
-		return p.certifyGeminiLive(ctx, t, model, maxEventBytes)
+		return p.certifyGeminiLive(ctx, t, model)
 	}
 	if duplexcontract.IsProfile(t.Connection.Document().ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
 		return p.certifyNativeDuplex(ctx, t, model)
@@ -47,7 +47,7 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 	case tuple.Operation == "realtime":
 		return p.certifyRealtime(ctx, t, model)
 	case tuple.Surface == "bedrock":
-		return p.certifyBedrockIngress(ctx, t, model, tuple, maxEventBytes)
+		return p.certifyBedrockIngress(ctx, t, model, tuple)
 	}
 	switch tuple.Operation {
 	case "generation", "token_count", "embeddings", "moderation", "rerank":
@@ -147,10 +147,10 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 		}
 		switch {
 		case tuple.Mode == "streaming":
-			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
+			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, "certification", func([]byte) error { return nil })
 		case aggregated:
 			var streamed *wire.Completion
-			if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, BodyLimit); err == nil {
+			if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, bodyLimit); err == nil {
 				_, err = protocols.DecodeRequest(encodedWire, family, streamed.Body, "certification", "", parsed)
 			}
 		default:

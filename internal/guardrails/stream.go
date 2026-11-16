@@ -28,14 +28,6 @@ type heldFrame struct {
 	textBytes map[string]int
 }
 
-// Rewriter is supplied only by transformed native routes. The adapter changes
-// text-delta fields while keeping event ordering and control metadata intact.
-func (s *Stream) Rewriter(rewrite func([]byte, string) ([]byte, error)) {
-	s.rewrite = func(frame []byte, texts map[string]string) ([]byte, error) {
-		return rewrite(frame, texts["stream"])
-	}
-}
-
 // SegmentRewriter changes only the named text fields in a native frame.
 func (s *Stream) SegmentRewriter(rewrite func([]byte, map[string]string) ([]byte, error)) {
 	s.rewrite = rewrite
@@ -59,12 +51,6 @@ func NewStream(engine *Engine, request Evaluation, window int) (*Stream, error) 
 	request.Partial = true
 	request.completeSegments = map[string]bool{}
 	return &Stream{engine: engine, request: request, window: window, lookbehind: width, texts: map[string]string{}}, nil
-}
-
-// Push returns only frames proven safe to release. A frame carrying a tool
-// call must be assembled and schema-checked by the native adapter beforehand.
-func (s *Stream) Push(ctx context.Context, frame []byte, text string) ([][]byte, error) {
-	return s.PushSegments(ctx, frame, []Delta{{ID: "stream", Text: text}})
 }
 
 // Delta is new assistant text for one streamed field.

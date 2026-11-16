@@ -83,9 +83,7 @@ type Account struct {
 	HealthObservedAt         *time.Time `json:"health_observed_at"`
 	UnavailableUntil         *time.Time `json:"unavailable_until"`
 	Eligible                 bool       `json:"eligible"`
-	GrantState               string     `json:"grant_state"`
 	Allowance                *Allowance `json:"allowance"`
-	Cooldowns                []Cooldown `json:"cooldowns"`
 	CycleAnchor              *string    `json:"cycle_anchor"`
 	AllowanceReadRequestedAt *time.Time `json:"allowance_read_requested_at"`
 	AllowanceReadAt          *time.Time `json:"allowance_read_at"`
@@ -162,18 +160,6 @@ type ModelCapability struct {
 	Protocol   Protocol `json:"protocol"`
 	Path       string   `json:"path"`
 	Transports []string `json:"transports"`
-}
-
-type Pool struct {
-	ID             string           `json:"id"`
-	ProjectID      string           `json:"project_id"`
-	Name           string           `json:"name"`
-	Kind           string           `json:"kind"`
-	OwnerUserID    *string          `json:"owner_user_id"`
-	AccountIDs     []string         `json:"account_ids"`
-	AccountWeights map[string]int64 `json:"account_weights"`
-	APIKeyIDs      []string         `json:"api_key_ids"`
-	ETag           string           `json:"etag"`
 }
 
 type PaidTarget struct {
@@ -349,38 +335,32 @@ func (b *TokenBound) Validate() error {
 }
 
 type Attempt struct {
-	InitialRecovery   bool              `json:"initial_recovery"`
-	Nonexecution      bool              `json:"nonexecution"`
-	RecoveryFrom      *string           `json:"recovery_from"`
-	RecoveryReason    *string           `json:"recovery_reason"`
-	RequestedModel    *string           `json:"requested_model"`
-	Attribution       map[string]string `json:"attribution,omitempty"`
-	EndUserDigest     string            `json:"end_user_digest"`
-	UpstreamStatus    *int              `json:"upstream_status"`
-	OutcomeOrigin     *string           `json:"outcome_origin"`
-	Outcome           *string           `json:"outcome"`
-	OutcomeObservedAt *time.Time        `json:"outcome_observed_at"`
-	ID                string            `json:"id"`
-	ProjectID         string            `json:"project_id"`
-	RouteID           string            `json:"route_id"`
-	RouteRevisionID   string            `json:"route_revision_id"`
-	APIKeyID          string            `json:"api_key_id"`
-	BindingID         string            `json:"binding_id"`
-	AccountID         string            `json:"account_id"`
-	Operation         string            `json:"operation"`
-	Model             string            `json:"model"`
-	State             string            `json:"state"`
-	ReservedTokens    int64             `json:"reserved_tokens"`
-	ReportedTokens    *int64            `json:"reported_tokens"`
-	InputTokens       *int64            `json:"input_tokens"`
-	OutputTokens      *int64            `json:"output_tokens"`
-	CachedTokens      *int64            `json:"cached_tokens"`
-	ReasoningTokens   *int64            `json:"reasoning_tokens"`
-	BoundEvidence     *string           `json:"bound_evidence"`
-	Refusal           *string           `json:"refusal"`
-	AllowanceCharge   json.RawMessage   `json:"allowance_charge"`
-	CreatedAt         time.Time         `json:"created_at"`
-	FinishedAt        *time.Time        `json:"finished_at"`
+	InitialRecovery bool              `json:"initial_recovery"`
+	RequestedModel  *string           `json:"requested_model"`
+	Attribution     map[string]string `json:"attribution,omitempty"`
+	EndUserDigest   string            `json:"end_user_digest"`
+	UpstreamStatus  *int              `json:"upstream_status"`
+	Outcome         *string           `json:"outcome"`
+	ID              string            `json:"id"`
+	ProjectID       string            `json:"project_id"`
+	RouteID         string            `json:"route_id"`
+	RouteRevisionID string            `json:"route_revision_id"`
+	APIKeyID        string            `json:"api_key_id"`
+	BindingID       string            `json:"binding_id"`
+	AccountID       string            `json:"account_id"`
+	Operation       string            `json:"operation"`
+	Model           string            `json:"model"`
+	State           string            `json:"state"`
+	ReservedTokens  int64             `json:"reserved_tokens"`
+	InputTokens     *int64            `json:"input_tokens"`
+	OutputTokens    *int64            `json:"output_tokens"`
+	CachedTokens    *int64            `json:"cached_tokens"`
+	ReasoningTokens *int64            `json:"reasoning_tokens"`
+	BoundEvidence   *string           `json:"bound_evidence"`
+	Refusal         *string           `json:"refusal"`
+	AllowanceCharge json.RawMessage   `json:"allowance_charge"`
+	CreatedAt       time.Time         `json:"created_at"`
+	FinishedAt      *time.Time        `json:"finished_at"`
 }
 
 // Usage's total includes cached input and reasoning output; the breakdowns

@@ -36,9 +36,6 @@ type Worker struct {
 }
 
 func (w *Worker) Run(ctx context.Context) {
-	if w.Connections == nil {
-		w.Connections = egress.NewConnectionClientCache(128)
-	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -50,7 +47,7 @@ func (w *Worker) Run(ctx context.Context) {
 				w.Log.Warn("retained reconciliation failed", "error", err)
 			}
 		}
-		_ = w.Store.CheckpointRetained(ctx, outcome, false)
+		_ = w.Store.CheckpointRetained(ctx, outcome)
 		select {
 		case <-ctx.Done():
 			return
@@ -59,9 +56,6 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 func (w *Worker) Pass(ctx context.Context) error {
-	if w.Connections == nil {
-		w.Connections = egress.NewConnectionClientCache(128)
-	}
 	claims, err := w.Store.ClaimRetained(ctx, 16)
 	if err != nil {
 		return err
@@ -83,7 +77,7 @@ func (w *Worker) Pass(ctx context.Context) error {
 					case <-work.Done():
 						return
 					case <-t.C:
-						_ = w.Store.CheckpointRetained(work, workerhealth.OutcomeSuccess, false)
+						_ = w.Store.CheckpointRetained(work, workerhealth.OutcomeSuccess)
 						if w.Store.HeartbeatRetained(work, claim) != nil {
 							cancel()
 							return
@@ -153,7 +147,7 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
 	if err != nil {
 		var failure *providerinvoke.ResolutionError
-		if errors.As(err, &failure) && failure.Stage != providerinvoke.ConnectionResolution {
+		if errors.As(err, &failure) && !failure.Connection {
 			return "credential_unavailable"
 		}
 		return "connection_unavailable"

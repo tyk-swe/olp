@@ -342,10 +342,6 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	fact.Discount = inputs.Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, now)
 	fact.PricingPinned = true
 	fact.CardPinned = true
-	fact.CardRevisionID = nil
-	if fact.CardRev != nil {
-		fact.CardRevisionID = &fact.CardRev.ID
-	}
 	accountingID := x.request.accountingID()
 	event, err := events.UsageEvent(events.Envelope{
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,

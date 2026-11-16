@@ -421,7 +421,7 @@ func ceilPerMillion(tokens int64, rate *big.Int) *big.Int {
 
 func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscount, input, output int64, tiers []PriceTier) (Cost, bool) {
 	if len(tiers) == 0 {
-		return price.MaximumWindowCostBound(input, output, true, discount)
+		return price.maximumWindowCostBound(input, output, discount)
 	}
 	bound, ok := workflowModelCostThroughTiers(price, discount, input, output, tiers[1:])
 	if !ok {
@@ -430,7 +430,7 @@ func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscoun
 	if tiers[0].AboveInputTokens >= input {
 		return bound, true
 	}
-	prior, ok := price.MaximumWindowCostBound(tiers[0].AboveInputTokens, output, true, discount)
+	prior, ok := price.maximumWindowCostBound(tiers[0].AboveInputTokens, output, discount)
 	if !ok {
 		return Cost{}, false
 	}

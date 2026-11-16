@@ -260,10 +260,6 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	return r, nil
 }
 
-func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.ListKinds(ctx, []string{kind}, apiKeyID, limit, afterID)
-}
-
 // ListKinds joins transformed and strict resource identities without changing
 // either storage contract. The cursor belongs to this owner and one of the
 // requested kinds; an unrelated local ID cannot move the page boundary.

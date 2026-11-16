@@ -596,6 +596,7 @@ internal/mcp/registration internal/access/httpkit
 internal/mcp/registration internal/egress
 internal/mcp/registration internal/mcp/upstream
 internal/mcp/registration internal/plugins
+internal/mcp/registration internal/plugins/identity
 internal/mcp/registration internal/routing
 internal/mcp/registration internal/secrets
 internal/mcp/sessions internal/access/authority
@@ -691,7 +692,6 @@ internal/operations/decision internal/operations/tokenization/estimate
 internal/operations/embeddings internal/oif
 internal/operations/embeddings internal/operations
 internal/operations/embeddings internal/operations/tokenization/estimate
-internal/operations/generation internal/oif
 internal/operations/ocr internal/oif
 internal/operations/ocr internal/operations
 internal/operations/rerank internal/oif
@@ -846,6 +846,7 @@ internal/promotion/retrievalbinding internal/promotion
 internal/promotion/retrievalbinding internal/promotion/project
 internal/promotion/retrievalbinding internal/providers
 internal/promotion/retrievalbinding internal/retrieval
+internal/promotion/retrievalbinding internal/retrieval/identity
 internal/promotion/retrievalbinding internal/routes
 internal/promotion/route internal/access
 internal/promotion/route internal/access/httpkit
@@ -886,7 +887,6 @@ internal/promotion/sink internal/promotion
 internal/promotion/sink internal/promotion/project
 internal/promotion/sink internal/sinks
 internal/protocols internal/oif
-internal/protocols internal/operations/generation
 internal/protocols internal/protocols/awsframe
 internal/protocols internal/protocols/openai
 internal/protocols internal/protocols/sse

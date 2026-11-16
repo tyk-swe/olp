@@ -26,19 +26,19 @@ func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	}
 	streamed := "data: " + `{"id":"multi","choices":[{"index":0,"delta":{"content":"alpha"},"finish_reason":"stop"},{"index":1,"delta":{"content":"beta"},"finish_reason":"stop"}]}` + "\n\ndata: " + `{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}` + "\n\ndata: [DONE]\n\n"
 	var gem bytes.Buffer
-	_, err = Stream(wire.Chat, wire.Gemini, strings.NewReader(streamed), 8192, "team-model", true, func(b []byte) error { gem.Write(b); return nil })
+	_, err = Stream(wire.Chat, wire.Gemini, strings.NewReader(streamed), 8192, "team-model", func(b []byte) error { gem.Write(b); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	var chat bytes.Buffer
-	summary, err := Stream(wire.Gemini, wire.Chat, bytes.NewReader(gem.Bytes()), 8192, "team-model", true, func(b []byte) error { chat.Write(b); return nil })
+	summary, err := Stream(wire.Gemini, wire.Chat, bytes.NewReader(gem.Bytes()), 8192, "team-model", func(b []byte) error { chat.Write(b); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.Usage == nil || summary.Usage.TotalTokens != 4 || strings.Count(chat.String(), "[DONE]") != 1 || !strings.Contains(chat.String(), `"index":1`) || !strings.Contains(chat.String(), `"role":"assistant"`) {
 		t.Fatalf("lost candidate/usage/completion: %s", chat.String())
 	}
-	if _, err = Stream(wire.Chat, wire.Chat, bytes.NewReader(chat.Bytes()), 8192, "team-model", true, func([]byte) error { return nil }); err != nil {
+	if _, err = Stream(wire.Chat, wire.Chat, bytes.NewReader(chat.Bytes()), 8192, "team-model", func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -52,7 +52,7 @@ func TestGeminiFinishReasonAgreesAcrossUnaryAndStreaming(t *testing.T) {
 				t.Fatal(err)
 			}
 			var streamed bytes.Buffer
-			_, err = Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+body+"\n\n"), 8192, "team-model", true, func(frame []byte) error {
+			_, err = Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+body+"\n\n"), 8192, "team-model", func(frame []byte) error {
 				_, err := streamed.Write(frame)
 				return err
 			})
@@ -138,7 +138,7 @@ func TestResponsesToolSnapshotsSurviveStreamingAndAggregation(t *testing.T) {
 				t.Fatalf("aggregated tools %+v", unary)
 			}
 			var frames bytes.Buffer
-			if _, err := Stream(wire.Responses, wire.Anthropic, strings.NewReader(source), 8192, "route", true, func(frame []byte) error { frames.Write(frame); return nil }); err != nil {
+			if _, err := Stream(wire.Responses, wire.Anthropic, strings.NewReader(source), 8192, "route", func(frame []byte) error { frames.Write(frame); return nil }); err != nil {
 				t.Fatal(err)
 			}
 			capture := NewCaptureStream(wire.Anthropic, 8192, true, true)
@@ -181,7 +181,7 @@ func TestTranslatedResponsesAllowEmptyUnsignedReasoning(t *testing.T) {
 				t.Fatalf("unsigned reasoning interrupted aggregate %+v, %v", unary, err)
 			}
 			var frames bytes.Buffer
-			if _, err := Stream(wire.Responses, target, strings.NewReader(source), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err }); err != nil {
+			if _, err := Stream(wire.Responses, target, strings.NewReader(source), 8192, "route", func(frame []byte) error { _, err := frames.Write(frame); return err }); err != nil {
 				t.Fatal(err)
 			}
 			capture := NewCaptureStream(target, 8192, true, true)
@@ -212,7 +212,7 @@ func TestTranslatedResponsesRefuseOpaqueReasoning(t *testing.T) {
 				t.Fatal("aggregated opaque reasoning silently disappeared", target)
 			}
 			var frames bytes.Buffer
-			if _, err := Stream(wire.Responses, target, strings.NewReader(stream), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || bytes.Contains(frames.Bytes(), []byte("[DONE]")) {
+			if _, err := Stream(wire.Responses, target, strings.NewReader(stream), 8192, "route", func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || bytes.Contains(frames.Bytes(), []byte("[DONE]")) {
 				t.Fatal("streamed opaque reasoning silently disappeared", target)
 			}
 			for _, event := range []string{"response.output_item.added", "response.output_item.done"} {
@@ -221,7 +221,7 @@ func TestTranslatedResponsesRefuseOpaqueReasoning(t *testing.T) {
 					if _, err := AggregateTranslatedResponses(target, strings.NewReader(source), 8192, "route", nil); err == nil {
 						t.Fatal("aggregated opaque item silently disappeared")
 					}
-					if _, err := Stream(wire.Responses, target, strings.NewReader(source), 8192, "route", true, func([]byte) error { return nil }); err == nil {
+					if _, err := Stream(wire.Responses, target, strings.NewReader(source), 8192, "route", func([]byte) error { return nil }); err == nil {
 						t.Fatal("streamed opaque item silently disappeared")
 					}
 				})
@@ -240,7 +240,7 @@ func TestResponsesCompletedMessagesSurviveStreamingAndAggregation(t *testing.T) 
 		t.Fatalf("completed message %+v", unary)
 	}
 	var frames bytes.Buffer
-	if _, err := Stream(wire.Responses, wire.Anthropic, strings.NewReader(source), 8192, "route", true, func(frame []byte) error { frames.Write(frame); return nil }); err != nil {
+	if _, err := Stream(wire.Responses, wire.Anthropic, strings.NewReader(source), 8192, "route", func(frame []byte) error { frames.Write(frame); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	capture := NewCaptureStream(wire.Anthropic, 8192, true, false)
@@ -304,7 +304,7 @@ func TestResponsesRefusalSnapshotsKeepClassification(t *testing.T) {
 					}
 					assertBody(aggregated.Body)
 					var emitted bytes.Buffer
-					if _, err := Stream(wire.Responses, target, strings.NewReader(events), 8192, "route", true, func(frame []byte) error { _, err := emitted.Write(frame); return err }); err != nil {
+					if _, err := Stream(wire.Responses, target, strings.NewReader(events), 8192, "route", func(frame []byte) error { _, err := emitted.Write(frame); return err }); err != nil {
 						t.Fatal(err)
 					}
 					var text strings.Builder
@@ -360,7 +360,7 @@ func TestGeminiArgumentlessCallsSurviveUnaryAndStreaming(t *testing.T) {
 					t.Fatalf("argumentless unary capture %s, %v", calls, err)
 				}
 				var frames bytes.Buffer
-				streamed, err := Stream(wire.Gemini, target, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err })
+				streamed, err := Stream(wire.Gemini, target, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", func(frame []byte) error { _, err := frames.Write(frame); return err })
 				if err != nil || streamed == nil || streamed.FinishReason != "tool_calls" || streamed.Usage == nil || streamed.Usage.TotalTokens != completion.Usage.TotalTokens {
 					t.Fatalf("argumentless stream failed %+v, %v", streamed, err)
 				}
@@ -400,10 +400,10 @@ func TestNativeStreamUsageFollowsIncludeUsage(t *testing.T) {
 					`data: {"id":"s","object":"` + kind + `","model":"upstream","choices":[],` + usage + `}` + "\n\n" +
 					"data: [DONE]\n\n"
 				var emitted bytes.Buffer
-				completion, err := Stream(format, format, strings.NewReader(source), 8192, "route", includeUsage, func(frame []byte) error {
+				completion, err := StreamWithEvents(format, format, strings.NewReader(source), 8192, "route", includeUsage, func(frame []byte) error {
 					_, err := emitted.Write(frame)
 					return err
-				})
+				}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -430,7 +430,7 @@ func TestGeminiIncompleteFunctionArgumentsRemainRefused(t *testing.T) {
 			t.Fatalf("accepted incomplete arguments %s", body)
 		}
 		var frames bytes.Buffer
-		if _, err := Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || frames.Len() != 0 {
+		if _, err := Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || frames.Len() != 0 {
 			t.Fatalf("emitted incomplete call %s, %v", frames.Bytes(), err)
 		}
 		if strings.Contains(args, "partialArgs") || strings.Contains(args, "willContinue") {

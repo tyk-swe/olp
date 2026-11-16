@@ -5,7 +5,6 @@ import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 
 export type RateCard = components['schemas']['RateCard'];
-export type RateCardOwner = components['schemas']['RateCardOwner'];
 export type RateCardRevision = components['schemas']['RateCardRevision'];
 export type CardPriceDraft = components['schemas']['RateCardPriceEntry'];
 

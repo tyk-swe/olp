@@ -405,7 +405,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.ServerError(http.StatusConflict, "webrtc_exposure_unresolved", "An earlier WebRTC session for this key is still billing-uncertain; new sessions are refused until that exposure resolves."))
 		return
 	}
-	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.cfg.WebRTCBound)
+	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), webRTCBound)
 	x.estimate = resourceEstimate
 	p, e := s.selectPinSurface(bg, x, &route, "realtime", "openai", "webrtc", func(provider *routing.Provider, model string) bool {
 		return provider.Connector().Supports("realtime", "openai", "webrtc") && provider.Supports(model, "realtime", "openai", "webrtc")
@@ -440,7 +440,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if e := s.reserveState(bg, x, authority, s.cfg.WebRTCBound); e != nil {
+	if e := s.reserveState(bg, x, authority, webRTCBound); e != nil {
 		releasePin()
 		cancel()
 		fail(e)
@@ -453,7 +453,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
+	if e := s.reserveSessionCost(bg, x, authority, p.attempt, webRTCBound); e != nil {
 		s.abandonSessionDebit(r.Context(), x)
 		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
 		releasePin()
@@ -476,7 +476,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	abandoned := fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
 	if r.Context().Err() != nil {
 		if err := s.hangupWebRTCCall(bg, sess); err != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		s.settleWebRTC(sess, abandoned)
 		cancel()
@@ -493,7 +493,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if werr != nil || r.Context().Err() != nil {
 		if herr := s.hangupWebRTCCall(bg, sess); herr != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		s.settleWebRTC(sess, abandoned)
 		cancel()
@@ -567,7 +567,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
 		fact.RecordEvidence(dispatched)
 		if dispatched {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
@@ -600,7 +600,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		if !ok || s.hangupWebRTCCall(ctx, sess) != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
 	}
@@ -610,7 +610,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.RecordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
 	}
 	sess.callID = callID
@@ -625,7 +625,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	conn, e := s.dialWebRTCControl(createCtx, sess, controlEndpoint)
 	if e != nil {
 		if herr := s.hangupWebRTCCall(ctx, sess); herr != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		return nil, 0, e
 	}

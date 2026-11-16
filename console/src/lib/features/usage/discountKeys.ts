@@ -7,7 +7,5 @@ export const discountKeys = {
 };
 export const rateCardKeys = {
   all: rateCards,
-  page: (cursor?: string) => [...rateCards, cursor ?? ''] as const,
-  revisions: (cardId: string, cursor?: string) =>
-    ['rate-card-revisions', cardId, cursor ?? ''] as const
+  page: (cursor?: string) => [...rateCards, cursor ?? ''] as const
 };

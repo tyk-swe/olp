@@ -194,7 +194,7 @@ func (s *Server) validateModelAccess(ctx context.Context, target probe.Target, r
 			return &probe.Failure{Reason: probe.NoCapabilities, Detail: "Declare capabilities for the slot's enabled models before validating."}
 		}
 		for _, capability := range model.Capabilities {
-			if err := s.prober.Certify(ctx, target, model.UpstreamModel, capability.Capability, probe.BodyLimit); err != nil {
+			if err := s.prober.Certify(ctx, target, model.UpstreamModel, capability.Capability); err != nil {
 				return err
 			}
 			checked++

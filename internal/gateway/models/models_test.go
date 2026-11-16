@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,10 @@ func testHandler(t *testing.T) *Handler {
 	return New(Dependencies{
 		Gate:  gate,
 		Begin: func(http.ResponseWriter, *http.Request) *release.Release { return rel },
+		Now:   time.Now,
+		Workflow: func(context.Context, *release.Release, keyauthority.Authority, routing.Route, string) *routing.WorkflowCapability {
+			return nil
+		},
 	})
 }
 

@@ -518,7 +518,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 
 func TestAccountingCardPinDoesNotPinProviderPricing(t *testing.T) {
 	revision := uuid.NewString()
-	fact := events.AttemptFact{CardPinned: true, CardRevisionID: &revision, Price: costPrice()}
+	fact := events.AttemptFact{CardPinned: true, CardRev: &rates.RoutingCardRevision{ID: revision}, Price: costPrice()}
 	attempt := assertAccountingCardPin(t, fact, true, revision)
 	if attempt.Routing.PricingRevisionID != nil {
 		t.Fatal("card-only pin unexpectedly pinned provider pricing")

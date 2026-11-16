@@ -71,9 +71,6 @@ func LoadRingWithUnwrapper(ctx context.Context, path string, unwrapper KeyUnwrap
 	defer clear(data)
 	return ParseRingWithUnwrapper(ctx, data, unwrapper)
 }
-func ParseRing(data []byte) (*KeyRing, error) {
-	return ParseRingWithUnwrapper(context.Background(), data, nil)
-}
 
 func ParseRingWithUnwrapper(ctx context.Context, data []byte, unwrapper KeyUnwrapper) (_ *KeyRing, resultErr error) {
 	var doc struct {

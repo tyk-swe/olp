@@ -8,11 +8,11 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 )
 
-type Stream string
+type stream string
 
 const (
-	Runs       Stream = "runs"
-	TraceSpans Stream = "trace_spans"
+	runs       stream = "runs"
+	traceSpans stream = "trace_spans"
 )
 
 type creatorAccess struct {
@@ -21,15 +21,11 @@ type creatorAccess struct {
 	SourceLive  bool    `db:"source_live"`
 }
 
-func sourceQuery(stream Stream) (string, error) {
-	switch stream {
-	case Runs:
-		return `SELECT EXISTS (SELECT 1 FROM olp.agent_runs WHERE id=$2 AND project_id=$3 AND created_at >= clock_timestamp() - make_interval(days => COALESCE((SELECT value::integer FROM olp.settings WHERE key='retention.requests_days'), 30)))`, nil
-	case TraceSpans:
-		return `SELECT EXISTS (SELECT 1 FROM olp.trace_spans WHERE id=$2 AND project_id=$3 AND received_at >= clock_timestamp() - make_interval(days => COALESCE((SELECT value::integer FROM olp.settings WHERE key='retention.requests_days'), 30)))`, nil
-	default:
-		return "", errors.New("unsupported evidence stream")
+func sourceQuery(source stream) string {
+	if source == traceSpans {
+		return `SELECT EXISTS (SELECT 1 FROM olp.trace_spans WHERE id=$2 AND project_id=$3 AND received_at >= clock_timestamp() - make_interval(days => COALESCE((SELECT value::integer FROM olp.settings WHERE key='retention.requests_days'), 30)))`
 	}
+	return `SELECT EXISTS (SELECT 1 FROM olp.agent_runs WHERE id=$2 AND project_id=$3 AND created_at >= clock_timestamp() - make_interval(days => COALESCE((SELECT value::integer FROM olp.settings WHERE key='retention.requests_days'), 30)))`
 }
 
 func projectMembership(projectID string, role *string) map[string]string {
@@ -39,12 +35,8 @@ func projectMembership(projectID string, role *string) map[string]string {
 	return map[string]string{projectID: *role}
 }
 
-func Eligible(ctx context.Context, q access.Queryer, stream Stream, sourceID, projectID, creatorID string) (bool, error) {
-	source, err := sourceQuery(stream)
-	if err != nil {
-		return false, err
-	}
-	rows, err := q.Query(ctx, `SELECT u.access_scope, m.role AS project_role, (`+source+`) AS source_live
+func eligible(ctx context.Context, q access.Queryer, source stream, sourceID, projectID, creatorID string) (bool, error) {
+	rows, err := q.Query(ctx, `SELECT u.access_scope, m.role AS project_role, (`+sourceQuery(source)+`) AS source_live
 		FROM olp.users u LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=$3
 		WHERE u.id=$1 AND u.active AND u.oidc_authorized`, creatorID, sourceID, projectID)
 	if err != nil {
@@ -61,12 +53,12 @@ func Eligible(ctx context.Context, q access.Queryer, stream Stream, sourceID, pr
 	return current.SourceLive && principal.Project(&projectID, access.View) == nil, nil
 }
 
-func Admit(ctx context.Context, q access.Queryer, stream string, sourceID, projectID *string, creatorID string) (bool, error) {
-	if stream != string(Runs) && stream != string(TraceSpans) {
+func Admit(ctx context.Context, q access.Queryer, name string, sourceID, projectID *string, creatorID string) (bool, error) {
+	if name != string(runs) && name != string(traceSpans) {
 		return true, nil
 	}
 	if sourceID == nil || projectID == nil {
 		return false, nil
 	}
-	return Eligible(ctx, q, Stream(stream), *sourceID, *projectID, creatorID)
+	return eligible(ctx, q, stream(name), *sourceID, *projectID, creatorID)
 }

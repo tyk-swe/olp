@@ -107,9 +107,6 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	fact.CardRev, fact.CardPinned = x.resolveAttemptCardRevision(a.ProviderID, x.route, fact.StartedAt)
-	if fact.CardPinned && fact.CardRev != nil {
-		fact.CardRevisionID = &fact.CardRev.ID
-	}
 	provider, known := x.snapshot().FindProvider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true

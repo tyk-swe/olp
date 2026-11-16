@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -74,7 +75,7 @@ func (s *Store) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (s *Store) prefix() string { return "olp:" + s.Installation + ":cache:" }
+func (s *Store) prefix() string { return coordination.Namespace(s.Installation) + "cache:" }
 
 func (s *Store) digest(v any) string {
 	b, _ := json.Marshal(v)
@@ -125,9 +126,6 @@ return 1
 `
 
 func (s *Store) resolve(ctx context.Context, space Space, canonical []byte, read bool) (Ticket, string, error) {
-	if s == nil || s.Client == nil || s.Auth == nil || s.Keys == nil {
-		return Ticket{}, "", ErrUnavailable
-	}
 	readFlag := "0"
 	if read {
 		readFlag = "1"
@@ -247,9 +245,6 @@ func (e *Entry) fresh(now time.Time, controls Controls) bool {
 }
 
 func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Policy, controls Controls, vector []float32) error {
-	if s == nil || s.Client == nil || s.Auth == nil || s.Keys == nil {
-		return ErrUnavailable
-	}
 	if controls.NoStore {
 		return ErrNotStored
 	}
@@ -289,9 +284,6 @@ func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Poli
 }
 
 func (s *Store) Purge(ctx context.Context, kind, id string) error {
-	if s == nil || s.Client == nil || s.Auth == nil {
-		return ErrUnavailable
-	}
 	if kind != "project" && kind != "route" {
 		return errors.New("invalid purge scope")
 	}

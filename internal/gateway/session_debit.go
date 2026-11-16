@@ -27,17 +27,18 @@ type SessionDebitLedger interface {
 	ReleaseUndispatched(context.Context, string, string) error
 	HasUnknownDebit(context.Context, string, time.Duration) (bool, error)
 	Currency(context.Context) (string, error)
+	MarkWorkflowModelDispatched(context.Context, string, string) error
+	RenewWorkflowModelLease(context.Context, string, string) error
+	MarkNotSent(context.Context, string, string) error
+	SettleWorkflow(context.Context, *usage.Event, int) ([]limits.Snapshot, error)
+	SettleRecovery(context.Context, debits.Result) error
+	PreviousRecovery(context.Context, string, string, []string) (bool, bool, error)
 }
 
 type durableSessionDebits struct {
 	*debits.Store
 	*debits.Syncer
 	pool *pgxpool.Pool
-}
-
-type workflowModelLeases interface {
-	MarkWorkflowModelDispatched(context.Context, string, string) error
-	RenewWorkflowModelLease(context.Context, string, string) error
 }
 
 func DurableSessionDebits(pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer) SessionDebitLedger {
@@ -91,8 +92,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 	callCtx, cancel := context.WithCancel(ctx)
 	result := make(chan *fault.Error, 1)
 	done := make(chan struct{})
-	ledger, ok := s.deps.Debits.(workflowModelLeases)
-	if !ok || debit == nil {
+	if debit == nil {
 		close(done)
 		return callCtx, func() *fault.Error { cancel(); return nil }
 	}
@@ -115,7 +115,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 				return
 			case <-ticker.C:
 				checkCtx, stop := context.WithTimeout(callCtx, time.Second)
-				err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
+				err := s.deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
 				stop()
 				if err != nil {
 					if callCtx.Err() != nil {
@@ -140,7 +140,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 		case <-debit.leaseStarted:
 			checkCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 			defer stop()
-			if err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
+			if err := s.deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
 				return fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 			}
 		default:
@@ -172,7 +172,7 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	if s.deps.Debits == nil {
 		return false, nil
 	}
-	held, err := s.deps.Debits.HasUnknownDebit(ctx, keyID, max(s.cfg.WebRTCBound, nativeDuplexSession))
+	held, err := s.deps.Debits.HasUnknownDebit(ctx, keyID, max(webRTCBound, nativeDuplexSession))
 	if err != nil {
 		return false, fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}
@@ -290,11 +290,7 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *fault.Erro
 		if x.workflow == nil {
 			return s.deps.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 		}
-		ledger, ok := s.deps.Debits.(workflowModelLeases)
-		if !ok {
-			return debits.ErrAuthority
-		}
-		return ledger.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+		return s.deps.Debits.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")

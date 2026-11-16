@@ -26,7 +26,7 @@ type Planner struct {
 type Applier func(context.Context, pgx.Tx, access.Principal) error
 
 type Names struct {
-	projects, providers, organizations, routes map[string]bool
+	projects, providers, organizations map[string]bool
 }
 
 func NamesOf(document contract.ConfigurationDocument) Names {
@@ -34,20 +34,12 @@ func NamesOf(document contract.ConfigurationDocument) Names {
 		projects:      folded(slices.Values(document.Projects), func(entry contract.ConfigurationProjectEntry) string { return entry.Name }),
 		providers:     folded(slices.Values(document.Providers), func(entry contract.ConfigurationProviderEntry) string { return entry.Name }),
 		organizations: folded(slices.Values(ValueOf(document.Organizations)), func(entry contract.ConfigurationOrganizationEntry) string { return entry.Name }),
-		routes: maps.Collect(func(yield func(string, bool) bool) {
-			for _, route := range document.Routes {
-				if !yield(route.Slug, true) {
-					return
-				}
-			}
-		}),
 	}
 }
 
 func (n Names) Project(name string) bool      { return n.projects[Fold(name)] }
 func (n Names) Provider(name string) bool     { return n.providers[Fold(name)] }
 func (n Names) Organization(name string) bool { return n.organizations[Fold(name)] }
-func (n Names) Route(slug string) bool        { return n.routes[slug] }
 
 func Fold(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 

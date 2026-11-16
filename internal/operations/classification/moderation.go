@@ -58,32 +58,32 @@ func moderationResult(request oif.Request, source oif.Result) (oif.View, error) 
 	if err != nil {
 		return nil, err
 	}
-	r := ModerationResult{source: source, scope: view.(ModerationRequest).scope}
+	r := ModerationResult{source: source}
 	root := source.Source().Root()
 	if root.Kind() != oif.Object || operations.Member(root, "id").Kind() != oif.String || operations.Member(root, "model").Kind() != oif.String {
 		return r, operations.Violation("result", "moderation_identity")
 	}
 	results := operations.Member(root, "results")
-	if results.Kind() != oif.Array || len(results.Elements()) != r.scope.Count {
+	if results.Kind() != oif.Array || len(results.Elements()) != view.(ModerationRequest).scope.Count {
 		return r, operations.Violation("results", "moderation_result_scope")
 	}
 	for position, value := range results.Elements() {
-		d := Decision{Position: position, Categories: operations.Member(value, "categories"), Scores: operations.Member(value, "category_scores"), Flagged: operations.Member(value, "flagged"), AppliedInputTypes: operations.Member(value, "category_applied_input_types"), Thresholds: operations.Member(value, "thresholds")}
-		if value.Kind() != oif.Object || d.Flagged.Kind() != oif.Boolean || d.Categories.Kind() != oif.Object || d.Scores.Kind() != oif.Object || len(d.Categories.Members()) == 0 || len(d.Categories.Members()) != len(d.Scores.Members()) {
+		categories, scores, applied := operations.Member(value, "categories"), operations.Member(value, "category_scores"), operations.Member(value, "category_applied_input_types")
+		if value.Kind() != oif.Object || operations.Member(value, "flagged").Kind() != oif.Boolean || categories.Kind() != oif.Object || scores.Kind() != oif.Object || len(categories.Members()) == 0 || len(categories.Members()) != len(scores.Members()) {
 			return r, operations.Violation("results/"+strconv.Itoa(position), "moderation_categories")
 		}
-		for _, category := range d.Categories.Members() {
-			score, present := d.Scores.Lookup(category.Name)
+		for _, category := range categories.Members() {
+			score, present := scores.Lookup(category.Name)
 			if category.Value.Kind() != oif.Boolean || !present || score.Kind() != oif.Number {
 				return r, operations.Violation("results", "moderation_category_score")
 			}
 		}
-		if d.AppliedInputTypes.Kind() != oif.Absent {
-			if d.AppliedInputTypes.Kind() != oif.Object {
+		if applied.Kind() != oif.Absent {
+			if applied.Kind() != oif.Object {
 				return r, operations.Violation("category_applied_input_types", "moderation_category_scope")
 			}
-			for _, category := range d.AppliedInputTypes.Members() {
-				if _, present := d.Categories.Lookup(category.Name); !present || category.Value.Kind() != oif.Array {
+			for _, category := range applied.Members() {
+				if _, present := categories.Lookup(category.Name); !present || category.Value.Kind() != oif.Array {
 					return r, operations.Violation("category_applied_input_types", "moderation_category_scope")
 				}
 				for _, kind := range category.Value.Elements() {
@@ -93,7 +93,6 @@ func moderationResult(request oif.Request, source oif.Result) (oif.View, error) 
 				}
 			}
 		}
-		r.decisions = append(r.decisions, d)
 	}
 	return r, nil
 }

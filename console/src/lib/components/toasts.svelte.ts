@@ -1,18 +1,17 @@
-export type Toast = {
+type Toast = {
   readonly id: number;
   readonly message: string;
-  readonly tone: 'success' | 'danger';
 };
 
 class ToastQueue {
   items = $state<readonly Toast[]>([]);
   #next = 0;
 
-  push(message: string, tone: Toast['tone'] = 'success') {
+  push(message: string) {
     this.#next += 1;
     const id = this.#next;
-    this.items = [...this.items, { id, message, tone }];
-    setTimeout(() => this.dismiss(id), tone === 'danger' ? 9000 : 5000);
+    this.items = [...this.items, { id, message }];
+    setTimeout(() => this.dismiss(id), 5000);
   }
 
   dismiss(id: number) {

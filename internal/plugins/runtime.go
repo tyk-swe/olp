@@ -32,8 +32,8 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// Limits bound every instance of a plugin module.
-type Limits struct {
+// limits bound every instance of a plugin module.
+type limits struct {
 	// Memory bounds an instance's linear memory, in bytes.
 	Memory uint32
 	// Time bounds one call, including waiting for an instance and
@@ -47,9 +47,7 @@ type Limits struct {
 	Instances int
 }
 
-func DefaultLimits() Limits {
-	return Limits{Memory: 64 << 20, Time: 10 * time.Second, Stack: 8 << 20, Instances: 4}
-}
+var defaultLimits = limits{Memory: 64 << 20, Time: 10 * time.Second, Stack: 8 << 20, Instances: 4}
 
 // maxMessage bounds every message a plugin returns or sends OLP. OLP's own
 // requests carry what they must, such as the body a sign request signs.
@@ -81,7 +79,6 @@ const (
 // Runtime runs confined plugin modules. It is safe for concurrent use.
 type Runtime struct {
 	engine wazero.Runtime
-	limits Limits
 	log    *slog.Logger
 	// mu orders loading modules before closing the runtime: wazero does not
 	// guard compiling against a runtime closed meanwhile, such as by a
@@ -90,9 +87,8 @@ type Runtime struct {
 	closed bool
 }
 
-// NewRuntime starts a runtime whose plugin calls run on engine, stay within
-// limits and log to log.
-func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Logger) (*Runtime, error) {
+// NewRuntime starts a runtime whose plugin calls run on engine and log to log.
+func NewRuntime(ctx context.Context, engine Engine, log *slog.Logger) (*Runtime, error) {
 	config := wazero.NewRuntimeConfigInterpreter()
 	if engine == Compiled {
 		// The compiler where wazero has one for the platform, else the
@@ -105,9 +101,9 @@ func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Log
 		// Debug metadata is not part of the ABI. Do not run an additional
 		// DWARF decoder over untrusted custom-section payloads.
 		WithDebugInfoEnabled(false).
-		WithMemoryLimitPages(limits.Memory / wasmPage).
+		WithMemoryLimitPages(defaultLimits.Memory / wasmPage).
 		WithCloseOnContextDone(true)
-	r := &Runtime{engine: wazero.NewRuntimeWithConfig(ctx, config), limits: limits, log: log}
+	r := &Runtime{engine: wazero.NewRuntimeWithConfig(ctx, config), log: log}
 	// WASI supplies the clock, randomness and output streams. With no
 	// preopened directories, arguments or environment it reaches nothing else.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r.engine); err != nil {
@@ -139,7 +135,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 var errClosedRuntime = errors.New("the plugin runtime is closed")
 
 // Module is a compiled plugin module built for the ABI this runtime serves.
-// Its calls share a pool of instances, which Limits.Instances bounds: a call
+// Its calls share a pool of instances, which limits.Instances bounds: a call
 // takes an idle instance, or instantiates the module if none is idle, and
 // returns the instance for later calls unless the call failed.
 type Module struct {
@@ -180,7 +176,7 @@ func (r *Runtime) Load(ctx context.Context, module []byte) (*Module, error) {
 	if err != nil {
 		return nil, errNotModule
 	}
-	m := &Module{Digest: hex.EncodeToString(sum[:]), runtime: r, compiled: compiled, slots: make(chan struct{}, r.limits.Instances)}
+	m := &Module{Digest: hex.EncodeToString(sum[:]), runtime: r, compiled: compiled, slots: make(chan struct{}, defaultLimits.Instances)}
 	if err = m.checkABI(ctx); err != nil {
 		compiled.Close(ctx)
 		return nil, err
@@ -372,12 +368,12 @@ func reportedFailure(out *output, response abi.Response) error {
 // run serves one call on an instance within the runtime's limits.
 func (m *Module) run(ctx context.Context, call Call, use func(context.Context, api.Module) error) error {
 	parent := ctx
-	ctx, cancel := context.WithTimeout(ctx, m.runtime.limits.Time)
+	ctx, cancel := context.WithTimeout(ctx, defaultLimits.Time)
 	defer cancel()
 	out := call.output(m.runtime.log, m.Digest)
 	defer out.close()
 	ctx = call.context(ctx, out)
-	ctx = context.WithValue(ctx, stackKey{}, &stack{limit: uint64(m.runtime.limits.Stack) / 8})
+	ctx = context.WithValue(ctx, stackKey{}, &stack{limit: uint64(defaultLimits.Stack) / 8})
 	instance, err := m.acquire(ctx, out)
 	if err == nil {
 		err = use(ctx, instance.module)
@@ -394,9 +390,9 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		return refuseTimedOut(m.runtime.limits.Time)
+		return refuseTimedOut(defaultLimits.Time)
 	case errors.Is(err, errStackExhausted):
-		return refuse(CodeFailed, fmt.Sprintf("The plugin exhausted its %d KiB stack limit.", m.runtime.limits.Stack>>10))
+		return refuse(CodeFailed, fmt.Sprintf("The plugin exhausted its %d KiB stack limit.", defaultLimits.Stack>>10))
 	}
 	return refuse(CodeFailed, "The plugin stopped: it trapped, exited or exhausted its memory limit.")
 }

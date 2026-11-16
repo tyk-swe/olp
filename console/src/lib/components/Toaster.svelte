@@ -4,7 +4,7 @@
 
 <div class="toaster" aria-live="polite" role="status">
   {#each toasts.items as toast (toast.id)}
-    <div class="toast {toast.tone}">
+    <div class="toast">
       <p>{toast.message}</p>
       <button
         type="button"
@@ -40,10 +40,6 @@
     font-size: var(--text-body-sm);
     pointer-events: auto;
     animation: pop-in 240ms var(--ease-out);
-  }
-
-  .toast.danger {
-    border-left-color: var(--danger);
   }
 
   p {

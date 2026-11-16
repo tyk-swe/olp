@@ -670,19 +670,8 @@ func textOf(raw json.RawMessage) (string, bool) {
 	return text, true
 }
 
-// jsonArray and jsonObject decode a value of the shape the estimate expects,
-// and nothing at all for any other shape.
-func jsonArray(raw json.RawMessage) []json.RawMessage {
-	if len(raw) == 0 {
-		return nil
-	}
-	var items []json.RawMessage
-	if json.Unmarshal(raw, &items) != nil {
-		return nil
-	}
-	return items
-}
-
+// jsonObject decodes a value of the shape the estimate expects, and nothing at
+// all for any other shape.
 func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
 	if len(raw) == 0 {
 		return nil

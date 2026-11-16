@@ -95,9 +95,6 @@ var (
 
 func runtimeMetrics(rt *release.Manager) prometheus.Collector {
 	return metric.Collector(func() []prometheus.Metric {
-		if rt == nil {
-			return []prometheus.Metric{authorityAge.Sample(math.Inf(1)), desiredGeneration.Sample(0)}
-		}
 		status := rt.Authority()
 		age := math.Inf(1)
 		if status.Loaded && !status.ReadAt.IsZero() {

@@ -45,11 +45,6 @@ var (
 	MCPEnrollmentDigest      = DigestPurpose{"mcp_enrollment"}
 )
 
-func DigestPurposes() []DigestPurpose {
-	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
-}
-
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed
 // for one purpose never opens as another. Its name is authenticated data in
 // every stored ciphertext and a column value the database constrains, so a

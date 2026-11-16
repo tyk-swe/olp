@@ -44,7 +44,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
@@ -142,58 +141,6 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 	defer f.mu.Unlock()
 	f.refused = append(f.refused, id)
 	f.refusedGenerations = append(f.refusedGenerations, generation)
-}
-
-type facetRuntime struct{ *fakeRuntime }
-
-func (facetRuntime) Digest(secrets.DigestPurpose, string) []byte { return []byte("derived") }
-
-func (facetRuntime) BudgetAuthority(*string) (keyauthority.Authority, error) {
-	return keyauthority.Authority{}, nil
-}
-
-func (facetRuntime) AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error {
-	return nil
-}
-
-func (facetRuntime) AuthenticateTaskCapability(context.Context, string) (*keyauthority.Authority, error) {
-	return &keyauthority.Authority{}, nil
-}
-
-func (facetRuntime) ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error) {
-	return &keyauthority.Authority{}, nil
-}
-
-type stubDigester struct{}
-
-func (stubDigester) Digest(secrets.DigestPurpose, string) []byte { return []byte("explicit") }
-
-func TestNormalizedDependenciesDerivesRuntimeFacets(t *testing.T) {
-	t.Parallel()
-	derived := normalizedDependencies(Dependencies{Runtime: facetRuntime{&fakeRuntime{}}, Egress: &egress.Policy{}})
-	if derived.Digester == nil || string(derived.Digester.Digest(secrets.BatchLineDigest, "x")) != "derived" {
-		t.Fatal("Digester was not derived from the runtime")
-	}
-	if derived.BudgetAuthority == nil {
-		t.Fatal("BudgetAuthority was not derived from the runtime")
-	}
-	if derived.TaskAttemptAdmitter == nil {
-		t.Fatal("TaskAttemptAdmitter was not derived from the runtime")
-	}
-	if derived.TaskCapabilityAuthenticator == nil {
-		t.Fatal("TaskCapabilityAuthenticator was not derived from the runtime")
-	}
-	if derived.DelegationReauthenticator == nil {
-		t.Fatal("DelegationReauthenticator was not derived from the runtime")
-	}
-	explicit := normalizedDependencies(Dependencies{Runtime: facetRuntime{&fakeRuntime{}}, Digester: stubDigester{}, Egress: &egress.Policy{}})
-	if got := string(explicit.Digester.Digest(secrets.BatchLineDigest, "x")); got != "explicit" {
-		t.Fatalf("explicit Digester lost to derivation: %s", got)
-	}
-	absent := normalizedDependencies(Dependencies{Runtime: &fakeRuntime{}, Egress: &egress.Policy{}})
-	if absent.Digester != nil || absent.BudgetAuthority != nil || absent.TaskAttemptAdmitter != nil || absent.TaskCapabilityAuthenticator != nil || absent.DelegationReauthenticator != nil {
-		t.Fatal("facets appeared for a runtime that does not provide them")
-	}
 }
 
 type envelopes struct {
@@ -822,12 +769,16 @@ func (unreachableValkey) Do(context.Context, ...string) (any, error) {
 	return nil, context.DeadlineExceeded
 }
 
+func (unreachableValkey) Pipeline(context.Context, ...[]string) ([]any, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	limiter := limitadmission.New(runner)
+	limiter := limitadmission.NewDurable(runner, nil)
 	slots := int64(1)
 	authority := keyauthority.Authority{ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{MaxConcurrency: &slots}}
 	for _, test := range []struct {

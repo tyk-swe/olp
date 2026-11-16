@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -64,9 +65,9 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			}()
 		}
 	}()
-	reauth := time.NewTicker(s.cfg.WebRTCReauth)
+	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
-	heartbeat := time.NewTicker(s.cfg.WebRTCHeartbeat)
+	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
 	for {
 		select {
@@ -76,14 +77,14 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 		case <-reauth.C:
 			if e := s.webrtcAuthority(sess); e != nil {
 				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-					s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+					s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 				}
 				s.settleWebRTC(sess, e)
 				sess.cancel()
 				return
 			}
 		case <-heartbeat.C:
-			pingCtx, pingCancel := context.WithTimeout(sess.ctx, s.cfg.WebRTCReauth)
+			pingCtx, pingCancel := context.WithTimeout(sess.ctx, ingress.ReauthInterval)
 			err := sess.conn.Ping(pingCtx)
 			pingCancel()
 			if err != nil {
@@ -92,7 +93,7 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			}
 		case <-sess.ctx.Done():
 			if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-				s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+				s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 			}
 			s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 			return
@@ -124,7 +125,7 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	sess.usageMu.Unlock()
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 			s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 			sess.cancel()
 			return
@@ -135,13 +136,13 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	}
 	if errors.Is(sess.ctx.Err(), context.DeadlineExceeded) {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 		return
 	}
 	if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
-		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 	}
 	s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 	sess.cancel()

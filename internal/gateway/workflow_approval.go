@@ -13,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -86,11 +85,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *fault.Erro
 	if json.Unmarshal(raw, &request) != nil || !request.Approved || request.ContinuationToken == "" || len(request.Arguments) == 0 {
 		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
-	if !ok {
-		return fault.ServerError(503, "tool_approval_unavailable", "The approval service is unavailable.")
-	}
-	continuation, err := store.Continue(ctx, x.authority, request.ContinuationToken, x.workflow.transcript, request.Arguments, int(s.cfg.MaxBodyBytes))
+	continuation, err := s.deps.WorkflowRuns.Continue(ctx, x.authority, request.ContinuationToken, x.workflow.transcript, request.Arguments, int(s.cfg.MaxBodyBytes))
 	if err != nil || continuation.RouteRevisionID != x.named().RevisionID {
 		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
@@ -154,11 +149,7 @@ func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority keyaut
 	if index < 0 {
 		return s.deps.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
 	}
-	runner, ok := s.deps.WorkflowTools.(WorkflowApprovedToolRunner)
-	if !ok {
-		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_approval_unavailable", Message: "The approval service is unavailable."}
-	}
-	return runner.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
+	return s.deps.WorkflowTools.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
 }
 
 func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Completion, iteration int) (*workflowPause, *fault.Error) {
@@ -210,10 +201,6 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 			}
 		}
 	})
-	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
-	if !ok {
-		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval service is unavailable.")
-	}
 	_, modelCostKnown := x.responseCost()
 	costKnown := modelCostKnown && !x.workflow.unknownCost && !slices.ContainsFunc(x.facts, func(fact events.AttemptFact) bool {
 		return fact.BillingUncertain && !fact.UsageObserved
@@ -230,7 +217,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
 	deadline, _ := ctx.Deadline()
-	token, err := store.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
+	token, err := s.deps.WorkflowRuns.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
 	if err != nil {
 		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

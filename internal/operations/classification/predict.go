@@ -7,7 +7,7 @@ import (
 
 func predictRequest(source oif.Request) (oif.View, error) {
 	root := source.Document().Root()
-	r := PredictRequest{source: source, rawScores: operations.Member(root, "raw_scores")}
+	r := PredictRequest{source: source}
 	if root.Kind() != oif.Object {
 		return r, operations.Invalid("request", "Use a native prediction object.")
 	}
@@ -16,7 +16,7 @@ func predictRequest(source oif.Request) (oif.View, error) {
 	}
 	inputs := operations.Member(root, "inputs")
 	if inputs.Kind() == oif.String {
-		r.sequences = []Sequence{{Source: inputs}}
+		r.count = 1
 		return r, nil
 	}
 	if inputs.Kind() != oif.Array || len(inputs.Elements()) == 0 {
@@ -24,33 +24,29 @@ func predictRequest(source oif.Request) (oif.View, error) {
 	}
 	items := inputs.Elements()
 	if items[0].Kind() == oif.String {
-		sequence, err := sequence(inputs)
-		r.sequences = []Sequence{sequence}
-		return r, err
+		r.count = 1
+		return r, validSequence(inputs)
 	}
 	r.batch = true
+	r.count = len(items)
 	for _, item := range items {
-		seq, err := sequence(item)
-		if err != nil {
+		if err := validSequence(item); err != nil {
 			return r, err
 		}
-		r.sequences = append(r.sequences, seq)
 	}
 	return r, nil
 }
-func sequence(value oif.Value) (Sequence, error) {
-	r := Sequence{Source: value}
+func validSequence(value oif.Value) error {
 	items := value.Elements()
 	if value.Kind() != oif.Array || len(items) < 1 || len(items) > 2 {
-		return r, operations.Invalid("inputs", "Each sequence must contain one or two strings.")
+		return operations.Invalid("inputs", "Each sequence must contain one or two strings.")
 	}
 	for _, item := range items {
 		if item.Kind() != oif.String {
-			return r, operations.Invalid("inputs", "Sequence elements must be strings.")
+			return operations.Invalid("inputs", "Sequence elements must be strings.")
 		}
 	}
-	r.Pair = len(items) == 2
-	return r, nil
+	return nil
 }
 func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 	view, err := predictRequest(request)
@@ -58,7 +54,7 @@ func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 		return nil, err
 	}
 	req := view.(PredictRequest)
-	r := PredictResult{source: source, batch: req.batch, rawScores: req.rawScores}
+	r := PredictResult{source: source}
 	root := source.Source().Root()
 	if root.Kind() != oif.Array {
 		return r, operations.Violation("result", "prediction_scope")
@@ -66,23 +62,20 @@ func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 	sets := []oif.Value{root}
 	if req.batch {
 		sets = root.Elements()
-		if len(sets) != len(req.sequences) {
+		if len(sets) != req.count {
 			return r, operations.Violation("result", "prediction_batch_scope")
 		}
 	}
-	for inputIndex, set := range sets {
+	for _, set := range sets {
 		if set.Kind() != oif.Array || len(set.Elements()) == 0 {
 			return r, operations.Violation("result", "prediction_set")
 		}
-		out := PredictionSet{InputIndex: inputIndex, Source: set}
-		for position, item := range set.Elements() {
+		for _, item := range set.Elements() {
 			label, score := operations.Member(item, "label"), operations.Member(item, "score")
 			if item.Kind() != oif.Object || label.Kind() != oif.String || score.Kind() != oif.Number {
 				return r, operations.Violation("result", "native_prediction")
 			}
-			out.rows = append(out.rows, Prediction{Position: position, Label: label, Score: score, Source: item})
 		}
-		r.sets = append(r.sets, out)
 	}
 	return r, nil
 }

@@ -52,14 +52,9 @@ func (a *AttemptTrace) InjectUpstream(header http.Header) {
 	propagation.TraceContext{}.Inject(a.ctx, propagation.HeaderCarrier(header))
 }
 
-func (a *AttemptTrace) RecordUsage(inputTokens, outputTokens, cachedInputTokens *int64, mediaUnits *string) {
-	a.span.SetAttributes(responseAttributes("", inputTokens, outputTokens, nil)...)
-	if inputTokens != nil {
-		a.span.SetAttributes(attribute.Int64("olp.usage.input_tokens", *inputTokens))
-	}
-	if outputTokens != nil {
-		a.span.SetAttributes(attribute.Int64("olp.usage.output_tokens", *outputTokens))
-	}
+func (a *AttemptTrace) RecordUsage(inputTokens, outputTokens int64, cachedInputTokens *int64, mediaUnits *string) {
+	a.span.SetAttributes(responseAttributes("", &inputTokens, &outputTokens, nil)...)
+	a.span.SetAttributes(attribute.Int64("olp.usage.input_tokens", inputTokens), attribute.Int64("olp.usage.output_tokens", outputTokens))
 	if cachedInputTokens != nil {
 		a.span.SetAttributes(attribute.Int64("olp.usage.cached_input_tokens", *cachedInputTokens))
 	}

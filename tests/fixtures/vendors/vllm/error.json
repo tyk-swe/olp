@@ -1,8 +1,0 @@
-{
-  "error": {
-    "message": "The model `x` does not exist.",
-    "type": "NotFoundError",
-    "param": null,
-    "code": 404
-  }
-}

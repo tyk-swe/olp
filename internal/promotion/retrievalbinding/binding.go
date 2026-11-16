@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
+	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
 const (
@@ -71,7 +72,7 @@ func parseEntry(entry contract.ConfigurationRetrievalBinding, duplicate bool) (B
 		KeyGrants:      append([]string{}, slices.Compact(slices.Sorted(slices.Values(entry.KeyGrants)))...),
 		Enabled:        entry.Enabled,
 	}
-	if !promotion.ValidLabel(binding.Project) || !promotion.ValidLabel(binding.Name) || !promotion.ValidLabel(binding.TargetProvider) || binding.Route == "" || len(binding.Route) > 128 || duplicate || !retrieval.ResourceValid(binding.Backend, binding.Resource) {
+	if !promotion.ValidLabel(binding.Project) || !promotion.ValidLabel(binding.Name) || !promotion.ValidLabel(binding.TargetProvider) || binding.Route == "" || len(binding.Route) > 128 || duplicate || !identity.ValidResource(binding.Backend, binding.Resource) {
 		return Binding{}, invalidIdentity()
 	}
 	if err := retrieval.ValidateFields(binding.Backend, binding.Fields); err != nil {

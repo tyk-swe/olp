@@ -13,22 +13,20 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-type Observation = codemode.Observation
-
 func codexWindowNames() [2]string {
 	return [2]string{"primary", "secondary"}
 }
 
-func Observe(body []byte, unary bool) Observation {
-	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
+func Observe(body []byte, unary bool) codemode.Observation {
+	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: codewire.MaxBody})
 	if err != nil {
-		return Observation{}
+		return codemode.Observation{}
 	}
 	root := document.Root()
 	now := time.Now().UTC()
 	kind, _ := field(root, "type").Text()
 	if kind == "codex.rate_limits" {
-		return Observation{Allowance: eventAllowance(root, now)}
+		return codemode.Observation{Allowance: eventAllowance(root, now)}
 	}
 	if kind == "error" {
 		status, _ := strconv.Atoi(field(root, "status").Raw())
@@ -51,10 +49,10 @@ func Observe(body []byte, unary bool) Observation {
 		if status != 0 {
 			outcome.UpstreamStatus = &status
 		}
-		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now), RejectionBody: codewire.RejectionBody(body)}
+		return codemode.Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now), RejectionBody: codewire.RejectionBody(body)}
 	}
 	if unary && len(root.Members()) == 1 && field(root, "error").Kind() == oif.Object {
-		return Observation{RejectionBody: codewire.RejectionBody(body)}
+		return codemode.Observation{RejectionBody: codewire.RejectionBody(body)}
 	}
 	terminal := wire.IsTerminalResponseEvent(kind)
 	successful := kind == "response.completed"
@@ -78,7 +76,7 @@ func Observe(body []byte, unary bool) Observation {
 		}
 	}
 	if !terminal {
-		return Observation{}
+		return codemode.Observation{}
 	}
 	id, _ := field(root, "id").Text()
 	usage := field(root, "usage")
@@ -96,7 +94,7 @@ func Observe(body []byte, unary bool) Observation {
 	if u.Validate() != nil {
 		u = codemode.Usage{}
 	}
-	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id, AllowanceCharge: codewire.AllowanceCharge(usage)}
+	return codemode.Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id, AllowanceCharge: codewire.AllowanceCharge(usage)}
 }
 
 func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
@@ -207,15 +205,4 @@ func finishAllowance(a *codemode.Allowance) *codemode.Allowance {
 		return nil
 	}
 	return a
-}
-
-// ForwardHeaders excludes authentication, OLP controls and hop-by-hop fields.
-func ForwardHeaders(source http.Header, request bool) http.Header {
-	return codewire.ForwardHeaders(source, request)
-}
-
-// ForwardTrailers also excludes fields nominated by the original message's
-// Connection headers, which are absent from its trailer map.
-func ForwardTrailers(source, headers http.Header, request bool) http.Header {
-	return codewire.ForwardTrailers(source, headers, request)
 }

@@ -16,20 +16,20 @@ func taskEventState(event protocol.Event) tasks.State {
 			return taskState(value.Status.State)
 		}
 	}
-	return "active"
+	return tasks.Active
 }
 
 func taskState(state protocol.TaskState) tasks.State {
 	switch state {
 	case protocol.TaskStateCompleted:
-		return "completed"
+		return tasks.Completed
 	case protocol.TaskStateCanceled:
-		return "canceled"
+		return tasks.Canceled
 	case protocol.TaskStateFailed, protocol.TaskStateRejected:
-		return "failed"
+		return tasks.Failed
 	case protocol.TaskStateSubmitted, protocol.TaskStateWorking, protocol.TaskStateInputRequired, protocol.TaskStateAuthRequired:
-		return "active"
+		return tasks.Active
 	default:
-		return "outcome_unknown"
+		return tasks.Unknown
 	}
 }

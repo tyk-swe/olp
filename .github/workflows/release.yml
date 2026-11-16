@@ -133,7 +133,7 @@ jobs:
           fi
           go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json
           go run -tags release ./internal/signing/cmd/olpsign verify internal/catalog/catalog.json internal/pluginindex/index.json
-          go test -tags release -run 'TestEmbedded' ./internal/catalog ./internal/pluginindex
+          go test -tags release -run 'TestEmbedded' ./internal/catalog
       - if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

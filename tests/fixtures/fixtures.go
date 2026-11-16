@@ -1,8 +1,8 @@
 // Package fixtures preserves the language-neutral reference corpus used by
-// the protocol, routing, and token tests.
+// the routing, stream, and token tests.
 package fixtures
 
 import "embed"
 
-//go:embed protocols/*.json routing/*.json security/*.json streams/*.sse streams/*.json tokens/*.json vendors/*/*.json vendors/*/*.jsonl vendors/*/*.sse vendors/*/*.out
+//go:embed routing/attempt-order.json streams/*.sse tokens/*.json
 var Files embed.FS

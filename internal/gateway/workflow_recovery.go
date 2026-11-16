@@ -17,11 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 )
 
-type workflowRecoveryLedger interface {
-	SettleRecovery(context.Context, debits.Result) error
-	PreviousRecovery(context.Context, string, string, []string) (bool, bool, error)
-}
-
 type workflowRecoveryBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -49,8 +44,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	if err := decoder.Decode(new(struct{})); err != io.EOF {
 		return nil, &mcp.WorkflowError{Status: 400, Code: "invalid_tool_call", Message: "The recovery identifier is invalid."}
 	}
-	ledger, ok := s.deps.Debits.(workflowRecoveryLedger)
-	if !ok || authority.ProjectID == nil || x.route == nil || x.snapshot() == nil {
+	if authority.ProjectID == nil || x.route == nil || x.snapshot() == nil {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
 	runID, err := uuid.Parse(x.workflow.runID)
@@ -67,7 +61,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 			}
 		}
 	})
-	settled, pending, err := ledger.PreviousRecovery(ctx, x.workflow.runID, authority.ID, previousIDs)
+	settled, pending, err := s.deps.Debits.PreviousRecovery(ctx, x.workflow.runID, authority.ID, previousIDs)
 	if err != nil || pending {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
@@ -117,7 +111,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	resultDigest := sha256.Sum256([]byte("recovery-result:" + dispatchID))
 	evidenceDigest := sha256.Sum256([]byte("recovery-evidence:" + dispatchID))
 	result := debits.Result{DispatchID: dispatchID, EventID: eventID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:], Cost: "0", Charge: "0", Final: true, Complete: true}
-	if err := ledger.SettleRecovery(ctx, result); err != nil {
+	if err := s.deps.Debits.SettleRecovery(ctx, result); err != nil {
 		_ = s.deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}
