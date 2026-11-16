@@ -229,7 +229,7 @@ func rateRequest(lookup string, requests, concurrency *int64) admission.Request 
 
 func releaseTraceLeases(ctx context.Context, leases []*admission.Lease) {
 	for _, lease := range leases {
-		_ = lease.Release(ctx)
+		_ = lease.Settle(ctx, nil)
 	}
 }
 

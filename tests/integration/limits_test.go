@@ -86,7 +86,7 @@ func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 	}
 	for _, lease := range first {
 		for range 2 {
-			if err := lease.Release(t.Context()); err != nil {
+			if err := lease.Settle(t.Context(), nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -269,7 +269,7 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 		t.Fatalf("got %v for 0.60 on top of a held 0.60 under a 1.00 budget, want a daily cost refusal of the estimate", err)
 	}
 	first.SetActualCost("0.10", "0.10")
-	if err := first.SettleCost(t.Context()); err != nil {
+	if err := first.Settle(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
 	second, err := holding("0.60")
