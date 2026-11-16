@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -208,7 +209,7 @@
       global authority.
     </ReadOnlyNote>{/if}
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if editing}
     {#if inventory.isError}<LoadError
         error={inventory.error}

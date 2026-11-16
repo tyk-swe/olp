@@ -26,7 +26,6 @@
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const policyIntent = useMutationIntent();
   let {
     canManageInstallation,
@@ -154,13 +153,13 @@
   const captureOwner = usePrincipalLifetime(() => {
     resetPolicyForm();
     policyBusy = false;
-    error = notice = '';
+    error = '';
   });
 
   async function toggleMaster() {
     if (!ownerOnly || !captureConfig.data) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateCaptureConfiguration(captureConfig.data, {
         enabled: !captureConfig.data.enabled
@@ -196,7 +195,7 @@
     }
     const isCurrent = captureOwner();
     policyBusy = true;
-    error = notice = '';
+    error = '';
     let committed = false;
     const fields = {
       ...(!editing ||
@@ -250,7 +249,7 @@
     } catch (cause) {
       if (!isCurrent()) return;
       error = committed
-        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
         : errorMessage(
             cause,
             editing
@@ -265,7 +264,7 @@
   async function togglePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateCapturePolicy(policy, { enabled: !policy.enabled });
       if (!isCurrent()) return;
@@ -290,11 +289,11 @@
     )
       return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await deleteCapturePolicy(policy);
       if (!isCurrent()) return;
-      notice = 'Capture policy deleted.';
+      notify('Capture policy deleted.');
       await queryClient.invalidateQueries({
         queryKey: observabilityKeys.capturePolicies()
       });
@@ -313,7 +312,7 @@
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 <div class="capture-warning" role="note">
   Capture is opt-in and delivered from memory to an installation-owned sink.
   Policies without redactors capture <strong>unredacted</strong> content. Configured

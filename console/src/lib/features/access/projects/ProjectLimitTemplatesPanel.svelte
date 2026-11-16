@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import PolicyFields from '../limit-templates/TemplateFields.svelte';
@@ -28,7 +29,6 @@
   let loaded = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
 
   function load(value: ProjectLimitTemplates) {
     form = templateForm(value.templates);
@@ -49,7 +49,7 @@
     const result = await policy.refetch();
     if (result.data) {
       load(result.data);
-      error = notice = '';
+      error = '';
     }
   }
 
@@ -57,7 +57,6 @@
     event.preventDefault();
     if (busy || !editable) return;
     error = templateError(form);
-    notice = '';
     if (error) return;
     busy = true;
     try {
@@ -65,7 +64,7 @@
         await putProjectLimitTemplates(projectId, etag, templateInput(form))
       );
       await client.invalidateQueries({ queryKey: projectKeys.root });
-      notice = 'Limit templates saved.';
+      notify('Limit templates saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -90,7 +89,7 @@
       </p>
       <PolicyFields bind:form disabled={busy || !editable} />
       {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-      {#if notice}<p class="notice" role="status">{notice}</p>{/if}
+
       <div class="actions">
         {#if editable}<button
             class="button button-primary"

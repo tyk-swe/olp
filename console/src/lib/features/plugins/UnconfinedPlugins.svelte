@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -189,7 +190,7 @@
       with its privileges. An owner reviews and permits each build.
     </p>
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-    {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+    {#if notice}<Callout tone="success">{notice}</Callout>{/if}
     {#if !canManage}
       <ReadOnlyNote
         >Only owners can review and permit unconfined plugins.</ReadOnlyNote

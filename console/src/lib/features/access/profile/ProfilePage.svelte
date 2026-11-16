@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
@@ -477,7 +478,7 @@
   />
 {/if}
 
-{#if message}<p class="success-banner" role="status">{message}</p>{/if}
+{#if message}<Callout tone="success">{message}</Callout>{/if}
 <ConflictNotice
   notice={profileConcurrentNotice}
   onReload={reloadProfile}

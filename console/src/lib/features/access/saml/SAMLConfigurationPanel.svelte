@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { FIXED_ROLES } from '../session/authorization';
@@ -98,11 +99,9 @@
     <button class="button button-secondary" onclick={() => query.refetch()}
       >Retry</button
     >{:else}
-    {#if error}<p role="alert" class="form-alert">{error}</p>{/if}{#if notice}<p
-        role="status"
-      >
-        {notice}
-      </p>{/if}
+    {#if error}<p role="alert" class="form-alert">
+        {error}
+      </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
     <form onsubmit={save}>
       <fieldset disabled={busy || !editable}>
         <legend>Identity provider</legend><label class="check"

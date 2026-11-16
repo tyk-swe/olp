@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { oidcKeys } from '#lib/features/access/oidc/oidcKeys.js';
 
   import { onDestroy } from 'svelte';
@@ -211,7 +212,7 @@
 {/if}
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 {#if oidc.isPending}
   <div class="loading-state" role="status">Loading OIDC configuration…</div>

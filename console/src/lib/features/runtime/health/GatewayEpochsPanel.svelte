@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -70,9 +71,9 @@
         class="badge">{epochs.data.items.length} on page</span
       >{/if}
   </div>
-  {#if epochNotice}<div class="inline-notice" role="status">
+  {#if epochNotice}<Callout tone="success">
       {epochNotice}
-    </div>{/if}
+    </Callout>{/if}
   {#if epochError}<div class="inline-problem" role="alert">
       {epochError}
     </div>{/if}

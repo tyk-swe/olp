@@ -46,7 +46,6 @@
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const sinkIntent = useMutationIntent();
   let {
     canManageInstallation,
@@ -176,7 +175,7 @@
       return;
     const isCurrent = captureOwner();
     sinkBusy = true;
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const parsed = parseSinkSettings(delivery, {
@@ -251,7 +250,7 @@
     } catch (cause) {
       if (!isCurrent()) return;
       error = committed
-        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
         : errorMessage(
             cause,
             editing
@@ -266,7 +265,7 @@
   async function toggleSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateExportSink(sink, { enabled: !sink.enabled });
       if (!isCurrent()) return;
@@ -289,11 +288,11 @@
     )
       return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await deleteExportSink(sink);
       if (!isCurrent()) return;
-      notice = 'Sink deleted.';
+      notify('Sink deleted.');
       await queryClient.invalidateQueries({ queryKey: observabilityKeys.root });
     } catch (cause) {
       if (!isCurrent()) return;
@@ -314,12 +313,12 @@
   const captureOwner = usePrincipalLifetime(() => {
     resetSinkForm();
     sinkBusy = false;
-    error = notice = '';
+    error = '';
   });
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 {#if canManageInstallation || canManageProjects}<div class="toolbar">
     <p class="section-help">
       Send logs, traces and metrics to an OpenTelemetry collector or another

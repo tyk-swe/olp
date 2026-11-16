@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
@@ -27,7 +28,6 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
 
   const users = createQuery(() => ({
     queryKey: userKeys.roster,
@@ -61,7 +61,7 @@
     )
       return;
     busy = `session-${id}`;
-    error = notice = '';
+    error = '';
     try {
       if (current) {
         await authLifecycle.endCurrentSession((signal) => logout(signal));
@@ -69,7 +69,7 @@
       }
       await revokeSession(id);
       await sessions.refetch();
-      notice = 'Session revoked.';
+      notify('Session revoked.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -79,7 +79,6 @@
 </script>
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 <div class="toolbar">
   <div>

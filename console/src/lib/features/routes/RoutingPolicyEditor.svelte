@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   import { onDestroy, untrack } from 'svelte';
@@ -216,7 +217,7 @@
         >Reload policy</button
       >
     </p>{/if}
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if policy.data}
     <form onsubmit={save}>
       <fieldset disabled={!canManage || busy || policy.isFetching}>

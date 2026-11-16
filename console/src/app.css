@@ -1313,19 +1313,6 @@ button:not(:disabled),
   min-width: 42rem;
 }
 
-.success-banner {
-  margin: 1rem 0;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--success);
-  border-radius: var(--radius-control);
-  background: var(--success-soft);
-  color: var(--foreground);
-}
-
-.success-banner strong {
-  color: var(--success);
-}
-
 @media (max-width: 62rem), (pointer: coarse) {
   .button,
   .filter-control,

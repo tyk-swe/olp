@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -201,7 +202,7 @@
       >Your role can view rate cards but not publish them.</ReadOnlyNote
     >{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="inline-notice" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card card-form" onsubmit={addCard}>
     <div class="form-grid">
       <div class="form-field">

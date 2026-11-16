@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { projectKeys } from '../projects/projectKeys';
@@ -45,7 +46,6 @@
   let saved = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   function input(): BudgetPolicy | null {
     return daily || weekly || monthly
       ? {
@@ -75,13 +75,13 @@
     const result = await query.refetch();
     if (result.data) {
       load(result.data);
-      error = notice = '';
+      error = '';
     }
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !editable) return;
-    error = notice = '';
+    error = '';
     if (
       [daily, weekly, monthly].some(
         (value) =>
@@ -99,7 +99,7 @@
       client.setQueryData(budgetKey, value);
       load(value);
       await client.invalidateQueries({ queryKey: projectKeys.root });
-      notice = `${title} saved.`;
+      notify(`${title} saved.`);
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -181,7 +181,7 @@
           0} this month.
       </p>
       {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-      {#if notice}<p role="status">{notice}</p>{/if}
+
       <div class="form-actions">
         {#if editable}<button
             class="button button-primary"

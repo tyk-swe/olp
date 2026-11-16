@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { getBranding, updateBranding } from './branding';
@@ -17,7 +18,6 @@
   let etag = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   $effect(() => {
     if (identity.data && !etag) {
       name = identity.data.name;
@@ -27,7 +27,7 @@
   });
 
   async function chooseLogo(file?: File) {
-    error = notice = '';
+    error = '';
     if (!file) return;
     if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 65536) {
       error = 'Choose a PNG or JPEG logo of at most 64 KiB.';
@@ -54,14 +54,14 @@
       name = result.data.name;
       logo = result.data.logo;
       etag = result.data.etag;
-      error = notice = '';
+      error = '';
     }
   }
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       const updated = await updateBranding({ name, logo, etag });
       queryClient.setQueryData(settingsKeys.branding, updated);
@@ -69,7 +69,7 @@
       logo = updated.logo;
       etag = updated.etag;
       await authLifecycle.validateSession();
-      notice = 'Installation branding saved.';
+      notify('Installation branding saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -91,7 +91,7 @@
       {errorMessage(identity.error)}
     </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
+
   <form onsubmit={save}>
     <label
       >Installation name<input

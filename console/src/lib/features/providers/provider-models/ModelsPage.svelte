@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
@@ -185,9 +186,7 @@
   <div class="inline-problem" role="alert">{mutationError}</div>
 {/if}
 
-{#if notice}
-  <div class="success-banner" role="status">{notice}</div>
-{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 <div class="toolbar" role="search">
   <label class="search"

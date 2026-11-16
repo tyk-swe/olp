@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -331,7 +332,7 @@
     </form>
   {/if}
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if selected.isPending}<p role="status">Loading diagnostics…</p>
   {:else if selected.isError}<LoadError
       error={selected.error}

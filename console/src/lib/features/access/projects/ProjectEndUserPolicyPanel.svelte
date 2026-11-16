@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import PolicyFields from '../end-users/PolicyFields.svelte';
@@ -24,7 +25,6 @@
   let loaded = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
 
   function load(value: ProjectEndUserPolicy) {
     form = policyForm(value.policy);
@@ -45,7 +45,7 @@
     const result = await policy.refetch();
     if (result.data) {
       load(result.data);
-      error = notice = '';
+      error = '';
     }
   }
 
@@ -53,13 +53,12 @@
     event.preventDefault();
     if (busy || !editable) return;
     error = policyError(form);
-    notice = '';
     if (error) return;
     busy = true;
     try {
       load(await putProjectEndUserPolicy(projectId, etag, policyInput(form)));
       await client.invalidateQueries({ queryKey: projectKeys.root });
-      notice = 'End-user policy saved.';
+      notify('End-user policy saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -89,7 +88,7 @@
         disabled={busy || !editable}
       />
       {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-      {#if notice}<p class="notice" role="status">{notice}</p>{/if}
+
       <div class="actions">
         {#if editable}<button
             class="button button-primary"

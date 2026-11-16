@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import {
@@ -54,7 +55,6 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
   let email = $state('');
   let role = $state('developer');
   let expiresInHours = $state(DEFAULT_EXPIRY_HOURS);
@@ -73,7 +73,7 @@
     role = 'developer';
     expiresInHours = DEFAULT_EXPIRY_HOURS;
     copied = false;
-    copyError = error = notice = busy = '';
+    copyError = error = busy = '';
   });
 
   async function run(
@@ -82,7 +82,7 @@
   ) {
     const isCurrent = captureOwner();
     busy = label;
-    error = notice = '';
+    error = '';
     try {
       await action(isCurrent);
     } catch (cause) {
@@ -115,7 +115,7 @@
       invitationSecret = result;
       createIntent.reset();
       email = '';
-      notice = 'Invitation created.';
+      notify('Invitation created.');
       try {
         const observation = await invitations.refetch();
         if (observation?.isError) throw observation.error;
@@ -142,7 +142,7 @@
       );
       if (!isCurrent()) return;
       await invitations.refetch();
-      notice = 'Invitation revoked.';
+      notify('Invitation revoked.');
     });
   }
 
@@ -206,7 +206,6 @@
 {/if}
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 {#if !canManage}
   <ReadOnlyNote>

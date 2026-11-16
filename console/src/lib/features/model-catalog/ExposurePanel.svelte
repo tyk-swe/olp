@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -15,7 +16,6 @@
   let etag = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   $effect(() => {
     if (exposure.data && !etag) {
       exposed = exposure.data.expose_upstream_models;
@@ -27,13 +27,13 @@
     if (result.data) {
       exposed = result.data.expose_upstream_models;
       etag = result.data.etag;
-      error = notice = '';
+      error = '';
     }
   }
   async function save(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       const result = await putExposure(routeId, {
         expose_upstream_models: exposed,
@@ -42,7 +42,7 @@
       client.setQueryData(catalogKeys.exposure(routeId), result);
       await client.invalidateQueries({ queryKey: catalogKeys.root });
       etag = result.etag;
-      notice = 'Catalog disclosure saved.';
+      notify('Catalog disclosure saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -61,7 +61,7 @@
       {errorMessage(exposure.error)}
     </p>{/if}
   {#if error}<p role="alert" class="inline-problem">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+
   <form onsubmit={save}>
     <label
       ><input

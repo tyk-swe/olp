@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
   import { page } from '$app/state';
@@ -97,9 +98,9 @@
     {editorView.error}
     <ProviderValidationIssues issues={editorView.validationIssues} />
   </div>{/if}
-{#if editorView.notice}<div class="success-banner" role="status">
+{#if editorView.notice}<Callout tone="success">
     {editorView.notice}
-  </div>{/if}
+  </Callout>{/if}
 <ConflictNotice
   notice={editorView.concurrentNotice}
   onReload={editor.reload}

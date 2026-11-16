@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import { errorMessage } from '#lib/management/http.js';
@@ -148,12 +149,9 @@
     Protect password sign-in with an authenticator app or a security key. Linked
     identity sign-in follows your identity provider’s policy.
   </p>
-  {#if error}<p class="form-alert" role="alert">{error}</p>{/if}{#if notice}<p
-      class="notice notice-success"
-      role="status"
-    >
-      {notice}
-    </p>{/if}
+  {#if error}<p class="form-alert" role="alert">
+      {error}
+    </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if status.isPending}<p role="status">
       Loading authenticators…
     </p>{:else if status.isError}<p class="form-alert" role="alert">
@@ -167,10 +165,10 @@
         Security keys need an HTTPS DNS public origin, or localhost for
         development. Authenticator apps remain available.
       </p>{/if}
-    {#if status.data.required}<p class="notice notice-info">
+    {#if status.data.required}<Callout>
         This installation requires a second factor for local sign-in. Enroll a
         replacement before removing the last factor.
-      </p>{/if}
+      </Callout>{/if}
     {#if status.data.factors.length}<ul>
         {#each status.data.factors as factor (factor.id)}<li>
             <div>

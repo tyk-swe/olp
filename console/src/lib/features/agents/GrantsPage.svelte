@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -299,12 +300,9 @@
 {#if $state.error || grantView.error}<p class="inline-problem" role="alert">
     {$state.error || grantView.error}
   </p>{/if}
-{#if $state.message || grantView.message}<p
-    class="success-banner"
-    role="status"
-  >
+{#if $state.message || grantView.message}<Callout tone="success">
     {$state.message || grantView.message}
-  </p>{/if}
+  </Callout>{/if}
 {#if grantView.handoffToken}
   <section class="section">
     <h2>Claim enrollment</h2>

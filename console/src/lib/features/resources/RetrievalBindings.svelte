@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -43,7 +44,6 @@
   let revision = $state('');
   let inspected = $state('');
   let error = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let conflict = $state(false);
   let epoch = 0;
@@ -53,7 +53,6 @@
     editor = false;
     inspected = '';
     error = '';
-    notice = '';
     busy = false;
   });
 
@@ -125,7 +124,6 @@
     const version = epoch;
     const isCurrent = captureOwner();
     error = '';
-    notice = '';
     busy = true;
     try {
       const next = action === 'save' ? input() : null;
@@ -153,7 +151,7 @@
         current = null;
         editor = false;
       }
-      notice = saved ? 'Binding revision saved.' : 'Binding retired.';
+      notify(saved ? 'Binding revision saved.' : 'Binding retired.');
       await client.invalidateQueries({ queryKey });
     } catch (cause) {
       if (isCurrent() && version === epoch) {
@@ -347,7 +345,7 @@
     </form>
   {/if}
   {#if busy}<p role="status">Waiting for the binding operation…</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if inspected}<pre
       aria-label="Retrieval binding revision">{inspected}</pre>{/if}

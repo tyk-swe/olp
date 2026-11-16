@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
   import { routeTabs } from './routeTabs.js';
@@ -75,9 +76,9 @@
   >
     {editor.errorMessage}
   </div>{/if}
-{#if editor.notice}<div class="success-banner" role="status">
+{#if editor.notice}<Callout tone="success">
     {editor.notice}
-  </div>{/if}
+  </Callout>{/if}
 <p class="sr-only" role="status">
   {editor.busy ? 'Operation in progress. Please wait.' : ''}
 </p>

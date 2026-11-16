@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { page } from '$app/state';
   import { errorMessage } from '#lib/management/http.js';
@@ -63,11 +64,9 @@
     response. An email match alone never links an account. Unlinking must leave
     another usable sign-in method.
   </p>
-  {#if error}<p class="form-alert" role="alert">{error}</p>{/if}{#if notice}<p
-      role="status"
-    >
-      {notice}
-    </p>{/if}
+  {#if error}<p class="form-alert" role="alert">
+      {error}
+    </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if identities.isPending}<p role="status">
       Loading SAML identities…
     </p>{:else if identities.isError}<p role="alert">

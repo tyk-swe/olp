@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
@@ -105,5 +106,5 @@
     </form>
   {/if}
 {/if}
-{#if saved}<p class="success-banner" role="status">Resolution recorded</p>{/if}
+{#if saved}<Callout tone="success">Resolution recorded</Callout>{/if}
 {#if action.error}<p class="inline-problem" role="alert">{action.error}</p>{/if}

@@ -60,7 +60,6 @@
   let createBusy = $state(false);
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
 
   let editingId = $state('');
   let editingGroup = $state.raw<BudgetGroup | null>(null);
@@ -99,7 +98,7 @@
     for (const field of rateFields) createRates[field] = editRates[field] = '';
     createBusy = editBusy = false;
     editingGroup = null;
-    error = notice = '';
+    error = '';
   });
 
   function startEdit(group: BudgetGroup) {
@@ -147,7 +146,7 @@
     }
     createBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const submission = createIntent.prepare<
@@ -228,7 +227,7 @@
     }
     editBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       await updateBudgetGroup(current, {
@@ -252,7 +251,7 @@
       if (!isCurrent()) return;
       editingId = '';
       editingGroup = null;
-      notice = 'Budget group updated.';
+      notify('Budget group updated.');
       await queryClient.invalidateQueries(
         { queryKey: budgetGroupKeys.root },
         { throwOnError: true }
@@ -288,7 +287,6 @@
   </div>
 
   {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-  {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 
   {#if creating}
     <Dialog

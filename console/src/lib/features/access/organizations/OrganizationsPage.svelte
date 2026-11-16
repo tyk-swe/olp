@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -28,7 +30,6 @@
   let projectRole = $state<'manager' | 'viewer'>('viewer');
   let busy = $state(false);
   let problem = $state('');
-  let notice = $state('');
   const organizations = createQuery(() => ({
     queryKey: organizationKeys.root,
     queryFn: ({ signal }) => api.listOrganizations(signal)
@@ -91,10 +92,9 @@
     if (busy) return;
     busy = true;
     problem = '';
-    notice = '';
     try {
       await action();
-      notice = 'Saved.';
+      notify('Saved.');
       try {
         await Promise.all([
           client.invalidateQueries(
@@ -125,8 +125,8 @@
     determine which operations each person can perform.
   </p>
 </header>
-{#if problem}<p class="notice error" role="alert">{problem}</p>{/if}
-{#if notice}<p class="notice success" role="status">{notice}</p>{/if}
+{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
+
 {#if canCreate}
   <form
     onsubmit={(e) => {
@@ -164,9 +164,9 @@
 {/if}
 {#if organizations.isPending}<p>
     Loading organizations…
-  </p>{:else if organizations.isError}<p class="notice error" role="alert">
+  </p>{:else if organizations.isError}<Callout tone="danger">
     {errorMessage(organizations.error)}
-  </p>
+  </Callout>
   <button
     class="button button-secondary"
     onclick={() => organizations.refetch()}>Retry</button
