@@ -47,7 +47,7 @@ export async function saveDefinition(
   project: string,
   type: Definition['type'],
   body: components['schemas']['UpdateGuardrailRequest'],
-  requestId: string = crypto.randomUUID()
+  requestId: string
 ) {
   return current
     ? unwrap(
@@ -69,53 +69,58 @@ export async function saveDefinition(
 export async function savePolicy(
   current: Policy | null,
   project: string,
-  body: components['schemas']['GuardrailPolicyInput']
+  body: components['schemas']['GuardrailPolicyInput'],
+  requestId: string
 ) {
   return current
     ? unwrap(
         await apiClient.PUT('/api/v1/guardrail-policies/{policy_id}', {
           params: {
             path: { policy_id: current.policy_id },
-            header: mutationHeaders(current.etag, crypto.randomUUID())
+            header: mutationHeaders(current.etag, requestId)
           },
           body
         })
       )
     : unwrap(
         await apiClient.POST('/api/v1/guardrail-policies', {
-          params: { header: createHeaders(crypto.randomUUID()) },
+          params: { header: createHeaders(requestId) },
           body: { ...body, project_id: project }
         })
       );
 }
-export async function activateDefinition(current: Definition) {
+export async function activateDefinition(
+  current: Definition,
+  requestId: string
+) {
   ensureOk(
     await apiClient.POST('/api/v1/guardrails/{guardrail_id}/activate', {
       params: {
         path: { guardrail_id: current.id },
-        header: mutationHeaders(current.etag, crypto.randomUUID())
+        header: mutationHeaders(current.etag, requestId)
       },
       body: { revision_id: current.revision_id }
     })
   );
 }
-export async function activatePolicy(current: Policy) {
+export async function activatePolicy(current: Policy, requestId: string) {
   ensureOk(
     await apiClient.POST('/api/v1/guardrail-policies/{policy_id}/activate', {
       params: {
         path: { policy_id: current.policy_id },
-        header: mutationHeaders(current.etag, crypto.randomUUID())
+        header: mutationHeaders(current.etag, requestId)
       },
       body: { revision_id: current.revision_id }
     })
   );
 }
 export async function attachPolicy(
-  body: components['schemas']['GuardrailAttachment']
+  body: components['schemas']['GuardrailAttachment'],
+  requestId: string
 ) {
   ensureOk(
     await apiClient.POST('/api/v1/guardrail-attachments', {
-      params: { header: createHeaders(crypto.randomUUID()) },
+      params: { header: createHeaders(requestId) },
       body
     })
   );
