@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -22,18 +23,18 @@ import (
 func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	owner := s.owner()
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "journey"}, idempotent(), http.StatusCreated)["id"].(string)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "journey"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 	provider := s.activeProvider(owner, "journey-provider", newVendor(t).URL, project)
 	slug := uniqueName("journey")
 	s.publishedRoute(owner, slug, provider, project)
 	testSelectorPluginPins(t, s, owner, provider, project)
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "journey", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
-	consumer := &caller{name: "journey key", token: key["secret"].(string)}
+	key := s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "journey", "scopes": []string{"inference"}, "project_id": project}, harness.Idempotent(), http.StatusCreated)
+	consumer := &harness.Caller{Name: "journey key", Token: key["secret"].(string)}
 	request := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hello"}}}
 
-	s.eventually("the published route serving a request", 20*time.Second, func() (bool, string) {
-		status, raw := s.do(consumer, "POST", "/v1/chat/completions", request, nil)
+	s.Eventually("the published route serving a request", 20*time.Second, func() (bool, string) {
+		status, raw := s.Do(consumer, "POST", "/v1/chat/completions", request, nil)
 		if status != http.StatusOK {
 			return false, describe(status, raw)
 		}
@@ -53,9 +54,9 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 		return true, ""
 	})
 
-	s.eventually("usage reaching durable storage", 20*time.Second, func() (bool, string) {
+	s.Eventually("usage reaching durable storage", 20*time.Second, func() (bool, string) {
 		var attempts, input, output int64
-		err := s.pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp.attempt_usage_facts`).Scan(&attempts, &input, &output)
+		err := s.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp.attempt_usage_facts`).Scan(&attempts, &input, &output)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +67,7 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 	t.Run("simulation_requires_all_predicates", func(t *testing.T) {
 		classifier := &routing.ClassifierPredicate{Route: slug, Labels: []string{"complex"}, TimeoutMS: 500}
 		plugin := &routing.PluginPredicate{Digest: strings.Repeat("a", 64)}
-		draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		draft := s.Want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 			"slug": uniqueName("simulation"), "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
 			"fidelity": map[string]any{"mode": "transformed"}, "project_id": project,
 			"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendor.Model, "priority": 0, "weight": 1, "timeout_ms": 2000, "tags": []string{"selected"}}},
@@ -75,8 +76,8 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 				{ID: "plugin", Tags: []string{"selected"}, When: routing.Predicate{Plugin: plugin}},
 				{ID: "classifier", Tags: []string{"selected"}, When: routing.Predicate{Classifier: classifier}},
 			},
-		}, idempotent(), http.StatusCreated)
-		result := s.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
+		}, harness.Idempotent(), http.StatusCreated)
+		result := s.Want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
 			"operation": "generation", "surface": "openai", "mode": "unary", "seed": "predicates",
 			"classifier_labels": map[string]string{"both": "complex", "classifier": "complex"},
 		}, nil, http.StatusOK)
@@ -100,85 +101,85 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	owner := s.owner()
-	ownerID := s.want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
+	owner := s.Owner()
+	ownerID := s.Want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
 	destination := uuid.NewString()
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
+	if _, err := s.Pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
  VALUES($1,'installation',$2,$1,$3)`, destination, "https://hooks.example.com/olp", ownerID); err != nil {
 		t.Fatal(err)
 	}
-	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{
 		"name": "keys only", "scopes": []string{"keys"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	path := "/api/v1/notifications/destinations/" + destination
 	match := map[string]string{"If-Match": `"` + destination + `"`}
-	for _, c := range []*caller{s.invite(owner, "developer@example.com", access.RoleDeveloper), {name: "keys token", token: token["secret"].(string)}} {
-		if status, raw := s.do(c, "DELETE", path, nil, idempotent(match)); status != http.StatusForbidden {
-			t.Errorf("%s deleted an installation destination: %s", c.name, describe(status, raw))
+	for _, c := range []*harness.Caller{s.Invite(owner, "developer@example.com", access.RoleDeveloper), {Name: "keys token", Token: token["secret"].(string)}} {
+		if status, raw := s.Do(c, "DELETE", path, nil, harness.Idempotent(match)); status != http.StatusForbidden {
+			t.Errorf("%s deleted an installation destination: %s", c.Name, describe(status, raw))
 		}
 	}
-	s.want(owner, "DELETE", path, nil, idempotent(match), http.StatusNoContent)
+	s.Want(owner, "DELETE", path, nil, harness.Idempotent(match), http.StatusNoContent)
 }
 
-func testSelectorPluginPins(t *testing.T, s *service, owner *caller, provider map[string]any, project string) {
+func testSelectorPluginPins(t *testing.T, s *service, owner *harness.Caller, provider map[string]any, project string) {
 	t.Helper()
 	const digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest, abi_version, manifest, module, size_bytes, etag, installed_by, approved_by, approved_at)
+	if _, err := s.Pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest, abi_version, manifest, module, size_bytes, etag, installed_by, approved_by, approved_at)
  SELECT $1, 1, '{"name":"selector-fixture","version":"0.1.0","origins":[],"profiles":[]}', '\x0061736d01000000'::bytea, 8, gen_random_uuid(), id, id, now() FROM olp.users WHERE email='owner@example.com'`, digest); err != nil {
 		t.Fatal(err)
 	}
 	pluginPath := "/api/v1/plugins/" + digest
-	installed := s.want(owner, "GET", pluginPath, nil, nil, http.StatusOK)
-	draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+	installed := s.Want(owner, "GET", pluginPath, nil, nil, http.StatusOK)
+	draft := s.Want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": uniqueName("selector-pin"), "project_id": project, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets":   []any{map[string]any{"provider_id": provider["id"], "provider_model": vendor.Model, "priority": 0, "weight": 1, "timeout_ms": 2000, "tags": []string{"selected"}}},
 		"selectors": []routing.Selector{{ID: "module", Tags: []string{"selected"}, When: routing.Predicate{Plugin: &routing.PluginPredicate{Digest: digest}}}},
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	requirePinned := func() {
 		t.Helper()
-		problem := s.want(owner, "DELETE", pluginPath, nil, idempotent(etag(installed)), http.StatusConflict)
+		problem := s.Want(owner, "DELETE", pluginPath, nil, harness.Idempotent(harness.ETag(installed)), http.StatusConflict)
 		if !strings.HasSuffix(problem["type"].(string), "/plugin_pinned") {
 			t.Fatalf("selector pin uninstall = %v", problem)
 		}
 	}
 	requirePinned()
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
-	activated := s.want(owner, "POST", draftPath+"/activate", nil, idempotent(etag(draft)), http.StatusOK)
-	current := s.want(owner, "GET", draftPath, nil, nil, http.StatusOK)
-	s.want(owner, "DELETE", draftPath, nil, idempotent(etag(current)), http.StatusNoContent)
+	activated := s.Want(owner, "POST", draftPath+"/activate", nil, harness.Idempotent(harness.ETag(draft)), http.StatusOK)
+	current := s.Want(owner, "GET", draftPath, nil, nil, http.StatusOK)
+	s.Want(owner, "DELETE", draftPath, nil, harness.Idempotent(harness.ETag(current)), http.StatusNoContent)
 	requirePinned()
 	routePath := "/api/v1/routes/" + activated["route_id"].(string)
-	route := s.want(owner, "GET", routePath, nil, nil, http.StatusOK)
-	s.want(owner, "POST", routePath+"/retire", nil, idempotent(etag(route)), http.StatusOK)
+	route := s.Want(owner, "GET", routePath, nil, nil, http.StatusOK)
+	s.Want(owner, "POST", routePath+"/retire", nil, harness.Idempotent(harness.ETag(route)), http.StatusOK)
 	requirePinned()
 }
 
 func TestNotificationRuleRejectsNullEnabled(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	owner := s.owner()
-	ownerID := s.want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
+	owner := s.Owner()
+	ownerID := s.Want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
 	destination := uuid.NewString()
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
+	if _, err := s.Pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
  VALUES($1,'notification validation','https://hooks.example.com/olp',$1,$2)`, destination, ownerID); err != nil {
 		t.Fatal(err)
 	}
-	rule := s.want(owner, "POST", "/api/v1/notifications/rules", map[string]any{
+	rule := s.Want(owner, "POST", "/api/v1/notifications/rules", map[string]any{
 		"name": "disabled", "event": "provider.grant.lapsed", "destination_id": destination, "enabled": false,
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	path := "/api/v1/notifications/rules/" + rule["id"].(string)
-	current := s.want(owner, "GET", path, nil, nil, http.StatusOK)
-	status, raw := s.do(owner, "PATCH", path, map[string]any{"enabled": nil}, idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}))
+	current := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+	status, raw := s.Do(owner, "PATCH", path, map[string]any{"enabled": nil}, harness.Idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}))
 	if status != http.StatusUnprocessableEntity {
 		t.Errorf("PATCH enabled=null: %s", describe(status, raw))
 	}
-	current = s.want(owner, "GET", path, nil, nil, http.StatusOK)
+	current = s.Want(owner, "GET", path, nil, nil, http.StatusOK)
 	if current["enabled"] != false {
 		t.Errorf("disabled rule after rejected null patch: enabled=%v", current["enabled"])
 	}
 	for _, enabled := range []bool{true, false} {
-		s.want(owner, "PATCH", path, map[string]any{"enabled": enabled}, idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}), http.StatusOK)
-		current = s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		s.Want(owner, "PATCH", path, map[string]any{"enabled": enabled}, harness.Idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}), http.StatusOK)
+		current = s.Want(owner, "GET", path, nil, nil, http.StatusOK)
 		if current["enabled"] != enabled {
 			t.Fatalf("enabled=%v, want %v", current["enabled"], enabled)
 		}

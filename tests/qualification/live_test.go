@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/tests/harness"
 )
 
 func liveBody(protocol, model string) map[string]any {
@@ -73,8 +74,8 @@ func newLiveReportWriter(t *testing.T) *reportWriter {
 	return &reportWriter{out: file}
 }
 
-func (s *service) liveList(c *caller, path string) ([]map[string]any, error) {
-	status, raw := s.do(c, "GET", path, nil, nil)
+func (s *service) liveList(c *harness.Caller, path string) ([]map[string]any, error) {
+	status, raw := s.Do(c, "GET", path, nil, nil)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("GET %s returned status %d", path, status)
 	}
@@ -87,8 +88,8 @@ func (s *service) liveList(c *caller, path string) ([]map[string]any, error) {
 	return page.Items, nil
 }
 
-func (s *service) liveCreate(c *caller, path string, body any, headers map[string]string, status int) (map[string]any, error) {
-	got, raw := s.do(c, "POST", path, body, headers)
+func (s *service) liveCreate(c *harness.Caller, path string, body any, headers map[string]string, status int) (map[string]any, error) {
+	got, raw := s.Do(c, "POST", path, body, headers)
 	if got != status {
 		return nil, fmt.Errorf("POST %s returned status %d, want %d", path, got, status)
 	}
@@ -123,7 +124,7 @@ func allowanceWindows(account map[string]any) []any {
 	return windows
 }
 
-func (s *service) liveAccount(owner *caller, project, accountID string) (map[string]any, bool) {
+func (s *service) liveAccount(owner *harness.Caller, project, accountID string) (map[string]any, bool) {
 	items, err := s.liveList(owner, "/api/v1/code/accounts?project_id="+project+"&limit=200")
 	if err != nil {
 		return nil, false
@@ -136,7 +137,7 @@ func (s *service) liveAccount(owner *caller, project, accountID string) (map[str
 	return nil, false
 }
 
-func (s *service) seedLiveAccount(owner *caller, project, ownerID, model, name string, spec laneSeed, adapter string) (string, error) {
+func (s *service) seedLiveAccount(owner *harness.Caller, project, ownerID, model, name string, spec laneSeed, adapter string) (string, error) {
 	providerID, credentialID, err := s.seedSubscriptionE(project, ownerID, spec, nil)
 	if err != nil {
 		return "", fmt.Errorf("seed subscription: %w", err)
@@ -144,7 +145,7 @@ func (s *service) seedLiveAccount(owner *caller, project, ownerID, model, name s
 	account, err := s.liveCreate(owner, "/api/v1/code/accounts", map[string]any{
 		"project_id": project, "provider_id": providerID, "credential_id": credentialID,
 		"name": name, "enabled": true, "models": []string{model},
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	if err != nil {
 		return "", err
 	}
@@ -158,7 +159,7 @@ func (s *service) seedLiveAccount(owner *caller, project, ownerID, model, name s
 	return id, nil
 }
 
-func (s *service) liveJourney(owner, consumer *caller, project, ownerID, keyID string, l liveLane) []runCheck {
+func (s *service) liveJourney(owner, consumer *harness.Caller, project, ownerID, keyID string, l liveLane) []runCheck {
 	setupFail := func(stage string, err error) []runCheck {
 		return []runCheck{{Name: "inference", Result: "no_signal", Detail: stage + ": " + err.Error()}}
 	}
@@ -191,7 +192,7 @@ func (s *service) liveJourney(owner, consumer *caller, project, ownerID, keyID s
 	pool, err := s.liveCreate(owner, "/api/v1/code/pools", map[string]any{
 		"project_id": project, "name": "qualify-live-" + l.profile, "kind": "shared", "owner_user_id": nil,
 		"account_ids": poolAccounts, "account_weights": map[string]any{}, "api_key_ids": []any{keyID},
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	if err != nil {
 		return setupFail("pool", err)
 	}
@@ -203,17 +204,17 @@ func (s *service) liveJourney(owner, consumer *caller, project, ownerID, keyID s
 	if len(accountIDs) > 1 {
 		routeBody["initial_recovery_attempts"] = 1
 	}
-	route, err := s.liveCreate(owner, "/api/v1/code/routes", routeBody, idempotent(), http.StatusCreated)
+	route, err := s.liveCreate(owner, "/api/v1/code/routes", routeBody, harness.Idempotent(), http.StatusCreated)
 	if err != nil {
 		return setupFail("route", err)
 	}
-	if _, err := s.liveCreate(owner, "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK); err != nil {
+	if _, err := s.liveCreate(owner, "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, harness.Idempotent(harness.ETag(route)), http.StatusOK); err != nil {
 		return setupFail("publish", err)
 	}
 	return s.liveChecks(owner, consumer, project, slug, primary, accountIDs, secondDetail, l)
 }
 
-func (s *service) liveInference(consumer *caller, slug string, l liveLane) int {
+func (s *service) liveInference(consumer *harness.Caller, slug string, l liveLane) int {
 	_, model, _ := l.provided()
 	headers := map[string]string{"User-Agent": l.client.userAgent}
 	for name, value := range l.headers {
@@ -222,7 +223,7 @@ func (s *service) liveInference(consumer *caller, slug string, l liveLane) int {
 	status := 0
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		status, _ = s.do(consumer, "POST", "/code/"+slug+"/"+l.path, liveBody(l.protocol, model), headers)
+		status, _ = s.Do(consumer, "POST", "/code/"+slug+"/"+l.path, liveBody(l.protocol, model), headers)
 		if status == http.StatusOK || !slices.Contains([]int{http.StatusNotFound, http.StatusBadGateway, http.StatusServiceUnavailable}, status) || time.Now().After(deadline) {
 			return status
 		}
@@ -230,7 +231,7 @@ func (s *service) liveInference(consumer *caller, slug string, l liveLane) int {
 	}
 }
 
-func (s *service) liveAttempts(owner *caller, project string) []map[string]any {
+func (s *service) liveAttempts(owner *harness.Caller, project string) []map[string]any {
 	items, err := s.liveList(owner, "/api/v1/code/attempts?project_id="+project+"&limit=200")
 	if err != nil {
 		return nil
@@ -238,7 +239,7 @@ func (s *service) liveAttempts(owner *caller, project string) []map[string]any {
 	return items
 }
 
-func (s *service) liveDecisions(owner *caller, project string) []map[string]any {
+func (s *service) liveDecisions(owner *harness.Caller, project string) []map[string]any {
 	items, err := s.liveList(owner, "/api/v1/code/decisions?project_id="+project+"&limit=200")
 	if err != nil {
 		return nil
@@ -246,7 +247,7 @@ func (s *service) liveDecisions(owner *caller, project string) []map[string]any 
 	return items
 }
 
-func (s *service) liveChecks(owner, consumer *caller, project, slug, primary string, accountIDs []string, secondDetail string, l liveLane) []runCheck {
+func (s *service) liveChecks(owner, consumer *harness.Caller, project, slug, primary string, accountIDs []string, secondDetail string, l liveLane) []runCheck {
 	status := s.liveInference(consumer, slug, l)
 	inference := runCheck{Name: "inference", Result: "fail", Detail: fmt.Sprintf("journey returned status %d", status)}
 	if status == http.StatusOK {
@@ -276,7 +277,7 @@ func (s *service) liveChecks(owner, consumer *caller, project, slug, primary str
 		s.liveFailoverCheck(owner, project, accountIDs, l))
 }
 
-func (s *service) liveAllowanceCheck(owner *caller, project, primary string, l liveLane) runCheck {
+func (s *service) liveAllowanceCheck(owner *harness.Caller, project, primary string, l liveLane) runCheck {
 	if l.adapter != "codex" {
 		return runCheck{Name: "allowance", Result: "no_signal", Detail: "no qualified allowance signal in stage one"}
 	}
@@ -290,7 +291,7 @@ func (s *service) liveAllowanceCheck(owner *caller, project, primary string, l l
 	return runCheck{Name: "allowance", Result: "no_signal", Detail: "no passive allowance observed; active reads are not qualified"}
 }
 
-func (s *service) liveBandsCheck(owner *caller, project string, accountIDs []string, secondDetail string, l liveLane) runCheck {
+func (s *service) liveBandsCheck(owner *harness.Caller, project string, accountIDs []string, secondDetail string, l liveLane) runCheck {
 	if l.adapter != "codex" {
 		return runCheck{Name: "bands", Result: "no_signal", Detail: "band ordering is scoped to Codex in stage one"}
 	}
@@ -308,7 +309,7 @@ func (s *service) liveBandsCheck(owner *caller, project string, accountIDs []str
 	return runCheck{Name: "bands", Result: "fail", Detail: "no selection decision carries allowance evidence"}
 }
 
-func (s *service) liveCooldownCheck(owner *caller, project string, accountIDs []string) runCheck {
+func (s *service) liveCooldownCheck(owner *harness.Caller, project string, accountIDs []string) runCheck {
 	for _, id := range accountIDs {
 		if account, ok := s.liveAccount(owner, project, id); ok {
 			if cooldowns, _ := account["cooldowns"].([]any); len(cooldowns) > 0 {
@@ -329,7 +330,7 @@ func (s *service) liveCooldownCheck(owner *caller, project string, accountIDs []
 	return runCheck{Name: "cooldown", Result: "no_signal", Detail: "no cooldown observed during the lane; exhaustion was not induced"}
 }
 
-func (s *service) liveFailoverCheck(owner *caller, project string, accountIDs []string, l liveLane) runCheck {
+func (s *service) liveFailoverCheck(owner *harness.Caller, project string, accountIDs []string, l liveLane) runCheck {
 	recovered := slices.ContainsFunc(s.liveAttempts(owner, project), func(attempt map[string]any) bool {
 		return attempt["recovery_from"] != nil && slices.Contains(accountIDs, fmt.Sprint(attempt["account_id"]))
 	})
@@ -383,18 +384,18 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 		return
 	}
 
-	s := startServiceAdjusted(t, func(env *environment) {
-		delete(env.values, "OLP_PROVIDER_EGRESS_ALLOW_CIDRS")
-		delete(env.values, "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS")
+	s := startService(t, func(env *harness.Environment) {
+		delete(env.Values, "OLP_PROVIDER_EGRESS_ALLOW_CIDRS")
+		delete(env.Values, "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS")
 	})
-	owner := s.owner()
+	owner := s.Owner()
 	var ownerID string
-	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users LIMIT 1`).Scan(&ownerID); err != nil {
+	if err := s.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users LIMIT 1`).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification-live"}, idempotent(), http.StatusCreated)["id"].(string)
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification-live", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
-	consumer := &caller{name: "qualification live key", token: key["secret"].(string)}
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification-live"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	key := s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification-live", "scopes": []string{"inference"}, "project_id": project}, harness.Idempotent(), http.StatusCreated)
+	consumer := &harness.Caller{Name: "qualification live key", Token: key["secret"].(string)}
 	keyID := key["id"].(string)
 
 	for _, spec := range specs {

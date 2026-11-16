@@ -37,19 +37,19 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 			t.Errorf("drop role: %v", err)
 		}
 	})
-	env := newEnvironment(t, databaseURL)
-	runBinary(t, env, "migrate", "--runtime-role", role)
+	env := harness.NewEnvironment(t, databaseURL, "Service test")
+	harness.RunBinary(t, env, "migrate", "--runtime-role", role)
 
 	parsed, err := url.Parse(databaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parsed.User = url.UserPassword(role, "runtime-test")
-	env.values["OLP_DATABASE_URL"] = parsed.String()
-	s := startProcess(t, pool, env)
-	owner := s.owner()
-	s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, idempotent(), http.StatusCreated)
-	s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, idempotent(), http.StatusCreated)
+	env.Values["OLP_DATABASE_URL"] = parsed.String()
+	s := harness.StartProcess(t, pool, env)
+	owner := s.Owner()
+	s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, harness.Idempotent(), http.StatusCreated)
+	s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, harness.Idempotent(), http.StatusCreated)
 
 	config, err := pgx.ParseConfig(parsed.String())
 	if err != nil {
@@ -91,7 +91,7 @@ func TestRestoreRejectsQueryDatabaseBeforeAccess(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			command := exec.CommandContext(t.Context(), "bash", "../../scripts/restore.sh", filepath.Join(t.TempDir(), "missing.dump"))
-			command.Env = environment{}.list(map[string]string{
+			command.Env = harness.Environment{}.List(map[string]string{
 				"OLP_RESTORE_DATABASE_URL":    test.address,
 				"OLP_RESTORE_VALKEY_ISOLATED": "true",
 			})
@@ -112,10 +112,10 @@ func TestEpochRecoveryWithoutValkey(t *testing.T) {
  VALUES('stopped-gateway',$1,now()-interval '3 minutes',1,0,0,0,false,false,now()-interval '2 minutes',now()-interval '30 seconds')`, epoch); err != nil {
 		t.Fatal(err)
 	}
-	env := newEnvironment(t, databaseURL)
-	env.values["OLP_VALKEY_URL"] = ""
-	s := startProcess(t, pool, env)
-	s.eventually("PostgreSQL-only epoch recovery and its health checkpoint", 12*time.Second, func() (bool, string) {
+	env := harness.NewEnvironment(t, databaseURL, "Service test")
+	env.Values["OLP_VALKEY_URL"] = ""
+	s := harness.StartProcess(t, pool, env)
+	s.Eventually("PostgreSQL-only epoch recovery and its health checkpoint", 12*time.Second, func() (bool, string) {
 		var recovered, healthy bool
 		if err := pool.QueryRow(t.Context(), `SELECT e.stale_detected_at IS NOT NULL AND g.event_count=1,
  EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='request_metadata_gateway_epoch_detection' AND successes_total>0)

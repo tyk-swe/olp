@@ -77,7 +77,9 @@ executed by PostgreSQL.
 migrated template database, so a test pays for a copy instead of every
 migration, and `harness.EmptyDatabase` hands migration tests a blank one.
 `harness.Valkey` opens a client, and each test works under its own key
-namespace.
+namespace. `harness.StartProcess` runs the built binary on free ports and
+`harness.Service` drives it over HTTP, which `tests/e2e` and
+`tests/qualification` share.
 
 ## End-to-end tier
 
