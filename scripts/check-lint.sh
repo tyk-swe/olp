@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Tools are pinned independently of runtime dependencies, as in
 # check-dependencies.sh. Enabled checks live in staticcheck.conf.
-go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -tags integration,e2e,qualification,qualificationlive ./...
 
 ./scripts/check-imports.sh
 

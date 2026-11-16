@@ -24,7 +24,7 @@ func Required(t testing.TB, name string) string {
 	t.Helper()
 	value := os.Getenv(name)
 	if value == "" {
-		t.Fatalf("%s is not set. Run make test-integration or make test-e2e", name)
+		t.Fatalf("%s is not set. Run make test-integration, make test-e2e or make qualify-code", name)
 	}
 	return value
 }
