@@ -67,14 +67,7 @@ jq -e --argjson actual "$actual" \
   '.installation == $actual.installation and .migrations == $actual.migrations and .generation == $actual.generation and .migration_history == $actual.migration_history' "$manifest" >/dev/null
 export OLP_DATABASE_URL="$staging_url"
 unset OLP_DATABASE_URL_FILE
-if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
-  source "$repo_dir/scripts/lib/image-container.sh"
-  olp_image_container_args
-  maintenance=(docker run --rm "${olp_image_args[@]}" --env OLP_DATABASE_URL --env OLP_VALKEY_URL
-    --env OLP_MASTER_KEY_FILE --env OLP_AUTH_HMAC_KEY_FILE --env OLP_BOOTSTRAP_TOKEN_FILE "$OLP_CONSOLE_E2E_IMAGE")
-else
-  maintenance=("${OLP_MAINTENANCE_BIN:-$repo_dir/.local/bin/olp}")
-fi
+maintenance=("${OLP_MAINTENANCE_BIN:-$repo_dir/.local/bin/olp}")
 "${maintenance[@]}" migrate >/dev/null
 "${maintenance[@]}" doctor >/dev/null
 pg_dump "$staging_url" --schema=olp --no-owner --no-privileges --file="$scratch/restore.sql"

@@ -197,12 +197,7 @@ separately from its editable resolved connection values.
 Each preset is a reviewed vendor contract in
 [`internal/vendors`](../../internal/vendors/catalog.go): its operations, generation
 dialects, the request fields its documentation refuses or renames, and the
-documentation it was reviewed against. Its evidence, under
-[`tests/fixtures/vendors`](../../tests/fixtures/vendors), pins the documented
-endpoints, refused parameters, usage shape, stream termination and error
-envelope, and states for each fixture whether it is a documented example or
-follows the documented schema or the OpenAI dialect where the vendor's
-documentation is silent. A preset whose vendor speaks Chat Completions exactly
+documentation it was reviewed against. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
 **Automatic** to use parameter defaults instead.
 

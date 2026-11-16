@@ -17,8 +17,6 @@ with the same ranks and any network fetch is an error.
 Output, next to this script:
 
     o200k_base.json, cl100k_base.json   [{name, encoding, text, tokens}]
-    framing.json                        chat-message counts by the OpenAI
-                                        cookbook formula on top of tiktoken
 
 Texts are encoded with encode_ordinary: special tokens in a prompt are ordinary
 text to the estimator, whereas plain encode refuses them.
@@ -479,46 +477,6 @@ def build_texts():
     return texts
 
 
-FRAMING = [
-    ("single-user-message", [{"role": "user", "content": "hello"}]),
-    ("system-and-user", [{"role": "system", "content": "You are a helpful assistant."},
-                         {"role": "user", "content": "What is the capital of France?"}]),
-    ("multi-turn", [{"role": "system", "content": "Answer in one word."},
-                    {"role": "user", "content": "Capital of France?"},
-                    {"role": "assistant", "content": "Paris."},
-                    {"role": "user", "content": "And of Japan?"}]),
-    ("with-names", [{"role": "system", "name": "example_user", "content": "New synergies will help drive top-line growth."},
-                    {"role": "system", "name": "example_assistant", "content": "Things working well together will increase revenue."},
-                    {"role": "user", "content": "Let's talk later."}]),
-    ("empty-content", [{"role": "user", "content": ""}, {"role": "assistant", "content": ""}]),
-    ("unicode", [{"role": "user", "content": "\u4eca\u5929\u5929\u6c14\u600e\u4e48\u6837\uff1f \U0001f600 caf\u00e9"}]),
-    ("code-and-whitespace", [{"role": "user", "content": CODE_GO}, {"role": "assistant", "content": "  \n\n  done  \n"}]),
-    ("tool-message", [{"role": "user", "content": "weather?"},
-                      {"role": "tool", "name": "get_current_weather", "content": "{\"temp\":21,\"unit\":\"celsius\"}"}]),
-]
-FRAMING_MODELS = [("gpt-4o", "o200k_base"), ("gpt-4", "cl100k_base")]
-
-
-def framing_fixtures(encodings):
-    """Counts messages as the cookbook's num_tokens_from_messages does for the
-    gpt-3.5-turbo, gpt-4 and gpt-4o families: three tokens per message, the
-    value of every field encoded (the role included), one more token for a name,
-    and three to prime the reply."""
-    out = []
-    for model, name in FRAMING_MODELS:
-        enc = encodings[name]
-        for label, messages in FRAMING:
-            tokens = 3
-            for message in messages:
-                tokens += 3
-                for key, value in message.items():
-                    tokens += len(enc.encode_ordinary(value))
-                    if key == "name":
-                        tokens += 1
-            out.append({"name": f"{model}-{label}", "model": model, "encoding": name, "messages": messages, "tokens": tokens})
-    return out
-
-
 def main():
     with tempfile.TemporaryDirectory() as cache:
         os.environ["TIKTOKEN_CACHE_DIR"] = cache
@@ -531,7 +489,6 @@ def main():
             fixtures = [{"name": n, "encoding": name, "text": t, "tokens": encode(encodings, name, t)} for n, t in texts]
             write_json(HERE / f"{name}.json", fixtures)
             print(f"{name}: {len(fixtures)} fixtures, {sum(len(f['tokens']) for f in fixtures)} tokens")
-        write_json(HERE / "framing.json", framing_fixtures(encodings))
 
 
 if __name__ == "__main__":

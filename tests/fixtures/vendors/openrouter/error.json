@@ -1,7 +1,0 @@
-{
-  "error": {
-    "code": 400,
-    "message": "Invalid request",
-    "metadata": {}
-  }
-}

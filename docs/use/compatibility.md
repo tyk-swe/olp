@@ -685,9 +685,7 @@ The exceptions are noted as drops.
 
 Unknown vendor fields are preserved as source extensions and replayed for native
 providers. Cross-protocol requests carrying unsupported extensions are refused;
-unsupported response and stream extensions are dropped. The Anthropic and Gemini
-request fixtures in `tests/fixtures/protocols/` cover preservation of fields
-such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
+unsupported response and stream extensions are dropped.
 
 A system message between turns, which Claude Code sends, is kept in place where
 the target can place it and refused where it cannot: Anthropic, Gemini, and
@@ -695,8 +693,7 @@ Bedrock Converse have one system field ahead of the conversation, so a request
 translated to them with a late system message fails with `unsupported_parameter`
 instead of moving the message to the front.
 
-`tests/fixtures/protocols/selected-operation-families.json` covers every
-operation family and surface. Keep these tables aligned with the
+Keep these tables aligned with the
 [protocol suites](../../internal/protocols/translation_test.go) when semantics
 change.
 

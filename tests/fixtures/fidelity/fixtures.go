@@ -5,5 +5,5 @@ package fidelity
 
 import "embed"
 
-//go:embed v1/*.json v1/*.sse
+//go:embed v1/*.sse
 var Files embed.FS

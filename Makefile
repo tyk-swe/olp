@@ -4,8 +4,6 @@ SHELL := bash
 VERSION = $(shell node -p "require('./package.json').version")
 LDFLAGS = -X main.Version=$(VERSION)
 
-GO_BUILD_OUTPUT ?= .local/bin/olp
-GO_BUILD_TAGS ?=
 AIR_VERSION := v1.67.4
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 GOFMT_PATHS = \
@@ -114,8 +112,8 @@ dev-reset: ## Delete development containers and data after stopping make dev
 	docker compose -f deploy/compose.dev.yaml down --volumes
 
 build-go: ## Build the native Go binary from generated contracts
-	mkdir -p -- "$$(dirname -- "$(GO_BUILD_OUTPUT)")"
-	CGO_ENABLED=1 go build -mod=readonly -trimpath $(if $(strip $(GO_BUILD_TAGS)),-tags="$(GO_BUILD_TAGS)") -ldflags='$(LDFLAGS)' -o "$(GO_BUILD_OUTPUT)" ./cmd/olp
+	mkdir -p .local/bin
+	CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags='$(LDFLAGS)' -o .local/bin/olp ./cmd/olp
 
 catalog: ## Rewrite the reference catalog and plugin index in canonical form
 	go run ./internal/signing/cmd/olpsign fmt $(SIGNED_DOCUMENTS)
