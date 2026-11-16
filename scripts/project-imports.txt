@@ -261,8 +261,6 @@ internal/codeplans/qwen-token-plan internal/codeplans
 internal/codeplans/qwen-token-plan plugin
 internal/codeplans/zai-coding internal/codeplans
 internal/codeplans/zai-coding plugin
-internal/coderesearch internal/codemode
-internal/coderesearch internal/oif
 internal/codesessions internal/access
 internal/codesessions internal/access/authority
 internal/codesessions internal/access/httpkit
@@ -283,10 +281,6 @@ internal/codexauth internal/oif
 internal/codexauth plugin/abi
 internal/codexauth/codex internal/codexauth
 internal/codexauth/codex plugin
-internal/codexwire internal/codemode
-internal/codexwire internal/codewire
-internal/codexwire internal/oif
-internal/codexwire internal/protocols/wire
 internal/connectors internal/connectors/cloudidentity
 internal/connectors internal/egress
 internal/connectors internal/oif
@@ -416,12 +410,12 @@ internal/gateway/codeforward internal/codeadapter
 internal/gateway/codeforward internal/codeclient
 internal/gateway/codeforward internal/codemode
 internal/gateway/codeforward internal/codeplans
-internal/gateway/codeforward internal/coderesearch
 internal/gateway/codeforward internal/codesessions
 internal/gateway/codeforward internal/codewire
-internal/gateway/codeforward internal/codexwire
 internal/gateway/codeforward internal/connectors
 internal/gateway/codeforward internal/egress
+internal/gateway/codeforward internal/gateway/codeforward/coderesearch
+internal/gateway/codeforward internal/gateway/codeforward/codexwire
 internal/gateway/codeforward internal/gateway/events
 internal/gateway/codeforward internal/gateway/fault
 internal/gateway/codeforward internal/gateway/ingress
@@ -441,6 +435,12 @@ internal/gateway/codeforward internal/upstream
 internal/gateway/codeforward internal/usage
 internal/gateway/codeforward internal/usage/rates
 internal/gateway/codeforward internal/usage/routinginputs
+internal/gateway/codeforward/coderesearch internal/codemode
+internal/gateway/codeforward/coderesearch internal/oif
+internal/gateway/codeforward/codexwire internal/codemode
+internal/gateway/codeforward/codexwire internal/codewire
+internal/gateway/codeforward/codexwire internal/oif
+internal/gateway/codeforward/codexwire internal/protocols/wire
 internal/gateway/delegation internal/access/authority
 internal/gateway/delegation internal/access/httpkit
 internal/gateway/delegation internal/consumerauth
