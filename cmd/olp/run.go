@@ -22,16 +22,12 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
-	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export/capture"
-	"github.com/tyk-swe/olp/internal/export/focus"
-	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/grants/personal"
@@ -42,13 +38,10 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/panics"
-	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
-	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -147,23 +140,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	installation, prefix := stores.installation, stores.prefix
 	debitStore, shared, limiter, outage := stores.debitStore, stores.shared, stores.limiter, stores.outage
 	var accounting *delivery.Delivery
-	var rt *release.Manager
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
 	var agentTasks *tasks.Store
 	var agentPeers *a2a.Peers
 	var grantStore *personal.Store
-	var mediaService *jobs.Service
-	var mediaTransport *transport.Transport
-	var mediaSpool *staging.Spool
-	var pluginHost *plugins.Host
-	policy := &egress.Policy{}
-	var auth *secrets.AuthKey
-	var business *telemetry.BusinessMetrics
-	var exporter *stream.Worker
-	var capturer *capture.Manager
-	var importer *imports.Worker
-	var focusWorker *focus.Worker
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
@@ -173,7 +154,6 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	lossCounters := &completeness.LossCounters{}
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
-	var keys *secrets.KeyRing
 	var prober *gateway.Server
 	core, err := newRuntimeCore(startup, c, pool, readPool, installation, vk, &shutdownDeadline, log)
 	if err != nil {
@@ -182,9 +162,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	for _, closer := range core.closers {
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, closer.name, closer.close)
 	}
-	auth, keys, policy = core.auth, core.keys, core.policy
-	business, exporter, focusWorker = core.business, core.exporter, core.focusWorker
-	capturer, importer, pluginHost, rt = core.capturer, core.importer, core.pluginHost, core.rt
+	auth, keys, policy := core.auth, core.keys, core.policy
+	business, exporter, focusWorker := core.business, core.exporter, core.focusWorker
+	capturer, importer, pluginHost, rt := core.capturer, core.importer, core.pluginHost, core.rt
 	unconfined := core.unconfined
 	assembly := gatewayTemplates(gatewayInputs{config: c, pool: pool, core: core, inferencePool: inferencePool, limiter: limiter, shared: shared, outage: outage, log: log})
 	gatewayDeps, probeDeps := assembly.deps, assembly.probeDeps
@@ -194,7 +174,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		return err
 	}
 	defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, media.closer.name, media.closer.close)
-	mediaSpool, mediaTransport, mediaService = media.spool, media.transport, media.service
+	mediaSpool, mediaTransport, mediaService := media.spool, media.transport, media.service
 	if c.Mode.Management() || c.Mode.Inference() {
 		grantStore = personal.NewStore(pool, installation, auth, keys, policy)
 		taskLimits := tasks.Limits{Debits: debitStore}
@@ -343,10 +323,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		drainProbes(shutdown, stopProbes, probesStopped, accounting, log)
 		// Accepted requests and probes have stopped producing while their live
 		// authority remained available. Runtime joins against the same budget.
-		if rt != nil {
-			if err := rt.StopContext(shutdown); err != nil {
-				log.Warn("shutdown budget reached before runtime stopped", "error", err)
-			}
+		if err := rt.StopContext(shutdown); err != nil {
+			log.Warn("shutdown budget reached before runtime stopped", "error", err)
 		}
 		if metadata != nil {
 			if err := metadata.Drain(shutdown); err != nil {
@@ -366,22 +344,18 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		awaitPlane(shutdown, background.Wait, log, "background tasks")
 		log.Info("process stopped", "mode", c.Mode)
 	}()
-	if pluginHost != nil {
-		background.Go(supervise(func() {
-			if err := pluginHost.PreparePinned(auxiliary); err != nil && auxiliary.Err() == nil {
-				log.Warn("plugins could not be prepared", "error", err)
-			}
-		}))
-	}
-	if rt != nil {
-		// Authority must stay fresh while accepted requests drain, so
-		// polling outlives the listeners and stops once handlers finish.
-		var grantRefreshed func(string, string)
-		if gw != nil {
-			grantRefreshed = gw.GrantRefreshed
+	background.Go(supervise(func() {
+		if err := pluginHost.PreparePinned(auxiliary); err != nil && auxiliary.Err() == nil {
+			log.Warn("plugins could not be prepared", "error", err)
 		}
-		rt.Start(context.WithoutCancel(ctx), grantRefreshed)
+	}))
+	// Authority must stay fresh while accepted requests drain, so
+	// polling outlives the listeners and stops once handlers finish.
+	var grantRefreshed func(string, string)
+	if gw != nil {
+		grantRefreshed = gw.GrantRefreshed
 	}
+	rt.Start(context.WithoutCancel(ctx), grantRefreshed)
 	if agentMonitor != nil {
 		background.Go(supervise(func() { agentMonitor.Run(auxiliary) }))
 	}
@@ -455,10 +429,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			prober.RunHealthProbes(probes, probeCheckpoint(pool, log, c.Region))
 		})()
 	}
-	live := []prometheus.Collector{runtimeMetrics(rt), admission.Metrics(inferencePool, managementPool), traces.Metrics()}
-	if business != nil {
-		live = append(live, business)
-	}
+	live := []prometheus.Collector{runtimeMetrics(rt), admission.Metrics(inferencePool, managementPool), traces.Metrics(), business}
 	privateHandler, err := observability.NewHandler(obsCache, live...)
 	if err != nil {
 		return err
