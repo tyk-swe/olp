@@ -12,16 +12,11 @@ export type ReconciliationTotals = ReconciliationReport['totals'][number];
 export async function getReconciliation(
   start: string,
   end: string,
-  providerId?: string,
   signal?: AbortSignal
 ): Promise<ReconciliationReport> {
   const response = await apiClient.GET('/api/v1/usage/reconciliation', {
     params: {
-      query: {
-        start,
-        end,
-        ...(providerId ? { provider_id: providerId } : {})
-      }
+      query: { start, end }
     },
     signal
   });

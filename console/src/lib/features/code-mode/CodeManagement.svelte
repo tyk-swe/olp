@@ -8,9 +8,7 @@
     listCodeRoutes,
     listCodeBudgets,
     publishCodeRoute,
-    type CodeRoute,
-    type CodeClientConfiguration,
-    type CodeClientSelection
+    type CodeRoute
   } from '#lib/features/code-mode/api.js';
   import { collectCursorPages } from '#lib/management/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -50,7 +48,6 @@
     kind,
     allowed,
     gatewayURL,
-    loadClientConfiguration,
     onDraftChange
   }: {
     projectId: string;
@@ -58,11 +55,6 @@
     allowed: boolean;
     gatewayURL: string;
     onDraftChange: (dirty: boolean) => void;
-    loadClientConfiguration?: (
-      route: CodeRoute,
-      selection: CodeClientSelection,
-      signal?: AbortSignal
-    ) => Promise<CodeClientConfiguration>;
   } = $props();
   const section = $derived(managementSections[kind]);
   let editing = $state<CodeEditing | null>(null);
@@ -490,18 +482,9 @@
           </dl>
           {#if detail === route.id}
             <RouteRevisions id={route.id} />
-            {#if loadClientConfiguration && route.published_at}<ClientConfiguration
-                {route}
-                {gatewayURL}
-                load={loadClientConfiguration}
-              />
-            {:else if !route.published_at}<p>
-                Publish this route before generating client configuration.
-              </p>
+            {#if route.published_at}<ClientConfiguration {route} {gatewayURL} />
             {:else}<p>
-                Client configuration requires the integrated qualified adapter.
-                No client release or local workflow is claimed by this
-                management view.
+                Publish this route before generating client configuration.
               </p>{/if}
           {/if}
         </article>

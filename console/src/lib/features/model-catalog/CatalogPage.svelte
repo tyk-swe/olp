@@ -4,6 +4,7 @@
   import { listCatalog, getPublicCatalog } from './api';
   import { catalogKeys } from './catalogKeys';
   import { errorMessage } from '#lib/management/http.js';
+  import { copyText } from '#lib/clipboard.js';
 
   let { publicProjectId = '' }: { publicProjectId?: string } = $props();
   const catalog = createQuery(() => ({
@@ -31,12 +32,8 @@
       : 'Unknown';
   async function copy(code: string, label: string) {
     copied = copyError = '';
-    try {
-      await navigator.clipboard.writeText(code);
-      copied = label;
-    } catch {
-      copyError = 'Copy is unavailable. Select and copy the example text.';
-    }
+    if (await copyText(code)) copied = label;
+    else copyError = 'Copy is unavailable. Select and copy the example text.';
   }
 </script>
 

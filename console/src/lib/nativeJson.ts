@@ -403,8 +403,8 @@ export function freezeNative(value: NativeValue): NativeValue {
 
 /** The editor may display an unfinished fragment. API serialization still
  * uses stringifyNativeJSON, whose incomplete sentinel always throws. */
-export function renderNativeDraft(value: NativeValue, indentation = 2): string {
-  return renderJSON(value, indentation, true);
+export function renderNativeDraft(value: NativeValue): string {
+  return renderJSON(value, 2, true);
 }
 
 function renderJSON(

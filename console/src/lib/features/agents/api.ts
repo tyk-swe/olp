@@ -360,7 +360,6 @@ export async function executePublication(
   }
 }
 
-export type MCPGrantStanding = components['schemas']['MCPUserGrantStanding'];
 export const listMCPGrants = () =>
   collectCursorPages(async (cursor) =>
     unwrapPage(

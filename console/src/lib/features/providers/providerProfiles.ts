@@ -16,13 +16,8 @@ export type FieldSchema = {
   format?: string;
   minimum?: number;
   maximum?: number;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
   enum?: unknown[];
   properties?: Record<string, FieldSchema>;
-  additionalProperties?: boolean | FieldSchema;
-  $ref?: string;
 };
 export type ConfigurationSchemas = Record<string, FieldSchema>;
 
