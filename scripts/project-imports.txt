@@ -596,6 +596,7 @@ internal/mcp/registration internal/access/httpkit
 internal/mcp/registration internal/egress
 internal/mcp/registration internal/mcp/upstream
 internal/mcp/registration internal/plugins
+internal/mcp/registration internal/plugins/identity
 internal/mcp/registration internal/routing
 internal/mcp/registration internal/secrets
 internal/mcp/sessions internal/access/authority

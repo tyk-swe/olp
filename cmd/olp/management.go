@@ -245,7 +245,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	})
 	// Installing reads a module's manifest once, which the
 	// interpreter is ready to do several times sooner.
-	pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
+	pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, log)
 	if err != nil {
 		return Management{}, err
 	}

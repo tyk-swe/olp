@@ -1,6 +1,7 @@
 package release
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -44,7 +45,9 @@ func TestReleasePublicationNotifiesOnlyAdvancedGrantGenerations(t *testing.T) {
 	publishGrantCandidate(t, m, grantCandidate(1, 1, "credential"))
 	publishGrantCandidate(t, m, grantCandidate(2, 2, "credential"))
 	publishGrantCandidate(t, m, grantCandidate(3, 2, "credential"))
-	m.Stop()
+	if err := m.StopContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if len(notified) != 1 || <-notified != "provider/credential" {
 		t.Fatal("initial or unchanged seeds emitted a refresh, or advancement was not reported")
 	}

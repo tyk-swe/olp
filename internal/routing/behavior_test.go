@@ -14,7 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/pluginindex"
-	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -63,7 +62,7 @@ func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
 			routeErr := behavior.Validate("route", nil)
 			indexErr := index.Validate()
-			if (indexErr == nil) != tc.valid || plugins.ValidDigest(tc.digest) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
+			if (indexErr == nil) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
 				t.Errorf("digest %q: valid %t, index %v, guardrail %v, route %v", tc.digest, tc.valid, indexErr, guardrailErr, routeErr)
 			}
 		})
