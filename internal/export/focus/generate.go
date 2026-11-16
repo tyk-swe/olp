@@ -93,6 +93,9 @@ func readFacts(ctx context.Context, tx pgx.Tx, s sink, day, now time.Time) (fact
 		&c.CallerPaidExcludedAttempts, &c.IngestionGap); err != nil {
 		return facts{}, err
 	}
+	if err := tx.QueryRow(ctx, s.basis.unavailableSQL, day, s.scope.project, s.scope.route).Scan(&c.RawDetailUnavailable); err != nil {
+		return facts{}, err
+	}
 	var accounting *string
 	if err := tx.QueryRow(ctx, s.basis.accountedSQL, day, s.scope.project, s.scope.route).Scan(&accounting); err != nil {
 		return facts{}, err
