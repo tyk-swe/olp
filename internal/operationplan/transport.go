@@ -59,7 +59,7 @@ func (p *Plan) PollState(body []byte) (operations.PollState, error) {
 	if p.template.codec.Poll == nil {
 		return "", fail("fidelity_protocol_violation", "/transport", "poll_reading", "The dialect has no polling reading.")
 	}
-	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: p.template.config.MaxBodyBytes})
+	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: maxBodyBytes})
 	if err != nil {
 		return "", operations.Violation("/result", "Native result is malformed or exceeds its declared bounds.")
 	}

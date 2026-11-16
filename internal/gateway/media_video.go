@@ -433,7 +433,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 			if artifact := mediaArtifact(result.Payload); artifact == nil {
 				contractErr = errors.New("native video content is unavailable")
 			} else {
-				contractErr = strictBlob(strictTemplate.Descriptor("unary"), artifact)
+				_, contractErr = artifact.BlobReference()
 			}
 		}
 		if contractErr != nil {

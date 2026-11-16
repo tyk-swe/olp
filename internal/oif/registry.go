@@ -6,14 +6,8 @@ import "fmt"
 // authoritative even when an operation has no portable interpretation.
 type View interface{ Schema() Identity }
 type Operation struct{ Identity Identity }
-type RequestAdapter interface{ LiftRequest(Request) (View, error) }
-type ResultAdapter interface{ LiftResult(Result) (View, error) }
-type EventAdapter interface{ LiftEvent(Event) (View, error) }
 type Binding struct {
 	Dialect, Operation Identity
-	Request            RequestAdapter
-	Result             ResultAdapter
-	Event              EventAdapter
 	IdentityRules      []IdentityRule
 }
 
@@ -75,21 +69,9 @@ func (r *Registry) PrepareIdentity(request Request, destination Descriptor, chan
 	}
 	return prepareIdentity(request, destination, changes, b.IdentityRules)
 }
-func (r *Registry) Request(d Descriptor, source Document) (Request, error) {
-	if _, err := r.Binding(d.Dialect, d.Operation); err != nil {
-		return Request{}, err
-	}
-	return NewRequest(d, source)
-}
 func (r *Registry) Result(d Descriptor, source Document, outcome Outcome) (Result, error) {
 	if _, err := r.Binding(d.Dialect, d.Operation); err != nil {
 		return Result{}, err
 	}
 	return NewResult(d, source, outcome)
-}
-func (r *Registry) Event(d Descriptor, source Document, name string, sequence uint64) (Event, error) {
-	if _, err := r.Binding(d.Dialect, d.Operation); err != nil {
-		return Event{}, err
-	}
-	return NewEvent(d, source, name, sequence)
 }

@@ -692,7 +692,6 @@ internal/operations/decision internal/operations/tokenization/estimate
 internal/operations/embeddings internal/oif
 internal/operations/embeddings internal/operations
 internal/operations/embeddings internal/operations/tokenization/estimate
-internal/operations/generation internal/oif
 internal/operations/ocr internal/oif
 internal/operations/ocr internal/operations
 internal/operations/rerank internal/oif
@@ -887,7 +886,6 @@ internal/promotion/sink internal/promotion
 internal/promotion/sink internal/promotion/project
 internal/promotion/sink internal/sinks
 internal/protocols internal/oif
-internal/protocols internal/operations/generation
 internal/protocols internal/protocols/awsframe
 internal/protocols internal/protocols/openai
 internal/protocols internal/protocols/sse
