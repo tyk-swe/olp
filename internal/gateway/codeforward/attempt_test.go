@@ -554,10 +554,10 @@ func (f *fakeCodeLedger) ResolvePaidFallback(context.Context, codesessions.Admis
 	return nil, nil
 }
 func (f *fakeCodeLedger) ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error) {
-	return codemode.Operation{}, nil
+	return codemode.Operation{}, errors.New("unexpected paid model resolution")
 }
 func (f *fakeCodeLedger) AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error) {
-	return codesessions.PaidPermit{}, nil
+	return codesessions.PaidPermit{}, errors.New("unexpected paid admission")
 }
 
 func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAttempt {
@@ -1088,10 +1088,10 @@ func (l *chargeLedger) ResolvePaidFallback(context.Context, codesessions.Admissi
 	return nil, nil
 }
 func (l *chargeLedger) ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error) {
-	return codemode.Operation{}, nil
+	return codemode.Operation{}, errors.New("unexpected paid model resolution")
 }
 func (l *chargeLedger) AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error) {
-	return codesessions.PaidPermit{}, nil
+	return codesessions.PaidPermit{}, errors.New("unexpected paid admission")
 }
 
 func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {

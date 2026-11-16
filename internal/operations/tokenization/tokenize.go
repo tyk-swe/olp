@@ -57,12 +57,12 @@ func tokenizeResult(request oif.Request, source oif.Result) (oif.View, error) {
 				return r, operations.Violation("id", "native_token_identity")
 			}
 			if startValue.Kind() == oif.Null && stopValue.Kind() == oif.Null {
-			} else {
-				start, sok := integer(startValue, 64)
-				stop, eok := integer(stopValue, 64)
-				if !sok || !eok || stop < start {
-					return r, operations.Violation("start", "native_token_offsets")
-				}
+				continue
+			}
+			start, sok := integer(startValue, 64)
+			stop, eok := integer(stopValue, 64)
+			if !sok || !eok || stop < start {
+				return r, operations.Violation("start", "native_token_offsets")
 			}
 		}
 	}
