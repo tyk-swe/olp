@@ -37,7 +37,7 @@ func IsResponseProjectionError(err error) bool {
 // no return: callers commit the response to the client there.
 
 // Stream decodes an upstream event stream for the family, validates each event,
-// rewrites model names, forwards frames, and reports the completion summary.
+// rewrites model names, and reports the completion summary.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string) (*wire.Completion, error) {
 	return stream(family, family, r, maxEventBytes, route, true, true, func([]byte) error { return nil }, nil)
