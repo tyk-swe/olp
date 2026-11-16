@@ -410,7 +410,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			return
 		}
 		if u := fact.Usage; u != nil {
-			atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+			atr.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 		}
 		atr.RecordResponse(fact.ResponseModel, fact.FinishReasons)
 		atr.Finish(fact.Class, fact.Status)

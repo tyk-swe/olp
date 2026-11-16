@@ -458,7 +458,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	fact.RecordEvidence(false)
 	s.health.Record(record.ProviderID, fact, false)
 	if u := fact.Usage; u != nil {
-		atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+		atr.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}
 	atr.Finish(fact.Class, fact.Status)
 	return result, nil, fact

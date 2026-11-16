@@ -70,7 +70,7 @@ func traceIngester(t *testing.T, pool *pgxpool.Pool, authority keyauthority.Auth
 	t.Helper()
 	store := &traceingest.Store{
 		Pool:    pool,
-		Limiter: admission.New(newRunner(t)),
+		Limiter: admission.NewDurable(newRunner(t), nil),
 		Auth:    secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), uuid.NewString()),
 	}
 	return traceingest.New(traceKeys{traceSecret: authority}, nil, store)

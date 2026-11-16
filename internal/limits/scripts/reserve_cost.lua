@@ -52,10 +52,7 @@ local function civil_month(days)
   return year, month
 end
 
-local function current_time(override)
-  if override > 0 then
-    return override
-  end
+local function current_time()
   local server_time = redis.call("TIME")
   if type(server_time) ~= "table" or #server_time ~= 2 then
     return nil
@@ -344,14 +341,14 @@ local function read_state(key, expected_fields, current_window, now_ms, fallback
   return "current", accrued_hi, accrued_lo, ttl, current_window
 end
 
--- KEYS: day balance, month balance, pending reservations, reservation expiries, week balance
---       (all five carry the cost owner's Valkey Cluster hash tag).
--- ARGV: daily_limit, monthly_limit, server time override (tests only), amount,
---       lease_id, lease_ttl_ms, weekly_limit. An empty limit disables that window; an amount
+-- KEYS: day balance, month balance, pending reservations, reservation expiries, week balance,
+--       durable exposure (all six carry the cost owner's Valkey Cluster hash tag).
+-- ARGV: daily_limit, monthly_limit, amount, lease_id, lease_ttl_ms, weekly_limit,
+--       increases. An empty limit disables that window; an amount
 --       of 0 is a request nothing could price, which is judged on accrued spend
 --       alone and leaves nothing pending. "check" reads availability including
 --       pending spend without modifying any key.
-if not ((#KEYS == 4 and #ARGV == 6) or ((#KEYS == 5 or #KEYS == 6) and (#ARGV == 7 or #ARGV == 8))) then
+if not (#KEYS == 6 and #ARGV == 7) then
   return failure("invalid_arguments")
 end
 
@@ -365,7 +362,7 @@ local function parse_limit(raw)
   return hi, lo
 end
 
-local weekly_limit = ARGV[7] or ""
+local weekly_limit = ARGV[6]
 local daily_hi, daily_lo, monthly_hi, monthly_lo, weekly_hi, weekly_lo
 if ARGV[1] ~= "" then
   daily_hi, daily_lo = parse_limit(ARGV[1])
@@ -374,24 +371,23 @@ if ARGV[2] ~= "" then
   monthly_hi, monthly_lo = parse_limit(ARGV[2])
 end
 if weekly_limit ~= "" then weekly_hi, weekly_lo = parse_limit(weekly_limit) end
-local override = parse_safe_unsigned_integer(ARGV[3])
-local verify = ARGV[4] == "verify"
-local read_only = ARGV[4] == "check" or verify
+local verify = ARGV[3] == "verify"
+local read_only = ARGV[3] == "check" or verify
 local amount_hi, amount_lo = 0, 0
 if not read_only then
-  amount_hi, amount_lo = parse_amount(ARGV[4])
+  amount_hi, amount_lo = parse_amount(ARGV[3])
 end
-local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
+local lease_ttl = parse_safe_unsigned_integer(ARGV[5])
 local priced = amount_hi ~= nil and (amount_hi > 0 or amount_lo > 0)
-if override == nil or amount_hi == nil or lease_ttl == nil
-    or (priced and (lease_ttl < 1 or not valid_lease(ARGV[5])))
+if amount_hi == nil or lease_ttl == nil
+    or (priced and (lease_ttl < 1 or not valid_lease(ARGV[4])))
     or (ARGV[1] ~= "" and daily_hi == nil)
     or (ARGV[2] ~= "" and monthly_hi == nil)
     or (weekly_limit ~= "" and weekly_hi == nil) then
   return failure("invalid_arguments")
 end
 
-local now_ms = current_time(override)
+local now_ms = current_time()
 if now_ms == nil then
   return failure("invalid_server_time")
 end
@@ -431,8 +427,8 @@ end
 
 -- Optional grants are immutable authority evidence, not caller input. They
 -- add to an existing cap only during their original period and server-time span.
-if ARGV[8] ~= nil and ARGV[8] ~= "" then
-  local ok, grants = pcall(cjson.decode, ARGV[8])
+if ARGV[7] ~= "" then
+  local ok, grants = pcall(cjson.decode, ARGV[7])
   if not ok or type(grants) ~= "table" or #grants > 24 then return failure("invalid_arguments") end
   for _, grant in ipairs(grants) do
     local hi, lo = parse_limit(grant.amount)
@@ -455,18 +451,16 @@ end
 
 -- Provisional exposure never shares the expiring pending hash. It is added
 -- to each current window, so moving to a new calendar window cannot free it.
-if #KEYS == 6 then
-  local durable = redis.pcall("HMGET",KEYS[6],"version","amount","blocked")
-  if durable.err ~= nil or parse_safe_unsigned_integer(durable[1]) == nil then
-    return {RESPONSE_VERSION,-1,"uninitialized_durable_cost_state",0,day_window,month_window}
-  end
-  local hi,lo = parse_amount(durable[2])
-  if hi == nil or (durable[3]~="0" and durable[3]~="1") then return {RESPONSE_VERSION,-1,"malformed_durable_cost_state",0,day_window,month_window} end
-  if durable[3]=="1" then return {RESPONSE_VERSION,-1,"unsettled_durable_cost_state",0,day_window,month_window} end
-  daily_spent_hi,daily_spent_lo=add_amount(daily_spent_hi,daily_spent_lo,hi,lo)
-  weekly_spent_hi,weekly_spent_lo=add_amount(weekly_spent_hi,weekly_spent_lo,hi,lo)
-  monthly_spent_hi,monthly_spent_lo=add_amount(monthly_spent_hi,monthly_spent_lo,hi,lo)
+local durable = redis.pcall("HMGET",KEYS[6],"version","amount","blocked")
+if durable.err ~= nil or parse_safe_unsigned_integer(durable[1]) == nil then
+  return {RESPONSE_VERSION,-1,"uninitialized_durable_cost_state",0,day_window,month_window}
 end
+local durable_hi,durable_lo = parse_amount(durable[2])
+if durable_hi == nil or (durable[3]~="0" and durable[3]~="1") then return {RESPONSE_VERSION,-1,"malformed_durable_cost_state",0,day_window,month_window} end
+if durable[3]=="1" then return {RESPONSE_VERSION,-1,"unsettled_durable_cost_state",0,day_window,month_window} end
+daily_spent_hi,daily_spent_lo=add_amount(daily_spent_hi,daily_spent_lo,durable_hi,durable_lo)
+weekly_spent_hi,weekly_spent_lo=add_amount(weekly_spent_hi,weekly_spent_lo,durable_hi,durable_lo)
+monthly_spent_hi,monthly_spent_lo=add_amount(monthly_spent_hi,monthly_spent_lo,durable_hi,durable_lo)
 
 if daily_hi ~= nil and compare_amount(daily_spent_hi, daily_spent_lo, daily_hi, daily_lo) > (verify and 0 or -1) then
   return {RESPONSE_VERSION, 0, "daily_cost", day_ttl, day_window, month_window}
@@ -516,9 +510,9 @@ if priced then
   -- Repeated deliveries never charge a lease twice. A larger estimate must
   -- fit beside the other leases before replacing this lease's amount. A lapsed
   -- lease outside the bounded sweep is retired and reserved afresh.
-  local recorded = redis.call("ZSCORE", KEYS[4], ARGV[5])
+  local recorded = redis.call("ZSCORE", KEYS[4], ARGV[4])
   if recorded ~= false then
-    local prior_hi, prior_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
+    local prior_hi, prior_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[4]))
     if prior_hi == nil then
       return failure("invalid_pending_amount")
     end
@@ -527,7 +521,7 @@ if priced then
         return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
       end
     else
-      release_lease(KEYS[3], KEYS[4], ARGV[5])
+      release_lease(KEYS[3], KEYS[4], ARGV[4])
     end
     held_hi, held_lo = sub_amount(held_hi, held_lo, prior_hi, prior_lo)
   end
@@ -587,7 +581,7 @@ if weekly_hi ~= nil and redis.call("PTTL", KEYS[5]) < 1 then
 end
 if priced then
   local expires_ms = now_ms + lease_ttl
-  store_lease(KEYS[3], KEYS[4], ARGV[5], amount_hi, amount_lo, held_hi, held_lo, expires_ms, false)
+  store_lease(KEYS[3], KEYS[4], ARGV[4], amount_hi, amount_lo, held_hi, held_lo, expires_ms, false)
   outlive(KEYS[3], KEYS[4], expires_ms, now_ms)
 end
 

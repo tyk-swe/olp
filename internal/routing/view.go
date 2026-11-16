@@ -53,7 +53,6 @@ func (v *View) Generation() Generation { return v.snapshot.Generation }
 func (v *View) ProviderCount() int     { return len(v.snapshot.Providers) }
 func (v *View) RouteCount() int        { return len(v.snapshot.Routes) }
 func (v *View) RouteSlugs() []string   { return slices.Sorted(maps.Keys(v.snapshot.Routes)) }
-func (v *View) ProviderIDs() []string  { return slices.Sorted(maps.Keys(v.snapshot.Providers)) }
 func (v *View) HasBodyLimits() bool    { return v != nil && v.snapshot.HasBodyLimits() }
 
 func (v *View) FindRoute(slug string) (Route, bool) {

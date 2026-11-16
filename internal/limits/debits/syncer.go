@@ -200,7 +200,7 @@ func (y *Syncer) admitTx(ctx context.Context, tx pgx.Tx, owner limits.Owner, bud
 	if err := y.syncFreshTx(ctx, tx, owner); err != nil {
 		return err
 	}
-	return y.scripts.VerifyCost(ctx, budget.Caps(true))
+	return y.scripts.VerifyCost(ctx, budget.Caps())
 }
 
 func (y *Syncer) syncFreshTx(ctx context.Context, tx pgx.Tx, owner limits.Owner) error {

@@ -17,9 +17,6 @@ import (
 
 type OTLPLogs struct{}
 
-func (OTLPLogs) Type() Type     { return contract.CreateExportSinkRequestTypeOtlpLogs }
-func (OTLPLogs) Format() Format { return contract.CreateExportSinkRequestFormatOtlp }
-
 func parseOTLPLogs(_ Type, settings json.RawMessage) (Spec, error) {
 	return OTLPLogs{}, decodeSettings(contract.CreateExportSinkRequestFormatOtlp, settings, &struct{}{})
 }

@@ -769,6 +769,10 @@ func (unreachableValkey) Do(context.Context, ...string) (any, error) {
 	return nil, context.DeadlineExceeded
 }
 
+func (unreachableValkey) Pipeline(context.Context, ...[]string) ([]any, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 	if err != nil {

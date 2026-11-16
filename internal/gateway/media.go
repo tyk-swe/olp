@@ -373,7 +373,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 			return
 		}
 		if u := fact.Usage; u != nil {
-			atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+			atr.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 		}
 		atr.Finish(fact.Class, fact.Status)
 	}

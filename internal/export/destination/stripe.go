@@ -46,9 +46,6 @@ type StripeMeter struct {
 	ValueKey    string            `json:"value_key"`
 }
 
-func (StripeMeter) Type() Type     { return contract.CreateExportSinkRequestTypeStripeMeter }
-func (StripeMeter) Format() Format { return contract.CreateExportSinkRequestFormatStripe }
-
 var (
 	stripeEventName  = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,100}$`)
 	stripeCustomerID = regexp.MustCompile(`^cus_[A-Za-z0-9]{1,250}$`)
