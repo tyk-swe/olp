@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -462,7 +463,7 @@
     >Rules decide which events send an alert, and to which destination.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification rules">
     <table class="data-table">
       <thead
         ><tr
@@ -592,5 +593,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

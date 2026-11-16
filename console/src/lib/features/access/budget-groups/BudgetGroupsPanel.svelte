@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -386,7 +387,7 @@
       >Create a group, then add API keys to it from each key's settings.</EmptyState
     >
   {:else}
-    <div class="table-scroll">
+    <ScrollTable label="Budget groups">
       <table class="data-table">
         <thead
           ><tr
@@ -531,7 +532,7 @@
           {/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
     {#if items.some((group) => !group.budget.enforcement_active)}
       <p class="section-help">
         Limits are stored policy only; accrued amounts are not live accounting
@@ -550,7 +551,7 @@
   }
   .groups-panel h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -572,9 +573,6 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-  }
-  .table-scroll {
-    overflow-x: auto;
   }
   td small {
     color: var(--foreground-muted);

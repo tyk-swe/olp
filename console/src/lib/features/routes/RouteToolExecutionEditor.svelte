@@ -139,7 +139,7 @@
   }
   h2 {
     margin: 0 0 1rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
   }
   fieldset {

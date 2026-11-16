@@ -80,7 +80,7 @@
 
 <section class="panel branding-panel" aria-labelledby="branding-title">
   <h2 id="branding-title">Installation identity</h2>
-  <p class="helper">
+  <p class="muted">
     Name this installation and use an embedded logo in the console. Images stay
     in this installation; the console keeps its dark theme and accessible text.
   </p>
@@ -110,7 +110,7 @@
         disabled={!access.can('settings.update') || busy || !etag}
       /></label
     >
-    <p class="helper">
+    <p class="muted">
       PNG or JPEG, at most 64 KiB and 512 × 512 pixels. Leave the logo empty to
       use the default brand mark.
     </p>

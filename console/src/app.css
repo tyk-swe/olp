@@ -160,7 +160,7 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.43;
 }
@@ -280,7 +280,7 @@ body {
   background: color-mix(in srgb, var(--canvas) 40%, var(--surface));
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 500;
   letter-spacing: -0.24px;
   text-transform: uppercase;
@@ -348,7 +348,7 @@ body {
   background: color-mix(in srgb, var(--foreground-muted) 10%, transparent);
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -584,7 +584,7 @@ input[type='file']::file-selector-button:hover {
   margin: 0;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   letter-spacing: -0.24px;
   line-height: 1;
   text-transform: uppercase;
@@ -644,9 +644,25 @@ input[type='file']::file-selector-button:hover {
 
 .section h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--foreground-muted);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--danger);
 }
 
 .section-help {
@@ -783,7 +799,7 @@ button:not(:disabled),
   padding: 0.5rem 0.875rem;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.2;
   text-decoration: none;
@@ -919,7 +935,7 @@ button:not(:disabled),
   margin: 0 0 0.5rem;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -962,7 +978,7 @@ button:not(:disabled),
 .wordmark {
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -982,7 +998,7 @@ button:not(:disabled),
   max-width: 44rem;
   margin: 0.75rem 0 0;
   color: var(--foreground-muted);
-  font-size: 1rem;
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
@@ -1281,7 +1297,7 @@ button:not(:disabled),
 .empty-state h2 {
   margin: 0;
   color: var(--foreground);
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -1452,7 +1468,7 @@ button:not(:disabled),
 }
 
 :is(.stack-card, .form-card) > h2 {
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }

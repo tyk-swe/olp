@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -378,7 +379,7 @@
     >Add a webhook or email destination, then point rules at it.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification destinations">
     <table class="data-table">
       <thead
         ><tr
@@ -511,5 +512,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

@@ -45,7 +45,7 @@
   .pagination span {
     min-width: 4rem;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
     text-align: center;
   }
   @media (max-width: 36rem) {

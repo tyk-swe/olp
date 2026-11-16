@@ -682,7 +682,7 @@
     flex: 1 1 12rem;
   }
   label {
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     font-weight: 500;
   }
   dl {
@@ -695,9 +695,6 @@
     color: var(--foreground-subtle);
     line-height: 1.6;
     overflow-wrap: anywhere;
-  }
-  .field-error {
-    color: var(--danger);
   }
   @media (max-width: 40rem) {
     dl {

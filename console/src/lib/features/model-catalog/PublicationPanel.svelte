@@ -136,7 +136,4 @@
     gap: 0.75rem;
     flex-wrap: wrap;
   }
-  .muted {
-    color: var(--foreground-muted);
-  }
 </style>

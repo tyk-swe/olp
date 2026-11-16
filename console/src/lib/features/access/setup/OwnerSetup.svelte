@@ -325,10 +325,6 @@
     color: var(--foreground-muted);
   }
 
-  .field-error {
-    color: var(--danger);
-  }
-
   .submit {
     width: 100%;
     margin-top: 0.35rem;

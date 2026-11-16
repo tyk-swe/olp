@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { notificationEvents } from './ruleDraft';
   import { createQuery } from '@tanstack/svelte-query';
   import { listNotificationDeliveries } from './api';
@@ -29,7 +30,7 @@
     No deliveries recorded yet.
   </p>
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification deliveries">
     <table class="data-table">
       <thead
         ><tr
@@ -81,5 +82,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

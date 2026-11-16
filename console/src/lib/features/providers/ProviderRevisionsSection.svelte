@@ -378,12 +378,9 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
-  }
-  .muted {
-    color: var(--foreground-muted);
   }
   .revisions {
     max-width: none;
@@ -477,7 +474,7 @@
   }
   .revision-models-heading {
     margin: 1.35rem 0 0.5rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

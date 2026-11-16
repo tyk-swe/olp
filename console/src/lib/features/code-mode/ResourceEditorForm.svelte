@@ -98,13 +98,13 @@
   }
   form :global(label),
   form :global(legend) {
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     font-weight: 600;
   }
   p,
   form :global(p) {
     color: var(--foreground-subtle);
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     line-height: 1.6;
   }
   form :global(.choice),
@@ -115,8 +115,5 @@
   }
   form :global(.choice input) {
     width: auto;
-  }
-  .field-error {
-    color: var(--danger);
   }
 </style>

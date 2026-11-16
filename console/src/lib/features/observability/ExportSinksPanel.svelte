@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
@@ -613,7 +614,7 @@
     >Add a sink to send logs and traces to your own collector.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Export sinks">
     <table class="data-table">
       <thead
         ><tr
@@ -704,5 +705,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

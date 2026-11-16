@@ -588,9 +588,6 @@
     padding: 2rem;
     border: 1px dashed var(--border);
   }
-  .field-error {
-    color: var(--danger);
-  }
   @media (max-width: 40rem) {
     dl {
       grid-template-columns: 1fr;

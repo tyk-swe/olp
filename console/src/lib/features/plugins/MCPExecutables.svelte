@@ -288,7 +288,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
   }
   .review {
     display: grid;

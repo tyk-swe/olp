@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -571,7 +572,7 @@
     >Prompts and responses are not stored unless a policy turns capture on.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Capture policies">
     <table class="data-table">
       <thead
         ><tr
@@ -624,5 +625,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

@@ -202,7 +202,7 @@
     overflow-wrap: anywhere;
   }
   h3 {
-    font-size: 1rem;
+    font-size: var(--text-body);
     margin-top: 1.5rem;
   }
   .muted,

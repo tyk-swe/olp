@@ -253,7 +253,4 @@
     color: var(--foreground-subtle);
     line-height: 1.6;
   }
-  .field-error {
-    color: var(--danger);
-  }
 </style>

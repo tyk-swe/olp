@@ -669,10 +669,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.8rem;
   }
-  .field-error {
-    margin: 0;
-    color: var(--danger);
-  }
   .run-actions {
     display: flex;
     gap: 0.5rem;
@@ -717,7 +713,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

@@ -364,9 +364,6 @@
     justify-content: flex-end;
     gap: 0.5rem;
   }
-  .field-error {
-    color: var(--danger);
-  }
   @media (max-width: 48rem) {
     .row {
       grid-template-columns: minmax(0, 1fr);
