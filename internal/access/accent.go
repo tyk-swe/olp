@@ -22,8 +22,6 @@ type accentScale struct {
 var (
 	white = rgb{0xff, 0xff, 0xff}
 	black = rgb{}
-	// Console surfaces from console/src/app.css: --color-void, --color-carbon-hover
-	// (the lightest dark surface) and --color-paper.
 	consoleVoid  = rgb{0x05, 0x06, 0x08}
 	consoleHover = rgb{0x17, 0x1b, 0x24}
 	consolePaper = rgb{0xec, 0xef, 0xf4}
