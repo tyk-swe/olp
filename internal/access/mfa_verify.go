@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/hotp"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -112,38 +113,38 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 	}
 }
 
-func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (Reply, error) {
+func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, error) {
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Reply{}, Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
+	return httpkit.Reply{}, httpkit.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
 }
 
-func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
+func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	var input mfaProof
-	if err := Decode(r, &input); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err := s.admit(r, "mfa_request", ""); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, err := s.Begin(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	f, err := s.loadMFAFlow(r, tx, input.Challenge)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.admit(r, "mfa_verify", f.UserID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var valid bool
 	var credential *webauthn.Credential
@@ -183,10 +184,10 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 			err = nil
 		}
 	default:
-		return Reply{}, Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return httpkit.Reply{}, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if !valid {
 		return s.mfaFailure(r, tx, f)
@@ -195,25 +196,25 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 	if strings.HasPrefix(f.Purpose, "enroll_") {
 		codes, err = s.activateMFA(r, tx, f, credential, counter)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", f.ID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	var reply Reply
+	var reply httpkit.Reply
 	switch {
 	case f.Purpose == "login" || f.SessionID == nil:
 		if local, e := s.localLoginEnabled(r, tx); e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		} else if !local {
-			return Reply{}, Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
+			return httpkit.Reply{}, httpkit.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
 		}
 		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: "local", MFA: true})
 	case f.Purpose == "manage" || f.Purpose == "reauth":
 		p, e := s.Authenticate(r, tx)
 		if e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 		purpose := f.Data.RecentPurpose
 		if purpose == "" {
@@ -225,23 +226,23 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 		// than upgrading a previously captured cookie in place.
 		var method string
 		if err = tx.QueryRow(r.Context(), "SELECT auth_method FROM olp.sessions WHERE id=$1", *f.SessionID).Scan(&method); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", *f.SessionID); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: method, MFA: true})
 		reply.Status = 200
 		reply.Body = map[string]any{"enrolled": true, "recovery_codes": codes}
 	}
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if codes != nil && f.SessionID == nil {
 		reply.Body = map[string]any{"session": reply.Body, "recovery_codes": codes}
 	}
 	if err = Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
 }
@@ -252,9 +253,9 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 		return nil, err
 	}
 	if count >= 10 {
-		return nil, Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
+		return nil, httpkit.Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
 	}
-	id := NewID()
+	id := httpkit.NewID()
 	kind := "webauthn"
 	var credentialID []byte
 	if credential != nil {
@@ -265,7 +266,7 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 		}
 	} else {
 		if f.SecretID == nil {
-			return nil, Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
+			return nil, httpkit.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
 		}
 		id = *f.SecretID
 		kind = "totp"

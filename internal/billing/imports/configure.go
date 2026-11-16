@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -96,7 +97,7 @@ func (v Vault) choose(ctx context.Context, tx pgx.Tx, src source.Source, current
 	if err != nil {
 		return "", err
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	return id, v.Keys.Store(ctx, tx, v.Installation, id, secrets.BillingCredential, sealed, nil)
 }
 
@@ -123,7 +124,7 @@ func Save(ctx context.Context, tx pgx.Tx, vault Vault, providerID string, desire
 	if err != nil {
 		return "", err
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_imports
 		(provider_id,source,credential_id,scope,enabled,etag,created_by,next_import_at)
 		VALUES($1::uuid,$2,$3::uuid,$4::jsonb,$5,$6,$7::uuid,now())

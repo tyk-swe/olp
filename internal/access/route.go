@@ -9,17 +9,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // Handler serves a management request whose caller the route has already
 // authenticated and admitted.
-type Handler func(*http.Request, Principal) (Reply, error)
+type Handler func(*http.Request, Principal) (httpkit.Reply, error)
 
 // StreamHandler is a Handler that writes its own response.
 type StreamHandler func(http.ResponseWriter, *http.Request, Principal) error
 
 // PublicHandler serves a management request that authenticates no principal.
-type PublicHandler func(*http.Request) (Reply, error)
+type PublicHandler func(*http.Request) (httpkit.Reply, error)
 
 type routeOptions struct {
 	maxBody int64
@@ -82,21 +83,21 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 	if keyAlternative != (o.keyAuth != nil) || keyAlternative && !strings.HasPrefix(pattern, "GET ") {
 		panic(fmt.Sprintf("management route %s has an invalid inference-key authenticator", pattern))
 	}
-	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, func(r *http.Request) (Reply, error) {
+	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, func(r *http.Request) (httpkit.Reply, error) {
 		if o.keyAuth != nil && presentedInferenceKey(r) {
 			authority, err := o.keyAuth(r)
 			if err != nil {
-				return Reply{}, err
+				return httpkit.Reply{}, err
 			}
 			p := Principal{Kind: "key", KeyAuthority: &authority}
 			if req.Admits(p) != nil {
-				return Reply{}, Forbidden()
+				return httpkit.Reply{}, httpkit.Forbidden()
 			}
 			return h(r, p)
 		}
 		r, p, err := s.admitRoute(r, req)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return h(r, p)
 	}))

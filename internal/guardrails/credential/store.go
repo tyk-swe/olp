@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -18,7 +19,7 @@ type New struct {
 }
 
 func Create(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation string, in New) (string, error) {
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := keys.Store(ctx, tx, installation, id, secrets.GuardrailCredential, in.Secret, nil); err != nil {
 		return "", err
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -12,7 +13,7 @@ import (
 )
 
 func Refusal(err error) (string, bool) {
-	problem, ok := errors.AsType[*access.Problem](err)
+	problem, ok := errors.AsType[*httpkit.Problem](err)
 	if !ok {
 		return "", false
 	}

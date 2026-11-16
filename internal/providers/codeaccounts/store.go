@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -41,23 +42,23 @@ type Granted struct {
 }
 
 func (s Settings) Validate() error {
-	if err := access.ValidText("name", s.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", s.Name, 100); err != nil {
 		return err
 	}
 	if err := codemode.ValidateModels(s.Models); err != nil {
-		return access.Invalid("models", err.Error())
+		return httpkit.Invalid("models", err.Error())
 	}
 	if s.CycleAnchor == nil {
 		return nil
 	}
 	if _, ok := codemode.ParseCycleAnchor(*s.CycleAnchor); !ok {
-		return access.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
+		return httpkit.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
 	}
 	return nil
 }
 
 func (in Input) validated() (Input, error) {
-	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
+	ids, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
 	if err != nil {
 		return Input{}, err
 	}
@@ -132,13 +133,13 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 		return nil, err
 	}
 	if principal == "" {
-		return nil, access.Invalid("credential_id", "Enrollment must establish an upstream principal.")
+		return nil, httpkit.Invalid("credential_id", "Enrollment must establish an upstream principal.")
 	}
 	if in.ExtraUsageEnabled != nil && (adapter == nil || *adapter != string(codemode.AdapterKimiCode)) {
-		return nil, access.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
+		return nil, httpkit.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
 	}
 	if in.CycleAnchor != nil && (profileID == nil || *profileID != codeplans.QwenTokenPlanProfile && *profileID != codeplans.QwenTokenPlanCNProfile) {
-		return nil, access.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
+		return nil, httpkit.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
 	}
 	if existing {
 		var oldPrincipal, oldProvider string
@@ -146,7 +147,7 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 			return nil, err
 		}
 		if oldPrincipal != principal || oldProvider != in.ProviderID {
-			return nil, access.Invalid("credential_id", "Account identity cannot change during credential rotation.")
+			return nil, httpkit.Invalid("credential_id", "Account identity cannot change during credential rotation.")
 		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,extra_usage_enabled,etag,created_by,cycle_anchor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

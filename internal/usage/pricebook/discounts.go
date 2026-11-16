@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // Discount is an immutable multiplier on provider cost at one scope. A scope
@@ -66,7 +66,7 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 		d.VendorID = &vendor
 	}
 	if input.ProviderID != nil {
-		id, err := access.ParseUUID(*input.ProviderID)
+		id, err := httpkit.ParseUUID(*input.ProviderID)
 		if err != nil {
 			return d, invalid("provider_id", "Use a valid provider identifier.")
 		}
@@ -106,7 +106,7 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 // CreateDiscount stores a validated discount inside the caller's transaction.
 func CreateDiscount(ctx context.Context, tx pgx.Tx, actor string,
 	d Discount) (Discount, error) {
-	d.ID = access.NewID()
+	d.ID = httpkit.NewID()
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.pricing_discounts
             (id, provider_kind, vendor_id, provider_id, multiplier, effective_at, created_by)
          VALUES ($1::uuid, $2, $3, $4::uuid, $5::text::numeric, $6, $7::uuid)`,

@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -42,7 +43,7 @@ func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault 
 	}
 	sealed, ok := binding.(promotion.Sealed)
 	if !ok {
-		return access.Invalid("secret_bindings", unboundCredential)
+		return httpkit.Invalid("secret_bindings", unboundCredential)
 	}
 	_, err = credential.Create(ctx, tx, vault.Keys, vault.Installation, credential.New{ProjectID: project, Name: string(ref), Secret: []byte(sealed.Secret), CreatedBy: p.UserID()})
 	return err
@@ -54,7 +55,7 @@ func credentialID(ctx context.Context, q access.Queryer, project *string) resolv
 	return func(name string) (string, error) {
 		id, found, err := credential.FindID(ctx, q, project, name)
 		if err == nil && !found {
-			return "", access.Invalid("secret_bindings", unboundCredential)
+			return "", httpkit.Invalid("secret_bindings", unboundCredential)
 		}
 		return id, err
 	}

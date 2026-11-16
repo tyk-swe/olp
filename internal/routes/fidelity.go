@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
@@ -20,7 +20,7 @@ import (
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	f, err := routing.DecodeFidelity(raw)
 	if err != nil {
-		return nil, access.Invalid("fidelity", err.Error())
+		return nil, httpkit.Invalid("fidelity", err.Error())
 	}
 	return json.Marshal(f)
 }
@@ -30,17 +30,17 @@ func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 	f, err := routing.DecodeFidelity(fidelity)
 	if err != nil {
-		return access.Invalid("fidelity", err.Error())
+		return httpkit.Invalid("fidelity", err.Error())
 	}
 	var policy *contentpolicy.Policy
 	if len(rawPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(rawPolicy), []byte("null")) {
 		policy, err = contentpolicy.Decode(rawPolicy)
 		if err != nil {
-			return access.Invalid("content_policy", err.Error())
+			return httpkit.Invalid("content_policy", err.Error())
 		}
 	}
 	if err = routing.ValidateRouteFidelity(f, policy); errors.Is(err, routing.ErrFidelityPolicyConflict) {
-		return access.Fail(422, "fidelity_policy_conflict", err.Error())
+		return httpkit.Fail(422, "fidelity_policy_conflict", err.Error())
 	}
 	return err
 }
@@ -80,7 +80,7 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 		}
 	}
 	if err = snapshot.ValidateRouteContracts(route); err != nil {
-		if refusal := access.ContractProblem(err); refusal != nil {
+		if refusal := httpkit.ContractProblem(err); refusal != nil {
 			return refusal
 		}
 		return err

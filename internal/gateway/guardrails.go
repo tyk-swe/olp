@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -423,7 +424,7 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in guardrails.Application
-	if err := access.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
+	if err := httpkit.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
 		return
 	}
@@ -465,10 +466,10 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthor
 
 func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 	if s == nil || s.deps.Runtime == nil {
-		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
+		return guardrails.Result{}, httpkit.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
 	if !s.gate.Admit(r.Context()) {
-		return guardrails.Result{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
+		return guardrails.Result{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
 	defer s.gate.Release(r.Context())
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
@@ -491,7 +492,7 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned 
 	}
 	failure := guardrailError(err)
 	s.finish(x, &outcome{err: failure}, failure.Status)
-	return result, access.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
+	return result, httpkit.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
 }
 func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.Application, policy func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error)) (guardrails.Result, error) {
 	x.route = &routing.Route{Slug: "guardrails", OverallTimeout: 30000, MaxAttempts: 1}

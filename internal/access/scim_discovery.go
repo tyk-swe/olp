@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -47,9 +48,9 @@ func scimSchemas() []map[string]any {
 	}
 }
 
-func (s *Server) scimDiscovery(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) scimDiscovery(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	if strings.HasSuffix(r.URL.Path, "/ServiceProviderConfig") {
-		return OK(map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": map[string]any{"supported": true}, "bulk": map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0}, "filter": map[string]any{"supported": true, "maxResults": 200}, "changePassword": map[string]any{"supported": false}, "sort": map[string]any{"supported": true}, "etag": map[string]any{"supported": true}, "authenticationSchemes": []any{map[string]any{"type": "oauthbearertoken", "name": "OLP management token", "description": "Installation-wide management token with access scope; creator authority is rechecked on every request.", "primary": true}}, "meta": map[string]any{"resourceType": "ServiceProviderConfig", "location": s.Origin + "/scim/v2/ServiceProviderConfig"}}), nil
+		return httpkit.OK(map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": map[string]any{"supported": true}, "bulk": map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0}, "filter": map[string]any{"supported": true, "maxResults": 200}, "changePassword": map[string]any{"supported": false}, "sort": map[string]any{"supported": true}, "etag": map[string]any{"supported": true}, "authenticationSchemes": []any{map[string]any{"type": "oauthbearertoken", "name": "OLP management token", "description": "Installation-wide management token with access scope; creator authority is rechecked on every request.", "primary": true}}, "meta": map[string]any{"resourceType": "ServiceProviderConfig", "location": s.Origin + "/scim/v2/ServiceProviderConfig"}}), nil
 	}
 	var resources []map[string]any
 	if strings.Contains(r.URL.Path, "/Schemas") {
@@ -74,10 +75,10 @@ func (s *Server) scimDiscovery(r *http.Request, _ Principal) (Reply, error) {
 	if id != "" {
 		for _, resource := range resources {
 			if resource["id"] == id {
-				return OK(resource), nil
+				return httpkit.OK(resource), nil
 			}
 		}
-		return Reply{}, scim.Fail(404, "", "The schema or resource type was not found.")
+		return httpkit.Reply{}, scim.Fail(404, "", "The schema or resource type was not found.")
 	}
-	return OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": len(resources), "startIndex": 1, "itemsPerPage": len(resources), "Resources": resources}), nil
+	return httpkit.OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": len(resources), "startIndex": 1, "itemsPerPage": len(resources), "Resources": resources}), nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type RunView struct {
@@ -71,36 +72,36 @@ type RunDetailView struct {
 const runColumns = `id::text AS id, api_key_id::text AS api_key_id, project_id::text AS project_id,
  revision_id::text AS revision_id, route_revision_id::text AS route_revision_id, created_at`
 
-func (s *Management) listRuns(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Management) listRuns(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project := r.URL.Query().Get("project_id")
 	if project != "" {
 		id, err := uuid.Parse(project)
 		if err != nil || id == uuid.Nil || id.String() != project {
-			return access.Reply{}, access.Invalid("project_id", "Use a canonical project UUID.")
+			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
 		if err := p.Project(&project, access.View); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
  ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[RunView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item RunView) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item RunView) string { return item.ID }), nil
 }
 
 func (s *Management) visibleRun(r *http.Request, p access.Principal) (RunView, error) {
-	id, err := access.IDParam(r, "run_id")
+	id, err := httpkit.IDParam(r, "run_id")
 	if err != nil {
 		return RunView{}, err
 	}
@@ -118,10 +119,10 @@ func (s *Management) visibleRun(r *http.Request, p access.Principal) (RunView, e
 	return run, nil
 }
 
-func (s *Management) getRun(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) getRun(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	stepRows, err := s.access.Pool.Query(r.Context(), `SELECT s.id::text AS id, s.dispatch_id::text AS dispatch_id, s.ordinal,
  d.kind,d.state,d.currency,d.cost_bound::text AS cost_bound,d.charge_bound::text AS charge_bound,
@@ -133,41 +134,41 @@ func (s *Management) getRun(r *http.Request, p access.Principal) (access.Reply, 
  LEFT JOIN olp.mcp_tool_calls c ON c.dispatch_id=s.dispatch_id
  WHERE s.run_id=$1 ORDER BY s.ordinal`, run.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	steps, err := pgx.CollectRows(stepRows, pgx.RowToStructByName[RunStepView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	approvalRows, err := s.access.Pool.Query(r.Context(), `SELECT id::text AS id,expires_at,consumed_at,dispatch_id::text AS dispatch_id
  FROM olp.agent_approvals WHERE run_id=$1 ORDER BY expires_at,id`, run.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	approvals, err := pgx.CollectRows(approvalRows, pgx.RowToStructByName[RunApprovalView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(RunDetailView{RunView: run, Steps: append([]RunStepView{}, steps...), Approvals: append([]RunApprovalView{}, approvals...)}), nil
+	return httpkit.OK(RunDetailView{RunView: run, Steps: append([]RunStepView{}, steps...), Approvals: append([]RunApprovalView{}, approvals...)}), nil
 }
 
-func (s *Management) listRunSpans(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) listRunSpans(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	spanID := r.URL.Query().Get("span_id")
 	if spanID != "" {
 		id, err := uuid.Parse(spanID)
 		if err != nil || id == uuid.Nil || id.String() != spanID {
-			return access.Reply{}, access.Invalid("span_id", "Use a canonical span UUID.")
+			return httpkit.Reply{}, httpkit.Invalid("span_id", "Use a canonical span UUID.")
 		}
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		limit, err = strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > 200 {
-			return access.Reply{}, access.Invalid("limit", "Use a page size from 1 to 200.")
+			return httpkit.Reply{}, httpkit.Invalid("limit", "Use a page size from 1 to 200.")
 		}
 	}
 	var beforeTime, beforeID any
@@ -177,7 +178,7 @@ func (s *Management) listRunSpans(r *http.Request, p access.Principal) (access.R
 		_, timeErr := strconv.ParseUint(timestamp, 10, 64)
 		parsedID, idErr := uuid.Parse(id)
 		if decodeErr != nil || !found || timeErr != nil || idErr != nil {
-			return access.Reply{}, access.Invalid("cursor", "Invalid pagination cursor.")
+			return httpkit.Reply{}, httpkit.Invalid("cursor", "Invalid pagination cursor.")
 		}
 		beforeTime, beforeID = timestamp, parsedID.String()
 	}
@@ -188,11 +189,11 @@ func (s *Management) listRunSpans(r *http.Request, p access.Principal) (access.R
  AND ($5='' OR id=NULLIF($5,'')::uuid)
  ORDER BY started_nanos DESC,id DESC LIMIT $4`, run.ID, beforeTime, beforeID, limit+1, spanID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	spans, err := pgx.CollectRows(rows, pgx.RowToStructByName[RunSpanView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var next any
 	if len(spans) > limit {
@@ -200,5 +201,5 @@ func (s *Management) listRunSpans(r *http.Request, p access.Principal) (access.R
 		last := spans[len(spans)-1]
 		next = base64.RawURLEncoding.EncodeToString([]byte(last.StartedNanos + "|" + last.ID))
 	}
-	return access.OK(map[string]any{"items": append([]RunSpanView{}, spans...), "next_cursor": next}), nil
+	return httpkit.OK(map[string]any{"items": append([]RunSpanView{}, spans...), "next_cursor": next}), nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -77,98 +78,98 @@ func (s *Server) Register(mux *http.ServeMux) {
 	a.Route(mux, "PUT /api/v1/sinks/{sink_id}", s.update)
 	a.Route(mux, "DELETE /api/v1/sinks/{sink_id}", s.retire)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+columns+" FROM olp.managed_export_sinks WHERE retired_at IS NULL AND id<$1 AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
 		d, err := scan(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		encoded, _ := json.Marshal(d)
 		var item map[string]any
 		_ = json.Unmarshal(encoded, &item)
 		items = append(items, item)
 	}
-	return access.ListReply(items, page), rows.Err()
+	return httpkit.ListReply(items, page), rows.Err()
 }
-func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "sink_id")
+func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := load(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = p.Project(d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(d, d.ETag), nil
+	return httpkit.Detail(d, d.ETag), nil
 }
 func validateAndNormalize(in *input, policy *egress.Policy, project *string) error {
 	in.Name = strings.TrimSpace(in.Name)
-	if err := access.ValidText("name", in.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
 		return err
 	}
 	if in.Enabled == nil {
-		return access.Invalid("enabled", "Supply an explicit enabled flag.")
+		return httpkit.Invalid("enabled", "Supply an explicit enabled flag.")
 	}
 	if policy == nil {
-		return access.Fail(503, "egress_policy_unavailable", "Export delivery requires provider egress policy.")
+		return httpkit.Fail(503, "egress_policy_unavailable", "Export delivery requires provider egress policy.")
 	}
 	target, err := policy.ValidateEndpoint(in.Destination)
 	if err != nil {
-		return access.Invalid("destination", "The endpoint is not permitted by egress policy.")
+		return httpkit.Invalid("destination", "The endpoint is not permitted by egress policy.")
 	}
 	in.Destination = target.String()
 	if len(in.Streams) < 1 || len(in.Streams) > 4 {
-		return access.Invalid("streams", "Choose supported content-free fact streams.")
+		return httpkit.Invalid("streams", "Choose supported content-free fact streams.")
 	}
 	for index, stream := range in.Streams {
 		if !slices.Contains([]string{"requests", "attempts", "guardrail_decisions", "audit", "runs", "trace_spans"}, stream) || slices.Contains(in.Streams[:index], stream) || (stream == "audit" && project != nil) {
-			return access.Invalid("streams", "Use unique streams; audit export requires an installation sink.")
+			return httpkit.Invalid("streams", "Use unique streams; audit export requires an installation sink.")
 		}
 	}
 	return nil
 }
-func (s *Server) create(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	return s.write(r, "", false)
 }
-func (s *Server) update(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "sink_id")
+func (s *Server) update(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.write(r, id, false)
 }
-func (s *Server) retire(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "sink_id")
+func (s *Server) retire(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.write(r, id, true)
 }
 
-func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, error) {
+func (s *Server) write(r *http.Request, id string, retire bool) (httpkit.Reply, error) {
 	var in input
 	if !retire {
-		if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
-			return access.Reply{}, err
+		if err := httpkit.DecodeUnique(r, &in, 64<<10); err != nil {
+			return httpkit.Reply{}, err
 		}
 	}
 	a := s.Access
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var current *Definition
@@ -176,42 +177,42 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	if id != "" {
 		current, err = load(r.Context(), tx, id, true)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		project = current.ProjectID
 	}
 	if err = p.Authorize(operation(project)); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if project != nil {
 		if err = a.RequireProject(r.Context(), tx, p, project); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if !retire {
 		if err = validateAndNormalize(&in, s.Egress, project); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	claim, replay, err := a.Replay(r, tx, p, in)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replay != nil {
 		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
-		if err = access.Match(r, current.ETag); err != nil {
-			return access.Reply{}, err
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, err
 		}
 		if current.RetiredAt != nil {
-			return access.Reply{}, access.Fail(409, "sink_retired", "Create a new sink instead of altering retained history.")
+			return httpkit.Reply{}, httpkit.Fail(409, "sink_retired", "Create a new sink instead of altering retained history.")
 		}
 		if in.ProjectID != nil || in.Type != "" {
-			return access.Reply{}, access.Invalid("project_id", "Sink project and type are immutable.")
+			return httpkit.Reply{}, httpkit.Invalid("project_id", "Sink project and type are immutable.")
 		}
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if retire {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_sinks SET enabled=false,retired_at=now(),etag=$2 WHERE id=$1", id, etag)
 		if err == nil {
@@ -219,22 +220,22 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		}
 	} else if current == nil {
 		if in.Type != "https" {
-			return access.Reply{}, access.Invalid("type", "Use the HTTPS JSON sink type.")
+			return httpkit.Reply{}, httpkit.Invalid("type", "Use the HTTPS JSON sink type.")
 		}
 		var count int
 		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.managed_export_sinks WHERE retired_at IS NULL").Scan(&count); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if count >= 64 {
-			return access.Reply{}, access.Invalid("sinks", "At most 64 active sinks are supported.")
+			return httpkit.Reply{}, httpkit.Invalid("sinks", "At most 64 active sinks are supported.")
 		}
-		id = access.NewID()
+		id = httpkit.NewID()
 		err = Insert(r.Context(), tx, id, in.spec(project), etag, p.UserID())
 	} else {
 		err = Update(r.Context(), tx, id, in.spec(project), etag)
 	}
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if retire {
 		in.Credential = json.RawMessage("null")
@@ -242,10 +243,10 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	if len(in.Credential) > 0 {
 		secret, credentialErr := signingCredential(in.Credential)
 		if credentialErr != nil {
-			return access.Reply{}, credentialErr
+			return httpkit.Reply{}, credentialErr
 		}
 		if err = (Credentials{Keys: a.Keys, Installation: a.Installation}).Replace(r.Context(), tx, id, secret); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	action := "sink.update"
@@ -256,22 +257,22 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		action = "sink.retire"
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "sink", id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply := access.Reply{Status: 204}
+	reply := httpkit.Reply{Status: 204}
 	if !retire {
 		d, err := load(r.Context(), tx, id, false)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		reply = access.Detail(d, etag)
+		reply = httpkit.Detail(d, etag)
 		if current == nil {
 			reply.Status = 201
 			reply.Location = "/api/v1/sinks/" + id
 		}
 	}
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
 }
@@ -286,7 +287,7 @@ func signingCredential(raw json.RawMessage) (*string, error) {
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil || len(value) < 1 || len(value) > 4096 {
-		return nil, access.Invalid("credential", "Use a signing credential of 1–4096 bytes or null.")
+		return nil, httpkit.Invalid("credential", "Use a signing credential of 1–4096 bytes or null.")
 	}
 	return &value, nil
 }

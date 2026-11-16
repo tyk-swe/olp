@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/management"
 )
 
@@ -33,7 +34,7 @@ type Alternative struct {
 
 // Admits reports whether p satisfies the requirement.
 func (req Requirement) Admits(p Principal) error {
-	refusal := Forbidden()
+	refusal := httpkit.Forbidden()
 	for _, alternative := range req.Alternatives {
 		if alternative.Kind != p.Kind {
 			continue
@@ -45,7 +46,7 @@ func (req Requirement) Admits(p Principal) error {
 			}
 		}
 		if err == nil && alternative.Installation && !p.AllProjects {
-			err = Forbidden()
+			err = httpkit.Forbidden()
 		}
 		if err == nil {
 			return nil

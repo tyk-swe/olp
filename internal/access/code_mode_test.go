@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 func TestCodeConfigurationWritesRequireProjectManagement(t *testing.T) {
@@ -23,7 +24,7 @@ func TestCodeConfigurationWritesRequireProjectManagement(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			var problem *access.Problem
+			var problem *httpkit.Problem
 			if err := save(); !errors.As(err, &problem) || problem.Status != 403 {
 				t.Fatalf("project member changed coding policy, got %v", err)
 			}

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type TaskView struct {
@@ -78,7 +79,7 @@ func projectFilter(r *http.Request, p access.Principal) (string, error) {
 	}
 	id, err := uuid.Parse(project)
 	if err != nil || id == uuid.Nil || id.String() != project {
-		return "", access.Invalid("project_id", "Use a canonical project UUID.")
+		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
 	}
 	if err := p.Project(&project, access.View); err != nil {
 		return "", err
@@ -86,43 +87,43 @@ func projectFilter(r *http.Request, p access.Principal) (string, error) {
 	return project, nil
 }
 
-func (s *Management) listTasks(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Management) listTasks(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project, err := projectFilter(r, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
  ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[TaskView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item TaskView) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item TaskView) string { return item.ID }), nil
 }
 
-func (s *Management) getTask(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "task_id")
+func (s *Management) getTask(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "task_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks WHERE id=$1`, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	task, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[TaskView])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(&task.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	feeRows, err := s.access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,d.currency,
  d.observed_cost::text AS observed_cost,d.observed_charge::text AS observed_charge,
@@ -131,11 +132,11 @@ func (s *Management) getTask(r *http.Request, p access.Principal) (access.Reply,
  FROM olp.execution_debits d WHERE d.kind='agent' AND (d.id=(SELECT dispatch_id FROM olp.a2a_tasks WHERE id=$1)
  OR EXISTS(SELECT 1 FROM olp.a2a_task_capabilities c WHERE c.dispatch_id=d.id AND c.task_id=$1)) ORDER BY d.created_at,d.id`, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	fees, err := pgx.CollectRows(feeRows, pgx.RowToStructByName[TaskRemoteFee])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	modelRows, err := s.access.Pool.Query(r.Context(), `SELECT c.accounting_id::text AS request_id,f.attempt_id::text AS attempt_id,
  CASE WHEN f.attempt_id IS NULL THEN 'pending' WHEN f.charge_status='not_billable' THEN 'not_billable'
@@ -150,11 +151,11 @@ func (s *Management) getTask(r *http.Request, p access.Principal) (access.Reply,
  OR EXISTS(SELECT 1 FROM olp.a2a_task_capabilities cap WHERE cap.dispatch_id=c.dispatch_id AND cap.task_id=$1))
  ORDER BY c.created_at,c.accounting_id,f.attempt_ordinal`, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	models, err := pgx.CollectRows(modelRows, pgx.RowToStructByName[TaskModelCallback])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	toolRows, err := s.access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,
  COALESCE(m.pricing_state,'unknown') AS pricing_state,d.currency,
@@ -168,11 +169,11 @@ func (s *Management) getTask(r *http.Request, p access.Principal) (access.Reply,
  OR EXISTS(SELECT 1 FROM olp.a2a_task_capabilities cap WHERE cap.dispatch_id=c.dispatch_id AND cap.task_id=$1))
  ORDER BY c.created_at,c.accounting_id`, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tools, err := pgx.CollectRows(toolRows, pgx.RowToStructByName[TaskToolCallback])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(TaskDetail{TaskView: task, RemoteFees: append([]TaskRemoteFee{}, fees...), CallbackModels: append([]TaskModelCallback{}, models...), CallbackTools: append([]TaskToolCallback{}, tools...)}), nil
+	return httpkit.OK(TaskDetail{TaskView: task, RemoteFees: append([]TaskRemoteFee{}, fees...), CallbackModels: append([]TaskModelCallback{}, models...), CallbackTools: append([]TaskToolCallback{}, tools...)}), nil
 }

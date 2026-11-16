@@ -6,15 +6,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // CreateProject creates a project managed by its creator, so every project
 // starts with the manager it must keep however it is created.
 func CreateProject(ctx context.Context, tx pgx.Tx, name, creator string) (id, etag string, err error) {
-	id, etag = access.NewID(), access.NewID()
+	id, etag = httpkit.NewID(), httpkit.NewID()
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, name, etag, creator); err != nil {
 		if duplicateName(err) {
-			return "", "", access.Fail(409, "project_name_taken", "A project with this name already exists.")
+			return "", "", httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
 		}
 		return "", "", err
 	}
@@ -35,10 +36,10 @@ func CreateProjectInOrganization(ctx context.Context, tx pgx.Tx, name, creator s
 	if organization == nil {
 		return CreateProject(ctx, tx, name, creator)
 	}
-	id, etag := access.NewID(), access.NewID()
+	id, etag := httpkit.NewID(), httpkit.NewID()
 	_, err := tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by,organization_id) VALUES($1,$2,$3,$4,$5)", id, name, etag, creator, organization)
 	if duplicateName(err) {
-		err = access.Fail(409, "project_name_taken", "A project with this name already exists.")
+		err = httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
 	}
 	if err == nil {
 		_, err = access.AdvanceAuthority(ctx, tx)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -63,7 +64,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	return promotion.TryMapIndex(declared, func(i int, t Template) (Template, error) {
 		field := "templates." + strconv.Itoa(i)
 		if first[t.Name] != i {
-			return Template{}, access.Invalid(field+".name", "Template names must be unique.")
+			return Template{}, httpkit.Invalid(field+".name", "Template names must be unique.")
 		}
 		parsed, err := normalized(t)
 		if err != nil {
@@ -152,13 +153,13 @@ func TemplateApplier(desired Desired) promotion.Applier {
 				return err
 			}
 			if found && promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
-				return access.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
+				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
 			}
 			in := t.input(projectID)
 			if !found {
-				return routes.WriteTemplate(ctx, tx, access.NewID(), access.NewID(), p.UserID(), &in, false)
+				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
 			}
-			return routes.WriteTemplate(ctx, tx, stored.ID, access.NewID(), p.UserID(), &in, true)
+			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
 		})
 	}
 }

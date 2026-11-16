@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -17,12 +18,12 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 	for _, kind := range []string{"Users", "Groups"} {
 		group := kind == "Groups"
 		path := "/scim/v2/" + kind
-		s.scimRoute(mux, "GET "+path, func(r *http.Request, p Principal) (Reply, error) { return s.scimList(r, p, group) })
-		s.scimRoute(mux, "POST "+path+"/.search", func(r *http.Request, p Principal) (Reply, error) { return s.scimList(r, p, group) })
-		s.scimRoute(mux, "POST "+path, func(r *http.Request, p Principal) (Reply, error) { return s.scimWrite(r, p, group) })
-		s.scimRoute(mux, "GET "+path+"/{scim_id}", func(r *http.Request, p Principal) (Reply, error) { return s.scimGet(r, p, group) })
+		s.scimRoute(mux, "GET "+path, func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
+		s.scimRoute(mux, "POST "+path+"/.search", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
+		s.scimRoute(mux, "POST "+path, func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
+		s.scimRoute(mux, "GET "+path+"/{scim_id}", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimGet(r, p, group) })
 		for _, method := range []string{"PUT", "PATCH", "DELETE"} {
-			s.scimRoute(mux, method+" "+path+"/{scim_id}", func(r *http.Request, p Principal) (Reply, error) { return s.scimWrite(r, p, group) })
+			s.scimRoute(mux, method+" "+path+"/{scim_id}", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
 		}
 	}
 	for _, path := range []string{"/scim/v2/ServiceProviderConfig", "/scim/v2/ResourceTypes", "/scim/v2/ResourceTypes/{scim_type}", "/scim/v2/Schemas", "/scim/v2/Schemas/{schema_id}"} {
@@ -38,7 +39,7 @@ func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		r, cancel, err := s.guard(w, r, scim.MaxBody, 15*time.Second)
 		defer cancel()
-		var reply Reply
+		var reply httpkit.Reply
 		if err == nil {
 			var p Principal
 			r, p, err = s.admitRoute(r, req)
@@ -97,7 +98,7 @@ func scimFailureFor(err error) (scimFailure, bool) {
 	if e, ok := errors.AsType[*scim.Error](err); ok {
 		return scimFailure{e.Status, e.Type, e.Detail}, true
 	}
-	if e, ok := errors.AsType[*Problem](err); ok {
+	if e, ok := errors.AsType[*httpkit.Problem](err); ok {
 		switch e.Status {
 		case 422:
 			return scimFailure{400, "invalidValue", e.Detail}, true

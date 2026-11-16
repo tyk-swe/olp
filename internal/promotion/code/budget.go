@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -24,12 +25,12 @@ type Budget struct {
 }
 
 func parseBudget(e contract.ConfigurationCodeBudget, routes []Route) (Budget, error) {
-	if access.ValidText("code", e.Project, 100) != nil {
-		return Budget{}, access.Invalid("code.budgets.project", "Name the project.")
+	if httpkit.ValidText("code", e.Project, 100) != nil {
+		return Budget{}, httpkit.Invalid("code.budgets.project", "Name the project.")
 	}
 	budget := Budget{ID: e.Id.String(), Project: e.Project, Route: text(promotion.Pointer(e.Route)), APIKeyRef: promotion.Pointer(e.ApiKeyRef), DailyTokens: promotion.Pointer(e.DailyTokens), MonthlyTokens: promotion.Pointer(e.MonthlyTokens), Enabled: e.Enabled}
 	if budget.Route != nil && !slices.ContainsFunc(routes, func(r Route) bool { return r.ID == *budget.Route && strings.EqualFold(r.Project, budget.Project) }) {
-		return Budget{}, access.Invalid("code.budgets.route", "The route must resolve within the budget project.")
+		return Budget{}, httpkit.Invalid("code.budgets.route", "The route must resolve within the budget project.")
 	}
 	return budget, budget.input(budget.ID, budget.Route, placeholderOf(budget.APIKeyRef, budget.ID)).Validate()
 }
@@ -127,7 +128,7 @@ func budgetChange(ctx context.Context, q access.Queryer, b resolved[access.CodeB
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeBudget, Key: b.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-			_, err := access.SaveCodeBudget(ctx, tx, p, b.to.id, access.NewID(), b.input, b.to.existing)
+			_, err := access.SaveCodeBudget(ctx, tx, p, b.to.id, httpkit.NewID(), b.input, b.to.existing)
 			return err
 		},
 	}, err

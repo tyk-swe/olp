@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -38,7 +39,7 @@ func SamePolicy(a, b *routing.Policy) bool {
 // draft's is configuration, and an API key's is key management.
 func policyScope(r *http.Request) (string, string, access.Operation, error) {
 	scope := r.PathValue("scope")
-	id, err := access.IDParam(r, "id")
+	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -46,14 +47,14 @@ func policyScope(r *http.Request) (string, string, access.Operation, error) {
 	switch scope {
 	case "installation":
 		if id != uuid.Nil.String() {
-			return "", "", 0, access.Invalid("id", "Installation policy uses the nil UUID")
+			return "", "", 0, httpkit.Invalid("id", "Installation policy uses the nil UUID")
 		}
 		operation = access.Settings
 	case "route-draft":
 	case "api-key":
 		operation = access.Keys
 	default:
-		return "", "", 0, access.Fail(404, "not_found", "Unknown policy scope")
+		return "", "", 0, httpkit.Fail(404, "not_found", "Unknown policy scope")
 	}
 	return scope, id, operation, nil
 }
@@ -104,90 +105,90 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	err = json.Unmarshal(data, &p)
 	return &p, etag, err
 }
-func (s *Server) policy(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) policy(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	scope, id, _, err := policyScope(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project, err := policyProject(r.Context(), s.Access.Pool, scope, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	policy, etag, err := loadPolicy(r.Context(), s.Access.Pool, scope, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var configured bool
 	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.routing_policies WHERE scope=$1 AND scope_id=$2 AND configured)", scope, id).Scan(&configured); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag, "configured": configured}, etag), nil
+	return httpkit.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag, "configured": configured}, etag), nil
 }
-func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) putPolicy(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	return s.writePolicy(r, false)
 }
 
-func (s *Server) deletePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) deletePolicy(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	return s.writePolicy(r, true)
 }
 
-func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error) {
+func (s *Server) writePolicy(r *http.Request, remove bool) (httpkit.Reply, error) {
 	scope, id, operation, err := policyScope(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var policy routing.Policy
 	if !remove {
-		if err = access.Decode(r, &policy); err != nil {
-			return access.Reply{}, err
+		if err = httpkit.Decode(r, &policy); err != nil {
+			return httpkit.Reply{}, err
 		}
 		if err = policy.Validate(); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	a := s.Access
 	tx, principal, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	if err = principal.Authorize(operation); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	// The stored reply discloses the policy, so the caller must still reach
 	// the scoped resource's project before a replay is served.
 	project, err := policyProject(r.Context(), tx, scope, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := principal.Project(project, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, principal, policy)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
 	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = access.Match(r, etag); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, etag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	previous := etag
-	etag = access.NewID()
+	etag = httpkit.NewID()
 	data, _ := json.Marshal(policy)
 	if remove {
 		data = []byte(`{}`)
 	}
 	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by,configured) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,configured=excluded.configured,updated_at=now()`, scope, id, data, etag, principal.UserID(), !remove); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	switch scope {
 	case "route-draft":
@@ -196,11 +197,11 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
 	}
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if scope != "route-draft" {
 		if _, err = release.Publish(r.Context(), tx, principal.UserID()); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	action := "routing_policy.update"
@@ -208,17 +209,17 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 		action = "routing_policy.delete"
 	}
 	if err = access.Audit(r.Context(), tx, r, principal.Actor(), action, scope, id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply := access.Detail(map[string]any{"policy": &policy, "etag": etag, "configured": true}, etag)
+	reply := httpkit.Detail(map[string]any{"policy": &policy, "etag": etag, "configured": true}, etag)
 	if remove {
-		reply = access.Reply{Status: http.StatusNoContent}
+		reply = httpkit.Reply{Status: http.StatusNoContent}
 	}
 	if scope != "installation" {
-		reply.ParentMutation = &access.ParentMutation{Previous: previous, Current: etag}
+		reply.ParentMutation = &httpkit.ParentMutation{Previous: previous, Current: etag}
 	}
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
 }

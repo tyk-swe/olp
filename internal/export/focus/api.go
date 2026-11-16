@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -32,25 +33,25 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/focus-datasets", a.datasets)
 }
 
-func (a *API) datasets(r *http.Request, p access.Principal) (access.Reply, error) {
+func (a *API) datasets(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	sinkID := r.PathValue("export_sink_id")
 	projectID, err := destination.SinkProject(r.Context(), a.server.Pool, sinkID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.PageBy(r, "9999-12-31", func(raw string) (string, error) {
+	page, err := httpkit.PageBy(r, "9999-12-31", func(raw string) (string, error) {
 		_, err := time.Parse(time.DateOnly, raw)
 		return raw, err
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := a.server.Pool.Query(r.Context(), datasetsSQL, sinkID, page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (contract.FocusDataset, error) {
 		var body []byte
@@ -61,7 +62,7 @@ func (a *API) datasets(r *http.Request, p access.Principal) (access.Reply, error
 		return item, json.Unmarshal(body, &item)
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item contract.FocusDataset) string { return item.ChargeDate.String() }), nil
+	return httpkit.ListReplyBy(items, page, func(item contract.FocusDataset) string { return item.ChargeDate.String() }), nil
 }

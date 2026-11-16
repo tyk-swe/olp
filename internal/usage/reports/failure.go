@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type FailureKind string
@@ -37,5 +37,5 @@ func problem(err error) error {
 	if failure.Kind == FailureExportTooLarge {
 		status = http.StatusUnprocessableEntity
 	}
-	return access.Fail(status, string(failure.Kind), failure.Detail)
+	return httpkit.Fail(status, string(failure.Kind), failure.Detail)
 }

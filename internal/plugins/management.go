@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
@@ -68,30 +69,30 @@ func (s *Management) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/permit", s.permit, access.MaxBody(64<<10), access.Deadline(time.Minute))
 }
 
-func (s *Management) list(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) list(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" WHERE $1 OR p.executable IS NULL ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest", s.Unconfined != nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items := []contract.Plugin{}
 	for rows.Next() {
 		item, err := scanPlugin(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		items = append(items, item)
 	}
-	return access.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
+	return httpkit.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
 }
 
-func (s *Management) get(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) get(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	plugin, err := s.load(r.Context(), s.Access.Pool, digest)
-	return access.Detail(plugin, plugin.Etag.String()), err
+	return httpkit.Detail(plugin, plugin.Etag.String()), err
 }
 
 // load reads an installed plugin that the deployment lets the API show: an
@@ -104,153 +105,153 @@ func (s *Management) load(ctx context.Context, q access.Queryer, digest string) 
 	return plugin, err
 }
 
-func (s *Management) install(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) install(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	// The route authorizes before reading an upload of up to 32 MiB.
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/wasm" {
-		return access.Reply{}, access.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
 	}
 	module, err := io.ReadAll(r.Body)
 	if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
-		return access.Reply{}, access.Fail(http.StatusRequestEntityTooLarge, "plugin_too_large", "A plugin module may be at most 32 MiB.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusRequestEntityTooLarge, "plugin_too_large", "A plugin module may be at most 32 MiB.")
 	}
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	sum := sha256.Sum256(module)
 	digest := hex.EncodeToString(sum[:])
 	if installed, err := loadPlugin(r.Context(), s.Access.Pool, digest); !errors.Is(err, pgx.ErrNoRows) {
-		return access.Detail(installed, installed.Etag.String()), err
+		return httpkit.Detail(installed, installed.Etag.String()), err
 	}
 	manifest, err := s.Runtime.Inspect(r.Context(), module)
 	if err != nil {
-		return access.Reply{}, problem(err)
+		return httpkit.Reply{}, problem(err)
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var count int
 	if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.plugins").Scan(&count); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if count >= maxInstalled {
-		return access.Reply{}, access.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 	}
 	tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
-		digest, abi.Version, data, module, len(module), access.NewID(), p.ID)
+		digest, abi.Version, data, module, len(module), httpkit.NewID(), p.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	status := http.StatusOK
 	if tag.RowsAffected() == 1 {
 		status = http.StatusCreated
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.install", "plugin", digest, "success"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	installed, err := loadPlugin(r.Context(), tx, digest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}, tx.Commit(r.Context())
+	return httpkit.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}, tx.Commit(r.Context())
 }
 
-func (s *Management) approve(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) approve(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input contract.PluginApprovalRequest
-	if err = access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	plugin, err := s.load(r.Context(), tx, digest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = access.Match(r, plugin.Etag.String()); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, plugin.Etag.String()); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if !plugin.ApprovedAt.IsNull() {
-		return access.Reply{}, access.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(input.Origins)), slices.Sorted(slices.Values(plugin.Manifest.Origins))) {
-		return access.Reply{}, &access.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
+		return httpkit.Reply{}, &httpkit.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
 			Detail: "Approve exactly the origins the plugin declares; review them again."}
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, access.NewID(), digest); err != nil {
-		return access.Reply{}, err
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, httpkit.NewID(), digest); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.approve", "plugin", digest, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if plugin, err = loadPlugin(r.Context(), tx, digest); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply, err := access.Detail(plugin, plugin.Etag.String()), tx.Commit(r.Context())
+	reply, err := httpkit.Detail(plugin, plugin.Etag.String()), tx.Commit(r.Context())
 	if err == nil {
 		s.Host.Prepare(digest)
 	}
 	return reply, err
 }
 
-func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) uninstall(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	plugin, err := s.load(r.Context(), tx, digest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = access.Match(r, plugin.Etag.String()); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, plugin.Etag.String()); err != nil {
+		return httpkit.Reply{}, err
 	}
 	// Configuration writes hold the same installation lock, so no revision can pin
 	// the plugin between this check and the delete.
 	pinning, err := pinningResources(r.Context(), tx, digest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(pinning) > 0 {
-		return access.Reply{}, access.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
 	}
 	retired, err := retireGrants(r.Context(), tx, digest)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	for _, credentialID := range retired {
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if len(retired) > 0 {
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.uninstall", "plugin", digest, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply, err := access.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+	reply, err := httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 	if err == nil {
 		// The plugin's cached code here stops; every other replica's copy is
 		// evicted when its next usability recheck observes the removal.
@@ -338,13 +339,13 @@ func problem(err error) error {
 	case CodeExecutableChanged:
 		status = http.StatusConflict
 	}
-	return &access.Problem{Status: status, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
+	return &httpkit.Problem{Status: status, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
 }
 
 func digestParam(r *http.Request) (string, error) {
 	digest := r.PathValue("plugin_digest")
 	if !ValidDigest(digest) {
-		return "", access.Fail(http.StatusBadRequest, "invalid_identifier", "Identify the plugin by the lowercase hexadecimal SHA-256 digest of its module.")
+		return "", httpkit.Fail(http.StatusBadRequest, "invalid_identifier", "Identify the plugin by the lowercase hexadecimal SHA-256 digest of its module.")
 	}
 	return digest, nil
 }

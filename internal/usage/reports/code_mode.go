@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 func (s *API) registerCodeMode(mux *http.ServeMux) {
@@ -13,13 +14,13 @@ func (s *API) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/token-windows", s.codeTokenWindows)
 }
 
-func (s *API) codeDecisions(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) codeDecisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeList(r, p, `SELECT to_jsonb(x) FROM olp.code_decisions x`,
 		access.CodeMatch{Field: "account_id", SQL: `x.chosen_account_id=$%[1]d::uuid`},
 		access.CodeMatch{Field: "attempt_id", SQL: `x.attempt_id=$%[1]d::uuid`})
 }
 
-func (s *API) codeAttempts(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) codeAttempts(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeUsageList(r, p, `SELECT jsonb_build_object(
 'upstream_status',x.upstream_status,'outcome_origin',x.outcome_origin,'outcome',x.outcome,'outcome_observed_at',x.outcome_observed_at,
 'account_id',x.account_id,'api_key_id',x.api_key_id,'binding_id',x.binding_id,'bound_evidence',x.bound_evidence,
@@ -41,10 +42,10 @@ func (s *API) codeAttempts(r *http.Request, p access.Principal) (access.Reply, e
 		access.CodeMatch{Field: "attempt_id", SQL: `x.id=$%[1]d::uuid`})
 }
 
-func (s *API) codeRefusals(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) codeRefusals(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeUsageList(r, p, `SELECT to_jsonb(x) FROM olp.code_refusals x`)
 }
 
-func (s *API) codeTokenWindows(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) codeTokenWindows(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeList(r, p, `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'windows',COALESCE((SELECT jsonb_agg(jsonb_build_object('period',w.period,'starts_at',w.starts_at,'reserved',w.reserved,'measured',w.measured) ORDER BY w.starts_at DESC,w.period) FROM olp.code_token_windows w WHERE w.budget_id=x.id),'[]'::jsonb)) FROM olp.code_token_budgets x`)
 }

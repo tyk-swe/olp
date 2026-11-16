@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -40,7 +41,7 @@ type routeInput struct {
 
 func parseRoute(e contract.ConfigurationCodeRoute, prior []contract.ConfigurationCodeRoute, accounts []Account, pools []Pool, names promotion.Names, deps provider.Deps) (Route, error) {
 	if slices.ContainsFunc(prior, func(other contract.ConfigurationCodeRoute) bool { return other.Slug == e.Slug }) {
-		return Route{}, access.Invalid("code.routes.slug", "Use distinct route slugs.")
+		return Route{}, httpkit.Invalid("code.routes.slug", "Use distinct route slugs.")
 	}
 	draft := Route{ID: e.Id.String(), Project: e.Project, Slug: e.Slug, Draft: policyOf(e.Draft)}
 	if err := draft.validPolicy(draft.Draft, accounts, pools); err != nil {
@@ -64,15 +65,15 @@ func parseRoute(e contract.ConfigurationCodeRoute, prior []contract.Configuratio
 }
 
 func (r Route) validPolicy(policy Policy, accounts []Account, pools []Pool) error {
-	if access.ValidText("code", r.Project, 100) != nil || !slices.ContainsFunc(pools, func(p Pool) bool { return p.ID == policy.Pool && strings.EqualFold(p.Project, r.Project) }) {
-		return access.Invalid("code.routes.pool", "Every pool must resolve within the route project.")
+	if httpkit.ValidText("code", r.Project, 100) != nil || !slices.ContainsFunc(pools, func(p Pool) bool { return p.ID == policy.Pool && strings.EqualFold(p.Project, r.Project) }) {
+		return httpkit.Invalid("code.routes.pool", "Every pool must resolve within the route project.")
 	}
 	if policy.Tools != nil && !slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == policy.Tools.AccountID && strings.EqualFold(a.Project, r.Project) }) {
-		return access.Invalid("code.routes.tools", "Research accounts must resolve within the route project.")
+		return httpkit.Invalid("code.routes.tools", "Research accounts must resolve within the route project.")
 	}
 	for model, target := range policy.paidTargets() {
-		if !slices.Contains(policy.Models, model) || access.ValidText("code", target.Provider, 100) != nil || access.ValidText("code", target.Slot, 100) != nil || access.ValidText("code", target.CredentialRef, 300) != nil {
-			return access.Invalid("code.paid_targets", "Use declared models and named provider, slot and explicit credential references.")
+		if !slices.Contains(policy.Models, model) || httpkit.ValidText("code", target.Provider, 100) != nil || httpkit.ValidText("code", target.Slot, 100) != nil || httpkit.ValidText("code", target.CredentialRef, 300) != nil {
+			return httpkit.Invalid("code.paid_targets", "Use declared models and named provider, slot and explicit credential references.")
 		}
 	}
 	placeholder := func(targets map[string]PaidTarget) map[string]codemode.PaidTarget {
@@ -84,11 +85,11 @@ func (r Route) validPolicy(policy Policy, accounts []Account, pools []Pool) erro
 func (r Route) validConnections(accounts []Account, pools []Pool) error {
 	policy := r.Published.Policy
 	if len(r.Published.Connections) == 0 && len(policy.PaidTargets)+len(policy.PaidFallbackTargets) == 0 {
-		return access.Invalid("code.routes.published.connections", "Published routes require frozen provider connections.")
+		return httpkit.Invalid("code.routes.published.connections", "Published routes require frozen provider connections.")
 	}
 	at := slices.IndexFunc(pools, func(p Pool) bool { return p.ID == policy.Pool })
 	if at < 0 {
-		return access.Invalid("code.routes.pool", "Every pool must resolve within the route project.")
+		return httpkit.Invalid("code.routes.pool", "Every pool must resolve within the route project.")
 	}
 	members := pools[at].Accounts
 	frozen := func(name string) bool {
@@ -96,12 +97,12 @@ func (r Route) validConnections(accounts []Account, pools []Pool) error {
 	}
 	for name := range r.Published.Connections {
 		if !slices.ContainsFunc(accounts, func(a Account) bool { _, member := members[a.ID]; return member && strings.EqualFold(a.Provider, name) }) {
-			return access.Invalid("code.routes.published.connections", "Frozen providers must resolve through published pool accounts.")
+			return httpkit.Invalid("code.routes.published.connections", "Frozen providers must resolve through published pool accounts.")
 		}
 	}
 	for ref := range members {
 		if !slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == ref && frozen(a.Provider) }) {
-			return access.Invalid("code.routes.published.connections", "Freeze every published pool provider.")
+			return httpkit.Invalid("code.routes.published.connections", "Freeze every published pool provider.")
 		}
 	}
 	return nil
@@ -174,13 +175,13 @@ func resolveRoute(ctx context.Context, q access.Queryer, r Route, in scope) (res
 		return resolved[routeInput]{}, err
 	}
 	if taken {
-		return resolved[routeInput]{}, access.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
+		return resolved[routeInput]{}, httpkit.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
 	}
 	ids, err := routes.CodeRouteIDs(ctx, q, r.Slug, projectID)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
-	to, err := lookup(access.NewID(), ids)
+	to, err := lookup(httpkit.NewID(), ids)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
@@ -228,7 +229,7 @@ func routeAction(ctx context.Context, q access.Queryer, r resolved[routeInput]) 
 func saveRoute(ctx context.Context, tx pgx.Tx, p access.Principal, r resolved[routeInput], republished bool) error {
 	published := r.input.published
 	if republished && published != nil {
-		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), published.Policy, r.to.existing)
+		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, httpkit.NewID(), published.Policy, r.to.existing)
 		if err != nil {
 			return err
 		}
@@ -236,7 +237,7 @@ func saveRoute(ctx context.Context, tx pgx.Tx, p access.Principal, r resolved[ro
 			return err
 		}
 	}
-	if _, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), r.input.draft, r.to.existing || republished && published != nil); err != nil {
+	if _, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, httpkit.NewID(), r.input.draft, r.to.existing || republished && published != nil); err != nil {
 		return err
 	}
 	if republished && published == nil {

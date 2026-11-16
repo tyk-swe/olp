@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -24,30 +25,30 @@ type BudgetTarget struct {
 
 func (t *BudgetTarget) validate() error {
 	if !limits.ValidBudgetBoundary(t.Kind) {
-		return Invalid("target.kind", "Choose a supported budget boundary.")
+		return httpkit.Invalid("target.kind", "Choose a supported budget boundary.")
 	}
 	if t.Kind != "installation" {
 		id, err := uuid.Parse(t.ID)
 		if err != nil {
-			return Invalid("target.id", "A resource UUID is required.")
+			return httpkit.Invalid("target.id", "A resource UUID is required.")
 		}
 		t.ID = id.String()
 	} else if t.ID != "" {
-		return Invalid("target.id", "Installation targets have no resource ID.")
+		return httpkit.Invalid("target.id", "Installation targets have no resource ID.")
 	}
 	if (t.Kind == "key_route" && !routeidentity.ValidSlug(t.Route)) || (t.Kind != "key_route" && t.Route != "") {
-		return Invalid("target.route", "Supply a route only for a key-route budget.")
+		return httpkit.Invalid("target.route", "Supply a route only for a key-route budget.")
 	}
 	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"
 	if (identified && !keyauthority.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
-		return Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
+		return httpkit.Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
 	}
 	if t.Kind == "attribution" {
 		if !attribution.ValidKey(t.Label) || !attribution.ValidValue(t.Value) {
-			return Invalid("target", "Supply a valid attribution label and value.")
+			return httpkit.Invalid("target", "Supply a valid attribution label and value.")
 		}
 	} else if t.Label != "" || t.Value != "" {
-		return Invalid("target", "Labels belong only to attribution budgets.")
+		return httpkit.Invalid("target", "Labels belong only to attribution budgets.")
 	}
 	return nil
 }

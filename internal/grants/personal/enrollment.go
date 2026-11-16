@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -153,12 +154,12 @@ func (s *Store) ResolveAgentTask(ctx context.Context, digest, publicationID, pro
 
 func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) (Handoff, error) {
 	if expected.OAuth.EntraOBO != nil {
-		return Handoff{}, access.Invalid("oauth", "Entra on-behalf-of grants require a verified user request, not browser enrollment.")
+		return Handoff{}, httpkit.Invalid("oauth", "Entra on-behalf-of grants require a verified user request, not browser enrollment.")
 	}
 	if _, err := liveBinding(ctx, s.pool, expected); err != nil {
 		return Handoff{}, err
 	}
-	id, token := access.NewID(), rand.Text()
+	id, token := httpkit.NewID(), rand.Text()
 	expires := time.Now().UTC().Add(10 * time.Minute)
 	_, err := s.pool.Exec(ctx, `INSERT INTO olp.mcp_grant_enrollments(id,server_id,agent_id,project_id,binding,binding_digest,handoff_digest,started_by,expires_at) VALUES($1,NULLIF($2,'')::uuid,NULLIF($3,'')::uuid,$4,$5,$6,$7,$8,$9)`, id, expected.ServerID, expected.AgentID, expected.ProjectID, expected, expected.Digest(), s.auth.Digest(secrets.MCPEnrollmentDigest, token), startedBy, expires)
 	if err != nil {
@@ -180,13 +181,13 @@ func (s *Store) Claim(ctx context.Context, id, token, memberID string) (Enrollme
 	}
 	provided := s.auth.Digest(secrets.MCPEnrollmentDigest, token)
 	if subtle.ConstantTimeCompare(provided, digest) != 1 || (e.StartedBy != nil && *e.StartedBy != memberID) {
-		return Enrollment{}, access.Fail(404, "not_found", "The enrollment was not found.")
+		return Enrollment{}, httpkit.Fail(404, "not_found", "The enrollment was not found.")
 	}
 	if e.ClaimedAt != nil {
-		return Enrollment{}, access.Fail(409, "enrollment_used", "Start a new enrollment. This link has already been used.")
+		return Enrollment{}, httpkit.Fail(409, "enrollment_used", "Start a new enrollment. This link has already been used.")
 	}
 	if !time.Now().Before(e.ExpiresAt) {
-		return Enrollment{}, access.Fail(410, "enrollment_expired", "Start a new enrollment. This link has expired.")
+		return Enrollment{}, httpkit.Fail(410, "enrollment_expired", "Start a new enrollment. This link has expired.")
 	}
 	if _, err := liveBinding(ctx, tx, e.Binding); err != nil {
 		return Enrollment{}, err

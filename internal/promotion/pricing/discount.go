@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -52,11 +53,11 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 	field := "discounts." + strconv.Itoa(i)
 	switch {
 	case discount.Provider == nil && discount.ProviderKind == string(contract.ProviderKindPlugin):
-		return access.Invalid(field+".provider", "Scope a plugin provider's discount to that provider.")
+		return httpkit.Invalid(field+".provider", "Scope a plugin provider's discount to that provider.")
 	case duplicate:
-		return access.Invalid(field, "The document scopes this discount twice.")
+		return httpkit.Invalid(field, "The document scopes this discount twice.")
 	case !nonNegative(discount.Multiplier):
-		return access.Invalid(field+".multiplier", "Use a non-negative decimal.")
+		return httpkit.Invalid(field+".multiplier", "Use a non-negative decimal.")
 	default:
 		return nil
 	}

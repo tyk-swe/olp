@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -29,16 +30,16 @@ func (server *MCP) Register(mux *http.ServeMux) {
 	server.access.Route(mux, "POST /api/v1/mcp", server.serveMCP, access.MaxBody(4<<20), access.Deadline(60*time.Second))
 }
 
-func rpcResult[T any](id json.RawMessage, result T) (access.Reply, error) {
+func rpcResult[T any](id json.RawMessage, result T) (httpkit.Reply, error) {
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(messages.Envelope{JSONRPC: "2.0", ID: messages.IDOrNull(id), Result: encoded}), nil
+	return httpkit.OK(messages.Envelope{JSONRPC: "2.0", ID: messages.IDOrNull(id), Result: encoded}), nil
 }
 
-func rpcFailure(id json.RawMessage, code int, message string) access.Reply {
-	return access.OK(messages.Envelope{JSONRPC: "2.0", ID: messages.IDOrNull(id), Error: &messages.Error{Code: code, Message: message}})
+func rpcFailure(id json.RawMessage, code int, message string) httpkit.Reply {
+	return httpkit.OK(messages.Envelope{JSONRPC: "2.0", ID: messages.IDOrNull(id), Error: &messages.Error{Code: code, Message: message}})
 }
 
 type managementTool struct {
@@ -59,10 +60,10 @@ type toolAnnotations struct {
 	OpenWorld   bool `json:"openWorldHint"`
 }
 
-func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access.Reply, error) {
+func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
 	var request messages.Request
-	if err := access.DecodeUnique(r, &request, 4<<20); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.DecodeUnique(r, &request, 4<<20); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if request.JSONRPC != "2.0" || request.Method == "" {
 		return rpcFailure(nil, -32600, "Invalid JSON-RPC request"), nil
@@ -72,7 +73,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 	}
 	if len(request.ID) == 0 {
 		if request.Method == "notifications/initialized" || request.Method == "notifications/cancelled" {
-			return access.Reply{Status: 202}, nil
+			return httpkit.Reply{Status: 202}, nil
 		}
 		return rpcFailure(nil, -32600, "Requests require an ID"), nil
 	}
@@ -105,7 +106,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 		tools := []managementTool{}
 		requirements, err := access.ContractRequirements()
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		for _, operation := range client.Operations() {
 			if requirements[operation.Method+" "+operation.Path].Admits(principal) != nil {
@@ -135,7 +136,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 		}
 		requirements, err := access.ContractRequirements()
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err = requirements[operation.Method+" "+operation.Path].Admits(principal); err != nil {
 			return rpcFailure(request.ID, -32602, "Tool is outside the token's authority"), nil
@@ -163,7 +164,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 		})
 		text, err := json.Marshal(result)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return rpcResult(request.ID, managementToolResult{
 			Content: []upstream.ToolContent{{Type: "text", Text: string(text)}}, StructuredContent: text, IsError: failed,

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type CodeResource struct{ table, audit string }
@@ -23,18 +24,18 @@ var (
 
 type CodeWriter func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error)
 
-func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project string, input any, write CodeWriter) (Reply, error) {
-	projectID, err := ParseUUID(project)
+func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project string, input any, write CodeWriter) (httpkit.Reply, error) {
+	projectID, err := httpkit.ParseUUID(project)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	if err := s.RequireProject(r.Context(), tx, p, &projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if r.PathValue("id") == "" {
 		return s.codeCreate(r, tx, p, resource, input, write)
@@ -42,50 +43,50 @@ func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project strin
 	return s.codeUpdate(r, tx, p, resource, projectID, write)
 }
 
-func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, input any, write CodeWriter) (Reply, error) {
+func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, input any, write CodeWriter) (httpkit.Reply, error) {
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	id, etag := NewID(), NewID()
+	id, etag := httpkit.NewID(), httpkit.NewID()
 	body, err := codeSave(r, tx, p, resource, id, etag, false, write)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}
+	result := httpkit.Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}
 	if err := s.CompleteReplay(r, tx, claim, result); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, projectID string, write CodeWriter) (Reply, error) {
-	id, err := ParseUUID(r.PathValue("id"))
+func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, projectID string, write CodeWriter) (httpkit.Reply, error) {
+	id, err := httpkit.ParseUUID(r.PathValue("id"))
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var oldProject, oldETag string
 	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+resource.table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(&oldProject, Change); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if oldProject != projectID {
-		return Reply{}, Invalid("project_id", "The project is immutable.")
+		return httpkit.Reply{}, httpkit.Invalid("project_id", "The project is immutable.")
 	}
-	if err := Match(r, oldETag); err != nil {
-		return Reply{}, err
+	if err := httpkit.Match(r, oldETag); err != nil {
+		return httpkit.Reply{}, err
 	}
-	etag := NewID()
+	etag := httpkit.NewID()
 	body, err := codeSave(r, tx, p, resource, id, etag, true, write)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(body, etag), tx.Commit(r.Context())
+	return httpkit.Detail(body, etag), tx.Commit(r.Context())
 }
 
 func codeSave(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, id, etag string, existing bool, write CodeWriter) (any, error) {
@@ -104,28 +105,28 @@ func codeSave(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, id
 // $%[1]d.
 type CodeMatch struct{ Field, SQL string }
 
-func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (Reply, error) {
+func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
 	return s.codeList(r, p, selectSQL, false, matches)
 }
 
 // CodeUsageList adds digest filtering for the two content-free usage ledgers.
-func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (Reply, error) {
+func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
 	return s.codeList(r, p, selectSQL, true, matches)
 }
 
-func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUsers bool, matches []CodeMatch) (Reply, error) {
-	page, err := Page(r)
+func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUsers bool, matches []CodeMatch) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project := r.URL.Query().Get("project_id")
 	if project != "" {
-		project, err = ParseUUID(project)
+		project, err = httpkit.ParseUUID(project)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err = p.Project(&project, View); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	where := ` WHERE x.id<$1 AND ($2 OR x.project_id=ANY($3::uuid[])) AND ($4='' OR x.project_id::text=$4)`
@@ -134,7 +135,7 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 		if digest == "unidentified" {
 			digest = ""
 		} else if !authority.ValidEndUserDigest(digest) {
-			return Reply{}, Invalid("end_user_digest", "Use an end-user digest or unidentified.")
+			return httpkit.Reply{}, httpkit.Invalid("end_user_digest", "Use an end-user digest or unidentified.")
 		}
 		args = append(args, digest)
 		where += fmt.Sprintf(" AND x.end_user_digest=$%d", len(args))
@@ -149,9 +150,9 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 	})
 	for _, field := range slices.Concat(fields, extra) {
 		if value := r.URL.Query().Get(field); value != "" {
-			id, err := ParseUUID(value)
+			id, err := httpkit.ParseUUID(value)
 			if err != nil {
-				return Reply{}, err
+				return httpkit.Reply{}, err
 			}
 			args = append(args, id)
 			condition := fmt.Sprintf("to_jsonb(x)->>'%s'=$%d", field, len(args))
@@ -163,10 +164,10 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 	}
 	rows, err := s.Pool.Query(r.Context(), selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := JSONRows(rows)
-	return ListReply(items, page), err
+	items, err := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, page), err
 }
 
 func (s *Server) registerCodeMode(mux *http.ServeMux) {
@@ -183,10 +184,10 @@ const codePoolJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project
 	'account_ids',ARRAY(SELECT account_id FROM olp.code_pool_accounts WHERE pool_id=x.id ORDER BY account_id),
 	'api_key_ids',ARRAY(SELECT api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id)) FROM olp.code_pools x`
 
-func (s *Server) codePools(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) codePools(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return s.CodeList(r, p, codePoolJSON)
 }
-func (s *Server) codeBudgets(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) codeBudgets(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return s.CodeList(r, p, `SELECT to_jsonb(x)-'created_by' FROM olp.code_token_budgets x`)
 }
 
@@ -200,14 +201,14 @@ type CodePoolInput struct {
 	APIKeyIDs      []string         `json:"api_key_ids"`
 }
 
-func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) writeCodePool(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var in CodePoolInput
-	if err := Decode(r, &in); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &in); err != nil {
+		return httpkit.Reply{}, err
 	}
 	input, validationError := in.Validated()
 	if validationError != nil {
-		return Reply{}, validationError
+		return httpkit.Reply{}, validationError
 	}
 	return s.CodeWrite(r, CodePools, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodePool(r.Context(), tx, p, id, etag, input, existing)
@@ -235,14 +236,14 @@ type CodeBudgetInput struct {
 	Enabled       bool    `json:"enabled"`
 }
 
-func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var in CodeBudgetInput
-	if err := Decode(r, &in); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &in); err != nil {
+		return httpkit.Reply{}, err
 	}
 	input, validationError := in.Validated()
 	if validationError != nil {
-		return Reply{}, validationError
+		return httpkit.Reply{}, validationError
 	}
 	return s.CodeWrite(r, CodeBudgets, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeBudget(r.Context(), tx, p, id, etag, input, existing)
@@ -263,7 +264,7 @@ func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, 
 			return nil, err
 		}
 		if !member {
-			return nil, Invalid("owner_user_id", "The owner must be a project member.")
+			return nil, httpkit.Invalid("owner_user_id", "The owner must be a project member.")
 		}
 	}
 	for _, account := range in.AccountIDs {
@@ -281,7 +282,7 @@ func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, 
 				return nil, err
 			}
 			if owner != *in.OwnerUserID {
-				return nil, Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
+				return nil, httpkit.Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
 			}
 		}
 	}
@@ -292,7 +293,7 @@ func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, 
 			return nil, err
 		}
 		if kind != in.Kind || (owner == nil) != (in.OwnerUserID == nil) || owner != nil && *owner != *in.OwnerUserID {
-			return nil, Invalid("kind", "Pool ownership is immutable.")
+			return nil, httpkit.Invalid("kind", "Pool ownership is immutable.")
 		}
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_pools(id,project_id,name,kind,owner_user_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
@@ -345,7 +346,7 @@ func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string
 			return nil, err
 		}
 		if !matches {
-			return nil, Invalid("scope", "Budget scope is immutable.")
+			return nil, httpkit.Invalid("scope", "Budget scope is immutable.")
 		}
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_token_budgets(id,project_id,route_id,api_key_id,daily_tokens,monthly_tokens,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -359,18 +360,18 @@ func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string
 }
 
 func (in CodePoolInput) validate() error {
-	if err := ValidText("name", in.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
 		return err
 	}
 	if in.Kind != "personal" && in.Kind != "shared" || (in.Kind == "personal") != (in.OwnerUserID != nil) {
-		return Invalid("kind", "Personal pools require an owner; shared pools have none.")
+		return httpkit.Invalid("kind", "Personal pools require an owner; shared pools have none.")
 	}
 	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
-		return Invalid("assignments", "Use at most 100 accounts and keys.")
+		return httpkit.Invalid("assignments", "Use at most 100 accounts and keys.")
 	}
 	for account, weight := range in.AccountWeights {
 		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
-			return Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
+			return httpkit.Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
 		}
 	}
 	return nil
@@ -378,11 +379,11 @@ func (in CodePoolInput) validate() error {
 
 func (in CodeBudgetInput) validate() error {
 	if in.DailyTokens == nil && in.MonthlyTokens == nil {
-		return Invalid("tokens", "Set a daily or monthly token cap.")
+		return httpkit.Invalid("tokens", "Set a daily or monthly token cap.")
 	}
 	for _, n := range []*int64{in.DailyTokens, in.MonthlyTokens} {
 		if n != nil && (*n < 1 || *n > 1<<53-1) {
-			return Invalid("tokens", "Use a positive safe integer.")
+			return httpkit.Invalid("tokens", "Use a positive safe integer.")
 		}
 	}
 	return nil
@@ -390,14 +391,14 @@ func (in CodeBudgetInput) validate() error {
 
 func (in CodePoolInput) Validated() (CodePoolInput, error) {
 	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
-		return CodePoolInput{}, Invalid("assignments", "Use at most 100 accounts and keys.")
+		return CodePoolInput{}, httpkit.Invalid("assignments", "Use at most 100 accounts and keys.")
 	}
 	weightKeys := slices.Sorted(maps.Keys(in.AccountWeights))
-	ids, err := ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
+	ids, err := httpkit.ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
 	if err != nil {
 		return CodePoolInput{}, err
 	}
-	owner, ownerError := ParseOptionalUUID(in.OwnerUserID)
+	owner, ownerError := httpkit.ParseOptionalUUID(in.OwnerUserID)
 	if ownerError != nil {
 		return CodePoolInput{}, ownerError
 	}
@@ -405,7 +406,7 @@ func (in CodePoolInput) Validated() (CodePoolInput, error) {
 	keyEnd := accountEnd + len(in.APIKeyIDs)
 	canonicalWeights := ids[keyEnd:]
 	if len(slices.Compact(slices.Sorted(slices.Values(canonicalWeights)))) != len(weightKeys) {
-		return CodePoolInput{}, Invalid("account_weights", "Assign each account weight once.")
+		return CodePoolInput{}, httpkit.Invalid("account_weights", "Assign each account weight once.")
 	}
 	weights := maps.Collect(func(yield func(string, int64) bool) {
 		for index, key := range weightKeys {
@@ -418,15 +419,15 @@ func (in CodePoolInput) Validated() (CodePoolInput, error) {
 	return canonical, canonical.validate()
 }
 func (in CodeBudgetInput) Validated() (CodeBudgetInput, error) {
-	project, projectError := ParseUUID(in.ProjectID)
+	project, projectError := httpkit.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return CodeBudgetInput{}, projectError
 	}
-	route, routeError := ParseOptionalUUID(in.RouteID)
+	route, routeError := httpkit.ParseOptionalUUID(in.RouteID)
 	if routeError != nil {
 		return CodeBudgetInput{}, routeError
 	}
-	key, keyError := ParseOptionalUUID(in.APIKeyID)
+	key, keyError := httpkit.ParseOptionalUUID(in.APIKeyID)
 	if keyError != nil {
 		return CodeBudgetInput{}, keyError
 	}

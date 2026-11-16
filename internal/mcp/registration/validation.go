@@ -5,7 +5,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -18,24 +18,24 @@ func Prepare(in Input, policy *egress.Policy) (Input, error) {
 		return Input{}, err
 	}
 	name := strings.TrimSpace(in.Name)
-	if err := access.ValidText("name", name, 100); err != nil {
+	if err := httpkit.ValidText("name", name, 100); err != nil {
 		return Input{}, err
 	}
 	if in.Enabled == nil {
-		return Input{}, access.Invalid("enabled", "Supply an explicit enabled flag.")
+		return Input{}, httpkit.Invalid("enabled", "Supply an explicit enabled flag.")
 	}
 	if policy == nil {
-		return Input{}, access.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
+		return Input{}, httpkit.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
 	}
 	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
-		return Input{}, access.Invalid("transport", "Use streamable_http, sse or stdio.")
+		return Input{}, httpkit.Invalid("transport", "Use streamable_http, sse or stdio.")
 	}
 	if in.Stdio != nil || in.Transport == string(routing.MCPStdio) {
 		if !in.Stdio.Valid() || in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 {
-			return Input{}, access.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
+			return Input{}, httpkit.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
 		}
 		if in.Transport != "" && in.Transport != string(routing.MCPStdio) {
-			return Input{}, access.Invalid("transport", "A stdio binding requires stdio transport.")
+			return Input{}, httpkit.Invalid("transport", "A stdio binding requires stdio transport.")
 		}
 	}
 	endpoint, err := prepareEndpoint(in, policy)
@@ -46,14 +46,14 @@ func Prepare(in Input, policy *egress.Policy) (Input, error) {
 		return Input{}, err
 	}
 	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
-		return Input{}, access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
+		return Input{}, httpkit.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
 	}
 	if len(in.ToolPrices) > 128 {
-		return Input{}, access.Invalid("tool_prices", "Price at most 128 tools.")
+		return Input{}, httpkit.Invalid("tool_prices", "Price at most 128 tools.")
 	}
 	for name, price := range in.ToolPrices {
 		if name == "" || len(name) > 128 || !routing.ValidToolPrice(price) {
-			return Input{}, access.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
+			return Input{}, httpkit.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
 		}
 	}
 	for _, limit := range [...]struct {
@@ -67,7 +67,7 @@ func Prepare(in Input, policy *egress.Policy) (Input, error) {
 		{"per_key_max_concurrency", in.PerKeyMaxConcurrency, routing.MaxToolConcurrency},
 	} {
 		if limit.value != nil && (*limit.value < 1 || *limit.value > limit.ceiling) {
-			return Input{}, access.Invalid(limit.field, "Stay inside the installation tool call limits.")
+			return Input{}, httpkit.Invalid(limit.field, "Stay inside the installation tool call limits.")
 		}
 	}
 	return Input{
@@ -86,7 +86,7 @@ func prepareEndpoint(in Input, policy *egress.Policy) (string, error) {
 	}
 	endpoint, err := policy.ValidateEndpoint(in.Endpoint)
 	if err != nil {
-		return "", access.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
+		return "", httpkit.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
 	}
 	return endpoint.String(), nil
 }

@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -72,7 +72,7 @@ func entryOf(config workload.Config, directory promotion.Directory) (contract.Co
 func mappingEntry(m workload.Mapping, directory promotion.Directory) (contract.ConfigurationWorkloadMapping, error) {
 	name, ok := directory.Name(m.ProjectID)
 	if !ok {
-		return contract.ConfigurationWorkloadMapping{}, access.Invalid("workload_issuers", "A workload mapping project is no longer available.")
+		return contract.ConfigurationWorkloadMapping{}, httpkit.Invalid("workload_issuers", "A workload mapping project is no longer available.")
 	}
 	toolsets, err := uuids(m.AllowedToolsets)
 	if err != nil {
