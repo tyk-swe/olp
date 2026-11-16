@@ -7,10 +7,13 @@
   import OwnerSetup from '#lib/features/access/setup/OwnerSetup.svelte';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
   import BrandMark from '#lib/shell/BrandMark.svelte';
+  import { useQueryClient } from '@tanstack/svelte-query';
+  import { brandingKey } from '#lib/shell/branding/branding.js';
 
   let setupView = $state<'checking' | 'ready' | 'error'>('checking');
   let message = $state('');
   let activeController: AbortController | undefined;
+  const queryClient = useQueryClient();
 
   async function checkStatus() {
     activeController?.abort();
@@ -32,6 +35,7 @@
   }
 
   function finishSetup() {
+    void queryClient.invalidateQueries({ queryKey: brandingKey });
     void goto(resolve(''), { replace: true });
   }
 

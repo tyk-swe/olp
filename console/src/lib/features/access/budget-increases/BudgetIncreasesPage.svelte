@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import type { EntityKind } from '#lib/components/entityOptions.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -181,7 +182,7 @@
   ];
 </script>
 
-<svelte:head><title>Budget increases · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Budget increases" />
 <div class="toolbar">
   <p class="lede">
     A temporary increase raises a budget cap until it expires or the budget

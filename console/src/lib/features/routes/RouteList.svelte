@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -76,7 +77,7 @@
   }
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <div class="toolbar">
   <div class="page-actions">

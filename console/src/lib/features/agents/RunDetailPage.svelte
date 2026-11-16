@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -46,7 +47,7 @@
   }
 </script>
 
-<svelte:head><title>Run · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Run" />
 <a class="text-button" href={resolve('activity/runs')}>All runs</a>
 <PageHeader title="Run" description={runID} />
 {#if run.error}

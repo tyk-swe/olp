@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import SavedFilters from '../SavedFilters.svelte';
   import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
@@ -75,7 +76,7 @@
   }
 </script>
 
-<svelte:head><title>Requests · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Requests" />
 
 <PageHeader
   title={requestId ? 'Request' : 'Requests'}

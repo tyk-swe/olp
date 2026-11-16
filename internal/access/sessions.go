@@ -12,13 +12,13 @@ import (
 )
 
 func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
-	var name, logo, sessionID string
-	err := q.QueryRow(r.Context(), "SELECT i.name,i.logo,COALESCE(s.id::text,'') FROM olp.installation i LEFT JOIN olp.sessions s ON s.digest=$1 WHERE i.singleton", s.Auth.Digest(secrets.SessionDigest, token)).Scan(&name, &logo, &sessionID)
+	var sessionID string
+	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT id::text FROM olp.sessions WHERE digest=$1),'')", s.Auth.Digest(secrets.SessionDigest, token)).Scan(&sessionID)
 	operations := []string{}
 	for _, op := range (Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
 		operations = append(operations, op.String())
 	}
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "installation_logo": logo, "session_id": sessionID, "csrf_token": s.csrf(token), "operations": operations}, err
+	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "session_id": sessionID, "csrf_token": s.csrf(token), "operations": operations}, err
 }
 
 type sessionAuth struct {

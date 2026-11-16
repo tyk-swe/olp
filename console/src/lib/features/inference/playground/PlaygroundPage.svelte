@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
@@ -42,7 +43,7 @@
   ];
 </script>
 
-<svelte:head><title>Playground · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Playground" />
 
 <PageHeader
   title="Playground"

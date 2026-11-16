@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -69,7 +70,7 @@
   }
 </script>
 
-<svelte:head><title>SCIM provisioning · OpenLLMProxy</title></svelte:head>
+<PageTitle title="SCIM provisioning" />
 <section class="card setup" aria-labelledby="scim-setup">
   <h2 id="scim-setup">Connect a directory</h2>
   <p>

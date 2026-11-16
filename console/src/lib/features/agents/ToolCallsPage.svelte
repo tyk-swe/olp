@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -30,7 +31,7 @@
   }));
 </script>
 
-<svelte:head><title>Tool calls · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Tool calls" />
 <form
   class="filter-bar"
   onsubmit={(event) => {

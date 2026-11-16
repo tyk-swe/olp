@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import AggregateBudgetPanel from './AggregateBudgetPanel.svelte';
@@ -6,7 +7,7 @@
   const access = useRole();
 </script>
 
-<svelte:head><title>Spending limit · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Spending limit" />
 
 {#if access.globalScope}
   <AggregateBudgetPanel

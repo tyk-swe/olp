@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -361,7 +362,7 @@
   }
 </script>
 
-<svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Guardrails" />
 {#if error && !definitionOpen && !policyOpen}<Callout tone="danger"
     >{error}</Callout
   >{/if}

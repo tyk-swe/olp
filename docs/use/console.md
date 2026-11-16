@@ -90,8 +90,13 @@ roles can inspect import status but cannot change it. See
 
 ## Installation identity
 
-The General tab under Settings edits the installation's display name and
-logo. Changes require installation-wide settings authority and the observed
+The General tab under Settings edits the installation's display name, logo
+and brand color. The sign-in page, browser tab titles, favicon and console
+navigation show them, so `GET /api/v1/branding` is readable without signing
+in. The brand color is a `#rrggbb` value that must give white button text at
+least 4.5:1 contrast. The console derives lighter and darker shades from it
+that keep text readable on dark and paper surfaces. Leave it empty to use the
+default accent. Changes require installation-wide settings authority and the observed
 ETag. A logo must be a validated PNG or JPEG no larger than 64 KiB and 512 by
 512 pixels. Branding does not change API endpoints or portable configuration.
 Generated CLI and MCP branding operations use the same authority, validation and

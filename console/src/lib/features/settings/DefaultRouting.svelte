@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
@@ -9,7 +10,7 @@
   const access = useRole();
 </script>
 
-<svelte:head><title>Default routing · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Default routing" />
 
 <p class="lede">
   Applies to every route unless an organization, project or route sets its own.

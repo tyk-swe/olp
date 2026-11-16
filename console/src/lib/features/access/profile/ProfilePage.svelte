@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
@@ -453,7 +454,7 @@
   }
 </script>
 
-<svelte:head><title>Your profile · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Your profile" />
 
 <PageHeader
   title="Your profile"

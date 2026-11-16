@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
@@ -63,7 +64,7 @@
   }
 </script>
 
-<svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Route templates" />
 <a class="text-button" href={resolve('routes')}>All routes</a>
 <div class="toolbar">
   <div class="page-actions">

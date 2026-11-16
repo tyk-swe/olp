@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -118,7 +119,7 @@
   }
 </script>
 
-<svelte:head><title>Organizations · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Organizations" />
 <PageHeader
   title="Organizations"
   description="Group projects under shared management and budgets. Installation roles still determine which operations each person can perform."

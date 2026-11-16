@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -45,7 +46,7 @@
   }
 </script>
 
-<svelte:head><title>Tool call · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Tool call" />
 <a class="text-button" href={resolve('activity/tool-calls')}>All tool calls</a>
 <PageHeader title="Tool call" />
 {#if call.error}

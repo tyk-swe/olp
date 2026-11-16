@@ -11732,6 +11732,17 @@ type InspectedTurnScope string
 
 // InstallationBrandingResponse defines model for InstallationBrandingResponse.
 type InstallationBrandingResponse struct {
+	// Accent Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text.
+	Accent string `json:"accent"`
+
+	// AccentScale Accessible accent shades derived from accent, or null for the default palette.
+	AccentScale nullable.Nullable[struct {
+		N300 string `json:"300"`
+		N400 string `json:"400"`
+		N500 string `json:"500"`
+		N600 string `json:"600"`
+		N700 string `json:"700"`
+	}] `json:"accent_scale"`
 	Etag string `json:"etag"`
 
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
@@ -16489,10 +16500,6 @@ type SessionListResponse struct {
 type SessionResponse struct {
 	CsrfToken string `json:"csrf_token"`
 
-	// InstallationLogo Embedded PNG/JPEG installation logo; empty uses the default brand mark.
-	InstallationLogo *string `json:"installation_logo,omitempty"`
-	InstallationName string  `json:"installation_name"`
-
 	// Operations The management operations the signed-in member may perform now; the console shows only what the server would admit.
 	Operations []ManagementOperation `json:"operations"`
 
@@ -17023,6 +17030,9 @@ type UpdateGuardrailRequestOnError string
 
 // UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
 type UpdateInstallationBrandingRequest struct {
+	// Accent Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text.
+	Accent string `json:"accent"`
+
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
 	Logo string `json:"logo"`
 	Name string `json:"name"`

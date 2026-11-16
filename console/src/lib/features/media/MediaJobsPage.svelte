@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { mediaJobKeys } from '#lib/features/media/mediaJobKeys.js';
@@ -172,7 +173,7 @@
   }
 </script>
 
-<svelte:head><title>Media jobs · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Media jobs" />
 
 {#if jobId}
   <PageHeader

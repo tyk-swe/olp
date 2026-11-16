@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import DisclosureSettings from './DisclosureSettings.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { listCatalog, getPublicCatalog } from './api';
@@ -40,7 +41,7 @@
   }
 </script>
 
-<svelte:head><title>Model catalog · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Model catalog" />
 {#snippet refresh()}<button
     class="button button-secondary"
     disabled={catalog.isFetching}

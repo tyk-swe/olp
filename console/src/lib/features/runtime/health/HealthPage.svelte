@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
@@ -93,7 +94,7 @@
   }
 </script>
 
-<svelte:head><title>Health · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Health" />
 
 <PageHeader
   title="Health"

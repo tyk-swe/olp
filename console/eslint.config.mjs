@@ -73,7 +73,7 @@ export default [
       'src/lib/features/providers/providers.ts',
       'src/lib/features/providers/revisions.ts',
       'src/lib/features/resources/retrieval.ts',
-      'src/lib/features/settings/branding.ts',
+      'src/lib/shell/branding/branding.ts',
       'src/lib/features/usage/discounts.ts',
       'src/lib/features/usage/pricing.ts',
       'src/lib/features/usage/pricingSources.ts',

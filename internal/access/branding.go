@@ -17,15 +17,29 @@ import (
 const maxLogoBytes = 64 << 10
 
 type brandingIdentity struct {
-	Name string `json:"name"`
-	Logo string `json:"logo"`
-	ETag string `json:"etag"`
+	Name        string       `json:"name"`
+	Logo        string       `json:"logo"`
+	Accent      string       `json:"accent"`
+	AccentScale *accentScale `json:"accent_scale"`
+	ETag        string       `json:"etag"`
 }
 
-func (s *Server) branding(r *http.Request, _ Principal) (httpkit.Reply, error) {
-	var identity brandingIdentity
-	err := s.Pool.QueryRow(r.Context(), "SELECT name,logo,branding_etag::text FROM olp.installation WHERE singleton").Scan(&identity.Name, &identity.Logo, &identity.ETag)
-	return httpkit.Detail(identity, identity.ETag), err
+func newBrandingIdentity(name, logo, accent, etag string) brandingIdentity {
+	return brandingIdentity{Name: name, Logo: logo, Accent: accent, AccentScale: accentScaleOf(accent), ETag: etag}
+}
+
+func accentScaleOf(accent string) *accentScale {
+	scale, err := deriveAccent(accent)
+	if err != nil {
+		return nil
+	}
+	return &scale
+}
+
+func (s *Server) branding(r *http.Request) (httpkit.Reply, error) {
+	var name, logo, accent, etag string
+	err := s.Pool.QueryRow(r.Context(), "SELECT name,logo,accent,branding_etag::text FROM olp.installation WHERE singleton").Scan(&name, &logo, &accent, &etag)
+	return httpkit.Detail(newBrandingIdentity(name, logo, accent, etag), etag), err
 }
 
 func validateLogo(raw string) (string, error) {
@@ -52,8 +66,9 @@ func validateLogo(raw string) (string, error) {
 
 func (s *Server) updateBranding(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var input struct {
-		Name string  `json:"name"`
-		Logo *string `json:"logo"`
+		Name   string  `json:"name"`
+		Logo   *string `json:"logo"`
+		Accent *string `json:"accent"`
 	}
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -69,20 +84,27 @@ func (s *Server) updateBranding(r *http.Request, _ Principal) (httpkit.Reply, er
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	if input.Accent == nil {
+		return httpkit.Reply{}, httpkit.Invalid("accent", "Include a brand color, or an empty string to use the default accent.")
+	}
+	accent, err := normalizeAccent(*input.Accent)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	var identity brandingIdentity
-	if err = tx.QueryRow(r.Context(), "SELECT name,logo,branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&identity.Name, &identity.Logo, &identity.ETag); err != nil {
+	var current string
+	if err = tx.QueryRow(r.Context(), "SELECT branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = httpkit.Match(r, identity.ETag); err != nil {
+	if err = httpkit.Match(r, current); err != nil {
 		return httpkit.Reply{}, err
 	}
-	identity = brandingIdentity{Name: input.Name, Logo: logo, ETag: httpkit.NewID()}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,branding_etag=$3 WHERE singleton", identity.Name, identity.Logo, identity.ETag); err != nil {
+	identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "branding.update", "installation", s.Installation, "success"); err != nil {

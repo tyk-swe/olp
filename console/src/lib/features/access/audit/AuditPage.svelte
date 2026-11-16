@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import Advanced from '#lib/components/Advanced.svelte';
   import Callout from '#lib/components/Callout.svelte';
@@ -73,7 +74,7 @@
   }
 </script>
 
-<svelte:head><title>Audit · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Audit" />
 
 <PageHeader
   title="Audit log"

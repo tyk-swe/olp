@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
@@ -105,7 +106,7 @@
   }
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <PageHeader
   title={revisions.data?.[0]?.slug ?? 'Route'}

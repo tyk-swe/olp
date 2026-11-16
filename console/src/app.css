@@ -6,9 +6,10 @@
 }
 
 /* Signal palette. The console is dark-only: a near-black canvas, cool
-   carbon surfaces, hairline greys and frost text, with electric blue as the
-   single brand accent (primary actions, focus, live status, indicators and
-   charts). Status colours are functional only: green for success, amber for
+   carbon surfaces, hairline greys and frost text, with one brand accent
+   (primary actions, focus, live status, indicators and charts). The accent
+   defaults to electric blue, and an installation brand color replaces the
+   --color-accent-* steps at runtime. Status colours are functional only: green for success, amber for
    warnings, red for failures. Components consume the semantic tokens below,
    never the raw colours, so paper cards can re-map them for their
    descendants. Every text pair clears WCAG AA on every surface it sits on. */
@@ -28,11 +29,11 @@
   --color-white: #f8f9fb;
   --color-paper: #eceff4;
   --color-paper-shade: #dde2ea;
-  --color-blue-300: #8fb3ff;
-  --color-blue-400: #5c8dff;
-  --color-blue-500: #2f64ee;
-  --color-blue-600: #2656d9;
-  --color-blue-700: #1f4fd1;
+  --color-accent-300: #8fb3ff;
+  --color-accent-400: #5c8dff;
+  --color-accent-500: #2f64ee;
+  --color-accent-600: #2656d9;
+  --color-accent-700: #1f4fd1;
   --color-green: #86d19b;
   --color-amber: #f0b34a;
   --color-red: #f07a6e;
@@ -50,26 +51,26 @@
   --border: var(--color-stroke);
   --border-hairline: var(--color-hairline);
   --border-strong: var(--color-graphite);
-  --accent: var(--color-blue-400);
-  --accent-strong: var(--color-blue-300);
-  --accent-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
-  --signal: var(--color-blue-400);
-  --signal-soft: color-mix(in srgb, var(--color-blue-400) 16%, transparent);
+  --accent: var(--color-accent-400);
+  --accent-strong: var(--color-accent-300);
+  --accent-soft: color-mix(in srgb, var(--color-accent-500) 14%, transparent);
+  --signal: var(--color-accent-400);
+  --signal-soft: color-mix(in srgb, var(--color-accent-400) 16%, transparent);
   --metric: var(--color-green);
   --caution: var(--color-amber);
-  --chart: var(--color-blue-400);
+  --chart: var(--color-accent-400);
   --success: var(--color-green);
   --success-soft: color-mix(in srgb, var(--color-green) 10%, var(--color-void));
   --warning: var(--color-amber);
   --warning-soft: color-mix(in srgb, var(--color-amber) 10%, var(--color-void));
   --danger: var(--color-red);
   --danger-soft: color-mix(in srgb, var(--color-red) 10%, var(--color-void));
-  --focus: var(--color-blue-400);
-  --ring: color-mix(in srgb, var(--color-blue-400) 28%, transparent);
+  --focus: var(--color-accent-400);
+  --ring: color-mix(in srgb, var(--color-accent-400) 28%, transparent);
   --code-bg: var(--color-carbon);
   --code-foreground: var(--color-frost);
-  --button-fill: var(--color-blue-500);
-  --button-fill-hover: var(--color-blue-600);
+  --button-fill: var(--color-accent-500);
+  --button-fill-hover: var(--color-accent-600);
   --button-fill-text: #ffffff;
   --backdrop: rgb(2 3 6 / 72%);
   --shadow-overlay:
@@ -167,7 +168,7 @@ body {
 
 /* Paper cards are the only bright objects on the canvas. Re-mapping the
    semantic tokens here restyles every descendant (inputs, buttons, banners)
-   for the paper surface without per-component overrides. Blue text uses the
+   for the paper surface without per-component overrides. Accent text uses the
    deeper 700 step, and green and amber stay non-text inside: neither clears
    4.5:1 on paper. */
 .card-light {
@@ -183,11 +184,11 @@ body {
   --border: #bfc6d2;
   --border-hairline: #d3d9e3;
   --border-strong: #6b7485;
-  --accent: var(--color-blue-700);
-  --accent-strong: var(--color-blue-700);
-  --accent-soft: color-mix(in srgb, var(--color-blue-500) 10%, transparent);
-  --signal: var(--color-blue-700);
-  --signal-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
+  --accent: var(--color-accent-700);
+  --accent-strong: var(--color-accent-700);
+  --accent-soft: color-mix(in srgb, var(--color-accent-500) 10%, transparent);
+  --signal: var(--color-accent-700);
+  --signal-soft: color-mix(in srgb, var(--color-accent-500) 14%, transparent);
   --success: var(--color-void);
   --success-soft: color-mix(
     in srgb,
@@ -206,12 +207,12 @@ body {
     var(--color-red-ink) 10%,
     var(--color-paper)
   );
-  --focus: var(--color-blue-700);
-  --ring: color-mix(in srgb, var(--color-blue-500) 22%, transparent);
+  --focus: var(--color-accent-700);
+  --ring: color-mix(in srgb, var(--color-accent-500) 22%, transparent);
   --code-bg: var(--color-void);
   --code-foreground: var(--color-frost);
-  --button-fill: var(--color-blue-500);
-  --button-fill-hover: var(--color-blue-700);
+  --button-fill: var(--color-accent-500);
+  --button-fill-hover: var(--color-accent-700);
   --button-fill-text: #ffffff;
   border-color: var(--border-hairline);
   background: var(--color-paper);
@@ -246,7 +247,8 @@ body {
   background: var(--color-paper);
   box-shadow:
     0 1px 0 0 rgb(255 255 255 / 60%) inset,
-    0 24px 60px -28px rgb(47 100 238 / 35%);
+    0 24px 60px -28px
+      color-mix(in srgb, var(--color-accent-500) 35%, transparent);
 }
 
 .table-shell {
@@ -749,7 +751,7 @@ button:not(:disabled),
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-blue-500) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent-500) 55%, transparent);
   color: var(--foreground-hover);
 }
 
@@ -773,7 +775,7 @@ button:not(:disabled),
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
   border-radius: var(--radius-control);
-  background: var(--color-blue-500);
+  background: var(--color-accent-500);
   color: #ffffff;
   transform: translateY(-160%);
   transition: transform var(--motion);
@@ -858,7 +860,7 @@ button:not(:disabled),
   background: var(--button-fill-hover);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 14%),
-    0 10px 28px -14px var(--color-blue-500);
+    0 10px 28px -14px var(--color-accent-500);
 }
 
 .button-secondary {

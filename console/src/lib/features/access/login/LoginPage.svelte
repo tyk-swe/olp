@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import { useBranding } from '#lib/shell/branding/branding.js';
   import { beginSAMLLogin } from '../saml/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -128,19 +130,21 @@
     void loadCapabilities();
   });
 
+  const branding = useBranding();
+
   onDestroy(() => {
     publicAuthController.abort();
     authLifecycle.abortAuthenticationWork();
   });
 </script>
 
-<svelte:head><title>Sign in · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Sign in" />
 
 <SetupFrame>
   <div class="heading">
     <p class="eyebrow">Operator console</p>
     <h1>Sign in</h1>
-    <p>Sign in to manage this installation.</p>
+    <p>Sign in to manage {branding.data?.name ?? 'this installation'}.</p>
   </div>
 
   {#if sessionExpired}<p class="session-notice" role="status">
