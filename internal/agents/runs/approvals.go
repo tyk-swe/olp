@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -77,7 +77,7 @@ func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a ke
 	if err != nil {
 		return "", err
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	_, err = tx.Exec(ctx, `INSERT INTO olp.agent_approvals(id,api_key_id,project_id,run_id,binding_digest,expires_at) SELECT $1,$2,$3,r.id,$5,$6 FROM olp.agent_runs r JOIN olp.agent_publications p ON p.id=$7 AND p.project_id=r.project_id AND NOT p.retired JOIN olp.live_agent_publication_revisions v ON v.id=$8 AND v.publication_id=p.id AND p.latest_revision_id=v.id WHERE r.id=$4 AND r.api_key_id=$2 AND r.project_id=$3 AND encode(r.principal_digest,'hex')=$9 AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.definition->'toolset'->'tools') t WHERE t->>'alias'=$10) AND ($11='' OR EXISTS(SELECT 1 FROM olp.route_revisions rr JOIN olp.routes route ON route.id=rr.route_id WHERE rr.id=r.route_revision_id AND rr.id::text=$11 AND route.latest_revision_id=rr.id AND route.state='active'))`, id, a.ID, *a.ProjectID, b.RunID, digest, expires, b.ToolsetID, b.ToolsetRevisionID, b.PrincipalDigest, b.ToolAlias, b.RouteRevisionID)
 	if err != nil {
 		return "", err

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -80,65 +81,65 @@ func device(authorization *abi.DeviceAuthorization) *deviceAuthorization {
 }
 
 func enrollmentIDs(r *http.Request) (string, string, error) {
-	providerID, err := access.IDParam(r, "provider_id")
+	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return "", "", err
 	}
-	enrollmentID, err := access.IDParam(r, "enrollment_id")
+	enrollmentID, err := httpkit.IDParam(r, "enrollment_id")
 	return providerID, enrollmentID, err
 }
 
-func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (access.Reply, error) {
-	providerID, err := access.IDParam(r, "provider_id")
+func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input grantStart
 	if r.ContentLength != 0 {
-		if err := access.DecodeUnique(r, &input, 1<<10); err != nil {
-			return access.Reply{}, err
+		if err := httpkit.DecodeUnique(r, &input, 1<<10); err != nil {
+			return httpkit.Reply{}, err
 		}
 	}
 	requestedSlot, err := optionalSlotID(input.SlotID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
 	current, err := readProvider(ctx, s.access.Pool, providerID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err := access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Match(r, current.ETag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	document := current.Connection.Document()
 	if !document.Grant() {
-		return access.Reply{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
+		return httpkit.Reply{}, httpkit.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
 	}
 	slots, err := loadSlots(ctx, s.access.Pool, providerID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	slot, err := enrollmentSlot(slots, requestedSlot)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	client, err := s.prober.Client(ctx, current.target(nil))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	enrollment, err := grants.Start(ctx, s.plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: document.ProfileRevision, ProfileID: document.ProfileID, StartedBy: p.ID}, document.Options.PluginOptions, client)
 	if err != nil {
-		return access.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
+		return httpkit.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
 	}
-	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (access.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (httpkit.Reply, error) {
 		if err := enrollment.Save(ctx, tx, s.access); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		return access.Reply{Status: 201, Body: started(enrollment)}, nil
+		return httpkit.Reply{Status: 201, Body: started(enrollment)}, nil
 	})
 	return reply, err
 }
@@ -147,9 +148,9 @@ func optionalSlotID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	parsed, err := access.ParseUUID(raw)
+	parsed, err := httpkit.ParseUUID(raw)
 	if err != nil {
-		return "", access.Invalid("slot_id", "Use a credential slot identifier.")
+		return "", httpkit.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	return parsed, nil
 }
@@ -160,46 +161,46 @@ func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
 			return slot, nil
 		}
 	}
-	return slotRow{}, access.Invalid("slot_id", "Unknown credential slot for this connection.")
+	return slotRow{}, httpkit.Invalid("slot_id", "Unknown credential slot for this connection.")
 }
 
-func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input grantContinuation
-	if err := access.DecodeUnique(r, &input, 2*maxGrantInput); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.DecodeUnique(r, &input, 2*maxGrantInput); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if input.Input == "" || len(input.Input) > maxGrantInput || strings.ContainsRune(input.Input, 0) {
-		return access.Reply{}, access.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
+		return httpkit.Reply{}, httpkit.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
 	}
 	ctx := r.Context()
 	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
 	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	enrollment, err := grants.Claim(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	completed, err := s.exchange(r, current, enrollment, input.Input)
 	if err != nil {
-		return access.Reply{}, s.failedEnrollment(r, principal.Actor(), providerID, err)
+		return httpkit.Reply{}, s.failedEnrollment(r, principal.Actor(), providerID, err)
 	}
-	return access.Reply{Status: 201, ETag: completed.ETag, Body: completed}, nil
+	return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, nil
 }
 
 func (s *Server) exchange(r *http.Request, current *record, enrollment grants.Enrollment, input string) (enrollmentCompletion, error) {
@@ -229,7 +230,7 @@ func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrol
 	if err := principal.Project(locked.ProjectID, access.Change); err != nil {
 		return enrollmentCompletion{}, err
 	}
-	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
+	stale := httpkit.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
 	change, err := connection.Diff(current.Connection.Document(), locked.Connection.Document())
 	if err != nil {
 		return enrollmentCompletion{}, err
@@ -284,57 +285,57 @@ func completion(providerID, etag string, credential grants.Credential) enrollmen
 	return enrollmentCompletion{ProviderID: providerID, ETag: etag, CredentialID: credential.ID, CredentialVersion: credential.Version, Principal: credential.Principal}
 }
 
-func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
 	tx, err := s.access.Pool.Begin(ctx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
 	principal, err := s.access.Reauthorize(r, tx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	enrollment, standing, err := grants.Watch(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if standing.Ended {
 		if err := access.Audit(ctx, tx, r, principal.Actor(), grantEnrollAction, "provider", providerID, "failure"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if enrollment == nil {
-		return access.OK(grantStatus(current, standing)), nil
+		return httpkit.OK(grantStatus(current, standing)), nil
 	}
 	staged, err := s.poll(r, current, *enrollment)
 	if err == nil {
-		return access.OK(enrollmentStatus{Status: grants.Completed, Completion: &staged}), nil
+		return httpkit.OK(enrollmentStatus{Status: grants.Completed, Completion: &staged}), nil
 	}
 	settled, settleErr := enrollment.Settle(ctx, s.access.Pool, err)
 	if (settleErr != nil || settled.Status != grants.Pending) && !errors.Is(settleErr, pgx.ErrNoRows) {
 		if audited := s.auditFailedEnrollment(r, principal.Actor(), providerID); audited != nil {
-			return access.Reply{}, audited
+			return httpkit.Reply{}, audited
 		}
 	}
 	if settleErr != nil {
-		return access.Reply{}, settleErr
+		return httpkit.Reply{}, settleErr
 	}
-	return access.OK(grantStatus(current, settled)), nil
+	return httpkit.OK(grantStatus(current, settled)), nil
 }
 
 func (s *Server) poll(r *http.Request, current *record, enrollment grants.Enrollment) (enrollmentCompletion, error) {
@@ -380,10 +381,10 @@ func (s *Server) auditFailedEnrollment(r *http.Request, actor access.Actor, prov
 	return tx.Commit(ctx)
 }
 
-func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	reply, err := access.Transact(s.access, r, func(tx pgx.Tx, principal access.Principal) (*record, error) {
 		current, err := readProvider(r.Context(), tx, providerID)
@@ -391,11 +392,11 @@ func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (acc
 			return nil, err
 		}
 		return current, principal.Project(current.ProjectID, access.Change)
-	}, func(tx pgx.Tx, principal access.Principal, _ *record) (access.Reply, error) {
+	}, func(tx pgx.Tx, principal access.Principal, _ *record) (httpkit.Reply, error) {
 		if err := grants.Cancel(r.Context(), tx, providerID, enrollmentID, principal.ID); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		return access.Reply{Status: 204}, nil
+		return httpkit.Reply{Status: 204}, nil
 	})
 	return reply, err
 }

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -53,7 +53,7 @@ func parseFOCUS(provider Type, settings json.RawMessage) (Spec, error) {
 	spec := FOCUS{Provider: provider, CostBasis: Cost, StartDate: input.StartDate}
 	if input.CostBasis != nil {
 		if *input.CostBasis != Cost && *input.CostBasis != Charge {
-			return nil, access.Invalid("settings.cost_basis", "cost_basis must be cost or charge")
+			return nil, httpkit.Invalid("settings.cost_basis", "cost_basis must be cost or charge")
 		}
 		spec.CostBasis = *input.CostBasis
 	}
@@ -69,7 +69,7 @@ func (f FOCUS) Start() (*time.Time, error) {
 	}
 	start, err := time.ParseInLocation(time.DateOnly, *f.StartDate, time.UTC)
 	if err != nil {
-		return nil, access.Invalid("settings.start_date", "start_date must be a YYYY-MM-DD date")
+		return nil, httpkit.Invalid("settings.start_date", "start_date must be a YYYY-MM-DD date")
 	}
 	return &start, nil
 }

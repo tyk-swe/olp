@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -155,20 +156,20 @@ func orEmpty(list []string) []string {
 	return list
 }
 
-func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record) (access.Reply, error) {
+func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record) (httpkit.Reply, error) {
 	slots, err := loadSlots(ctx, q, current.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	activeCredentials := map[string]*string{}
 	if current.ActiveRevisionID != nil {
 		var encoded []byte
 		if err = q.QueryRow(ctx, "SELECT slots FROM olp.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		var published []routing.RevisionSlot
 		if err = json.Unmarshal(encoded, &published); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		for _, slot := range published {
 			activeCredentials[slot.ID] = slot.CredentialID
@@ -176,7 +177,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	}
 	models, err := enabledModels(ctx, q, current.ID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var credentialIDs []string
 	for _, id := range activeCredentials {
@@ -186,7 +187,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	}
 	generations, err := release.ReadGrantGenerations(ctx, q, credentialIDs)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	live, connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
 	items := make([]slotReply, len(slots))
@@ -199,7 +200,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 			CoolingDown: quota.coolingDown, ValidatedAt: row.validationTime(current.Connection.Document(), models), Usage: quota.usage,
 		}
 	}
-	return access.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection}, current.SlotsETag), nil
+	return httpkit.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection}, current.SlotsETag), nil
 }
 
 type slotList struct {
@@ -277,14 +278,14 @@ func (s *Server) quotaUnavailable(err error) {
 	s.log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
-func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) slots(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.slotList(r.Context(), s.access.Pool, current)
 }
@@ -294,17 +295,17 @@ func (in slotInput) normalized(slotID string) (slotInput, error) {
 	if err != nil {
 		return slotInput{}, err
 	}
-	if err := access.ValidText("slot.name", in.Name, 100); err != nil {
+	if err := httpkit.ValidText("slot.name", in.Name, 100); err != nil {
 		return slotInput{}, err
 	}
 	if in.Priority != nil && (*in.Priority < 0 || *in.Priority > 32767) {
-		return slotInput{}, access.Invalid("slot.priority", "Use a priority from 0 to 32767.")
+		return slotInput{}, httpkit.Invalid("slot.priority", "Use a priority from 0 to 32767.")
 	}
 	if in.Weight != nil && (*in.Weight < 1 || *in.Weight > 1000000) {
-		return slotInput{}, access.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
+		return slotInput{}, httpkit.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
 	}
 	if len(in.AllowedAPIKeys) > 100 || len(in.AllowedRoutes) > 100 || len(in.AllowedModels) > 2000 {
-		return slotInput{}, access.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
+		return slotInput{}, httpkit.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
 	}
 	keys, err := apiKeyIDs(in.AllowedAPIKeys)
 	if err != nil {
@@ -312,7 +313,7 @@ func (in slotInput) normalized(slotID string) (slotInput, error) {
 	}
 	for _, route := range in.AllowedRoutes {
 		if !routeidentity.ValidSlug(route) {
-			return slotInput{}, access.Invalid("slot.allowed_routes", "Use route slugs.")
+			return slotInput{}, httpkit.Invalid("slot.allowed_routes", "Use route slugs.")
 		}
 	}
 	for _, model := range in.AllowedModels {
@@ -336,9 +337,9 @@ func slotPathID(given, path string) (string, error) {
 	if given == "" {
 		return "", nil
 	}
-	id, err := access.ParseUUID(given)
+	id, err := httpkit.ParseUUID(given)
 	if err != nil || (id != "00000000-0000-0000-0000-000000000000" && id != path) {
-		return "", access.Invalid("slot.id", "The slot id must match the path.")
+		return "", httpkit.Invalid("slot.id", "The slot id must match the path.")
 	}
 	return id, nil
 }
@@ -349,9 +350,9 @@ func apiKeyIDs(keys []string) ([]string, error) {
 	}
 	ids := make([]string, len(keys))
 	for i, key := range keys {
-		id, err := access.ParseUUID(key)
+		id, err := httpkit.ParseUUID(key)
 		if err != nil {
-			return nil, access.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
+			return nil, httpkit.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
 		}
 		ids[i] = id
 	}
@@ -362,63 +363,63 @@ func credentialVersionID(given *string) (*string, error) {
 	if given == nil {
 		return nil, nil
 	}
-	id, err := access.ParseUUID(*given)
+	id, err := httpkit.ParseUUID(*given)
 	if err != nil {
-		return nil, access.Invalid("slot.credential_version_id", "Use a credential identifier.")
+		return nil, httpkit.Invalid("slot.credential_version_id", "Use a credential identifier.")
 	}
 	return &id, nil
 }
 
-func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) writeSlot(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	a := s.access
-	id, err := access.IDParam(r, "provider_id")
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	slotID, err := access.IDParam(r, "slot_id")
+	slotID, err := httpkit.IDParam(r, "slot_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var request slotWrite
-	if err = access.DecodeUnique(r, &request, 1<<20); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.DecodeUnique(r, &request, 1<<20); err != nil {
+		return httpkit.Reply{}, err
 	}
 	slot, err := request.Slot.normalized(slotID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	input := slotWrite{Slot: slot, Credential: request.Credential, CredentialReference: request.CredentialReference}
 	source, err := decodeCredential(input.Credential, input.CredentialReference)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, external := source.(externalCredential); external && slot.CredentialVersionID != nil {
-		return access.Reply{}, access.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
+		return httpkit.Reply{}, httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
 		slots, err := loadSlots(r.Context(), tx, id)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		existing := findSlot(slots, slotID)
 		if err = matchSlot(r, current, existing); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err := s.saveDraftSlot(r.Context(), tx, current, slotID, slot, source, existing, len(slots)); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		updated, err := readProvider(r.Context(), tx, id)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		result, err := s.slotList(r.Context(), tx, updated)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		result.ParentMutation = &access.ParentMutation{Previous: current.ETag, Current: updated.ETag}
+		result.ParentMutation = &httpkit.ParentMutation{Previous: current.ETag, Current: updated.ETag}
 		return result, nil
 	})
 }
@@ -426,7 +427,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
 	if existing == nil && slotCount >= maxSlots {
-		return access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
+		return httpkit.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
 	}
 	enabled, priority, weight := valueOr(slot.Enabled, true), valueOr(slot.Priority, 0), valueOr(slot.Weight, 1)
 	credentialID, err := s.slotCredential(ctx, tx, current, slot, source, existing)
@@ -453,10 +454,10 @@ func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record,
 	switch {
 	case source != nil:
 		if !current.Connection.Document().CredentialRequired() {
-			return nil, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+			return nil, httpkit.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
 		if current.Connection.Document().Grant() {
-			return nil, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+			return nil, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
 		stored, _, err := s.storeCredential(ctx, tx, current.ID, source)
 		return &stored, err
@@ -465,13 +466,13 @@ func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record,
 		err := tx.QueryRow(ctx, "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *slot.CredentialVersionID, current.ID).Scan(&revoked, &lapsed)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return nil, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
+			return nil, httpkit.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
 		case err != nil:
 			return nil, err
 		case revoked:
-			return nil, access.Fail(422, "credential_revoked", "That credential version is revoked.")
+			return nil, httpkit.Fail(422, "credential_revoked", "That credential version is revoked.")
 		case lapsed:
-			return nil, access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
+			return nil, httpkit.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
 		}
 		return slot.CredentialVersionID, nil
 	case existing != nil:
@@ -484,32 +485,32 @@ func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record,
 // slot precondition without borrowing authority over unrelated pool changes.
 func matchSlot(r *http.Request, current *record, slot *slotRow) error {
 	if r.Header.Get("If-Match") == `"`+current.SlotsETag+`"` || slot == nil {
-		return access.Match(r, current.SlotsETag)
+		return httpkit.Match(r, current.SlotsETag)
 	}
-	return access.Match(r, slot.ETag)
+	return httpkit.Match(r, slot.ETag)
 }
 
-func (s *Server) getSlot(r *http.Request, p access.Principal) (access.Reply, error) {
-	providerID, err := access.IDParam(r, "provider_id")
+func (s *Server) getSlot(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	slotID, err := access.IDParam(r, "slot_id")
+	slotID, err := httpkit.IDParam(r, "slot_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, providerID); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := loadSlots(r.Context(), s.access.Pool, providerID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	slot := findSlot(rows, slotID)
 	if slot == nil {
-		return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+		return httpkit.Reply{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 	}
-	return access.Detail(struct {
+	return httpkit.Detail(struct {
 		slotReply
 		ProviderID string `json:"provider_id"`
 		IsDefault  bool   `json:"is_default"`
@@ -517,43 +518,43 @@ func (s *Server) getSlot(r *http.Request, p access.Principal) (access.Reply, err
 	}{slot.reply(), providerID, slot.Default, slot.ETag}, slot.ETag), nil
 }
 
-func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
-	providerID, err := access.IDParam(r, "provider_id")
+func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	slotID, err := access.IDParam(r, "slot_id")
+	slotID, err := httpkit.IDParam(r, "slot_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	input := map[string]string{"provider_id": providerID, "slot_id": slotID}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
 		rows, err := loadSlots(r.Context(), tx, providerID)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		slot := findSlot(rows, slotID)
 		if slot == nil {
-			return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+			return httpkit.Reply{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 		}
 		if err = matchSlot(r, current, slot); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		etag, err := s.deleteDraftSlot(r.Context(), tx, providerID, slotID, slot)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		return access.Reply{Status: http.StatusNoContent, ParentMutation: &access.ParentMutation{Previous: current.ETag, Current: etag}}, nil
+		return httpkit.Reply{Status: http.StatusNoContent, ParentMutation: &httpkit.ParentMutation{Previous: current.ETag, Current: etag}}, nil
 	})
 }
 
 func (s *Server) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
 	var err error
 	if slot.Default {
-		return "", access.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
+		return "", httpkit.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
 	}
 	if err = grants.DiscardSlotEnrollments(ctx, tx, providerID, slotID); err != nil {
 		return "", err

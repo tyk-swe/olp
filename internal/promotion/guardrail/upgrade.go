@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -24,10 +24,10 @@ func Upgrade(document contract.ConfigurationDocument) (contract.ConfigurationDoc
 		return document, nil
 	}
 	if len(promotion.ValueOf(document.GuardrailPolicies)) > 0 || len(promotion.ValueOf(document.GuardrailAttachments)) > 0 {
-		return contract.ConfigurationDocument{}, access.Invalid("guardrails", "Version 1 cannot mix new guardrail policies with legacy content policies.")
+		return contract.ConfigurationDocument{}, httpkit.Invalid("guardrails", "Version 1 cannot mix new guardrail policies with legacy content policies.")
 	}
 	if slices.ContainsFunc(promotion.ValueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Configuration != nil }) {
-		return contract.ConfigurationDocument{}, access.Invalid("guardrails", "Version 1 cannot contain typed guardrail configuration.")
+		return contract.ConfigurationDocument{}, httpkit.Invalid("guardrails", "Version 1 cannot contain typed guardrail configuration.")
 	}
 	definitions, err := promotion.TryMap(promotion.ValueOf(document.Guardrails), upgradeGuardrail)
 	if err != nil {
@@ -51,10 +51,10 @@ func refuseLegacy(document contract.ConfigurationDocument) error {
 		_, set := promotion.Present(r.ContentPolicy)
 		return set
 	}) {
-		return access.Invalid("content_policy", "Use version 2 guardrail definitions, policies and attachments.")
+		return httpkit.Invalid("content_policy", "Use version 2 guardrail definitions, policies and attachments.")
 	}
 	if slices.ContainsFunc(promotion.ValueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Policy != nil }) {
-		return access.Invalid("guardrails", "Use typed configuration in version 2.")
+		return httpkit.Invalid("guardrails", "Use typed configuration in version 2.")
 	}
 	return nil
 }
@@ -67,7 +67,7 @@ func upgradeGuardrail(g contract.ConfigurationGuardrail) (contract.Configuration
 		return contentpolicy.Rule{ID: r.Id, Phase: string(r.Phase), Pattern: r.Pattern, Action: string(r.Action), Replacement: promotion.ValueOf(r.Replacement)}
 	})
 	if contentpolicy.Validate(&contentpolicy.Policy{Rules: rules}) != nil {
-		return contract.ConfigurationGuardrail{}, access.Invalid("guardrails", "Use valid bounded RE2 block or redact rules.")
+		return contract.ConfigurationGuardrail{}, httpkit.Invalid("guardrails", "Use valid bounded RE2 block or redact rules.")
 	}
 	return regexGuardrail(g.Project, g.Name, g.Type, rules, 1000), nil
 }
@@ -79,7 +79,7 @@ func upgradeRoute(route contract.ConfigurationRouteEntry) (converted, error) {
 	}
 	raw, err := json.Marshal(policy)
 	if err != nil {
-		return converted{}, access.Invalid("content_policy", "Invalid legacy content policy.")
+		return converted{}, httpkit.Invalid("content_policy", "Invalid legacy content policy.")
 	}
 	project := route.Project.GetOrEmpty()
 	return legacyRoute(route.Slug, project, raw, int64(route.OverallTimeoutMs))
@@ -94,7 +94,7 @@ func withoutContentPolicy(route contract.ConfigurationRouteEntry) contract.Confi
 func legacyRoute(slug, project string, raw json.RawMessage, overallMS int64) (converted, error) {
 	policy, err := contentpolicy.Decode(raw)
 	if err != nil {
-		return converted{}, access.Invalid("content_policy", "Invalid legacy content policy.")
+		return converted{}, httpkit.Invalid("content_policy", "Invalid legacy content policy.")
 	}
 	if len(policy.Rules) == 0 {
 		return converted{}, nil

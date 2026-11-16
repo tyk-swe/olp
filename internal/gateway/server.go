@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -1133,7 +1133,7 @@ func configuredSink(sink events.Sink, log *slog.Logger) events.Sink {
 func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
 	authority, failure := s.gate.Authenticate(r, "models_read")
 	if failure != nil {
-		return keyauthority.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
+		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
 	}
 	return authority, nil
 }

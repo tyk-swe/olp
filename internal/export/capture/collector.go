@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -213,7 +213,7 @@ func (c *Collector) record(ctx context.Context, identity Identity, at time.Time)
 		return nil, err
 	}
 	record, err := json.Marshal(envelope{
-		Data: data, EventID: access.NewID(), OccurredAt: at.UTC().Format(time.RFC3339Nano), Outcome: identity.Outcome,
+		Data: data, EventID: httpkit.NewID(), OccurredAt: at.UTC().Format(time.RFC3339Nano), Outcome: identity.Outcome,
 		ProjectID: identity.ProjectID, Route: identity.Route, SourceID: c.requestID, Stream: "captures", Version: 1,
 	})
 	if err != nil {

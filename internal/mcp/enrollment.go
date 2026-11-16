@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -19,7 +19,7 @@ func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fail(http.StatusForbidden, "verified_individual_required", "permission_error", "A verified workload identity with an end user is required."))
 		return
 	}
-	serverID, err := access.IDParam(r, "server_id")
+	serverID, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
 		writeError(w, fail(http.StatusBadRequest, "invalid_server_id", "invalid_request_error", "Use a server UUID."))
 		return
@@ -27,7 +27,7 @@ func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		ToolsetID string `json:"toolset_id"`
 	}
-	if err := access.Decode(r, &input); err != nil {
+	if err := httpkit.Decode(r, &input); err != nil {
 		writeError(w, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a toolset identifier."))
 		return
 	}

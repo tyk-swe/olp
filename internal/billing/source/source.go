@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -145,7 +145,7 @@ func For(providerKind connectors.Kind) (Source, error) {
 			return source, nil
 		}
 	}
-	return Source{}, access.Invalid("billing_import", fmt.Sprintf("Billing imports are not supported for provider kind %q.", providerKind))
+	return Source{}, httpkit.Invalid("billing_import", fmt.Sprintf("Billing imports are not supported for provider kind %q.", providerKind))
 }
 
 func Lookup(kind Kind) (Source, bool) {
@@ -186,7 +186,7 @@ func (s Source) Open(scope json.RawMessage, stored []byte) (Import, error) {
 func jsonString(raw json.RawMessage) (string, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err != nil {
-		return "", access.Invalid("credential", "credential must be a string")
+		return "", httpkit.Invalid("credential", "credential must be a string")
 	}
 	return text, nil
 }

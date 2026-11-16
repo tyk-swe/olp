@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
@@ -64,7 +65,7 @@ func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 
 func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail) (*guardrails.Engine, error) {
 	if duplicate || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
-		return nil, access.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
+		return nil, httpkit.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
 	}
 	type resolvedEntry struct {
 		Entry
@@ -73,7 +74,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	resolved, err := promotion.TryMap(p.Entries, func(e Entry) (resolvedEntry, error) {
 		g, ok := definitions[keyOf(p.Project, e.Guardrail)]
 		if !ok {
-			return resolvedEntry{}, access.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
+			return resolvedEntry{}, httpkit.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
 		}
 		return resolvedEntry{e, g}, nil
 	})
@@ -89,7 +90,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	})
 	engine, err := guardrails.Compile(entries, revisions)
 	if err != nil {
-		return nil, access.Invalid("guardrail_policies", "Invalid guardrail entries.")
+		return nil, httpkit.Invalid("guardrail_policies", "Invalid guardrail entries.")
 	}
 	return engine, nil
 }
@@ -128,7 +129,7 @@ func applies(a Attachment, slug, project, organization string) bool {
 
 func checkRoute(engine *guardrails.Engine, route contract.ConfigurationRouteEntry) error {
 	if _, passthrough := promotion.Present(route.Passthrough); passthrough {
-		return access.Fail(422, "passthrough_conflict", "A pass-through route cannot carry guardrails.")
+		return httpkit.Fail(422, "passthrough_conflict", "A pass-through route cannot carry guardrails.")
 	}
 	raw, err := fidelityOf(route)
 	if err != nil {
@@ -139,7 +140,7 @@ func checkRoute(engine *guardrails.Engine, route contract.ConfigurationRouteEntr
 		return nil
 	}
 	if engine.ValidateRoute(fidelity.Strict(), int64(route.OverallTimeoutMs)) != nil {
-		return access.Invalid("guardrail_policies", "Guardrails are incompatible with an attached route's fidelity or deadline.")
+		return httpkit.Invalid("guardrail_policies", "Guardrails are incompatible with an attached route's fidelity or deadline.")
 	}
 	return nil
 }

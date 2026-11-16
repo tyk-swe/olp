@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/release"
@@ -128,7 +129,7 @@ func parsePricing(value nullable.Nullable[contract.ConfigurationPricingEntry]) (
 		return nil, nil
 	}
 	if len(entry.Prices) > maxPrices {
-		return nil, access.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
+		return nil, httpkit.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
 	}
 	return &Pricing{EffectiveAt: entry.EffectiveAt, Prices: promotion.Map(entry.Prices, parsePrice)}, nil
 }
@@ -221,5 +222,5 @@ func undeclaredPrice(i int) error {
 }
 
 func undeclaredProvider(field, subject string) error {
-	return access.Invalid(field, subject+" names a provider neither the document nor this installation declares.")
+	return httpkit.Invalid(field, subject+" names a provider neither the document nor this installation declares.")
 }

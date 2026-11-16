@@ -115,6 +115,19 @@ func trust(t *testing.T, keys string) (*saml.ServiceProvider, Metadata) {
 type issue struct {
 	assertionID, destination, audience, recipient, inResponseTo, nameIDFormat, algorithm string
 	age, lifetime                                                                        time.Duration
+	reshape                                                                              func(assertion *etree.Element)
+}
+
+func without(name string) func(*etree.Element) {
+	return func(assertion *etree.Element) {
+		assertion.RemoveChild(assertion.SelectElement(name))
+	}
+}
+
+func foreignNameID(assertion *etree.Element) {
+	identifier := assertion.SelectElement("Subject").SelectElement("NameID")
+	identifier.Space = "other"
+	identifier.CreateAttr("xmlns:other", "urn:example:other")
 }
 
 func respond(t *testing.T, assertionSigner, responseSigner *signer, i issue) []byte {
@@ -145,14 +158,23 @@ func respond(t *testing.T, assertionSigner, responseSigner *signer, i issue) []b
 			}},
 		}
 	}
-	assertion := assert(assertionSigner.sign(t, assert(nil).Element(), i.algorithm))
+	shaped := func(signature *etree.Element) *etree.Element {
+		element := assert(signature).Element()
+		if i.reshape != nil {
+			i.reshape(element)
+		}
+		return element
+	}
+	assertion := shaped(assertionSigner.sign(t, shaped(nil), i.algorithm))
 	response := func(signature *etree.Element) *etree.Element {
-		return (&saml.Response{
+		element := (&saml.Response{
 			ID: "id-response-1", InResponseTo: cmp.Or(i.inResponseTo, requestID), Version: "2.0", IssueInstant: issued,
 			Destination: cmp.Or(i.destination, serviceConsume), Issuer: &saml.Issuer{Value: providerEntity},
 			Status:    saml.Status{StatusCode: saml.StatusCode{Value: saml.StatusSuccess}},
-			Signature: signature, Assertion: assertion,
+			Signature: signature,
 		}).Element()
+		element.AddChild(assertion.Copy())
+		return element
 	}
 	document := etree.NewDocument()
 	document.SetRoot(response(responseSigner.sign(t, response(nil), i.algorithm)))
@@ -232,6 +254,9 @@ func TestVerifyAcceptsOnlyTheSolicitedSignedAssertion(t *testing.T) {
 		"an expired assertion":                         respond(t, provider, nil, issue{age: 10 * time.Minute}),
 		"an assertion from the future":                 respond(t, provider, nil, issue{age: -10 * time.Minute}),
 		"an assertion valid for more than ten minutes": respond(t, provider, nil, issue{lifetime: 11 * time.Minute}),
+		"a signed assertion without a subject":         respond(t, provider, nil, issue{reshape: without("Subject")}),
+		"a signed assertion without conditions":        respond(t, provider, nil, issue{reshape: without("Conditions")}),
+		"a name identifier in a foreign namespace":     respond(t, provider, nil, issue{reshape: foreignNameID}),
 		"a second subject name outside the SAML namespace": resigned(t, provider, solicited, func(subject *etree.Element) {
 			subject.AddChild(outsideSAML(subject.SelectElement("NameID").Copy()))
 		}),

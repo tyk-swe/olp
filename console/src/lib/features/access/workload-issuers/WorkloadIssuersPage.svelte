@@ -1,7 +1,10 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '#lib/editing/mutationIntent.svelte.js';
   import {
     listIssuers,
     saveIssuer,
@@ -41,6 +44,7 @@
   let pending = $state<IssuerWrite>();
   let busy = $state(false);
   let error = $state('');
+  const disableIntent = useMutationIntent();
   const captureOwner = usePrincipalLifetime(() => {
     editing = pending = undefined;
     opened = busy = false;
@@ -153,10 +157,10 @@
     busy = true;
     error = '';
     try {
-      const saved = await saveIssuer(
-        { ...issuerInput(value), enabled: false },
-        crypto.randomUUID(),
-        value
+      const saved = await disableIntent.submit(
+        { input: { ...issuerInput(value), enabled: false }, current: value },
+        (attempt, attemptId) =>
+          saveIssuer(attempt.input, attemptId, attempt.current)
       );
       if (!isCurrent()) return;
       committed = true;

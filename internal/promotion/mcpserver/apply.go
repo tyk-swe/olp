@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -52,14 +53,14 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promoti
 	}
 	certified, ok := prepared.certifications[server.key()]
 	if !ok {
-		return false, access.Invalid("mcp_servers", "Prepare certified registrations before applying.")
+		return false, httpkit.Invalid("mcp_servers", "Prepare certified registrations before applying.")
 	}
 	if etagOf(existing) != certified.observed {
-		return false, access.Fail(412, "mcp_registration_changed", "The destination MCP registration changed during certification.")
+		return false, httpkit.Fail(412, "mcp_registration_changed", "The destination MCP registration changed during certification.")
 	}
 	switch outcome := certified.outcome.(type) {
 	case limited:
-		return true, registration.UpdateLimits(ctx, tx, existing.ID, server.Limits, access.NewID())
+		return true, registration.UpdateLimits(ctx, tx, existing.ID, server.Limits, httpkit.NewID())
 	case recertified:
 		return true, save(ctx, tx, p, bindings, keys, projectID, existing, server, outcome.catalog)
 	}
@@ -96,7 +97,7 @@ func credentialOf(ctx context.Context, tx pgx.Tx, bindings promotion.Bindings, k
 	if !bound {
 		return credential{id: retained(existing, true, func(d registration.Definition) *string { return d.CredentialID })}, nil
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := keys.store(ctx, tx, id, sealed.Secret); err != nil {
 		return credential{}, err
 	}

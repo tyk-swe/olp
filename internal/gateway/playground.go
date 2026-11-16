@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -129,51 +130,51 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	switch in.operation() {
 	case "generation", "token_count", "embeddings", "moderation", "rerank":
 	default:
-		return access.Invalid("operation", "operation must be generation, token_count, embeddings, moderation, or rerank")
+		return httpkit.Invalid("operation", "operation must be generation, token_count, embeddings, moderation, or rerank")
 	}
 	switch {
 	case strings.TrimSpace(in.Model) == "":
-		return access.Invalid("model", "model is required")
+		return httpkit.Invalid("model", "model is required")
 	case in.Surface != nil && !slices.Contains([]string{"openai", "anthropic", "gemini"}, *in.Surface):
-		return access.Invalid("surface", "surface must be openai, anthropic, or gemini")
+		return httpkit.Invalid("surface", "surface must be openai, anthropic, or gemini")
 	case in.Temperature != nil && (*in.Temperature < 0 || *in.Temperature > 2):
-		return access.Invalid("temperature", "temperature must be between 0 and 2")
+		return httpkit.Invalid("temperature", "temperature must be between 0 and 2")
 	case in.MaxOutputTokens != nil && (*in.MaxOutputTokens < 1 || *in.MaxOutputTokens > 1<<20):
-		return access.Invalid("max_output_tokens", "max_output_tokens must be between 1 and 1048576")
+		return httpkit.Invalid("max_output_tokens", "max_output_tokens must be between 1 and 1048576")
 	case len(in.Tools) > 128:
-		return access.Invalid("tools", "at most 128 tools are allowed")
+		return httpkit.Invalid("tools", "at most 128 tools are allowed")
 	}
 	if in.Request != nil {
 		if in.Input != "" || len(in.Tools) > 0 || in.ResponseFormat != nil || in.Temperature != nil || in.MaxOutputTokens != nil {
-			return access.Invalid("request", "request cannot be combined with input, tools, response_format, temperature, or max_output_tokens")
+			return httpkit.Invalid("request", "request cannot be combined with input, tools, response_format, temperature, or max_output_tokens")
 		}
 	} else {
 		if in.Input == "" {
-			return access.Invalid("input", "input is required")
+			return httpkit.Invalid("input", "input is required")
 		}
 		if in.operation() != "generation" {
-			return access.Invalid("operation", "non-generation operations require a raw request document")
+			return httpkit.Invalid("operation", "non-generation operations require a raw request document")
 		}
 	}
 	if streaming {
 		if in.Stream == nil || !*in.Stream {
-			return access.Invalid("stream", "stream must be true for the streaming playground")
+			return httpkit.Invalid("stream", "stream must be true for the streaming playground")
 		}
 		if in.operation() != "generation" {
-			return access.Invalid("operation", "streaming supports generation only")
+			return httpkit.Invalid("operation", "streaming supports generation only")
 		}
 	} else if in.Stream != nil && *in.Stream {
-		return access.Invalid("stream", "streaming requests use the streaming playground endpoint")
+		return httpkit.Invalid("stream", "streaming requests use the streaming playground endpoint")
 	}
 	if in.operation() != "generation" && in.operation() != "token_count" && in.surface() != "openai" {
-		return access.Invalid("surface", "this operation is available on the openai surface only")
+		return httpkit.Invalid("surface", "this operation is available on the openai surface only")
 	}
 	if err := in.Routing.Validate("routing"); err != nil {
 		return err
 	}
 	for i, tool := range in.Tools {
 		if strings.TrimSpace(tool.Name) == "" || len(tool.InputSchema) == 0 {
-			return access.Invalid("tools", "tool "+string(rune('0'+min(i, 9)))+" needs a name and an input_schema")
+			return httpkit.Invalid("tools", "tool "+string(rune('0'+min(i, 9)))+" needs a name and an input_schema")
 		}
 	}
 	if f := in.ResponseFormat; f != nil {
@@ -181,10 +182,10 @@ func (in *playgroundRequest) validate(streaming bool) error {
 		case "text", "json_object":
 		case "json_schema":
 			if strings.TrimSpace(f.Name) == "" || len(f.Schema) == 0 {
-				return access.Invalid("response_format", "json_schema formats need a name and a schema")
+				return httpkit.Invalid("response_format", "json_schema formats need a name and a schema")
 			}
 		default:
-			return access.Invalid("response_format", "unsupported response_format type")
+			return httpkit.Invalid("response_format", "unsupported response_format type")
 		}
 	}
 	return nil
@@ -199,7 +200,7 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 		doc, err := protocols.ParseSource(family, in.Request)
 		if err != nil {
 			e := requestError(err)
-			return parsedRequest{}, access.Fail(e.Status, e.Code, e.Message)
+			return parsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
 		}
 		if operation == "generation" {
 			if family == wire.Chat {
@@ -227,14 +228,14 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 				}
 				parsed, e := p.Gateway.parsePromptDocument(x, family, doc, in.Model, p.authorize(principal), bindings)
 				if e != nil {
-					return parsedRequest{}, access.Fail(e.Status, e.Code, e.Message)
+					return parsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
 				}
 				return parsed, nil
 			}
 		}
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
-			return parsedRequest{}, access.Invalid("request", "request must be a JSON object")
+			return parsedRequest{}, httpkit.Invalid("request", "request must be a JSON object")
 		}
 		if in.surface() == "gemini" {
 			delete(fields, "model")
@@ -246,17 +247,17 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 		data, _ := json.Marshal(fields)
 		parsed, err := protocols.SimulationRequest(data, operation, in.surface(), mode, in.Model)
 		if err != nil {
-			return parsedRequest{}, access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+			return parsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		}
 		return parsedRequest{request: parsed, decoded: int64(len(data))}, nil
 	}
 	body, err := in.chatBody()
 	if err != nil {
-		return parsedRequest{}, access.Invalid("input", "the request could not be encoded")
+		return parsedRequest{}, httpkit.Invalid("input", "the request could not be encoded")
 	}
 	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
-		return parsedRequest{}, access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return parsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
 	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
 		kind := *in.Surface
@@ -268,11 +269,11 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 		}
 		encoded, encodedWire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
 		if e != nil {
-			return parsedRequest{}, access.Invalid("input", e.Error())
+			return parsedRequest{}, httpkit.Invalid("input", e.Error())
 		}
 		parsed, e = protocols.Parse(encodedWire, encoded, in.Model)
 		if e != nil {
-			return parsedRequest{}, access.Invalid("input", e.Error())
+			return parsedRequest{}, httpkit.Invalid("input", e.Error())
 		}
 	}
 	return parsedRequest{request: parsed}, nil
@@ -304,13 +305,13 @@ func (p *Playground) authorize(principal access.Principal) func(*routing.Route) 
 	}
 }
 
-func (p *Playground) handle(r *http.Request, principal access.Principal) (access.Reply, error) {
+func (p *Playground) handle(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
 	var in playgroundRequest
-	if err := access.Decode(r, &in); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &in); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err := in.validate(false); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	s := p.Gateway
 	x := p.call(r, principal, nil, "", in.Routing)
@@ -319,7 +320,7 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	}
 	parsed, err := in.parse(in.operation(), "unary", p, x, principal)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
 	if x.request.body != nil {
@@ -328,13 +329,13 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
-		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
+		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
 	if !s.gate.Admit(r.Context()) {
 		x.failure = fault.Overloaded
 		s.finish(x, nil, fault.Overloaded.Status)
-		return access.Reply{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
+		return httpkit.Reply{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
 	defer s.gate.Release(r.Context())
 	// Playground calls, streamed or not, are charged to the route's project and
@@ -343,7 +344,7 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
-		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
+		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	out := s.execute(r.Context(), x)
 	if out.err != nil {
@@ -352,14 +353,14 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		if status == 0 {
 			status = http.StatusBadGateway
 		}
-		return access.Reply{}, access.Fail(status, out.err.Code, out.err.Message)
+		return httpkit.Reply{}, httpkit.Fail(status, out.err.Code, out.err.Message)
 	}
 	if e := s.enforceCompletionOutput(x, out.completion); e != nil {
 		s.finish(x, out, e.Status)
-		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
+		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	s.finish(x, out, http.StatusOK)
-	return access.OK(p.response(x, out, in)), nil
+	return httpkit.OK(p.response(x, out, in)), nil
 }
 
 func routingEvidence(x *call) []map[string]any {
@@ -455,7 +456,7 @@ func attemptPriority(x *call, targetID string) int {
 
 func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal access.Principal) error {
 	var in playgroundRequest
-	if err := access.Decode(r, &in); err != nil {
+	if err := httpkit.Decode(r, &in); err != nil {
 		return err
 	}
 	if err := in.validate(true); err != nil {
@@ -477,20 +478,20 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
-		return access.Fail(e.Status, e.Code, e.Message)
+		return httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
 	if !s.gate.Admit(r.Context()) {
 		x.failure = fault.Overloaded
 		s.finish(x, nil, fault.Overloaded.Status)
-		return access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
+		return httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
 	defer s.gate.Release(r.Context())
 	defer s.settleAdmission(r.Context(), x)
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
-		return access.Fail(e.Status, e.Code, e.Message)
+		return httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	sw := &playgroundStreamWriter{w: w, maxTotal: s.cfg.MaxResponseBytes}
 	x.generation.emit = sw.emit
@@ -504,7 +505,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return nil
 	}
 	if out.err != nil && !sw.committed {
-		return access.Fail(out.err.Status, out.err.Code, out.err.Message)
+		return httpkit.Fail(out.err.Status, out.err.Code, out.err.Message)
 	}
 	sw.finish(x, out)
 	return nil
@@ -568,4 +569,4 @@ func (sw *playgroundStreamWriter) finish(x *call, out *outcome) {
 	_ = sw.write("done", data, false)
 }
 
-func uuidString() string { return access.NewID() }
+func uuidString() string { return httpkit.NewID() }

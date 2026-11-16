@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -166,7 +167,7 @@ func (b binder) bind(ctx context.Context, definition agentcontract.Draft, ref *p
 	reusable := reusableCredential(prior, &base)
 	sealed, bound := b.bindings[*ref].(promotion.Sealed)
 	if !bound && !reusable {
-		return base, access.Invalid("agent_publications.credential_ref", "Supply the required destination credential; endpoint changes cannot inherit it.")
+		return base, httpkit.Invalid("agent_publications.credential_ref", "Supply the required destination credential; endpoint changes cannot inherit it.")
 	}
 	if !bound {
 		return publications.WithCredential(base, prior.Agent.CredentialID), nil

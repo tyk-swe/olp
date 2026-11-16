@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/retrieval"
@@ -39,7 +40,7 @@ func exported(ctx context.Context, q access.Queryer, directory promotion.Directo
 			return "", err
 		}
 		if !found || key.Revoked || key.Expired || promotion.ValueOf(key.ProjectID) != binding.ProjectID {
-			return "", access.Invalid("retrieval_bindings.key_grants", "Remove inactive API-key grants before exporting retrieval bindings.")
+			return "", httpkit.Invalid("retrieval_bindings.key_grants", "Remove inactive API-key grants before exporting retrieval bindings.")
 		}
 		return key.Name, nil
 	})

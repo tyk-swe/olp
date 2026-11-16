@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -38,27 +39,27 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "GET /api/v1/provider-health", m.providerHealth)
 }
 
-func (m *Management) ready(_ *http.Request, _ access.Principal) (access.Reply, error) {
+func (m *Management) ready(_ *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	health, err := readyHealth(m.Cache.readinessSnapshot(), time.Now())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(healthResponse(health)), nil
+	return httpkit.OK(healthResponse(health)), nil
 }
 
-func (m *Management) providerHealth(r *http.Request, p access.Principal) (access.Reply, error) {
+func (m *Management) providerHealth(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	window := 15
 	if raw := query.Get("window_minutes"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 1440 {
-			return access.Reply{}, access.Invalid("window_minutes", "Use a whole number of minutes between 1 and 1440.")
+			return httpkit.Reply{}, httpkit.Invalid("window_minutes", "Use a whole number of minutes between 1 and 1440.")
 		}
 		window = parsed
 	}
-	pagination, err := access.Page(r)
+	pagination, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	page, err := ReadProviderHealth(r.Context(), m.Pool, ProviderHealthQuery{
 		WindowMinutes: window,
@@ -68,7 +69,7 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 		Projects:      p.ProjectIDs(),
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	shared, circuits, probes := m.fleet(r.Context())
 	items := make([]contract.ProviderHealthItem, len(page.Items))
@@ -92,7 +93,7 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 	if page.NextCursor != nil {
 		response.NextCursor = nullable.NewNullableWithValue(base64.RawURLEncoding.EncodeToString([]byte(*page.NextCursor)))
 	}
-	return access.OK(response), nil
+	return httpkit.OK(response), nil
 }
 
 // fleet reads the shared circuits and probe results. An unreadable store

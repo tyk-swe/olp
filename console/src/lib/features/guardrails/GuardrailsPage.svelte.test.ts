@@ -538,3 +538,92 @@ it.each(
     );
   }
 );
+
+it('retries a failed policy save and activation with the same idempotency key', async () => {
+  const keys = vi.fn<(key: string | null) => void>();
+  const failed = new Set<string>();
+  serve(
+    async (request) => {
+      const path = new URL(request.url).pathname;
+      if (request.method === 'GET') {
+        if (path === '/api/v1/projects')
+          return json({ items: [{ id: 'project', name: 'Project' }] });
+        if (path === '/api/v1/guardrail-attachments')
+          return json({ items: [] });
+        return json({ items: [original, other] });
+      }
+      keys(request.headers.get('Idempotency-Key'));
+      const attempt = `${request.method} ${path}`;
+      if (!failed.has(attempt)) {
+        failed.add(attempt);
+        return json({ title: 'Response lost. Try again.', status: 500 }, 500);
+      }
+      if (path.endsWith('/activate')) return json({});
+      const body = (await request.json()) as { name: string };
+      return json({
+        ...original,
+        ...body,
+        revision: 2,
+        revision_id: 'saved-revision',
+        etag: 'saved-etag'
+      });
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(GuardrailsPage, {
+      target,
+      props: { tab: 'policies' },
+      context: getAllContexts()
+    })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  const click = (name: string) => {
+    button(name)?.click();
+    flushSync();
+  };
+  const save = () => {
+    target
+      .querySelector('form')
+      ?.dispatchEvent(
+        new SubmitEvent('submit', { bubbles: true, cancelable: true })
+      );
+    flushSync();
+  };
+  flushSync();
+  await vi.waitFor(() => expect(button('Original')).toBeDefined());
+  click('Original');
+  save();
+  await vi.waitFor(() =>
+    expect(target.querySelector('[role=alert]')?.textContent).toContain(
+      'Response lost'
+    )
+  );
+  save();
+  await vi.waitFor(() => expect(keys).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(button('Activate revision')).toBeDefined());
+  click('Activate revision');
+  await vi.waitFor(() =>
+    expect(target.querySelector('[role=alert]')?.textContent).toContain(
+      'Response lost'
+    )
+  );
+  click('Activate revision');
+  await vi.waitFor(() => expect(keys).toHaveBeenCalledTimes(4));
+  const [saveKey, saveRetryKey, activateKey, activateRetryKey] =
+    keys.mock.calls.map((call) => call[0]);
+  expect(saveKey).toBeTruthy();
+  expect(saveRetryKey).toBe(saveKey);
+  expect(activateKey).toBeTruthy();
+  expect(activateKey).not.toBe(saveKey);
+  expect(activateRetryKey).toBe(activateKey);
+});

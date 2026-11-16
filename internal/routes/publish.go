@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
@@ -23,11 +24,11 @@ import (
 func PassthroughAccessError(err error) error {
 	var refusal *routing.Refusal
 	if errors.As(err, &refusal) {
-		return access.Fail(422, refusal.Code, refusal.Message)
+		return httpkit.Fail(422, refusal.Code, refusal.Message)
 	}
 	var validation *routing.ValidationError
 	if errors.As(err, &validation) {
-		return access.Invalid(validation.Field, validation.Message)
+		return httpkit.Invalid(validation.Field, validation.Message)
 	}
 	return err
 }
@@ -35,7 +36,7 @@ func PassthroughAccessError(err error) error {
 func draftRoute(d *draft) (routing.Route, error) {
 	fidelity, err := routing.DecodeFidelity(d.Fidelity)
 	if err != nil {
-		return routing.Route{}, access.Invalid("fidelity", err.Error())
+		return routing.Route{}, httpkit.Invalid("fidelity", err.Error())
 	}
 	route := simulationRoute(d.ID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
@@ -45,7 +46,7 @@ func draftRoute(d *draft) (routing.Route, error) {
 	if len(d.ContentPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(d.ContentPolicy), []byte("null")) {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
 		if err != nil {
-			return routing.Route{}, access.Invalid("content_policy", err.Error())
+			return routing.Route{}, httpkit.Invalid("content_policy", err.Error())
 		}
 	}
 	return route, nil
@@ -69,11 +70,11 @@ func check(d *draft, live map[string]*resolved) error {
 		label := t.ProviderName + "/" + t.ProviderModel
 		switch {
 		case !ok:
-			return access.Fail(422, "target_unknown", "Target "+label+" no longer exists.")
+			return httpkit.Fail(422, "target_unknown", "Target "+label+" no longer exists.")
 		case r.ProviderState != "active":
-			return access.Fail(422, "provider_not_active", "Target "+label+" belongs to a connection that is not active.")
+			return httpkit.Fail(422, "provider_not_active", "Target "+label+" belongs to a connection that is not active.")
 		case !r.Published:
-			return access.Fail(422, "model_not_published", "Target "+label+" is not part of the connection's activated revision.")
+			return httpkit.Fail(422, "model_not_published", "Target "+label+" is not part of the connection's activated revision.")
 		}
 		for _, op := range d.Operations {
 			if route.IsPassthrough() && op == routing.PassthroughOperation {
@@ -84,7 +85,7 @@ func check(d *draft, live map[string]*resolved) error {
 				certified = certified || len(key) > len(op) && key[:len(op)+1] == op+"/"
 			}
 			if !certified {
-				return access.Fail(422, "capability_not_certified", "Target "+label+" has no certified "+op+" capability.")
+				return httpkit.Fail(422, "capability_not_certified", "Target "+label+" has no certified "+op+" capability.")
 			}
 		}
 	}
@@ -108,7 +109,7 @@ func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
 			return err
 		}
 		if !active {
-			return access.Fail(422, "route_reference_unknown", "Route "+slug+" is not an active route.")
+			return httpkit.Fail(422, "route_reference_unknown", "Route "+slug+" is not an active route.")
 		}
 	}
 	for _, selector := range behavior.Selectors {
@@ -118,7 +119,7 @@ func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
 				return err
 			}
 			if !usable {
-				return access.Fail(422, "route_plugin_unavailable", "Selector "+selector.ID+" names a plugin that is not an approved confined plugin.")
+				return httpkit.Fail(422, "route_plugin_unavailable", "Selector "+selector.ID+" names a plugin that is not an approved confined plugin.")
 			}
 		}
 	}
@@ -131,112 +132,112 @@ func sameBehavior(a, b []byte) bool {
 	return reflect.DeepEqual(left, right)
 }
 
-func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) validateDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	a := s.Access
-	id, err := access.IDParam(r, "draft_id")
+	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, current.ETag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	live, err := s.resolve(r.Context(), tx, current.Targets)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = check(current, live); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = checkReferences(r.Context(), tx, current); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(current.ContentPolicy) > 0 {
 		var policy contentpolicy.Policy
 		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if _, err = contentpolicy.Compile(&policy); err != nil {
-			return access.Reply{}, access.Invalid("content_policy", err.Error())
+			return httpkit.Reply{}, httpkit.Invalid("content_policy", err.Error())
 		}
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.validate", "route_draft", id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	current.State, current.ETag = "validated", etag
-	return access.Detail(current.summary(), etag), tx.Commit(r.Context())
+	return httpkit.Detail(current.summary(), etag), tx.Commit(r.Context())
 }
 
-func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) activateDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	a := s.Access
-	id, err := access.IDParam(r, "draft_id")
+	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	// The stored reply discloses the draft, so the caller must still reach
 	// its project before a replay is served.
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	if err = access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, current.ETag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	promoted, err := s.promote(r.Context(), tx, current, p.UserID())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	generation, err := release.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if behavior, _ := routing.DecodeBehavior(current.Behavior); behavior.Cache != nil && behavior.Cache.AllowUnsealedVectors {
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "cache.semantic_acknowledge", "route", promoted.routeID, "success"); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", promoted.routeID, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := access.Detail(map[string]any{"route_id": promoted.routeID, "revision_id": promoted.revisionID, "revision": promoted.revision, "draft_etag": promoted.etag, "runtime_generation": generation}, promoted.etag)
+	result := httpkit.Detail(map[string]any{"route_id": promoted.routeID, "revision_id": promoted.revisionID, "revision": promoted.revision, "draft_etag": promoted.etag, "runtime_generation": generation}, promoted.etag)
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
@@ -278,17 +279,17 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	var revision int
 	var routeProject *string
 	err = tx.QueryRow(ctx, "SELECT id::text,latest_revision,project_id::text FROM olp.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision, &routeProject)
-	revisionID := access.NewID()
+	revisionID := httpkit.NewID()
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		routeID, revision = access.NewID(), 1
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, actor, revisionID, access.NewID(), current.ProjectID); err != nil {
+		routeID, revision = httpkit.NewID(), 1
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, actor, revisionID, httpkit.NewID(), current.ProjectID); err != nil {
 			return promotion{}, err
 		}
 	case err != nil:
 		return promotion{}, err
 	case !sameProject(routeProject, current.ProjectID):
-		return promotion{}, access.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
+		return promotion{}, httpkit.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
 	default:
 		revision++
 	}
@@ -302,7 +303,7 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, actor, encodedPolicy, current.ContentPolicy, current.Fidelity, current.Behavior); err != nil {
 		return promotion{}, err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, httpkit.NewID()); err != nil {
 		return promotion{}, err
 	}
 	if err = guardrailattachment.Promote(ctx, tx, actor, current.ID, routeID); err != nil {
@@ -313,14 +314,14 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 		return promotion{}, err
 	}
 	if exposure != nil {
-		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, access.NewID()); err != nil {
+		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, httpkit.NewID()); err != nil {
 			return promotion{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET catalog_expose_upstream_models=NULL WHERE id=$1", current.ID); err != nil {
 			return promotion{}, err
 		}
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", current.ID, targets, etag, revisionID); err != nil {
 		return promotion{}, err
 	}
@@ -372,9 +373,9 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.revision=$2", routeID, n))
 	}
-	id, err := access.ParseUUID(ref)
+	id, err := httpkit.ParseUUID(ref)
 	if err != nil {
-		return nil, access.Fail(404, "not_found", "Unknown revision.")
+		return nil, httpkit.Fail(404, "not_found", "Unknown revision.")
 	}
 	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id=$2", routeID, id))
 }
@@ -442,77 +443,77 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	return &r, nil
 }
 
-func (s *Server) routes(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) routes(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+routeColumns+routeFrom+" WHERE r.id<$1 AND ($2 OR r.project_id=ANY($3::uuid[])) ORDER BY r.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	var routes []*routeRow
 	for rows.Next() {
 		row, err := scanRoute(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		routes = append(routes, row)
 	}
 	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows.Close()
 	items := []map[string]any{}
 	for _, row := range routes {
 		item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		items = append(items, item)
 	}
-	return access.ListReply(items, page), nil
+	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "route_id")
+func (s *Server) route(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	row, err := scanRoute(s.Access.Pool.QueryRow(r.Context(), "SELECT "+routeColumns+routeFrom+" WHERE r.id=$1", id))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(row.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(item, row.ETag), nil
+	return httpkit.Detail(item, row.ETag), nil
 }
 
-func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "route_id")
+func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project, err := routeProject(r.Context(), s.Access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id<$2 ORDER BY v.id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	var revisions []*revisionRow
@@ -520,58 +521,58 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	for rows.Next() {
 		v, err := scanRevision(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		revisions = append(revisions, v)
 		all = append(all, v.Targets...)
 	}
 	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows.Close()
 	live, err := s.resolve(r.Context(), s.Access.Pool, all)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items := []map[string]any{}
 	for _, v := range revisions {
 		items = append(items, v.json(live))
 	}
-	return access.ListReply(items, page), nil
+	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "route_id")
+func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project, err := routeProject(r.Context(), s.Access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	live, err := s.resolve(r.Context(), s.Access.Pool, v.Targets)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(v.json(live)), nil
+	return httpkit.OK(v.json(live)), nil
 }
 
-func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) retireRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	a := s.Access
-	id, err := access.IDParam(r, "route_id")
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	// The stored reply discloses the route, so the caller must still reach
@@ -579,61 +580,61 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	var state, current string
 	var project *string
 	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	if err = access.Match(r, current); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, current); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if state == "retired" {
-		return access.Reply{}, access.Fail(409, "route_retired", "This route is already retired.")
+		return httpkit.Reply{}, httpkit.Fail(409, "route_retired", "This route is already retired.")
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET state='retired',retired_at=now(),retired_by=$2,etag=$3 WHERE id=$1", id, p.UserID(), etag); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	generation, err := release.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.retire", "route", id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := access.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag)
+	result := httpkit.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag)
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "route_id")
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	project, err := routeProject(r.Context(), s.Access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	to, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("to"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	label := func(t routing.PublishedTarget) string { return t.ProviderName + "/" + t.ProviderModel }
 	before := map[string]routing.PublishedTarget{}
@@ -673,7 +674,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	for _, list := range []*[]string{&added, &removed, &changed} {
 		slices.Sort(*list)
 	}
-	return access.OK(map[string]any{
+	return httpkit.OK(map[string]any{
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"slug_changed": from.Slug != to.Slug, "timeout_changed": from.OverallTimeoutMS != to.OverallTimeoutMS, "max_attempts_changed": from.MaxAttempts != to.MaxAttempts,
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
@@ -685,71 +686,71 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	}), nil
 }
 
-func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	a := s.Access
-	id, err := access.IDParam(r, "route_id")
+	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	ref := r.PathValue("revision_id")
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	// The stored reply discloses the restored draft, so the caller must still
 	// reach the route's project before a replay is served.
 	project, err := routeProject(r.Context(), tx, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(project, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	behavior, err := routing.DecodeBehavior(v.Behavior)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	draftID, etag := access.NewID(), access.NewID()
+	draftID, etag := httpkit.NewID(), httpkit.NewID()
 	targets := slices.Clone(v.Targets)
 	for i := range targets {
-		targets[i].ID = access.NewID()
+		targets[i].ID = httpkit.NewID()
 	}
 	content := DraftContent{
 		Slug: v.Slug, Operations: v.Operations, OverallTimeoutMS: v.OverallTimeoutMS, MaxAttempts: v.MaxAttempts, Targets: targets,
 		ContentPolicy: v.ContentPolicy, Fidelity: v.Fidelity, Behavior: behavior,
 	}
 	if err = StageDraft(r.Context(), tx, NewDraft{ID: draftID, CreatedBy: p.UserID(), ProjectID: project, BasedOn: &v.ID}, etag, content); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = StageDraftPolicy(r.Context(), tx, draftID, etag, p.UserID(), v.Policy); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.restore", "route_draft", draftID, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := loadDraft(r.Context(), tx, draftID, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	result, err := s.draftDetail(r.Context(), tx, d)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	result.Status, result.Location = 201, "/api/v1/route-drafts/"+draftID
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }

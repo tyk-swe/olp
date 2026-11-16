@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
@@ -37,7 +37,7 @@ type Desired struct {
 func Parse(document contract.ConfigurationDocument, names promotion.Names) (Desired, error) {
 	entries := promotion.ValueOf(document.RetrievalBindings)
 	if len(entries) > maxBindings {
-		return Desired{}, access.Invalid("retrieval_bindings", "Declare at most 512 retrieval bindings.")
+		return Desired{}, httpkit.Invalid("retrieval_bindings", "Declare at most 512 retrieval bindings.")
 	}
 	first := promotion.FirstIndex(entries, entryKey)
 	bindings, err := promotion.TryMapIndex(entries, func(i int, entry contract.ConfigurationRetrievalBinding) (Binding, error) {
@@ -75,15 +75,15 @@ func parseEntry(entry contract.ConfigurationRetrievalBinding, duplicate bool) (B
 		return Binding{}, invalidIdentity()
 	}
 	if err := retrieval.ValidateFields(binding.Backend, binding.Fields); err != nil {
-		return Binding{}, access.Invalid("retrieval_bindings.fields", err.Error())
+		return Binding{}, httpkit.Invalid("retrieval_bindings.fields", err.Error())
 	}
 	if len(entry.KeyGrants) > maxKeyGrants {
-		return Binding{}, access.Invalid("retrieval_bindings.key_grants", "Use at most 2000 explicit key names.")
+		return Binding{}, httpkit.Invalid("retrieval_bindings.key_grants", "Use at most 2000 explicit key names.")
 	}
 	if !slices.ContainsFunc(binding.KeyGrants, func(name string) bool { return !promotion.ValidLabel(name) }) {
 		return binding, nil
 	}
-	return Binding{}, access.Invalid("retrieval_bindings.key_grants", "Use nonempty exact project-local API-key names.")
+	return Binding{}, httpkit.Invalid("retrieval_bindings.key_grants", "Use nonempty exact project-local API-key names.")
 }
 
 func Render(bindings []Binding) *[]contract.ConfigurationRetrievalBinding {
@@ -131,5 +131,5 @@ func entryKey(entry contract.ConfigurationRetrievalBinding) string {
 }
 
 func invalidIdentity() error {
-	return access.Invalid("retrieval_bindings", "Use unique project/name pairs with an explicit route, provider and native backend resource.")
+	return httpkit.Invalid("retrieval_bindings", "Use unique project/name pairs with an explicit route, provider and native backend resource.")
 }

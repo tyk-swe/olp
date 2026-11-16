@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -127,7 +127,7 @@ func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 				}
 				return nil
 			}()
-			_, err := CreateCardRevision(t.Context(), tc.tx, access.NewID(), access.NewID(), "1", time.Now().UTC(), prices, "USD", NewNormalizer(sampleVendorKind))
+			_, err := CreateCardRevision(t.Context(), tc.tx, httpkit.NewID(), httpkit.NewID(), "1", time.Now().UTC(), prices, "USD", NewNormalizer(sampleVendorKind))
 			if tc.want != nil {
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("currency failure = %v, want %v", err, tc.want)
@@ -156,7 +156,7 @@ func TestPriceBookFailuresKeepTheirPublicForm(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			access.WriteProblem(recorder, Problem(test.err))
+			httpkit.WriteProblem(recorder, Problem(test.err))
 			var body struct {
 				Type   string                     `json:"type"`
 				Errors map[string]json.RawMessage `json:"errors"`

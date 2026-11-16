@@ -2,6 +2,8 @@ package access
 
 import (
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // Operation is a management action that authorization decides. Delegable
@@ -162,21 +164,21 @@ func (p Principal) Authorize(op Operation) error {
 		if op == Read && p.KeyAuthority != nil && slices.Contains(p.KeyAuthority.Policy.Scopes, "models_read") {
 			return nil
 		}
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	r, ok := op.rule()
 	if !ok {
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	role := p.Role
 	if p.Kind == "machine" {
 		if !r.delegable || !p.scopes.has(op) {
-			return Forbidden()
+			return httpkit.Forbidden()
 		}
 		role = p.creatorRole
 	}
 	if !r.roles.has(role) || r.installation && !p.AllProjects {
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -37,7 +38,7 @@ func checkGroups(ctx context.Context, q access.Queryer, directory promotion.Dire
 			return err
 		}
 		if slices.ContainsFunc(owners, func(id *string) bool { return !ownedBy(directory, id, g.project) }) {
-			return access.Invalid("route_groups", "Group routes must belong to their project.")
+			return httpkit.Invalid("route_groups", "Group routes must belong to their project.")
 		}
 		return nil
 	})

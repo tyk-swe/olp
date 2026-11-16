@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -30,7 +31,7 @@ func portablePaid(ctx context.Context, q access.Queryer, frozen map[string]routi
 
 func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routing.Provider) (PaidConnection, error) {
 	if frozen.PendingCommitment != nil {
-		return PaidConnection{}, access.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
+		return PaidConnection{}, httpkit.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
 	}
 	stored, err := providers.ReadRevisionLabels(ctx, q, frozen.RevisionID, frozen.ID)
 	if err != nil {

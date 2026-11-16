@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/priority"
@@ -30,15 +31,15 @@ const maxAttributionKeys = 8
 
 func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
-		return Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
+		return httpkit.Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
 	}
 	if len(input.AllowedRouteGroups) > 64 {
-		return Invalid("allowed_route_groups", "Use at most 64 route groups.")
+		return httpkit.Invalid("allowed_route_groups", "Use at most 64 route groups.")
 	}
 	groupNames := map[string]bool{}
 	for _, name := range input.AllowedRouteGroups {
 		if !routeidentity.ValidSlug(name) || groupNames[name] {
-			return Invalid("allowed_route_groups", "Use unique valid group names.")
+			return httpkit.Invalid("allowed_route_groups", "Use unique valid group names.")
 		}
 		groupNames[name] = true
 	}
@@ -56,30 +57,30 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 		return err
 	}
 	if input.RunLimits != nil && !input.RunLimits.Valid() {
-		return Invalid("run_limits", "Use valid workflow run limits.")
+		return httpkit.Invalid("run_limits", "Use valid workflow run limits.")
 	}
 	if err := validateKeyCIDRs(input.AllowedCIDRs); err != nil {
 		return err
 	}
 	if input.EndUserPolicy != nil && input.EndUserSource == nil {
-		return Invalid("end_user_source", "An end-user policy requires an identifier source.")
+		return httpkit.Invalid("end_user_source", "An end-user policy requires an identifier source.")
 	}
 	if err := input.EndUserPolicy.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	if input.EndUserSource != nil && *input.EndUserSource != "header" && *input.EndUserSource != "native" {
-		return Invalid("end_user_source", "Use header, native, or null to disable end-user identification.")
+		return httpkit.Invalid("end_user_source", "Use header, native, or null to disable end-user identification.")
 	}
-	if err := ValidText("name", input.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
 	if len(input.Scopes) < 1 || len(input.Scopes) > len(ConsumerScopes()) {
-		return Invalid("scopes", "Select at least one unique scope.")
+		return httpkit.Invalid("scopes", "Select at least one unique scope.")
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
 		if !slices.Contains(ConsumerScopes(), scope) || seen[scope] {
-			return Invalid("scopes", "Use unique supported consumer scopes.")
+			return httpkit.Invalid("scopes", "Use unique supported consumer scopes.")
 		}
 		seen[scope] = true
 	}
@@ -89,25 +90,25 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 		}
 	}
 	if input.AllowedRoutes == nil {
-		return Invalid("allowed_routes", "This field cannot be null.")
+		return httpkit.Invalid("allowed_routes", "This field cannot be null.")
 	}
 	if len(input.AllowedRoutes) > 100 {
-		return Invalid("allowed_routes", "Use at most 100 route slugs.")
+		return httpkit.Invalid("allowed_routes", "Use at most 100 route slugs.")
 	}
 	seen = map[string]bool{}
 	for _, route := range input.AllowedRoutes {
 		if !routeidentity.ValidSlug(route) || seen[route] {
-			return Invalid("allowed_routes", "Use unique valid route slugs.")
+			return httpkit.Invalid("allowed_routes", "Use unique valid route slugs.")
 		}
 		seen[route] = true
 	}
 	if len(input.AllowedAttributionKeys) > maxAttributionKeys {
-		return Invalid("allowed_attribution_keys", "Use at most 8 attribution keys.")
+		return httpkit.Invalid("allowed_attribution_keys", "Use at most 8 attribution keys.")
 	}
 	seen = map[string]bool{}
 	for _, key := range input.AllowedAttributionKeys {
 		if key == attribution.DelegationPairKey || !attribution.ValidKey(key) || seen[key] {
-			return Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
+			return httpkit.Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
 		}
 		seen[key] = true
 	}
@@ -116,23 +117,16 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
 		if value != nil && priority.Rank(*value) < 0 {
-			return Invalid(field, "Use critical, high, normal or low.")
+			return httpkit.Invalid(field, "Use critical, high, normal or low.")
 		}
 	}
 	if priority.Rank(input.DefaultPriority()) < priority.Rank(input.PriorityCeiling()) {
-		return Invalid("priority", "The default priority cannot exceed max_priority.")
+		return httpkit.Invalid("priority", "The default priority cannot exceed max_priority.")
 	}
 	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
-		return Invalid("expires_at", "Choose a future expiry.")
+		return httpkit.Invalid("expires_at", "Choose a future expiry.")
 	}
 	return nil
-}
-func ParseUUID(value string) (string, error) {
-	id, err := uuid.Parse(value)
-	if err != nil {
-		return "", Invalid("id", "Use a valid UUID.")
-	}
-	return id.String(), nil
 }
 
 // parseProjectID canonicalises an optional project_id, so project lookups,
@@ -143,7 +137,7 @@ func parseProjectID(value *string) (*string, error) {
 	}
 	id, err := uuid.Parse(*value)
 	if err != nil {
-		return nil, Invalid("project_id", "Use a valid UUID.")
+		return nil, httpkit.Invalid("project_id", "Use a valid UUID.")
 	}
 	canonical := id.String()
 	return &canonical, nil
@@ -159,7 +153,7 @@ type AuthorityGeneration struct {
 func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (AuthorityGeneration, error) {
 	var id string
 	var sequence int64
-	err := tx.QueryRow(ctx, "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", NewID()).Scan(&id, &sequence)
+	err := tx.QueryRow(ctx, "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", httpkit.NewID()).Scan(&id, &sequence)
 	return AuthorityGeneration{ID: id, Sequence: sequence}, err
 }
 
@@ -188,146 +182,146 @@ func (s *Server) keyJSON() string {
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)),'{weekly,limit}',COALESCE(k.policy->'weekly_cost_limit','null'::jsonb))))`
 }
 
-func (s *Server) apiKeys(r *http.Request, principal Principal) (Reply, error) {
-	p, err := Page(r)
+func (s *Server) apiKeys(r *http.Request, principal Principal) (httpkit.Reply, error) {
+	p, err := httpkit.Page(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var issuer any
 	if raw := r.URL.Query().Get("created_by"); raw != "" {
-		issuer, err = ParseUUID(raw)
+		issuer, err = httpkit.ParseUUID(raw)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT "+s.keyJSON()+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := JSONRows(rows)
-	return ListReply(items, p), err
+	items, err := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, p), err
 }
-func (s *Server) apiKey(r *http.Request, p Principal) (Reply, error) {
-	id, err := IDParam(r, "api_key_id")
+func (s *Server) apiKey(r *http.Request, p Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var data []byte
 	var etag string
 	var projectID *string
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, View); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(json.RawMessage(data), etag), nil
+	return httpkit.Detail(json.RawMessage(data), etag), nil
 }
-func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) createAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	input := keyInput{KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
-	if err := Decode(r, &input); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	projectID, err := parseProjectID(input.ProjectID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	input.ProjectID = projectID
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		// The stored reply carries the plaintext secret, so the caller must
 		// still reach the target project to receive it.
 		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return *replayed, tx.Commit(r.Context())
 	}
 	// A replay returns the original result even if its key has since expired.
 	if err := validateAndNormalizeKey(input, true); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if input.BudgetGroupID != nil {
 		var parsed string
-		if parsed, err = ParseUUID(*input.BudgetGroupID); err != nil {
-			return Reply{}, err
+		if parsed, err = httpkit.ParseUUID(*input.BudgetGroupID); err != nil {
+			return httpkit.Reply{}, err
 		}
 		input.BudgetGroupID = &parsed
 	}
 	if err = checkBudgetGroup(r.Context(), tx, input.BudgetGroupID, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate, endUserTemplate(input.EndUserPolicy)); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = checkKeyAgentResources(r.Context(), tx, input.KeyPolicy, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = ValidateRouteReferences(r, tx, input.AllowedRoutes, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	id, lookup, etag := NewID(), secrets.Token(), NewID()
+	id, lookup, etag := httpkit.NewID(), secrets.Token(), httpkit.NewID()
 	secret := "olp_" + lookup + "_" + secrets.Token()
 	policy, err := json.Marshal(input.KeyPolicy)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = ensureRouteBudgetAccounts(r.Context(), tx, id, input.RouteLimits); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
+	result := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.create", "api_key", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
-func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) updateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var patch map[string]json.RawMessage
-	if err := Decode(r, &patch); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &patch); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if patch == nil {
-		return Reply{}, Invalid("policy", "Send a policy object.")
+		return httpkit.Reply{}, httpkit.Invalid("policy", "Send a policy object.")
 	}
 	allowed := []string{"run_limits", "allowed_toolsets", "allowed_agents", "regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
-			return Reply{}, Invalid(field, "Unknown policy field.")
+			return httpkit.Reply{}, httpkit.Invalid(field, "Unknown policy field.")
 		}
 		if string(value) == "null" && (field == "name" || field == "scopes" || field == "allowed_routes") {
-			return Reply{}, Invalid(field, "This field cannot be null.")
+			return httpkit.Reply{}, httpkit.Invalid(field, "This field cannot be null.")
 		}
 	}
-	id, err := IDParam(r, "api_key_id")
+	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var data []byte
@@ -338,125 +332,125 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	// Seed expiry from the authoritative column, so an omitted patch field
 	// preserves it even when the policy JSON is missing or has a stale value.
 	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name,'expires_at',expires_at),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, Change); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var managed bool
 	if err = tx.QueryRow(r.Context(), "SELECT workload_issuer_id IS NOT NULL FROM olp.api_keys WHERE id=$1", id).Scan(&managed); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if managed {
-		return Reply{}, Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
+		return httpkit.Reply{}, httpkit.Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
 	}
-	if err = Match(r, etag); err != nil {
-		return Reply{}, err
+	if err = httpkit.Match(r, etag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if revoked != nil {
-		return Reply{}, Fail(409, "api_key_revoked", "A revoked key cannot be edited.")
+		return httpkit.Reply{}, httpkit.Fail(409, "api_key_revoked", "A revoked key cannot be edited.")
 	}
 	var merged map[string]json.RawMessage
 	if err = json.Unmarshal(data, &merged); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var previous keyauthority.KeyPolicy
 	if err = json.Unmarshal(data, &previous); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	maps.Copy(merged, patch)
 	data, err = json.Marshal(merged)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input keyInput
 	if err = json.Unmarshal(data, &input); err != nil {
-		return Reply{}, Invalid("policy", "Invalid policy value.")
+		return httpkit.Reply{}, httpkit.Invalid("policy", "Invalid policy value.")
 	}
 	_, changed := patch["expires_at"]
 	if err = validateAndNormalizeKey(input, changed); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if raw, ok := patch["budget_group_id"]; ok {
 		if err = json.Unmarshal(raw, &groupID); err != nil {
-			return Reply{}, Invalid("budget_group_id", "Use a budget group UUID or null.")
+			return httpkit.Reply{}, httpkit.Invalid("budget_group_id", "Use a budget group UUID or null.")
 		}
 		if groupID != nil {
 			var parsed string
-			if parsed, err = ParseUUID(*groupID); err != nil {
-				return Reply{}, err
+			if parsed, err = httpkit.ParseUUID(*groupID); err != nil {
+				return httpkit.Reply{}, err
 			}
 			groupID = &parsed
 		}
 		if err = checkBudgetGroup(r.Context(), tx, groupID, projectID); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err = CheckLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate, endUserTemplate(input.EndUserPolicy)); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	resources := addedKeyAgentResources(input.KeyPolicy, previous)
 	if err = checkKeyAgentResources(r.Context(), tx, resources, projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = ValidateRouteReferences(r, tx, input.AllowedRoutes, projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	data, err = json.Marshal(input.KeyPolicy)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	etag = NewID()
+	etag = httpkit.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), data, input.ExpiresAt, groupID, etag, id); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = ensureRouteBudgetAccounts(r.Context(), tx, id, input.RouteLimits); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.update", "api_key", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag), tx.Commit(r.Context())
+	return httpkit.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag), tx.Commit(r.Context())
 }
-func (s *Server) revokeAPIKey(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) revokeAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	return s.transitionKey(r, false)
 }
-func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	return s.transitionKey(r, true)
 }
-func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
+func (s *Server) transitionKey(r *http.Request, rotate bool) (httpkit.Reply, error) {
 	var overlapSeconds int
 	var overlapUntil *time.Time
 	var input map[string]json.RawMessage
 	if rotate && r.ContentLength != 0 {
-		if err := Decode(r, &input); err != nil {
-			return Reply{}, err
+		if err := httpkit.Decode(r, &input); err != nil {
+			return httpkit.Reply{}, err
 		}
 		for field := range input {
 			if field != "daily_cost_limit" && field != "monthly_cost_limit" && field != "weekly_cost_limit" && field != "budget_group_id" && field != "overlap_seconds" {
-				return Reply{}, Invalid(field, "Only cost budgets and overlap_seconds may accompany rotation.")
+				return httpkit.Reply{}, httpkit.Invalid(field, "Only cost budgets and overlap_seconds may accompany rotation.")
 			}
 		}
 	}
 	if raw, ok := input["overlap_seconds"]; ok {
 		if string(raw) == "null" || json.Unmarshal(raw, &overlapSeconds) != nil || overlapSeconds < 0 || overlapSeconds > 86400 {
-			return Reply{}, Invalid("overlap_seconds", "Use 0–86400 seconds of overlap.")
+			return httpkit.Reply{}, httpkit.Invalid("overlap_seconds", "Use 0–86400 seconds of overlap.")
 		}
 	}
-	id, err := IDParam(r, "api_key_id")
+	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var etag, name string
@@ -465,91 +459,91 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	var projectID *string
 	var groupID *string
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1 FOR UPDATE", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	// A stored replay returns the rotated secret, so the caller must still
 	// reach this key's project before it is accepted.
 	if err := p.Project(projectID, Change); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if rotate {
 		var managed bool
 		if err = tx.QueryRow(r.Context(), "SELECT workload_issuer_id IS NOT NULL FROM olp.api_keys WHERE id=$1", id).Scan(&managed); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if managed {
-			return Reply{}, Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
+			return httpkit.Reply{}, httpkit.Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
 		}
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	if err = Match(r, etag); err != nil {
-		return Reply{}, err
+	if err = httpkit.Match(r, etag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if revoked != nil {
-		return Reply{}, Fail(409, "api_key_revoked", "This key is already revoked.")
+		return httpkit.Reply{}, httpkit.Fail(409, "api_key_revoked", "This key is already revoked.")
 	}
-	etag = NewID()
+	etag = httpkit.NewID()
 	action := "api_key.revoke"
 	var secret, lookup string
 	if rotate {
 		if raw, ok := input["budget_group_id"]; ok {
 			delete(input, "budget_group_id")
 			if err = json.Unmarshal(raw, &groupID); err != nil {
-				return Reply{}, Invalid("budget_group_id", "Use a budget group UUID or null.")
+				return httpkit.Reply{}, httpkit.Invalid("budget_group_id", "Use a budget group UUID or null.")
 			}
 			if groupID != nil {
 				var parsed string
-				if parsed, err = ParseUUID(*groupID); err != nil {
-					return Reply{}, err
+				if parsed, err = httpkit.ParseUUID(*groupID); err != nil {
+					return httpkit.Reply{}, err
 				}
 				groupID = &parsed
 			}
 			if err = checkBudgetGroup(r.Context(), tx, groupID, projectID); err != nil {
-				return Reply{}, err
+				return httpkit.Reply{}, err
 			}
 		}
 		delete(input, "overlap_seconds")
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.api_key_overlaps WHERE api_key_id=$1 AND (expires_at<=now() OR $2=0)", id, overlapSeconds); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if overlapSeconds > 0 {
 			var count int
 			if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.api_key_overlaps WHERE api_key_id=$1", id).Scan(&count); err != nil {
-				return Reply{}, err
+				return httpkit.Reply{}, err
 			}
 			if count >= 8 {
-				return Reply{}, Fail(409, "key_overlap_limit", "Eight previous secrets are still active. Wait for an overlap to end, or rotate with zero overlap.")
+				return httpkit.Reply{}, httpkit.Fail(409, "key_overlap_limit", "Eight previous secrets are still active. Wait for an overlap to end, or rotate with zero overlap.")
 			}
 			if err = tx.QueryRow(r.Context(), `INSERT INTO olp.api_key_overlaps(lookup_id,api_key_id,digest,expires_at)
      SELECT lookup_id,id,digest,LEAST(now()+make_interval(secs=>$2),expires_at) FROM olp.api_keys WHERE id=$1 RETURNING expires_at`, id, overlapSeconds).Scan(&overlapUntil); err != nil {
-				return Reply{}, err
+				return httpkit.Reply{}, err
 			}
 		}
 		var policy map[string]json.RawMessage
 		if err = json.Unmarshal(data, &policy); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		maps.Copy(policy, input)
 		data, err = json.Marshal(policy)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		var normalized keyauthority.KeyPolicy
 		if err = json.Unmarshal(data, &normalized); err != nil {
-			return Reply{}, Invalid("policy", "Invalid cost budget.")
+			return httpkit.Reply{}, httpkit.Invalid("policy", "Invalid cost budget.")
 		}
 		if err = validateAndNormalizeKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		data, err = json.Marshal(normalized)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		action = "api_key.rotate"
 		lookup = secrets.Token()
@@ -559,21 +553,21 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
 	}
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := Detail(generation, etag)
+	result := httpkit.Detail(generation, etag)
 	if rotate {
 		result.Body = map[string]any{"id": id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation, "overlap_expires_at": overlapUntil}
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), action, "api_key", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
@@ -587,47 +581,7 @@ func ValidateRouteReferences(r *http.Request, q Queryer, routes []string, projec
 		return err
 	}
 	if mismatched {
-		return Invalid("allowed_routes", "Allowed routes must belong to the key's project.")
+		return httpkit.Invalid("allowed_routes", "Allowed routes must belong to the key's project.")
 	}
 	return nil
-}
-
-func ParseUUIDs(values []string) ([]string, error) {
-	type parsedUUID struct {
-		value string
-		err   error
-	}
-	parsed := slices.Collect(func(yield func(parsedUUID) bool) {
-		for _, raw := range values {
-			value, err := ParseUUID(raw)
-			if !yield(parsedUUID{value, err}) {
-				return
-			}
-		}
-	})
-	for _, value := range parsed {
-		if value.err != nil {
-			return nil, value.err
-		}
-	}
-	if values == nil {
-		return nil, nil
-	}
-	return append([]string{}, slices.Collect(func(yield func(string) bool) {
-		for _, value := range parsed {
-			if !yield(value.value) {
-				return
-			}
-		}
-	})...), nil
-}
-func ParseOptionalUUID(value *string) (*string, error) {
-	if value == nil {
-		return nil, nil
-	}
-	canonical, err := ParseUUID(*value)
-	if err != nil {
-		return nil, err
-	}
-	return &canonical, nil
 }

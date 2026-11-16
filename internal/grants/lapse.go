@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -126,7 +127,7 @@ func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family)
-		VALUES($1,$2,'provider_credential',$3,'success',$4)`, access.NewID(), action, g.credentialID, workerAgent); err != nil {
+		VALUES($1,$2,'provider_credential',$3,'success',$4)`, httpkit.NewID(), action, g.credentialID, workerAgent); err != nil {
 		return err
 	}
 	_, err := access.AdvanceAuthority(ctx, tx)

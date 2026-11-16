@@ -50,6 +50,7 @@
   );
 
   const intent = useMutationIntent();
+  const runIntent = useMutationIntent();
   const queryClient = useQueryClient();
   const billing = createQuery(() => ({
     queryKey: providerKeys.billingImport(provider.id),
@@ -435,7 +436,9 @@
     busy = true;
     error = notice = '';
     try {
-      await runBillingImport(provider.id, crypto.randomUUID());
+      await runIntent.submit(provider.id, (id, requestId) =>
+        runBillingImport(id, requestId)
+      );
       if (!isCurrent()) return;
       notice = 'Import scheduled.';
       await queryClient.invalidateQueries({

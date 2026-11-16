@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 
@@ -1335,7 +1336,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 			t.Fatal(err)
 		}
 		defer tx.Rollback(t.Context())
-		body, err := codeaccounts.Save(t.Context(), tx, operator, id, access.NewID(), input, existing)
+		body, err := codeaccounts.Save(t.Context(), tx, operator, id, httpkit.NewID(), input, existing)
 		if err != nil {
 			return nil, err
 		}

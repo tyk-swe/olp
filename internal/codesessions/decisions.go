@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -33,7 +33,7 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in Admission, binding co
 		return &in.Recovery.Envelope, &in.Recovery.Number
 	}()
 	decision := codemode.Decision{
-		ID:                 access.NewID(),
+		ID:                 httpkit.NewID(),
 		AttemptID:          attemptID,
 		ProjectID:          in.Route.ProjectID,
 		RouteID:            in.Route.ID,

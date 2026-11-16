@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -26,7 +27,7 @@ type budgetGroupInput struct {
 }
 
 func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
-	if err := ValidText("name", input.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
@@ -48,7 +49,7 @@ func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
 		input.CostBasis = "cost"
 	}
 	if input.LimitTemplate == nil && input.RequestsPerMinute == nil && input.TokensPerMinute == nil && input.MaxConcurrency == nil && input.DailyCostLimit == nil && input.MonthlyCostLimit == nil && input.WeeklyCostLimit == nil {
-		return Invalid("daily_cost_limit", "Set at least one limit or reference a template.")
+		return httpkit.Invalid("daily_cost_limit", "Set at least one limit or reference a template.")
 	}
 	return nil
 }
@@ -65,154 +66,154 @@ func (s *Server) budgetGroupJSON() string {
 		`||jsonb_build_object('enforcement_active',` + enforcement + `)))`
 }
 
-func (s *Server) budgetGroups(r *http.Request, p Principal) (Reply, error) {
-	page, err := Page(r)
+func (s *Server) budgetGroups(r *http.Request, p Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT "+s.budgetGroupJSON()+budgetGroupFrom+" WHERE g.id<$1 AND ($2 OR g.project_id=ANY($3::uuid[])) ORDER BY g.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := JSONRows(rows)
-	return ListReply(items, page), err
+	items, err := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) budgetGroup(r *http.Request, p Principal) (Reply, error) {
-	id, err := IDParam(r, "budget_group_id")
+func (s *Server) budgetGroup(r *http.Request, p Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "budget_group_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var data []byte
 	var etag string
 	var projectID *string
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.budgetGroupJSON()+",g.etag::text,g.project_id::text"+budgetGroupFrom+" WHERE g.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, View); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(json.RawMessage(data), etag), nil
+	return httpkit.Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var input budgetGroupInput
-	if err := Decode(r, &input); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	projectID, err := parseProjectID(input.ProjectID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	input.ProjectID = projectID
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		// The stored reply carries the created budget group, so the caller
 		// must still reach its project to receive it.
 		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return *replayed, tx.Commit(r.Context())
 	}
 	if err := validateAndNormalizeBudgetGroup(&input); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	id, etag := NewID(), NewID()
+	id, etag := httpkit.NewID(), httpkit.NewID()
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by,limit_template,requests_per_minute,tokens_per_minute,max_concurrency,weekly_cost_limit,cost_basis) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID(), input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
+	result := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.create", "budget_group", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	var patch map[string]json.RawMessage
-	if err := Decode(r, &patch); err != nil {
-		return Reply{}, err
+	if err := httpkit.Decode(r, &patch); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if patch == nil {
-		return Reply{}, Invalid("budget_group", "Send a budget group object.")
+		return httpkit.Reply{}, httpkit.Invalid("budget_group", "Send a budget group object.")
 	}
 	allowed := []string{"name", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "limit_template", "requests_per_minute", "tokens_per_minute", "max_concurrency"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
-			return Reply{}, Invalid(field, "Unknown budget group field.")
+			return httpkit.Reply{}, httpkit.Invalid(field, "Unknown budget group field.")
 		}
 		if string(value) == "null" && field == "name" {
-			return Reply{}, Invalid(field, "This field cannot be null.")
+			return httpkit.Reply{}, httpkit.Invalid(field, "This field cannot be null.")
 		}
 	}
-	id, err := IDParam(r, "budget_group_id")
+	id, err := httpkit.IDParam(r, "budget_group_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var etag string
 	var projectID *string
 	var data []byte
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text,'cost_basis',cost_basis) FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", id).Scan(&etag, &projectID, &data); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, Change); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = Match(r, etag); err != nil {
-		return Reply{}, err
+	if err = httpkit.Match(r, etag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var merged map[string]json.RawMessage
 	if err = json.Unmarshal(data, &merged); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	maps.Copy(merged, patch)
 	data, err = json.Marshal(merged)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input budgetGroupInput
 	if err = json.Unmarshal(data, &input); err != nil {
-		return Reply{}, Invalid("budget_group", "Invalid budget group value.")
+		return httpkit.Reply{}, httpkit.Invalid("budget_group", "Invalid budget group value.")
 	}
 	if err = validateAndNormalizeBudgetGroup(&input); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = CheckLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	etag = NewID()
+	etag = httpkit.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now(),limit_template=$6,requests_per_minute=$7,tokens_per_minute=$8,max_concurrency=$9,weekly_cost_limit=$10,cost_basis=$11 WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id, input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.update", "budget_group", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
+	return httpkit.Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
 }
 
 func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string) error {
@@ -224,7 +225,7 @@ func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string
 		return err
 	}
 	if (groupProject == nil) != (projectID == nil) || (groupProject != nil && *groupProject != *projectID) {
-		return Invalid("budget_group_id", "Budget group must belong to the key's project.")
+		return httpkit.Invalid("budget_group_id", "Budget group must belong to the key's project.")
 	}
 	return nil
 }

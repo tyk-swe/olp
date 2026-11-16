@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/export/destination"
 )
 
@@ -122,7 +122,7 @@ func (m *Manager) audit(ctx context.Context, item queued, action, outcome string
 	if item.projectID != "" {
 		project = &item.projectID
 	}
-	if _, err := m.pool.Exec(ctx, auditSQL, access.NewID(), action, item.requestID, outcome, project); err != nil {
+	if _, err := m.pool.Exec(ctx, auditSQL, httpkit.NewID(), action, item.requestID, outcome, project); err != nil {
 		m.log.Warn("capture audit failed", "request_id", item.requestID, "code", "database")
 	}
 }

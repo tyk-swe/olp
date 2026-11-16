@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
@@ -623,11 +624,11 @@ func warnEgressExceptions(log *slog.Logger, c Config) {
 // document the console's handlers produce.
 func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
 	if surface == "management" {
-		problem := access.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
+		problem := httpkit.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
 		if strings.HasPrefix(r.URL.Path, "/scim/") {
 			access.WriteSCIMError(w, problem)
 		} else {
-			access.WriteProblem(w, problem)
+			httpkit.WriteProblem(w, problem)
 		}
 		return
 	}

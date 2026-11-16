@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -35,19 +35,19 @@ type googleScope struct {
 func parseGoogleScope(raw json.RawMessage) (googleScope, error) {
 	var scope googleScope
 	if err := decodeStrict(raw, &scope); errors.Is(err, errTrailingData) {
-		return googleScope{}, access.Invalid("scope", "scope must be a single JSON document")
+		return googleScope{}, httpkit.Invalid("scope", "scope must be a single JSON document")
 	} else if err != nil {
-		return googleScope{}, access.Invalid("scope", "Google scope must be an object containing only supported fields")
+		return googleScope{}, httpkit.Invalid("scope", "Google scope must be an object containing only supported fields")
 	}
 	if !googleBillingAccount.MatchString(scope.BillingAccountID) || !googleProjectID.MatchString(scope.BigQueryProjectID) ||
 		len(scope.DatasetID) > 1024 || len(scope.TableID) > 1024 || !googleDatasetID.MatchString(scope.DatasetID) || !googleTableID.MatchString(scope.TableID) {
-		return googleScope{}, access.Invalid("scope", "Google billing account, BigQuery project, dataset and table must be valid identifiers")
+		return googleScope{}, httpkit.Invalid("scope", "Google billing account, BigQuery project, dataset and table must be valid identifiers")
 	}
 	if len(scope.ProjectIDs) > 100 {
-		return googleScope{}, access.Invalid("scope.project_ids", "at most 100 project IDs")
+		return googleScope{}, httpkit.Invalid("scope.project_ids", "at most 100 project IDs")
 	}
 	if slices.ContainsFunc(scope.ProjectIDs, func(id string) bool { return !googleProjectID.MatchString(id) }) {
-		return googleScope{}, access.Invalid("scope.project_ids", "project IDs must be valid Google project identifiers")
+		return googleScope{}, httpkit.Invalid("scope.project_ids", "project IDs must be valid Google project identifiers")
 	}
 	return googleScope{
 		BillingAccountID:  scope.BillingAccountID,
@@ -98,38 +98,38 @@ func googleCredentialInput(raw json.RawMessage) (string, error) {
 		return text, nil
 	}
 	if json.Unmarshal(raw, new(map[string]json.RawMessage)) != nil {
-		return "", access.Invalid("credential", "credential must be a string")
+		return "", httpkit.Invalid("credential", "credential must be a string")
 	}
 	return string(raw), nil
 }
 
 func parseGoogleCredential(text string) (googleCredential, error) {
 	if len(text) > googleMaxCredential {
-		return nil, access.Invalid("credential", "Google billing credential exceeds 65536 bytes")
+		return nil, httpkit.Invalid("credential", "Google billing credential exceeds 65536 bytes")
 	}
 	var doc googleCredentialDocument
 	if err := decodeStrict(json.RawMessage(text), &doc); errors.Is(err, errTrailingData) {
-		return nil, access.Invalid("credential", "credential must be a single JSON document")
+		return nil, httpkit.Invalid("credential", "credential must be a single JSON document")
 	} else if err != nil {
-		return nil, access.Invalid("credential", "Google billing credential must be a credential document")
+		return nil, httpkit.Invalid("credential", "Google billing credential must be a credential document")
 	}
 	if doc.Source != "" && doc.Source != contract.GoogleBigquery {
-		return nil, access.Invalid("credential", "credential source does not match")
+		return nil, httpkit.Invalid("credential", "credential source does not match")
 	}
 	switch doc.AuthMode {
 	case "service_account":
 		key, ok := canonicalServiceAccount(doc.ServiceAccount)
 		if !ok {
-			return nil, access.Invalid("credential", "service_account requires a Google service account key document")
+			return nil, httpkit.Invalid("credential", "service_account requires a Google service account key document")
 		}
 		return googleServiceAccount{key: key}, nil
 	case "adc":
 		if len(doc.ServiceAccount) != 0 {
-			return nil, access.Invalid("credential", "adc does not accept a service account key")
+			return nil, httpkit.Invalid("credential", "adc does not accept a service account key")
 		}
 		return googleADC{}, nil
 	default:
-		return nil, access.Invalid("credential", "Google auth_mode must be service_account or adc")
+		return nil, httpkit.Invalid("credential", "Google auth_mode must be service_account or adc")
 	}
 }
 
