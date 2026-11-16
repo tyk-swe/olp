@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '#lib/management/http.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
@@ -61,8 +62,7 @@
       await client.invalidateQueries({ queryKey: scimKeys.groups() });
       await client.invalidateQueries({ queryKey: projectKeys.root });
     } catch (e) {
-      error =
-        e instanceof Error ? e.message : 'Could not save the group mapping.';
+      error = errorMessage(e, 'Could not save the group mapping.');
     } finally {
       busy = false;
     }

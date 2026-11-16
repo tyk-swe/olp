@@ -49,9 +49,7 @@
               >{notificationEvents[delivery.event]
                 .label}{#if delivery.event === 'key.expiring'}<small
                   >{delivery.api_key_name} · {delivery.reason}
-                  {delivery.due_at
-                    ? new Date(delivery.due_at).toLocaleString()
-                    : ''}</small
+                  {delivery.due_at ? formatDate(delivery.due_at) : ''}</small
                 >{/if}
               {#if delivery.provider_name}<br /><small
                   >{delivery.provider_name} · credential v{delivery.credential_version}</small
