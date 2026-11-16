@@ -61,6 +61,13 @@ credential's custom headers when set, and `X-OLP-Signature` when the credential
 provides `signing_secret`. A redelivery resends byte-identical payloads, so a
 consumer deduplicates on `id`. OpenMeter is the reference consumer.
 
+The first delivery claim freezes payload settings for that pending event before
+sending it. Settings edits apply to events not yet claimed. Destination and
+credential changes still apply to retries so operators can repair transport
+configuration. After an upgrade, the first claim of a legacy pending event
+freezes the current settings. It cannot reconstruct settings used by earlier
+attempts. Older workers continue to read live settings until upgraded.
+
 ### Stripe meter sinks
 
 A `stripe_meter` sink with format `stripe` carries `metering` only and posts
