@@ -12,11 +12,11 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
+| Users, keys and identity | `internal/access/`, `internal/access/authority/`, `internal/access/httpkit/` (management problems, replies, decoding and pagination); console `access/` |
 | Projects, installation settings and policy | `internal/projects/`, `internal/access/` (settings, branding and installation budgets), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/` and `models/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
+| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |

@@ -154,3 +154,148 @@ destination family derivation behind connector profile data, deciding the
 `BedrockCount` operation string, splitting the access hub along its
 principal and HTTP kit seam, and threading retry identity through the
 guardrail policy and activation calls that still mint it inline.
+
+## Second pass baseline
+
+The second pass starts at commit `25184252`, which landed the first pass.
+Measured the same way as the first baseline, the tree has 186 Go packages in
+`internal/` and `cmd/`, 85 top level packages under `internal/`, and 1133
+recorded import edges. Packages importing `internal/access` stand at 60, and
+a count of `access.` symbol uses outside tests shows the HTTP kit first
+(`Reply`, `Invalid`, `Fail`, `Decode`) ahead of `Principal` and `Queryer`,
+which confirms the principal and HTTP kit seam as the cheapest next cut.
+The gateway kernel root holds 34805 non-test lines with 66 project imports,
+so the models extraction bought clarity rather than size, and the pinned
+executor remains the large hidden module. `Run` in `cmd/olp/run.go` is 428
+lines in a 635 line file and stays as designed. The loop baseline is
+`make test-unit-go` at 10.4s of its 30s budget and a warm-cache
+`go build ./...` at about 4s wall time, and the import graph gate passes
+before anything moves.
+
+The targets for this pass are 35 or fewer packages importing
+`internal/access`, 78 or fewer top level packages under `internal/`, 1080 or
+fewer recorded import edges, and a gateway kernel root under 28000 non-test
+lines. The work takes the five named follow-ups first, in the order access
+hub, pinned executor, destination family, guardrail retry identity, and then
+one fresh item the first pass did not cover, the 12 top level code mode
+packages at roughly 9500 lines combined, each package moving only when its
+importers already sit inside code mode plus `cmd/olp`. Moves and logic
+changes stay in separate commits, behavior is pinned by tests before code
+moves, and no test budget changes to admit any of it.
+
+The access slice landed first and its investigation narrowed the original
+target. Counting `access.` symbols per importing package showed only a
+handful of packages use nothing but the HTTP kit, because nearly every
+importer also names `Principal`, registers routes on the concrete server, or
+calls the mutation machinery. The pure kit now lives in
+`internal/access/httpkit`, a leaf package that imports only
+`internal/access/authority`, `internal/oif`, and the database driver, and it
+owns problems and their rendering, replies, strict JSON decoding, ETag
+matching, identifier parsing, and cursor pagination. Every call site moved
+with it and `internal/access/http.go` fell from 568 to 358 lines. Packages
+importing `internal/access` fell from 60 to 55, with `internal/mcp`,
+`internal/billing/source`, `internal/codeclient`,
+`internal/gateway/delegation`, and `internal/usage/param` now depending on
+the leaf alone. Total recorded edges rose from 1133 to 1189 because most
+feature packages now import both the server and the kit, so for this hub the
+importer count is the honest measure and the raw edge total is not. The
+deeper cut, moving `Principal`, `Operation`, and contract admission into a
+caller package and registering feature routes against a narrow router
+instead of the concrete server, remains open work. It needs a constructor
+for the principal's unexported token scope state and its own review, since
+it rewires how every management feature is mounted.
+
+The pinned executor investigation also ran in this pass and the extraction
+did not move. The retained and pinned files are 4196 lines in ten files, but
+they read and write about thirty fields of the kernel `call` and call at
+least a dozen kernel helpers that live outside them, including the state and
+settlement helpers in `internal/gateway/resources.go`, `settlePinHold` in
+dispatch, and `finish` in the executor response path. Registration also
+starts from `resources.go`, so the real unit is the retained files plus much
+of that file plus a split of `call` into the generation state the kernel
+keeps and the pinned state an executor could own. That is a settlement
+design change rather than a file move, which is what the first pass meant by
+giving it its own change. It stays follow-up work with this dependency map
+as its starting point, and it should begin by pinning settlement behavior
+with characterization tests aimed at the retained paths specifically, beyond
+the cost reservation and usage settlement coverage that already exists.
+
+The destination family slice settled its smallest open question and left the
+larger merge open. `BedrockCount` was the one count family whose accounting
+operation fell through to generation, and two consumers, the wire descriptor
+and the connector target family selector, each carried a special case that
+patched it back to a token count. The family now reports the token count
+operation itself, both patches are gone, and a wire test pins every count
+family to one shared operation that its descriptor agrees with. Provider
+invocation also stopped computing the kind based family on requests that an
+explicit profile then re-selected. What remains open is the merge of the two
+selectors themselves, the kind based selector in protocols that automatic
+providers use and the profile based selector in connectors that explicit
+profiles use. They answer overlapping questions for two different provider
+modes, and unifying them needs automatic providers to synthesize the profile
+they are currently selected without, which is a connector design change
+rather than a cleanup.
+
+The guardrail retry identity item turned out to live in the console. Policy
+save, both activation calls, and policy attach minted a fresh idempotency
+key inline on every attempt, so a retry after an ambiguous failure reached
+the server as a new logical mutation and its replay protection could not
+recognize it. Those calls now take the caller's retained request identity
+the way definition save and the credential calls already did, the page owns
+one mutation intent per editor action, and a new API test pins the threaded
+key on save, activation, and attach, including the repeated activation a
+retry sends.
+
+The code mode audit mostly rejected its own premise. Of the twelve top level
+packages, only the allowance worker has no importers outside the family, and
+it stays top level because it is a polling worker that spans the adapter,
+plans, and vendor auth packages while sessions implement one side of its
+store interface. The rest serve distinct outside owners, providers own code
+accounts, routing selects them, and the gateway forwards them, and
+`internal/codemode` itself is the shared decision vocabulary those owners
+agree on. The three vendor auth packages also stay separate, since the
+plugin ABI they each implement is already the one shared surface and a merge
+would only collide their adapter names. Two packages did have exactly one
+owner, the research session protocol and the Codex wire observer, both used
+only by gateway code forwarding, and they now live under
+`internal/gateway/codeforward/` with their package names unchanged. Top
+level packages under `internal/` fell from 85 to 83.
+
+The interface census over the packages this pass touched found nothing to
+cut. The new kit package and the wire and invocation packages declare no
+named interfaces at all, and every named interface nearby sits on a real
+substitution boundary, the plugin carrier and signer seams in connectors,
+the cloud credential and polling input seams in billing sources, the
+optional runtime capabilities the delegation handler asserts, the contract
+between the gateway kernel and code forwarding, and the database querier in
+access that both the pool and a transaction satisfy. Deleting any of them
+would widen coupling rather than deepen a module, so the constructor and
+interface diet closes as investigated with no change. The console follow
+through threaded retained mutation identity through the three remaining
+call sites that minted it per attempt, scheduling a billing import,
+deleting a project, and disabling a workload issuer. The guardrails page
+keeps its own action runner for now, since its mid-action fencing does not
+map onto the combined mutation hook's submit and accept shape without
+restructuring the page, and the identity fix did not depend on that move.
+
+## Outcome of the second pass
+
+Measured the same way as the baseline, this pass took packages importing
+`internal/access` from 60 to 55 and top level packages under `internal/`
+from 85 to 83, while recorded import edges rose from 1133 to 1189 because
+splitting a hub into a server plus a leaf kit gives most feature packages
+two honest edges instead of one wide one. Go packages in `internal/` and
+`cmd/` went from 186 to 187, the gateway kernel root stayed at about 34800
+non-test lines, and a warm-cache `go build ./...` stayed at about 4s wall
+time. Against the targets set at the start, the access importer target, the
+top level package target, the edge target, and the kernel size target were
+all missed, and each miss is recorded above with the evidence that changed
+it rather than a number quietly redefined. What landed is the management
+HTTP kit as a leaf package with every call site moved, the token count
+operation decision with its two compensating patches deleted, retained
+retry identity on every console mutation that still minted it inline, two
+single-owner code packages folded under their consumer, and dependency maps
+for the two remaining structural items, the pinned executor extraction and
+the principal and router split of the access hub. Both are design changes
+that deserve their own reviewed changes, starting from the maps recorded
+here.
