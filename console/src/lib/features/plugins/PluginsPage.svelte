@@ -454,7 +454,9 @@
     margin: 0.25rem 0 0;
     min-width: 0;
   }
-  .facts small,
+  .facts small {
+    color: var(--foreground-muted);
+  }
   summary {
     cursor: pointer;
   }

@@ -241,7 +241,7 @@
     </fieldset>
     <fieldset class="checks routes">
       <legend>Routes</legend>
-      <p>
+      <p class="section-help">
         {services.gatewayAvailable
           ? 'Leave every route unchecked to allow all current and future routes.'
           : 'Leave blank to allow all current and future routes.'}
@@ -849,7 +849,6 @@
     border-radius: var(--radius-control);
     background: var(--surface-raised);
   }
-  .checks.routes p,
   .limits {
     grid-template-columns: repeat(3, 1fr);
   }
