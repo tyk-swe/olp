@@ -161,8 +161,8 @@ The second pass starts at commit `25184252`, which landed the first pass.
 Measured the same way as the first baseline, the tree has 186 Go packages in
 `internal/` and `cmd/`, 85 top level packages under `internal/`, and 1133
 recorded import edges. Packages importing `internal/access` stand at 60, and
-a count of `access.` symbol uses outside tests shows the HTTP kit first
-(`Reply`, `Invalid`, `Fail`, `Decode`) ahead of `Principal` and `Queryer`,
+a count of `access.` symbol uses outside tests shows the HTTP kit leading as
+a group, with `Reply` and `Invalid` first and `Principal` and `Queryer` next,
 which confirms the principal and HTTP kit seam as the cheapest next cut.
 The gateway kernel root holds 34805 non-test lines with 66 project imports,
 so the models extraction bought clarity rather than size, and the pinned
@@ -177,8 +177,11 @@ The targets for this pass are 35 or fewer packages importing
 fewer recorded import edges, and a gateway kernel root under 28000 non-test
 lines. The work takes the five named follow-ups first, in the order access
 hub, pinned executor, destination family, guardrail retry identity, and then
-one fresh item the first pass did not cover, the 12 top level code mode
-packages at roughly 9500 lines combined, each package moving only when its
+one fresh item the first pass did not cover, the twelve top level code mode
+packages (`codeadapter`, `codeallowance`, `codeclient`, `codemode`,
+`codeplans`, `coderesearch`, `codesessions`, `codewire`, `codexauth`,
+`codexwire`, `claudeauth` and `antigravityauth`) at 9893 non-test lines
+combined, each package moving only when its
 importers already sit inside code mode plus `cmd/olp`. Moves and logic
 changes stay in separate commits, behavior is pinned by tests before code
 moves, and no test budget changes to admit any of it.
@@ -188,8 +191,8 @@ target. Counting `access.` symbols per importing package showed only a
 handful of packages use nothing but the HTTP kit, because nearly every
 importer also names `Principal`, registers routes on the concrete server, or
 calls the mutation machinery. The pure kit now lives in
-`internal/access/httpkit`, a leaf package that imports only
-`internal/access/authority`, `internal/oif`, and the database driver, and it
+`internal/access/httpkit`, a leaf package whose project imports are only
+`internal/access/authority` and `internal/oif`, and it
 owns problems and their rendering, replies, strict JSON decoding, ETag
 matching, identifier parsing, and cursor pagination. Every call site moved
 with it and `internal/access/http.go` fell from 568 to 358 lines. Packages
