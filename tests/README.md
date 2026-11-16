@@ -208,8 +208,8 @@ reviewing the purpose change.
 
 ## Retained fixtures
 
-The language-neutral corpus under `tests/fixtures` stays as conformance
-evidence for the protocol, routing, and token tests. The
+The language-neutral corpus under `tests/fixtures` stays as reference data for
+the routing, stream, batch reader, and token tests. The
 comparator in `tests/fidelity` stays because the protocol tests use it.
 Neither is a test suite on its own.
 

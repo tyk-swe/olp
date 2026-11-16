@@ -2,7 +2,7 @@ root = "."
 tmp_dir = ".local/air"
 
 [build]
-cmd = "make build-go GO_BUILD_OUTPUT=.local/bin/olp"
+cmd = "make build-go"
 entrypoint = ["bash", "scripts/dev-backend.sh"]
 include_dir = ["cmd", "guardrails", "inference", "internal", "management", "plugin"]
 include_ext = ["go", "sql", "json", "sig", "lua", "bin"]

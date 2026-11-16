@@ -506,8 +506,8 @@ model family, not ingress dialect; equivalent families are counted once.
 | `anthropic`, `gemini`, `other` | Remaining recognized/unknown models | Four characters/token, with catalog calibration when measured |
 
 Opaque deployment names are not guessed as OpenAI. OpenAI counts documented
-message framing; fixtures match tiktoken, with possible Unicode-version splitting
-differences. The walker retains only the first 36 KiB of text and tail size.
+message framing. Text token fixtures match tiktoken, with possible
+Unicode-version splitting differences. The walker retains only the first 36 KiB of text and tail size.
 
 - `tokenizer`: exact supported text/framing only.
 - `calibrated`: media/tool/schema/encrypted/unknown fields or long-tail ratio.
