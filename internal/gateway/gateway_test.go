@@ -822,12 +822,16 @@ func (unreachableValkey) Do(context.Context, ...string) (any, error) {
 	return nil, context.DeadlineExceeded
 }
 
+func (unreachableValkey) Pipeline(context.Context, ...[]string) ([]any, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	limiter := limitadmission.New(runner)
+	limiter := limitadmission.NewDurable(runner, nil)
 	slots := int64(1)
 	authority := keyauthority.Authority{ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{MaxConcurrency: &slots}}
 	for _, test := range []struct {

@@ -64,6 +64,18 @@ func (s *server) Do(_ context.Context, args ...string) (any, error) {
 	return found.value, found.err
 }
 
+func (s *server) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+	replies := make([]any, len(commands))
+	for index, command := range commands {
+		value, err := s.Do(ctx, command...)
+		replies[index] = value
+		if err != nil {
+			replies[index] = err
+		}
+	}
+	return replies, nil
+}
+
 func (s *server) sent(name string) [][]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -99,7 +111,7 @@ func limiterOn(t *testing.T, client scripts.Commander) *Limiter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(runner)
+	return NewDurable(runner, nil)
 }
 
 func costRequest(basis limits.Basis, rate bool) Request {

@@ -36,8 +36,6 @@ func RequestFromContext(ctx context.Context) *RequestTrace {
 	return &RequestTrace{span: trace.SpanFromContext(ctx)}
 }
 
-func (t *RequestTrace) PropagateUpstream() bool { return t != nil && t.propagateUpstream }
-
 func (t *RequestTrace) SpanContext() trace.SpanContext {
 	if t == nil {
 		return trace.SpanContext{}

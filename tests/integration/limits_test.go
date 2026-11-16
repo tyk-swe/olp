@@ -76,7 +76,7 @@ func contend(t *testing.T, limiter *admission.Limiter, request admission.Request
 func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 	t.Parallel()
 	const capacity, contenders = 5, 40
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{MaxConcurrency: new(int64(capacity))})
 	first := contend(t, limiter, request, contenders)
 	if len(first) != capacity {
@@ -96,7 +96,7 @@ func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 
 func TestAbandonedConcurrencySlotComesBackWhenItsLeaseLapses(t *testing.T) {
 	t.Parallel()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{MaxConcurrency: new(int64(2))})
 	abandoned := request
 	abandoned.LeaseTTL = 50 * time.Millisecond
@@ -117,7 +117,7 @@ func TestAbandonedConcurrencySlotComesBackWhenItsLeaseLapses(t *testing.T) {
 func TestRequestWindowRefusesTheOverflowAndGivesBackRefunds(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{RequestsPerMinute: new(int64(3)), Report: true})
 	reserve := func() *admission.Lease {
 		lease, err := limiter.Reserve(t.Context(), request)
@@ -148,7 +148,7 @@ func TestRequestWindowRefusesTheOverflowAndGivesBackRefunds(t *testing.T) {
 func TestTokenWindowChargesWhatARequestActuallyUsed(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{TokensPerMinute: new(int64(100)), Tokens: 40})
 	asking := func(tokens int64) admission.Request {
 		sized := request
@@ -173,7 +173,7 @@ func TestTokenWindowChargesWhatARequestActuallyUsed(t *testing.T) {
 func TestSupplyReportsEachLookupsTightestHeadroom(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	busy := rated(admission.RateLimits{RequestsPerMinute: new(int64(4)), TokensPerMinute: new(int64(100)), Tokens: 10})
 	for range 3 {
 		if _, err := limiter.Reserve(t.Context(), busy); err != nil {

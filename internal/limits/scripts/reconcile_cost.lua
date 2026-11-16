@@ -96,10 +96,7 @@ local function civil_month(days)
   return year, month
 end
 
-local function current_time(override)
-  if override > 0 then
-    return override
-  end
+local function current_time()
   local server_time = redis.call("TIME")
   if type(server_time) ~= "table" or #server_time ~= 2 then
     return nil
@@ -372,7 +369,7 @@ local function release_lease(pending_key, expiry_key, lease_id)
 end
 -- END cost_pending
 
-if not ((#KEYS == 4 and #ARGV == 7) or (#KEYS == 5 and (#ARGV == 9 or #ARGV == 15)) or (#KEYS == 6 and #ARGV == 18)) then
+if not ((#KEYS == 5 and (#ARGV == 8 or #ARGV == 14)) or (#KEYS == 6 and #ARGV == 17)) then
   return failure("invalid_arguments")
 end
 
@@ -380,20 +377,20 @@ end
 -- newer committed ledger projection can reduce provisional exposure.
 local durable_version, durable_amount
 if #KEYS == 6 then
-  durable_version = parse_safe_unsigned_integer(ARGV[16])
-  durable_amount = normalize_decimal(ARGV[17])
-  if durable_version == nil or durable_amount == nil or (ARGV[18]~="0" and ARGV[18]~="1") then return failure("invalid_arguments") end
+  durable_version = parse_safe_unsigned_integer(ARGV[15])
+  durable_amount = normalize_decimal(ARGV[16])
+  if durable_version == nil or durable_amount == nil or (ARGV[17]~="0" and ARGV[17]~="1") then return failure("invalid_arguments") end
   local prior = redis.pcall("HMGET",KEYS[6],"version","amount","blocked")
   if prior.err ~= nil then return failure("invalid_arguments") end
   if prior[1] ~= false then
     local version = parse_safe_unsigned_integer(prior[1])
     if version == nil or version > durable_version then return failure("invalid_arguments") end
-    if version == durable_version and (prior[2] ~= durable_amount or prior[3] ~= ARGV[18]) then return failure("invalid_arguments") end
+    if version == durable_version and (prior[2] ~= durable_amount or prior[3] ~= ARGV[17]) then return failure("invalid_arguments") end
   end
 end
 
-local snapshot_week = parse_safe_unsigned_integer(ARGV[8] or "0")
-local weekly_value = ARGV[9] or ""
+local snapshot_week = parse_safe_unsigned_integer(ARGV[7])
+local weekly_value = ARGV[8]
 local weekly_accrued = weekly_value ~= "" and normalize_decimal(weekly_value) or nil
 if weekly_value ~= "" and (snapshot_week == nil or weekly_accrued == nil) then return failure("invalid_arguments") end
 
@@ -402,15 +399,14 @@ local daily_accrued = normalize_decimal(ARGV[2])
 local snapshot_month = parse_safe_unsigned_integer(ARGV[3])
 local monthly_accrued = normalize_decimal(ARGV[4])
 local unpriced = parse_safe_unsigned_integer(ARGV[5])
-local override = parse_safe_unsigned_integer(ARGV[6])
-local request_id = ARGV[7]
+local request_id = ARGV[6]
 if snapshot_day == nil or daily_accrued == nil or snapshot_month == nil
-    or monthly_accrued == nil or unpriced == nil or override == nil
+    or monthly_accrued == nil or unpriced == nil
     or (request_id ~= "" and not valid_lease(request_id)) then
   return failure("invalid_arguments")
 end
 
-local now_ms = current_time(override)
+local now_ms = current_time()
 if now_ms == nil then
   return failure("invalid_server_time")
 end
@@ -427,7 +423,7 @@ end
 local bounds = {}
 local function interval(key, index, snapshot, fallback, ttl)
   local existing = redis.pcall("HMGET", key, "starts_at", "ends_at", "window")
-  if #ARGV < 15 then
+  if #ARGV < 14 then
     return fallback, ttl, existing.err ~= nil or existing[1] == false
   end
   local first = parse_safe_unsigned_integer(ARGV[index])
@@ -445,9 +441,9 @@ local function interval(key, index, snapshot, fallback, ttl)
   return snapshot, last-now_ms, active
 end
 local day_active, month_active, week_active
- day_window, day_ttl, day_active = interval(KEYS[1],10,snapshot_day,day_window,day_ttl)
- month_window, month_ttl, month_active = interval(KEYS[2],12,snapshot_month,month_window,month_ttl)
- if #KEYS >= 5 then week_window, week_ttl, week_active = interval(KEYS[5],14,snapshot_week,week_window,week_ttl) end
+ day_window, day_ttl, day_active = interval(KEYS[1],9,snapshot_day,day_window,day_ttl)
+ month_window, month_ttl, month_active = interval(KEYS[2],11,snapshot_month,month_window,month_ttl)
+ week_window, week_ttl, week_active = interval(KEYS[5],13,snapshot_week,week_window,week_ttl)
  if day_window == nil or month_window == nil or week_window == nil then return failure("invalid_arguments") end
 local function record_interval(key)
  if bounds[key] ~= nil then redis.call("HSET",key,"starts_at",bounds[key][1],"ends_at",bounds[key][2]) end
@@ -521,7 +517,7 @@ end
 
 if #KEYS == 6 then
   -- Install accrued and lower exposure atomically, never exposing a free gap.
-  redis.call("HSET",KEYS[6],"version",ARGV[16],"amount",durable_amount,"blocked",ARGV[18])
+  redis.call("HSET",KEYS[6],"version",ARGV[15],"amount",durable_amount,"blocked",ARGV[17])
   redis.call("PERSIST",KEYS[6])
 end
 return {RESPONSE_VERSION, 1, "ok", reconciled_daily, reconciled_monthly}

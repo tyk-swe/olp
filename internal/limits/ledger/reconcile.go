@@ -111,19 +111,6 @@ const (
 	OutcomeSkipped
 )
 
-func (o Outcome) String() string {
-	switch o {
-	case OutcomeSuccess:
-		return "success"
-	case OutcomeFailure:
-		return "failure"
-	case OutcomeSkipped:
-		return "skipped"
-	default:
-		return "unknown"
-	}
-}
-
 type Worker struct {
 	Pool       *pgxpool.Pool
 	Region     string

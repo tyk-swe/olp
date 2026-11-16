@@ -20,20 +20,11 @@ type Limiter struct {
 	durable DurableSyncer
 }
 
-func New(runner scripts.Runner) *Limiter { return &Limiter{scripts: runner} }
-
 func NewDurable(runner scripts.Runner, durable DurableSyncer) *Limiter {
 	return &Limiter{scripts: runner, durable: durable}
 }
 
 func (l *Limiter) Ping(ctx context.Context) error { return l.scripts.Ping(ctx) }
-
-func (l *Limiter) PendingCost(ctx context.Context, ownerID string) (string, error) {
-	if _, err := uuid.Parse(ownerID); err != nil {
-		return "", invalid("cost owner ID must be a UUID")
-	}
-	return l.scripts.PendingCost(ctx, limits.Owner{ID: ownerID, Basis: limits.BasisCost})
-}
 
 func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	if err := r.validate(); err != nil {
@@ -106,14 +97,12 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 	return hold, nil
 }
 
-func (b CostBudget) Caps(durable bool) scripts.CostCaps {
+func (b CostBudget) Caps() scripts.CostCaps {
 	return scripts.CostCaps{
 		Owner: b.Owner, Daily: text(b.Daily), Weekly: text(b.Weekly), Monthly: text(b.Monthly),
-		Increases: b.Increases, Durable: durable,
+		Increases: b.Increases,
 	}
 }
-
-func (l *Limiter) caps(b CostBudget) scripts.CostCaps { return b.Caps(l.durable != nil) }
 
 func text(value *string) string {
 	if value == nil {
@@ -125,15 +114,12 @@ func text(value *string) string {
 func (l *Limiter) reserveCost(ctx context.Context, b CostBudget, ttl time.Duration, retain bool) (*costReservation, error) {
 	if b.Estimate == nil {
 		return nil, l.decided(ctx, b.Owner.ID, func() error {
-			return l.scripts.ReserveCost(ctx, l.caps(b), "0", "", 0)
+			return l.scripts.ReserveCost(ctx, b.Caps(), "0", "", 0)
 		})
 	}
-	held := &costReservation{
-		hold:  scripts.CostHold{Owner: b.Owner, LeaseID: limits.CanonicalUUID(b.Estimate.RequestID)},
-		grace: b.Estimate.grace(),
-	}
+	held := &costReservation{hold: scripts.CostHold{Owner: b.Owner, LeaseID: limits.CanonicalUUID(b.Estimate.RequestID)}}
 	err := l.decided(ctx, b.Owner.ID, func() error {
-		return l.scripts.ReserveCost(ctx, l.caps(b), b.Estimate.Amount, held.hold.LeaseID, ttl+held.grace)
+		return l.scripts.ReserveCost(ctx, b.Caps(), b.Estimate.Amount, held.hold.LeaseID, ttl+costGrace)
 	})
 	if err == nil {
 		return held, nil

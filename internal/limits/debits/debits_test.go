@@ -207,6 +207,10 @@ func (refusing) Do(context.Context, ...string) (any, error) {
 	return nil, errors.New("connection refused")
 }
 
+func (refusing) Pipeline(context.Context, ...[]string) ([]any, error) {
+	return nil, errors.New("connection refused")
+}
+
 func pricedResult() Result {
 	return Result{
 		DispatchID: testID, EventID: testID,
