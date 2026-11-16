@@ -173,137 +173,130 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	lossCounters := &completeness.LossCounters{}
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
-	// Worker replicas also need the runtime manager and the key ring: media
-	// reconciliation serves jobs against their pinned historical providers
-	// with credentials from the manager's credential source.
 	var keys *secrets.KeyRing
 	var prober *gateway.Server
-	if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-		core, err := newRuntimeCore(startup, c, pool, readPool, installation, vk, &shutdownDeadline, log)
+	core, err := newRuntimeCore(startup, c, pool, readPool, installation, vk, &shutdownDeadline, log)
+	if err != nil {
+		return err
+	}
+	for _, closer := range core.closers {
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, closer.name, closer.close)
+	}
+	auth, keys, policy = core.auth, core.keys, core.policy
+	business, exporter, focusWorker = core.business, core.exporter, core.focusWorker
+	capturer, importer, pluginHost, rt = core.capturer, core.importer, core.pluginHost, core.rt
+	unconfined := core.unconfined
+	assembly := gatewayTemplates(gatewayInputs{config: c, pool: pool, core: core, inferencePool: inferencePool, limiter: limiter, shared: shared, outage: outage, log: log})
+	gatewayDeps, probeDeps := assembly.deps, assembly.probeDeps
+	gatewayConfig, probeConfig := assembly.config, assembly.probeConfig
+	media, err := newMediaPlane(c, pool, policy, rt, &mediaGapsTotal, log)
+	if err != nil {
+		return err
+	}
+	defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, media.closer.name, media.closer.close)
+	mediaSpool, mediaTransport, mediaService = media.spool, media.transport, media.service
+	if c.Mode.Management() || c.Mode.Inference() {
+		grantStore = personal.NewStore(pool, installation, auth, keys, policy)
+		taskLimits := tasks.Limits{Debits: debitStore}
+		if shared != nil {
+			taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
+		}
+		agentTasks = tasks.New(pool, taskLimits, auth, log)
+		agentPeers = a2a.NewPeers(policy, func(ctx context.Context, id string) ([]byte, error) {
+			return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
+		})
+	}
+	if c.Mode.Inference() {
+		gatewayDeps.Capture = capturer
+		gatewayDeps.Media = &gateway.MediaDeps{Transport: mediaTransport, Jobs: mediaService, Store: jobs.NewStore(pool)}
+		gatewayDeps.Staging = mediaSpool
+		gatewayDeps.Uploads = staging.NewAdmission(mediaSpool.CapacityBytes())
+		if pool != nil {
+			gatewayDeps.CodeLedger = codesessions.New(pool)
+			gatewayDeps.CodeAuthorizer = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+			gatewayDeps.CodeResearch = codesessions.New(pool)
+			gatewayDeps.ResearchAuth = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+			gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
+			gatewayDeps.Resolver = resources.NewResolver(pool)
+		}
+
+		agentExecutor := agents.New(agents.Options{Tasks: agentTasks, Peers: agentPeers, Grants: grantStore, Entra: rt})
+		agentServer := a2a.New(a2a.Options{Runtime: rt, Executor: agentExecutor, Peers: agentPeers, Grants: grantStore, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin})
+		agentServer.Register(public)
+		agentMonitor = agents.NewMonitor(agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, grantStore), rt, log)
+		var toolLedger mcpaccounting.Ledger
+		if limiter != nil {
+			toolLedger = mcpaccounting.NewDurableLedger(pool, debitStore, shared.Syncer, auth)
+		}
+		var sessionStore *sessions.Store
+		if vk != nil {
+			sessionStore, err = sessions.New(vk, prefix+"mcp")
+			if err != nil {
+				return err
+			}
+		}
+		toolLimiter := func() mcp.RateLimiter {
+			if limiter == nil {
+				return nil
+			}
+			return limiter
+		}()
+		toolExecutor := mcp.NewExecutor(mcp.ExecutorOptions{
+			Authority: rt, Grants: grantStore, Connect: upstream.NewDialer(policy, registration.NewExecutables(unconfined, pool)),
+			Ledger: toolLedger, Auth: auth, Limiter: toolLimiter, Log: log,
+			Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
+			},
+			Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
+				return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
+			},
+		})
+		toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
+		if limiter != nil {
+			gatewayDeps.WorkflowRuns = runs.NewWorkflowStore(pool, auth, keys, installation)
+			gatewayDeps.WorkflowTools = toolServer
+		}
+		toolServer.Register(public)
+	}
+	// Every process that can spend against shared budgets owns a durable
+	// producer epoch, including control-only playground calls and worker-only
+	// health probes. No producer may log and forget a failed ledger write.
+	// Without shared state, hard limits are refused and metadata stays logged.
+	if limiter != nil {
+		accounting = delivery.NewDelivery(pool, completeness.GatewayInstance(c.Hostname), metadataBuffer, lossCounters, log)
+		for _, server := range []*gateway.Dependencies{&gatewayDeps, &probeDeps} {
+			if server.Admission == nil {
+				continue
+			}
+			server.Debits = gateway.DurableSessionDebits(pool, debitStore, shared.Syncer)
+			server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
+			server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
+			server.Admission.CostAccountingReady = accounting.Check
+			server.Sink = &events.AccountingSink{Delivery: accounting, Next: server.Sink}
+		}
+	}
+	if c.Mode.Management() || c.Mode.Inference() {
+		gw = gateway.New(gatewayDeps, gatewayConfig)
+	}
+	if probeDeps.Admission != nil {
+		prober = gateway.New(probeDeps, probeConfig)
+	}
+	if c.Mode.Inference() {
+		gw.Register(public)
+	}
+	if c.Mode.Management() {
+		mgmt, err := newManagement(startup, managementInputs{
+			config: c, pool: pool, installation: installation, core: core,
+			limiter: limiter, shared: shared, gateway: gw,
+			agentTasks: agentTasks, agentPeers: agentPeers, agentGrants: grantStore,
+			media: mediaService, spool: mediaSpool, health: obsCache,
+			catalog: referenceCatalog, catalogKeys: catalogKeys, pluginIndex: pluginIndex, log: log,
+		})
 		if err != nil {
 			return err
 		}
-		for _, closer := range core.closers {
-			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, closer.name, closer.close)
-		}
-		auth, keys, policy = core.auth, core.keys, core.policy
-		business, exporter, focusWorker = core.business, core.exporter, core.focusWorker
-		capturer, importer, pluginHost, rt = core.capturer, core.importer, core.pluginHost, core.rt
-		unconfined := core.unconfined
-		assembly := gatewayTemplates(gatewayInputs{config: c, pool: pool, core: core, inferencePool: inferencePool, limiter: limiter, shared: shared, outage: outage, log: log})
-		gatewayDeps, probeDeps := assembly.deps, assembly.probeDeps
-		gatewayConfig, probeConfig := assembly.config, assembly.probeConfig
-		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-			media, err := newMediaPlane(c, pool, policy, rt, &mediaGapsTotal, log)
-			if err != nil {
-				return err
-			}
-			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, media.closer.name, media.closer.close)
-			mediaSpool, mediaTransport, mediaService = media.spool, media.transport, media.service
-		}
-		if c.Mode.Management() || c.Mode.Inference() {
-			grantStore = personal.NewStore(pool, installation, auth, keys, policy)
-			taskLimits := tasks.Limits{Debits: debitStore}
-			if shared != nil {
-				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
-			}
-			agentTasks = tasks.New(pool, taskLimits, auth, log)
-			agentPeers = a2a.NewPeers(policy, func(ctx context.Context, id string) ([]byte, error) {
-				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
-			})
-		}
-		if c.Mode.Inference() {
-			gatewayDeps.Capture = capturer
-			gatewayDeps.Media = &gateway.MediaDeps{Transport: mediaTransport, Jobs: mediaService, Store: jobs.NewStore(pool)}
-			gatewayDeps.Staging = mediaSpool
-			gatewayDeps.Uploads = staging.NewAdmission(mediaSpool.CapacityBytes())
-			if pool != nil {
-				gatewayDeps.CodeLedger = codesessions.New(pool)
-				gatewayDeps.CodeAuthorizer = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
-				gatewayDeps.CodeResearch = codesessions.New(pool)
-				gatewayDeps.ResearchAuth = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
-				gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
-				gatewayDeps.Resolver = resources.NewResolver(pool)
-			}
-
-			agentExecutor := agents.New(agents.Options{Tasks: agentTasks, Peers: agentPeers, Grants: grantStore, Entra: rt})
-			agentServer := a2a.New(a2a.Options{Runtime: rt, Executor: agentExecutor, Peers: agentPeers, Grants: grantStore, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin})
-			agentServer.Register(public)
-			agentMonitor = agents.NewMonitor(agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, grantStore), rt, log)
-			var toolLedger mcpaccounting.Ledger
-			if limiter != nil {
-				toolLedger = mcpaccounting.NewDurableLedger(pool, debitStore, shared.Syncer, auth)
-			}
-			var sessionStore *sessions.Store
-			if vk != nil {
-				sessionStore, err = sessions.New(vk, prefix+"mcp")
-				if err != nil {
-					return err
-				}
-			}
-			toolLimiter := func() mcp.RateLimiter {
-				if limiter == nil {
-					return nil
-				}
-				return limiter
-			}()
-			toolExecutor := mcp.NewExecutor(mcp.ExecutorOptions{
-				Authority: rt, Grants: grantStore, Connect: upstream.NewDialer(policy, registration.NewExecutables(unconfined, pool)),
-				Ledger: toolLedger, Auth: auth, Limiter: toolLimiter, Log: log,
-				Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
-					return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
-				},
-				Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
-					return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
-				},
-			})
-			toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
-			if limiter != nil {
-				gatewayDeps.WorkflowRuns = runs.NewWorkflowStore(pool, auth, keys, installation)
-				gatewayDeps.WorkflowTools = toolServer
-			}
-			toolServer.Register(public)
-		}
-		// Every process that can spend against shared budgets owns a durable
-		// producer epoch, including control-only playground calls and worker-only
-		// health probes. No producer may log and forget a failed ledger write.
-		// Without shared state, hard limits are refused and metadata stays logged.
-		if limiter != nil {
-			accounting = delivery.NewDelivery(pool, completeness.GatewayInstance(c.Hostname), metadataBuffer, lossCounters, log)
-			for _, server := range []*gateway.Dependencies{&gatewayDeps, &probeDeps} {
-				if server.Admission == nil {
-					continue
-				}
-				server.Debits = gateway.DurableSessionDebits(pool, debitStore, shared.Syncer)
-				server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
-				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
-				server.Admission.CostAccountingReady = accounting.Check
-				server.Sink = &events.AccountingSink{Delivery: accounting, Next: server.Sink}
-			}
-		}
-		if c.Mode.Management() || c.Mode.Inference() {
-			gw = gateway.New(gatewayDeps, gatewayConfig)
-		}
-		if probeDeps.Admission != nil {
-			prober = gateway.New(probeDeps, probeConfig)
-		}
-		if c.Mode.Inference() {
-			gw.Register(public)
-		}
-		if c.Mode.Management() {
-			mgmt, err := newManagement(startup, managementInputs{
-				config: c, pool: pool, installation: installation, core: core,
-				limiter: limiter, shared: shared, gateway: gw,
-				agentTasks: agentTasks, agentPeers: agentPeers, agentGrants: grantStore,
-				media: mediaService, spool: mediaSpool, health: obsCache,
-				catalog: referenceCatalog, catalogKeys: catalogKeys, pluginIndex: pluginIndex, log: log,
-			})
-			if err != nil {
-				return err
-			}
-			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", mgmt.PluginRuntime.Close)
-			mgmt.Register(public)
-		}
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", mgmt.PluginRuntime.Close)
+		mgmt.Register(public)
 	}
 	if err := startup.Err(); err != nil {
 		return err
