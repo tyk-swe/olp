@@ -486,7 +486,7 @@ type certifyResult struct {
 }
 
 func (s *Server) certifyCapability(ctx context.Context, target probe.Target, model string, c connection.Capability, fingerprint string, at time.Time) (storedCapability, certifyResult) {
-	if err := s.prober.Certify(ctx, target, model, c, probe.BodyLimit); err != nil {
+	if err := s.prober.Certify(ctx, target, model, c); err != nil {
 		failure := probe.Classify(err)
 		return storedCapability{Capability: c, Source: "declared"}, certifyResult{Capability: c, Detail: failure.Detail, ErrorCode: &failure.Reason}
 	}

@@ -71,7 +71,7 @@ func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if got, ok := test.price.Cost(test.usage(), settledAt, true); ok {
+			if got, ok := NewRoutingPrice(RoutingPrice{Price: test.price}).Cost(test.usage(), settledAt, true, nil); ok {
 				t.Fatalf("Cost = %q, true, want no cost", got.String())
 			}
 		})
@@ -131,32 +131,32 @@ func TestCostPerRequestToolsAndBatch(t *testing.T) {
 	u := usageOf(1_000_000, 0)
 	u.OutputTokens = nil
 	u.ToolCalls = map[string]int64{"web_search": 3, "file_search": 0}
-	got, ok := price.Cost(u, settledAt, true)
+	got, ok := NewRoutingPrice(RoutingPrice{Price: price}).Cost(u, settledAt, true, nil)
 	if !ok || got.String() != "1.08" {
 		// 1 + 0.05 + 3*0.01; the zero-count tool needs no fee.
 		t.Fatalf("Cost = %q, %v, want 1.08", got.String(), ok)
 	}
 	// A failed attempt pays no per-request fee.
-	got, ok = price.Cost(u, settledAt, false)
+	got, ok = NewRoutingPrice(RoutingPrice{Price: price}).Cost(u, settledAt, false, nil)
 	if !ok || got.String() != "1.03" {
 		t.Fatalf("unsuccessful Cost = %q, %v, want 1.03", got.String(), ok)
 	}
 	// A tool with a nonzero count and no fee leaves the attempt unpriced.
 	u.ToolCalls = map[string]int64{"file_search": 1}
-	if _, ok := price.Cost(u, settledAt, true); ok {
+	if _, ok := NewRoutingPrice(RoutingPrice{Price: price}).Cost(u, settledAt, true, nil); ok {
 		t.Fatal("a tool without a fee priced")
 	}
 	// Batch usage multiplies the whole charge.
 	u.ToolCalls = nil
 	u.Batch = true
-	got, ok = price.Cost(u, settledAt, true)
+	got, ok = NewRoutingPrice(RoutingPrice{Price: price}).Cost(u, settledAt, true, nil)
 	if !ok || got.String() != "0.525" {
 		t.Fatalf("batch Cost = %q, %v, want 0.525", got.String(), ok)
 	}
 	// And is unpriced when the price names no batch multiplier.
 	plain := Price{ProviderKind: "openai", Model: "m", Operation: "generation",
 		InputPerMillion: rate("1"), OutputPerMillion: rate("2"), Currency: "USD"}
-	if _, ok := plain.Cost(u, settledAt, true); ok {
+	if _, ok := NewRoutingPrice(RoutingPrice{Price: plain}).Cost(u, settledAt, true, nil); ok {
 		t.Fatal("batch usage priced without a batch multiplier")
 	}
 }
@@ -197,7 +197,7 @@ func TestCostBoundWithComponents(t *testing.T) {
 func TestRetainedEvalAggregateUsageCannotChooseInvocationTiers(t *testing.T) {
 	price := Price{ProviderKind: "openai", Model: "m", Operation: "generation", InputPerMillion: new("1"), OutputPerMillion: new("0"), Tiers: []PriceTier{{AboveInputTokens: 100_000, InputPerMillion: new("3"), OutputPerMillion: new("0")}}}
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceObservedComplete, Deferred: true, UsageQuantities: usage.UsageQuantities{InvocationCount: new(int64(2)), InputTokens: new(int64(120_000)), OutputTokens: new(int64(0))}}
-	if cost, priced := price.Cost(evidence, time.Now(), true); priced {
+	if cost, priced := NewRoutingPrice(RoutingPrice{Price: price}).Cost(evidence, time.Now(), true, nil); priced {
 		t.Fatalf("two 60k invocations charged aggregate tier: %s", cost.String())
 	}
 	card := RoutingCardRevision{Prices: []RoutingPrice{*NewRoutingPrice(RoutingPrice{Price: price})}}
@@ -206,7 +206,7 @@ func TestRetainedEvalAggregateUsageCannotChooseInvocationTiers(t *testing.T) {
 	}
 	evidence.InvocationCount = new(int64(1))
 	evidence.InputTokens = new(int64(60_000))
-	if cost, priced := price.Cost(evidence, time.Now(), true); !priced || cost.String() != "0.06" {
+	if cost, priced := NewRoutingPrice(RoutingPrice{Price: price}).Cost(evidence, time.Now(), true, nil); !priced || cost.String() != "0.06" {
 		t.Fatalf("single invocation pricing changed: %s %v", cost.String(), priced)
 	}
 }

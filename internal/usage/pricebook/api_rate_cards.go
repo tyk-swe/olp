@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -120,20 +118,17 @@ func (s *API) listRateCardRevisions(r *http.Request, _ access.Principal) (httpki
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	limit, err := param.Limit(r.URL.Query())
+	query := r.URL.Query()
+	limit, err := param.Limit(query)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	before := 1 << 30
-	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
-		revision, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || revision < 1 {
-			return httpkit.Reply{}, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
-		}
-		before = revision
+	before, err := param.RevisionCursor(query)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), cardRevisionColumns+
-		" WHERE r.rate_card_id=$1::uuid AND r.revision < $2 ORDER BY r.revision DESC LIMIT $3",
+		" WHERE r.rate_card_id=$1::uuid AND ($2::int IS NULL OR r.revision < $2) ORDER BY r.revision DESC LIMIT $3",
 		id, before, int64(limit)+1)
 	if err != nil {
 		return httpkit.Reply{}, err

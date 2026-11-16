@@ -22,7 +22,7 @@ import (
 
 const (
 	Timeout     = 15 * time.Second
-	BodyLimit   = 1 << 20
+	bodyLimit   = 1 << 20
 	concurrency = 4
 )
 
@@ -40,9 +40,11 @@ type Prober struct {
 	slots       chan struct{}
 }
 
-func New(policy *egress.Policy, getenv func(string) string, signer connectors.Signer, carriers *plugins.Host, secrets NetworkSecrets) *Prober {
+func New(policy *egress.Policy, getenv func(string) string, carriers *plugins.Host, secrets NetworkSecrets) *Prober {
 	auth := connectors.NewAuth(policy, getenv)
-	auth.Signer = signer
+	if carriers != nil {
+		auth.Signer = carriers
+	}
 	return &Prober{
 		egress:      policy,
 		auth:        auth,
@@ -163,11 +165,11 @@ func (p *Prober) do(ctx context.Context, t Target, r request) (response, error) 
 		return response{}, Classify(err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, BodyLimit+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
 	if err != nil {
 		return response{status: resp.StatusCode, header: resp.Header.Clone()}, Classify(err)
 	}
-	if len(data) > BodyLimit {
+	if len(data) > bodyLimit {
 		return response{status: resp.StatusCode, header: resp.Header.Clone()}, &Failure{Reason: UpstreamResponseTooLarge, Detail: "The upstream response exceeded the probe body limit."}
 	}
 	return response{status: resp.StatusCode, header: resp.Header.Clone(), body: data}, nil

@@ -65,15 +65,15 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 		return protocols.DecodeRequest(invocation.Wire, parsed.Family, transport.UnwrapResponse(body), "certification", "", parsed)
 	}
 	if parsed.Family == wire.Responses {
-		completion, err := openai.Aggregate(wire.Responses, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, BodyLimit)
+		completion, err := openai.Aggregate(wire.Responses, transport.StreamPayload(bytes.NewReader(body), bodyLimit), bodyLimit, bodyLimit)
 		if err != nil {
 			return nil, err
 		}
 		return openai.DecodeResponse(completion.Body, "certification")
 	}
 	var frames bytes.Buffer
-	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, "certification", true, func(frame []byte) error {
-		if frames.Len()+len(frame) > BodyLimit {
+	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), bodyLimit), bodyLimit, "certification", true, func(frame []byte) error {
+		if frames.Len()+len(frame) > bodyLimit {
 			return wire.ErrEventTooLarge
 		}
 		_, writeErr := frames.Write(frame)
@@ -82,5 +82,5 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 	if err != nil {
 		return nil, err
 	}
-	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), BodyLimit, "certification", true, func([]byte) error { return nil })
+	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), bodyLimit, "certification", true, func([]byte) error { return nil })
 }

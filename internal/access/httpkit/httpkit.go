@@ -69,14 +69,10 @@ func ProblemFor(err error) (*Problem, bool) {
 
 func WriteProblem(w http.ResponseWriter, err error) {
 	p, _ := ProblemFor(err)
-	renderProblem(w, p)
+	RenderProblem(w, p)
 }
 
 func RenderProblem(w http.ResponseWriter, p *Problem) {
-	renderProblem(w, p)
-}
-
-func renderProblem(w http.ResponseWriter, p *Problem) {
 	body := map[string]any{"type": "https://openllmproxy.dev/problems/" + p.Code, "title": http.StatusText(p.Status), "status": p.Status, "detail": p.Detail}
 	if p.Field != "" {
 		body["errors"] = map[string]any{p.Field: []any{map[string]string{"code": p.Code, "message": p.Detail}}}

@@ -366,9 +366,6 @@ func (in CodePoolInput) validate() error {
 	if in.Kind != "personal" && in.Kind != "shared" || (in.Kind == "personal") != (in.OwnerUserID != nil) {
 		return httpkit.Invalid("kind", "Personal pools require an owner; shared pools have none.")
 	}
-	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
-		return httpkit.Invalid("assignments", "Use at most 100 accounts and keys.")
-	}
 	for account, weight := range in.AccountWeights {
 		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
 			return httpkit.Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")

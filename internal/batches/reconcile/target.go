@@ -52,7 +52,7 @@ func (w *Worker) target(ctx context.Context, settlement batches.Settlement) (ups
 	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
 	if err != nil {
 		var failure *providerinvoke.ResolutionError
-		if errors.As(err, &failure) && failure.Stage != providerinvoke.ConnectionResolution {
+		if errors.As(err, &failure) && !failure.Connection {
 			return upstream.Target{}, errors.Join(errCredentialUnavailable, err)
 		}
 		return upstream.Target{}, errors.Join(errRuntimeUnavailable, err)

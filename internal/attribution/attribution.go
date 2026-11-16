@@ -10,7 +10,6 @@ const (
 	HeaderBytes       = 4096
 	MaxKeys           = 4
 	MaxBytes          = 1024
-	KeyMax            = 8
 	DelegationPairKey = "delegation_pair"
 )
 

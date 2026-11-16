@@ -49,7 +49,7 @@ func TestBindingResolvesPinnedCredentialsBeforeNetwork(t *testing.T) {
 	bound := resolver.Bind(pinned, Target{Provider: routing.Provider{ID: "provider", Network: &egress.ConnectionOptions{CredentialID: "network-version"}}, Slot: routing.Slot{CredentialID: &credentialID}}, nil)
 	resolved, err := bound.Resolve(t.Context())
 	var resolution *ResolutionError
-	if !errors.As(err, &resolution) || resolution.Stage != NetworkResolution {
+	if !errors.As(err, &resolution) || resolution.Connection {
 		t.Fatalf("network refusal lost its resolution stage: %v", err)
 	}
 	if !errors.Is(err, refusal) || resolved.Credential.Generation != 7 || string(resolved.Credential.Secret) != "owned-secret" || resolved.Client != nil {
@@ -93,7 +93,7 @@ func TestBindingExplicitScopeRetainsConnectionValidation(t *testing.T) {
 	defer resolver.Connections.CloseIdleConnections()
 	_, err := resolver.Bind(nil, Target{Provider: routing.Provider{ID: "provider"}}, nil).Resolve(t.Context())
 	var resolution *ResolutionError
-	if !errors.As(err, &resolution) || resolution.Stage != ConnectionResolution {
+	if !errors.As(err, &resolution) || !resolution.Connection {
 		t.Fatalf("explicit scope bypassed connection construction: %v", err)
 	}
 }

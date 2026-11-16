@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -87,13 +85,9 @@ func (s *API) listPricingRevisions(r *http.Request, p access.Principal) (httpkit
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	var before *int
-	if raw := strings.TrimSpace(query.Get("cursor")); raw != "" {
-		revision, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || revision < 1 {
-			return httpkit.Reply{}, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
-		}
-		before = &revision
+	before, err := param.RevisionCursor(query)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	items, next, err := ListRevisions(r.Context(), s.Access.Pool, before, limit)
 	if err != nil {

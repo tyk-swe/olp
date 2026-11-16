@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-func (p *Prober) certifyGeminiInteraction(ctx context.Context, t Target, model, mode string, maxEventBytes int) error {
+func (p *Prober) certifyGeminiInteraction(ctx context.Context, t Target, model, mode string) error {
 	if mode != "unary" && mode != "streaming" {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "Gemini Interactions profile supports unary and streaming calls."}
 	}
@@ -37,14 +37,14 @@ func (p *Prober) certifyGeminiInteraction(ctx context.Context, t Target, model, 
 		return statusError(t, status, result)
 	}
 	if mode == "unary" {
-		if _, err := geminilifecycle.ParseInteractionResponse(result, BodyLimit); err != nil {
+		if _, err := geminilifecycle.ParseInteractionResponse(result, bodyLimit); err != nil {
 			return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not return a valid Interaction resource."}
 		}
 		return nil
 	}
 	state := &geminilifecycle.InteractionStream{}
-	err = sse.Decode(bytes.NewReader(result), maxEventBytes, func(frame sse.Frame) error {
-		event, err := geminilifecycle.ParseInteractionEvent([]byte(frame.Data), maxEventBytes)
+	err = sse.Decode(bytes.NewReader(result), bodyLimit, func(frame sse.Frame) error {
+		event, err := geminilifecycle.ParseInteractionEvent([]byte(frame.Data), bodyLimit)
 		if err != nil {
 			return err
 		}
@@ -56,7 +56,7 @@ func (p *Prober) certifyGeminiInteraction(ctx context.Context, t Target, model, 
 	return nil
 }
 
-func (p *Prober) certifyGeminiLive(ctx context.Context, t Target, model string, maxEventBytes int) error {
+func (p *Prober) certifyGeminiLive(ctx context.Context, t Target, model string) error {
 	endpoint, err := t.Connection.Transport().GeminiLiveURL()
 	if err != nil {
 		return &Failure{Reason: InvalidEndpoint, Detail: "The Live profile cannot address this endpoint."}
@@ -90,7 +90,7 @@ func (p *Prober) certifyGeminiLive(ctx context.Context, t Target, model string, 
 		return Classify(err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	conn.SetReadLimit(int64(maxEventBytes))
+	conn.SetReadLimit(int64(bodyLimit))
 	upstream := transport.Model(model)
 	if !connectors.ModelValid(connectors.KindGemini, upstream) {
 		return &Failure{Reason: ModelInvalid, Detail: "The Live model binding is malformed."}
@@ -100,10 +100,10 @@ func (p *Prober) certifyGeminiLive(ctx context.Context, t Target, model string, 
 		return Classify(err)
 	}
 	_, responseBody, err := conn.Read(ctx)
-	if err != nil || geminilifecycle.ValidateLiveServerFrame(responseBody, maxEventBytes) != nil {
+	if err != nil || geminilifecycle.ValidateLiveServerFrame(responseBody, bodyLimit) != nil {
 		return &Failure{Reason: ProviderProtocolError, Detail: "The Live provider did not acknowledge setup."}
 	}
-	doc, err := oif.ParseJSON(responseBody, oif.Limits{MaxBytes: maxEventBytes})
+	doc, err := oif.ParseJSON(responseBody, oif.Limits{MaxBytes: bodyLimit})
 	if err != nil {
 		return &Failure{Reason: ProviderProtocolError, Detail: "The Live provider returned malformed setup acknowledgement."}
 	}
