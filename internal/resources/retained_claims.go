@@ -2,14 +2,12 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type RetainedClaim struct {
@@ -117,19 +115,9 @@ func (s *Store) RetainedEvidenceTerminationTx(ctx context.Context, tx pgx.Tx, id
 	err := tx.QueryRow(ctx, `SELECT remote_terminated,terminal_at FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, id).Scan(&term, &at)
 	return term, at, err
 }
-func (s *Store) RetainedTemplates(ctx context.Context, id uuid.UUID) (map[string]*usage.Event, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx, `SELECT templates FROM olp.retained_settlements WHERE resource_id=$1`, id).Scan(&raw)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]*usage.Event
-	err = json.Unmarshal(raw, &out)
-	return out, err
-}
 
-func (s *Store) CheckpointRetained(ctx context.Context, outcome workerhealth.Outcome, progress bool) error {
-	return workerhealth.New(workerhealth.TaskRetainedSettlement, "").Checkpoint(ctx, s.pool, outcome, progress)
+func (s *Store) CheckpointRetained(ctx context.Context, outcome workerhealth.Outcome) error {
+	return workerhealth.New(workerhealth.TaskRetainedSettlement, "").Checkpoint(ctx, s.pool, outcome, false)
 }
 
 // CloseUndispatchedRetained uses the durable submission fence as proof that no

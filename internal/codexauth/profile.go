@@ -8,12 +8,11 @@ import (
 )
 
 const (
-	ClientVersion  = "latest"
-	SourceRevision = "a956835d020762cb2b570053af06f643a11c0ecc"
-	ProfileID      = "codex-subscription"
-	Upstream       = "https://chatgpt.com/backend-api/codex"
-	Issuer         = "https://auth.openai.com"
-	ClientID       = "app_EMoamEEZ73f0CkXaXp7hrann"
+	ClientVersion = "latest"
+	ProfileID     = "codex-subscription"
+	Upstream      = "https://chatgpt.com/backend-api/codex"
+	Issuer        = "https://auth.openai.com"
+	ClientID      = "app_EMoamEEZ73f0CkXaXp7hrann"
 )
 
 func Manifest() abi.Manifest {

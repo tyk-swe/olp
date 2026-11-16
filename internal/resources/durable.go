@@ -207,14 +207,6 @@ func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]
 	return payload, nil
 }
 
-func (s *Store) DeleteStagedDurableContract(ctx context.Context, id uuid.UUID) error {
-	if !s.Encrypted() || id == uuid.Nil {
-		return ErrContract
-	}
-	_, err := s.pool.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.ProviderContinuation)
-	return err
-}
-
 // ReadDurableContract checks the current owner before decrypting. The gateway
 // additionally resolves the historical serving pin and current revocation.
 func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID string) (*Resource, []byte, error) {

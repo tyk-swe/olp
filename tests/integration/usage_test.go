@@ -65,7 +65,7 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	worker := retainedworker.Worker{Store: store, Resolver: resources.NewResolver(pool), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	worker := retainedworker.Worker{Store: store, Resolver: resources.NewResolver(pool), Connections: egress.NewConnectionClientCache(128), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	go func() {
 		defer close(done)
 		worker.Run(ctx)

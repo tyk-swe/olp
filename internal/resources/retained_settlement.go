@@ -512,17 +512,6 @@ WHERE e.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, i
 	return len(templates) > 0, nil
 }
 
-func (s *Store) RetainedStatus(ctx context.Context, id uuid.UUID) (map[string]any, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx, `SELECT to_jsonb(s)-'templates'-'claim_id'-'lease_until' FROM olp.retained_settlements s WHERE resource_id=$1`, id).Scan(&raw)
-	if err != nil {
-		return nil, err
-	}
-	var result map[string]any
-	err = json.Unmarshal(raw, &result)
-	return result, err
-}
-
 func retainedEvidenceKey(observation RetainedObservation) string {
 	return "provider:" + retainedObservationDigest(observation)
 }

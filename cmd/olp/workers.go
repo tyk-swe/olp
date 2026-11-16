@@ -105,7 +105,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDe
 		Limiter: limiter, Log: log, Now: time.Now,
 	})
 	wg.Go(supervise(func() { batchWorker.Run(ctx) }))
-	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Log: log}
+	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Connections: egress.NewConnectionClientCache(128), Log: log}
 	wg.Go(supervise(func() { retained.Run(ctx) }))
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
