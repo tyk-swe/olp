@@ -4,6 +4,7 @@
   import { listRoutes } from '#lib/features/routes/api.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import { errorMessage } from '#lib/management/http.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
   import {
     ResourceRequestError,
@@ -162,7 +163,17 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => run('delete')}
+      onclick={async () => {
+        if (
+          await confirmAction({
+            title: `Delete agent ${id}?`,
+            body: 'This asks the provider to delete the agent.',
+            confirmLabel: 'Delete agent',
+            danger: true
+          })
+        )
+          await run('delete');
+      }}
       disabled={busy || !id || !apiKey}>Delete agent</button
     >
     {#if nextPage}<button

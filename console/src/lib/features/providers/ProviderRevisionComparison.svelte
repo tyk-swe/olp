@@ -97,7 +97,7 @@
   }
   .revision-diff h3 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

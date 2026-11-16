@@ -1,6 +1,9 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
@@ -42,7 +45,6 @@
   let revision = $state('');
   let inspected = $state('');
   let error = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let conflict = $state(false);
   let epoch = 0;
@@ -52,7 +54,6 @@
     editor = false;
     inspected = '';
     error = '';
-    notice = '';
     busy = false;
   });
 
@@ -107,12 +108,23 @@
       key_grants: keys
     };
   }
+  async function retire() {
+    if (!current) return;
+    if (
+      await confirmAction({
+        title: `Retire ${current.name}?`,
+        body: 'Retrieval through this binding stops on the route.',
+        confirmLabel: 'Retire binding',
+        danger: true
+      })
+    )
+      await write('retire');
+  }
   async function write(action: 'save' | 'retire') {
     if (busy || !canManage || conflict) return;
     const version = epoch;
     const isCurrent = captureOwner();
     error = '';
-    notice = '';
     busy = true;
     try {
       const next = action === 'save' ? input() : null;
@@ -140,7 +152,7 @@
         current = null;
         editor = false;
       }
-      notice = saved ? 'Binding revision saved.' : 'Binding retired.';
+      notify(saved ? 'Binding revision saved.' : 'Binding retired.');
       await client.invalidateQueries({ queryKey });
     } catch (cause) {
       if (isCurrent() && version === epoch) {
@@ -198,7 +210,7 @@
   {:else if !bindings.data?.length}<p>
       No cloud retrieval bindings are configured.
     </p>
-  {:else}<div class="table-shell">
+  {:else}<ScrollTable label="Cloud retrieval bindings">
       <table class="data-table">
         <caption class="sr-only">Cloud retrieval bindings</caption>
         <thead
@@ -228,7 +240,7 @@
             </tr>{/each}</tbody
         >
       </table>
-    </div>{/if}
+    </ScrollTable>{/if}
   {#if editor}
     <form
       onsubmit={(event) => {
@@ -298,7 +310,7 @@
           {#if current}<button
               class="button button-secondary"
               type="button"
-              onclick={() => write('retire')}
+              onclick={retire}
               disabled={conflict}>Retire binding</button
             >{/if}
         </div>
@@ -334,7 +346,7 @@
     </form>
   {/if}
   {#if busy}<p role="status">Waiting for the binding operation…</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if inspected}<pre
       aria-label="Retrieval binding revision">{inspected}</pre>{/if}
@@ -387,9 +399,6 @@
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  .table-shell {
-    overflow-x: auto;
   }
   td small {
     display: block;

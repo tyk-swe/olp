@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { SvelteMap } from 'svelte/reactivity';
   import { formatCost } from '#lib/format.js';
@@ -143,7 +144,7 @@
         or Azure OpenAI connection.
       </p>
     {:else}
-      <div class="table-scroll">
+      <ScrollTable label="Billing reconciliation">
         <table class="data-table">
           <thead
             ><tr
@@ -204,7 +205,7 @@
             </tbody>
           {/each}
         </table>
-      </div>
+      </ScrollTable>
     {/if}
   </section>
 {/if}

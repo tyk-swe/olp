@@ -111,7 +111,7 @@
           >{/each}
       </select></label
     >
-    <p class="helper">
+    <p class="muted">
       Switching opens that installation with its own session. Bookmarks contain
       names and origins; keys and data stay separate.
     </p>
@@ -173,7 +173,7 @@
   .switcher-menu {
     color: var(--foreground);
     font-family: var(--font-sans);
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     font-weight: 400;
     line-height: 1.5;
     letter-spacing: normal;

@@ -4,7 +4,6 @@
   import type { Snippet } from 'svelte';
   import type { SessionUser } from '#lib/features/access/session/api.js';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import Toaster from '#lib/components/Toaster.svelte';
   import BrandMark from '#lib/shell/BrandMark.svelte';
   import CommandPalette from '#lib/shell/CommandPalette.svelte';
   import NavIcon from '#lib/shell/NavIcon.svelte';
@@ -148,8 +147,6 @@
     onClose={() => (paletteOpen = false)}
   />
 {/if}
-
-<Toaster />
 
 <style>
   .shell {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -16,7 +17,6 @@
   let etag = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   $effect(() => {
     if (publication.data && !etag) {
       enabled = publication.data.enabled;
@@ -30,13 +30,13 @@
       enabled = result.data.enabled;
       pricesPublic = result.data.prices_public;
       etag = result.data.etag;
-      error = notice = '';
+      error = '';
     }
   }
   async function save(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       const result = await putPublication(projectId, {
         enabled,
@@ -45,7 +45,7 @@
       });
       client.setQueryData(catalogKeys.publication(projectId), result);
       etag = result.etag;
-      notice = 'Catalog publication saved.';
+      notify('Catalog publication saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -64,7 +64,7 @@
       {errorMessage(publication.error)}
     </p>{/if}
   {#if error}<p role="alert" class="inline-problem">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+
   {#if !access.allows('PUT /api/v1/projects/{project_id}/catalog')}<p
       class="muted"
     >
@@ -135,8 +135,5 @@
     display: flex;
     gap: 0.75rem;
     flex-wrap: wrap;
-  }
-  .muted {
-    color: var(--foreground-muted);
   }
 </style>

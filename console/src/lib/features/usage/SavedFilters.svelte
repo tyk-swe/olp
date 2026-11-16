@@ -68,7 +68,7 @@
 
 <details class="saved-views">
   <summary>Saved views</summary>
-  <p class="helper">
+  <p class="muted">
     Save the current filters for this sign-in session and browser tab. A new
     session starts with no saved views.
   </p>

@@ -241,7 +241,7 @@
     </fieldset>
     <fieldset class="checks routes">
       <legend>Routes</legend>
-      <p>
+      <p class="section-help">
         {services.gatewayAvailable
           ? 'Leave every route unchecked to allow all current and future routes.'
           : 'Leave blank to allow all current and future routes.'}
@@ -808,7 +808,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -849,12 +849,6 @@
     border-radius: var(--radius-control);
     background: var(--surface-raised);
   }
-  .checks.routes p,
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
-  }
   .limits {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -894,9 +888,6 @@
     font-size: var(--text-caption);
   }
   .budget-detail .danger-text {
-    color: var(--danger);
-  }
-  .field-error {
     color: var(--danger);
   }
   .scope-label {

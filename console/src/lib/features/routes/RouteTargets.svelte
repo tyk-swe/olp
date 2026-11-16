@@ -214,7 +214,7 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -309,7 +309,7 @@
     border-radius: var(--radius-control);
     background: var(--warning-soft);
     color: var(--foreground);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .eligibility-warning strong {
     color: var(--warning);

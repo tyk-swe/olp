@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import {
     useMutationIntent,
@@ -202,8 +203,8 @@
       tried first; weights distribute requests within a priority.
     </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
-  {#if pool.isError}<p role="alert">
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
+  {#if pool.isError}<p class="inline-problem" role="alert">
       Credentials could not be loaded. <button
         type="button"
         onclick={() => pool.refetch()}>Retry</button

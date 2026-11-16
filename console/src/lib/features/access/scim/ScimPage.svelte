@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { errorMessage } from '#lib/management/http.js';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
@@ -27,7 +29,6 @@
   >([]);
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   function edit(group: Group) {
     current = group;
     role = group.mapping.role ?? '';
@@ -37,7 +38,6 @@
       id: crypto.randomUUID()
     }));
     error = '';
-    notice = '';
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -58,12 +58,11 @@
         projects: memberships.map(({ value, role }) => ({ value, role }))
       });
       edit(result);
-      notice = 'Group access saved.';
+      notify('Group access saved.');
       await client.invalidateQueries({ queryKey: scimKeys.groups() });
       await client.invalidateQueries({ queryKey: projectKeys.root });
     } catch (e) {
-      error =
-        e instanceof Error ? e.message : 'Could not save the group mapping.';
+      error = errorMessage(e, 'Could not save the group mapping.');
     } finally {
       busy = false;
     }
@@ -96,7 +95,9 @@
 </section>
 {#if groups.isPending}<p role="status">
     Loading provisioned groups…
-  </p>{:else if groups.isError}<p role="alert">Could not load SCIM groups.</p>
+  </p>{:else if groups.isError}<p class="inline-problem" role="alert">
+    Could not load SCIM groups.
+  </p>
   <button class="button button-secondary" onclick={() => groups.refetch()}
     >Retry</button
   >{:else if !groups.data?.length}<p>
@@ -202,10 +203,8 @@
           ])}>Add project membership</button
       >
     </fieldset>
-    {#if error}<p class="error-message" role="alert">
+    {#if error}<p class="inline-problem" role="alert">
         {error}
-      </p>{/if}{#if notice}<p role="status">
-        {notice}
       </p>{/if}
     <div class="actions">
       {#if editable}<button class="button button-primary" disabled={busy}

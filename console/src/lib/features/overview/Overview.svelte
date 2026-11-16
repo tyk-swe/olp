@@ -408,7 +408,7 @@
   .status-card strong {
     display: block;
     overflow: hidden;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
     text-overflow: ellipsis;
@@ -444,7 +444,7 @@
 
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

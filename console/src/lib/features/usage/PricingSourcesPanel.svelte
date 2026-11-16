@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
@@ -255,7 +256,7 @@
       Your role can view pricing sources but not change them.
     </p>{/if}
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-  {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
   {#if canEdit}
     <form class="card source-form" onsubmit={submitCreate}>
@@ -524,11 +525,6 @@
     display: grid;
     gap: 1rem;
     padding: 1.25rem;
-  }
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
   }
   .source-list {
     display: grid;

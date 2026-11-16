@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -43,7 +44,6 @@
     $props();
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const ruleIntent = useMutationIntent();
   const destinations = createQuery(() => ({
     queryKey: notificationKeys.destinations(),
@@ -128,7 +128,7 @@
     }
     ruleBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const submission = ruleIntent.prepare(parsed.input);
@@ -171,7 +171,7 @@
     editingRule = null;
     editConfiguration = newRuleConfiguration('budget.threshold');
     ruleBusy = editRuleBusy = false;
-    error = notice = '';
+    error = '';
   });
 
   function startRuleEdit(rule: NotificationRule) {
@@ -199,7 +199,7 @@
     if (!current || current.id !== rule.id) return;
     editRuleBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     const parsed = parseRuleConfiguration(editConfiguration);
     if (parsed.kind === 'invalid') {
       error = parsed.message;
@@ -217,7 +217,7 @@
       if (!isCurrent()) return;
       editRuleId = '';
       editingRule = null;
-      notice = 'Rule updated.';
+      notify('Rule updated.');
       await queryClient.invalidateQueries(
         {
           queryKey: notificationKeys.root
@@ -237,7 +237,7 @@
   async function toggleRule(rule: NotificationRule) {
     if (!canManage) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateNotificationRule(rule, { enabled: !rule.enabled });
       if (!isCurrent()) return;
@@ -276,7 +276,7 @@
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 {#if canManage}<div class="toolbar">
     <p class="section-help">
       When a budget is close to its limit, a key expires, or deliveries fail.
@@ -463,7 +463,7 @@
     >Rules decide which events send an alert, and to which destination.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification rules">
     <table class="data-table">
       <thead
         ><tr
@@ -593,5 +593,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

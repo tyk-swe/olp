@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
@@ -177,7 +178,7 @@
     </form>
   {/if}
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 </section>
 
 <style>

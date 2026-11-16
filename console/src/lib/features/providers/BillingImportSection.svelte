@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
@@ -89,7 +90,6 @@
   let enabled = $state(true);
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   let conflicted = $state(false);
   let initialized = $state(false);
 
@@ -106,7 +106,7 @@
     googleAuthMode = 'service_account';
     enabled = true;
     busy = false;
-    error = notice = '';
+    error = '';
     conflicted = false;
     initialized = false;
   });
@@ -366,7 +366,7 @@
     };
     const isCurrent = captureOwner();
     busy = true;
-    error = notice = '';
+    error = '';
     conflicted = false;
     try {
       await intent.submit(input, (submission, requestId) =>
@@ -379,7 +379,7 @@
       if (kind === 'vertex_ai') googleAuthMode = 'keep';
       accessKeyId = secretAccessKey = sessionToken = '';
       replaceCredential = false;
-      notice = 'Billing import saved.';
+      notify('Billing import saved.');
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
       });
@@ -399,7 +399,7 @@
     if (busy) return;
     const isCurrent = captureOwner();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       const result = await billing.refetch();
       if (!isCurrent()) return;
@@ -434,13 +434,13 @@
     if (!canManage || busy) return;
     const isCurrent = captureOwner();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       await runIntent.submit(provider.id, (id, requestId) =>
         runBillingImport(id, requestId)
       );
       if (!isCurrent()) return;
-      notice = 'Import scheduled.';
+      notify('Import scheduled.');
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
       });
@@ -465,7 +465,7 @@
       return;
     const isCurrent = captureOwner();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       await deleteBillingImport(provider.id, detail.etag);
       if (!isCurrent()) return;
@@ -477,7 +477,7 @@
       billingAccountID = bigQueryProjectID = datasetID = tableID = '';
       googleAuthMode = 'service_account';
       enabled = true;
-      notice = 'Billing import removed.';
+      notify('Billing import removed.');
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
       });
@@ -502,7 +502,7 @@
       Billing credentials are separate from inference credentials.
     </p>
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-    {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
     {#if conflicted}
       <ConflictNotice notice="conflict" onReload={reload} disabled={busy} />
     {/if}

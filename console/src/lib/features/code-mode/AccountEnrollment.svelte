@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { onDestroy } from 'svelte';
   import { importSubscriptionCredentials } from '#lib/features/providers/grants.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -156,11 +157,11 @@
     an OLP key
   </p>
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if provider.isPending || kinds.isPending}
     <p role="status">Loading grant capabilities…</p>
   {:else if provider.isError || kinds.isError}
-    <p role="alert">
+    <p class="inline-problem" role="alert">
       Could not load grant capabilities. <button
         class="text-button"
         type="button"
@@ -251,8 +252,5 @@
   p {
     color: var(--foreground-subtle);
     line-height: 1.6;
-  }
-  .field-error {
-    color: var(--danger);
   }
 </style>

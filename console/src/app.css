@@ -160,7 +160,7 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.43;
 }
@@ -280,7 +280,7 @@ body {
   background: color-mix(in srgb, var(--canvas) 40%, var(--surface));
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 500;
   letter-spacing: -0.24px;
   text-transform: uppercase;
@@ -348,7 +348,7 @@ body {
   background: color-mix(in srgb, var(--foreground-muted) 10%, transparent);
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -584,7 +584,7 @@ input[type='file']::file-selector-button:hover {
   margin: 0;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   letter-spacing: -0.24px;
   line-height: 1;
   text-transform: uppercase;
@@ -615,7 +615,8 @@ input[type='file']::file-selector-button:hover {
   color: var(--foreground-muted);
 }
 
-.inline-problem {
+/* Doubled here and on .field-error to beat component-scoped rules like `p.svelte-x`. */
+.inline-problem.inline-problem {
   margin: 1rem 0;
   padding: 0.75rem 1rem;
   border: 1px solid var(--danger);
@@ -644,9 +645,30 @@ input[type='file']::file-selector-button:hover {
 
 .section h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--foreground-muted);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.field-error.field-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.section-help {
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
 }
 
 /* A button that reads as a link: used for refresh and reveal affordances that
@@ -691,7 +713,7 @@ input[type='file']::file-selector-button:hover {
 
 @media (forced-colors: active) {
   .badge,
-  .inline-problem {
+  .inline-problem.inline-problem {
     border: 1px solid CanvasText;
   }
 }
@@ -778,7 +800,7 @@ button:not(:disabled),
   padding: 0.5rem 0.875rem;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.2;
   text-decoration: none;
@@ -824,7 +846,7 @@ button:not(:disabled),
 }
 
 .button-primary {
-  --hatch: rgb(255 255 255 / 20%);
+  --hatch: rgb(255 255 255 / 10%);
   border-color: var(--button-fill);
   background: var(--button-fill);
   color: var(--button-fill-text);
@@ -851,13 +873,24 @@ button:not(:disabled),
   color: var(--foreground-hover);
 }
 
-.button-danger,
-.button-danger:hover:not(:disabled) {
+.button-danger {
   color: var(--danger);
 }
 
 .button-danger:hover:not(:disabled) {
   border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--foreground-muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground-hover);
 }
 
 /* Rows driven by the `slidingIndicator` action: one signal bar glides to the
@@ -903,7 +936,7 @@ button:not(:disabled),
   margin: 0 0 0.5rem;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -946,7 +979,7 @@ button:not(:disabled),
 .wordmark {
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -966,7 +999,7 @@ button:not(:disabled),
   max-width: 44rem;
   margin: 0.75rem 0 0;
   color: var(--foreground-muted);
-  font-size: 1rem;
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
@@ -1265,7 +1298,7 @@ button:not(:disabled),
 .empty-state h2 {
   margin: 0;
   color: var(--foreground);
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -1300,19 +1333,6 @@ button:not(:disabled),
 
 :is(.provider-table, .key-table, .route-section, .recent-table) .data-table {
   min-width: 42rem;
-}
-
-.success-banner {
-  margin: 1rem 0;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--success);
-  border-radius: var(--radius-control);
-  background: var(--success-soft);
-  color: var(--foreground);
-}
-
-.success-banner strong {
-  color: var(--success);
 }
 
 @media (max-width: 62rem), (pointer: coarse) {
@@ -1449,7 +1469,7 @@ button:not(:disabled),
 }
 
 :is(.stack-card, .form-card) > h2 {
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }

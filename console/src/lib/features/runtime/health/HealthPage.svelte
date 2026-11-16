@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
 
@@ -161,13 +162,7 @@
         Loading runtime generations…
       </div>
     {:else}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Runtime generation history"
-      >
+      <ScrollTable label="Runtime generation history">
         <table class="data-table">
           <caption class="sr-only"
             >Recently published immutable runtime generations</caption
@@ -192,7 +187,7 @@
               >{/each}</tbody
           >
         </table>
-      </div>
+      </ScrollTable>
       <CursorPagination
         {...cursorPaginationProps(
           generationPagination,

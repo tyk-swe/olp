@@ -129,7 +129,7 @@
     max-width: 31rem;
     margin: 1.25rem 0 0;
     color: var(--foreground-muted);
-    font-size: 1rem;
+    font-size: var(--text-body);
     line-height: 1.5;
     animation-delay: 520ms;
   }
@@ -173,7 +173,7 @@
     padding: 0;
     color: var(--foreground-subtle);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
     letter-spacing: -0.24px;
     list-style: none;
     text-transform: uppercase;

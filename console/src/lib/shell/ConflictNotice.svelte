@@ -65,7 +65,7 @@
   .concurrent-notice span,
   .concurrent-notice small {
     color: var(--foreground);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   @media (max-width: 36rem) {
     .concurrent-notice {

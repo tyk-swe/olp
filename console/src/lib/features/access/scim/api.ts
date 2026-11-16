@@ -1,22 +1,18 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Group = components['schemas']['SCIMManagedGroup'];
 export type Mapping = components['schemas']['SCIMGroupAccess'];
 export async function listGroups(signal?: AbortSignal) {
-  const groups: Group[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/scim/groups', {
         params: { query: { cursor } },
         signal
       })
-    );
-    groups.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return groups;
+    )
+  );
 }
 export async function saveMapping(group: Group, mapping: Mapping) {
   return unwrap(

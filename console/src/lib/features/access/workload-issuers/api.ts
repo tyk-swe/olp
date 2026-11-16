@@ -1,22 +1,18 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Issuer = components['schemas']['WorkloadIssuer'];
 export type IssuerWrite = components['schemas']['WorkloadIssuerWrite'];
 export async function listIssuers(signal?: AbortSignal) {
-  const items: Issuer[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/workload-issuers', {
         params: { query: { cursor } },
         signal
       })
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function saveIssuer(
   body: IssuerWrite,

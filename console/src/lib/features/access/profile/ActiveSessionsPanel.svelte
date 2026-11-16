@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
 
@@ -20,7 +21,6 @@
   const pagination = $state(emptyCursorHistory());
   let revoking = $state('');
   let error = $state('');
-  let notice = $state('');
 
   const sessions = createQuery(() => ({
     queryKey: profileKeys.sessions(pagination.cursor),
@@ -40,14 +40,14 @@
     )
       return;
     revoking = id;
-    error = notice = '';
+    error = '';
     try {
       if (current) {
         await authLifecycle.endCurrentSession((signal) => logout(signal));
         return;
       }
       await revokeSession(id);
-      notice = 'Session revoked.';
+      notify('Session revoked.');
       await sessions.refetch();
     } catch (cause) {
       error = errorMessage(cause, 'The session could not be revoked.');
@@ -71,7 +71,7 @@
       disabled={sessions.isFetching}>Refresh</button
     >
   </div>
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
+
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
   {#if sessions.isPending}
     <div class="loading-state" role="status">Loading sessions…</div>
@@ -147,7 +147,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

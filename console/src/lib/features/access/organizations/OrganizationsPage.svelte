@@ -1,9 +1,13 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '../session/useRole.svelte';
   import { projectKeys } from '../projects/projectKeys';
   import { organizationKeys } from './organizationKeys';
@@ -27,7 +31,6 @@
   let projectRole = $state<'manager' | 'viewer'>('viewer');
   let busy = $state(false);
   let problem = $state('');
-  let notice = $state('');
   const organizations = createQuery(() => ({
     queryKey: organizationKeys.root,
     queryFn: ({ signal }) => api.listOrganizations(signal)
@@ -70,14 +73,29 @@
     if (projects.data && !projects.data.some((p) => p.id === projectId))
       projectId = projects.data[0]?.id ?? '';
   });
+  async function removeMember(
+    email: string,
+    scope: string,
+    action: () => Promise<unknown>
+  ) {
+    if (
+      !(await confirmAction({
+        title: `Remove ${email}?`,
+        body: `They lose access granted through this ${scope}.`,
+        confirmLabel: 'Remove member',
+        danger: true
+      }))
+    )
+      return;
+    await run(action);
+  }
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     busy = true;
     problem = '';
-    notice = '';
     try {
       await action();
-      notice = 'Saved.';
+      notify('Saved.');
       try {
         await Promise.all([
           client.invalidateQueries(
@@ -101,15 +119,12 @@
 </script>
 
 <svelte:head><title>Organizations · OpenLLMProxy</title></svelte:head>
-<header>
-  <h1>Organizations</h1>
-  <p>
-    Group projects under shared management and budgets. Installation roles still
-    determine which operations each person can perform.
-  </p>
-</header>
-{#if problem}<p class="notice error" role="alert">{problem}</p>{/if}
-{#if notice}<p class="notice success" role="status">{notice}</p>{/if}
+<PageHeader
+  title="Organizations"
+  description="Group projects under shared management and budgets. Installation roles still determine which operations each person can perform."
+/>
+{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
+
 {#if canCreate}
   <form
     onsubmit={(e) => {
@@ -147,9 +162,9 @@
 {/if}
 {#if organizations.isPending}<p>
     Loading organizations…
-  </p>{:else if organizations.isError}<p class="notice error" role="alert">
+  </p>{:else if organizations.isError}<Callout tone="danger">
     {errorMessage(organizations.error)}
-  </p>
+  </Callout>
   <button
     class="button button-secondary"
     onclick={() => organizations.refetch()}>Retry</button
@@ -195,20 +210,22 @@
       organizationId={selected}
       {editable}
     />{/key}
-  <section aria-labelledby="organization-members">
+  <section class="section" aria-labelledby="organization-members">
     <h2 id="organization-members">Organization members</h2>
-    <p>
+    <p class="section-help">
       Managers inherit management of every contained project. Direct project
       memberships remain independent. Add existing users by their user ID.
     </p>
-    {#if members.isError}<p role="alert">{errorMessage(members.error)}</p>{/if}
+    {#if members.isError}<p class="inline-problem" role="alert">
+        {errorMessage(members.error)}
+      </p>{/if}
     {#each members.data ?? [] as m (m.user_id)}<p>
         {m.email} · {m.role} · installation {m.installation_role}
         {#if editable}<button
             class="button button-secondary"
             disabled={busy}
             onclick={() =>
-              run(() =>
+              removeMember(m.email, 'organization', () =>
                 api.removeOrganizationMember(
                   selected,
                   m.user_id,
@@ -251,9 +268,9 @@
         >
       </form>{/if}
   </section>
-  <section aria-labelledby="organization-projects">
+  <section class="section" aria-labelledby="organization-projects">
     <h2 id="organization-projects">Projects</h2>
-    {#if projects.isError}<p role="alert">
+    {#if projects.isError}<p class="inline-problem" role="alert">
         {errorMessage(projects.error)}
       </p>{/if}
     {#if editable}<form
@@ -334,7 +351,7 @@
         </form>{/if}
       <h3>Direct project members</h3>
       <p>Organization memberships above apply in addition to this list.</p>
-      {#if directMembers.isError}<p role="alert">
+      {#if directMembers.isError}<p class="inline-problem" role="alert">
           {errorMessage(directMembers.error)}
         </p>{/if}
       {#each directMembers.data ?? [] as m (m.user_id)}<p>
@@ -342,7 +359,7 @@
               class="button button-secondary"
               disabled={busy}
               onclick={() =>
-                run(() =>
+                removeMember(m.email, 'project', () =>
                   api.removeProjectMember(
                     selected,
                     projectId,
@@ -402,7 +419,6 @@
   }
   section {
     border-top: 1px solid var(--border);
-    margin-top: 2rem;
-    padding-top: 1rem;
+    padding-top: 1.5rem;
   }
 </style>

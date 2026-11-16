@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '#lib/components/toasts.svelte.js';
   import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   import type { components } from '#lib/management/schema.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -8,7 +9,6 @@
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const locked = $derived(!editor.canManage || Boolean(editor.busy));
   let status = $state<components['schemas']['CacheStatistics'] | null>(null);
-  let notice = $state('');
   let problem = $state('');
   let busy = $state(false);
 
@@ -56,7 +56,6 @@
   async function refresh() {
     busy = true;
     problem = '';
-    notice = '';
     try {
       status = await cacheStatistics(editor.slug);
     } catch (error) {
@@ -68,7 +67,6 @@
   async function purge() {
     busy = true;
     problem = '';
-    notice = '';
     try {
       const routes = await listRoutes();
       const route = routes.find(
@@ -79,7 +77,7 @@
       if (!route)
         throw new Error('Publish this route before purging its cache.');
       await purgeCache({ route_id: route.id });
-      notice = 'Cached responses for this route were invalidated.';
+      notify('Cached responses for this route were invalidated.');
       status = await cacheStatistics(editor.slug);
     } catch (error) {
       problem = errorMessage(error);
@@ -308,7 +306,7 @@
         Avoided provider cost: {cost.amount}
         {cost.currency}
       </p>{/each}{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
 </section>
 

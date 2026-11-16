@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDate } from '#lib/format.js';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
@@ -134,9 +135,9 @@
     {#if 'overlap_expires_at' in secret && secret.overlap_expires_at}<p
         class="section-help"
       >
-        The previous secret remains valid until {new Date(
+        The previous secret remains valid until {formatDate(
           secret.overlap_expires_at
-        ).toLocaleString()}.
+        )}.
       </p>{/if}
     {#if copyError}<div class="inline-problem" role="alert">
         {copyError}

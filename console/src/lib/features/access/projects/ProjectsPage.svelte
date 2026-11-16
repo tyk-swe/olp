@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -95,7 +96,7 @@
         >{/if}{/snippet}
   </EmptyState>
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Projects">
     <table class="data-table">
       <thead><tr><th>Name</th><th>Your role</th></tr></thead>
       <tbody>
@@ -116,7 +117,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
 
 {#if creating}

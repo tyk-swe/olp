@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
@@ -185,9 +187,7 @@
   <div class="inline-problem" role="alert">{mutationError}</div>
 {/if}
 
-{#if notice}
-  <div class="success-banner" role="status">{notice}</div>
-{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 <div class="toolbar" role="search">
   <label class="search"
@@ -272,7 +272,7 @@
   {#if models.isPlaceholderData}
     <p class="updating" role="status">Updating…</p>
   {/if}
-  <div class="table-shell" aria-busy={models.isPlaceholderData}>
+  <ScrollTable label="Provider models" busy={models.isPlaceholderData}>
     <table class="data-table">
       <thead
         ><tr
@@ -342,7 +342,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
 
 {#if !models.isPending && !models.isError}<CursorPagination

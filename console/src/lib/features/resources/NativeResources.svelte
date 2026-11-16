@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { listRoutes } from '#lib/features/routes/api.js';
@@ -386,7 +387,7 @@
         </div>{/if}
     </form>
   {/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
   {#if downloadUrl}<a
       class="button button-secondary"

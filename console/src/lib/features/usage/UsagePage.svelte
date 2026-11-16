@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
   import Advanced from '#lib/components/Advanced.svelte';
@@ -551,13 +552,7 @@
         >Try a wider date range or fewer filters.</EmptyState
       >
     {:else}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Usage breakdown"
-      >
+      <ScrollTable label="Usage breakdown">
         <table class="data-table">
           <caption class="sr-only"
             >Usage breakdown by {applied.dimension}</caption
@@ -631,7 +626,7 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
   </section>
 {/if}
@@ -759,7 +754,7 @@
   .pipeline-card span {
     margin: 0;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .pipeline-card strong {
     font-size: 1.25rem;
@@ -784,7 +779,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

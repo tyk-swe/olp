@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -174,13 +175,7 @@
     <p>No provider resources match these filters.</p>
   </section>
 {:else}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-  <div
-    class="table-shell"
-    tabindex="0"
-    role="region"
-    aria-label="Provider resource results"
-  >
+  <ScrollTable label="Provider resource results">
     <table class="data-table">
       <caption class="sr-only">Provider resource mappings</caption><thead
         ><tr
@@ -227,7 +222,7 @@
           >{/each}</tbody
       >
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(
       paging,
@@ -280,8 +275,5 @@
     overflow-wrap: anywhere;
     font-family: var(--font-mono);
     font-size: var(--text-caption);
-  }
-  .table-shell {
-    overflow-x: auto;
   }
 </style>

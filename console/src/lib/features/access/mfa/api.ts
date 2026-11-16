@@ -9,6 +9,7 @@ import {
 } from '#lib/management/http.js';
 type Schemas = components['schemas'];
 export type MFAChallenge = Schemas['MFAChallenge'];
+export type MFAFactor = Schemas['MFAStatus']['factors'][number];
 export type MFAEnrollment = Schemas['MFAEnrollment'];
 export type MFAVerification =
   | Schemas['MFAEnrollmentComplete']
