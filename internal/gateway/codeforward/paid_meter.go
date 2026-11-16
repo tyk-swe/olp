@@ -53,7 +53,7 @@ func (a *codeAttempt) meterPaidResponse(response *http.Response) (*http.Response
 
 func readPaidUsage(reader io.Reader, family wire.Format, streaming bool, encoding, route string) paidUsageObservation {
 	if streaming && (encoding == "" || encoding == "identity") {
-		completion, err := protocols.Stream(family, family, reader, codewire.MaxBody, route, true, func([]byte) error { return nil })
+		completion, err := protocols.Stream(family, family, reader, codewire.MaxBody, route, func([]byte) error { return nil })
 		if completion == nil {
 			return paidUsageObservation{}
 		}

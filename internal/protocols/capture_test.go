@@ -25,7 +25,7 @@ func TestCaptureCompletions(t *testing.T) {
 	}
 }
 
-func TestCaptureDocumentToolCallsFamilies(t *testing.T) {
+func TestCaptureResponseToolCallsFamilies(t *testing.T) {
 	for _, tc := range []struct {
 		family wire.Format
 		body   string
@@ -38,8 +38,8 @@ func TestCaptureDocumentToolCallsFamilies(t *testing.T) {
 		{wire.Bedrock, `{"stopReason":"tool_use","output":{"message":{"content":[{"toolUse":{"toolUseId":"t","name":"n","input":{}}}]}}}`, 1},
 		{wire.CohereChat, `{"finish_reason":"TOOL_CALL","message":{"tool_calls":[{"id":"t","type":"function","function":{"name":"g","arguments":"{}"}}]}}`, 1},
 	} {
-		calls := CaptureDocumentToolCalls(tc.family, []byte(tc.body))
-		if len(calls) != tc.want {
+		_, calls, err := CaptureResponse(tc.family, []byte(tc.body), false, true)
+		if err != nil || len(calls) != tc.want {
 			t.Fatalf("%s: %d tool calls, want %d", tc.family, len(calls), tc.want)
 		}
 	}

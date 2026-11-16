@@ -7,14 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func CaptureDocumentToolCalls(family wire.Format, body []byte) []json.RawMessage {
-	_, calls, err := CaptureResponse(family, body, false, true)
-	if err != nil {
-		return nil
-	}
-	return calls
-}
-
 // CaptureResponse extracts only complete, inspectable selected surfaces. Unlike
 // serving rewrites it is read-only, including on strict native routes.
 func CaptureResponse(family wire.Format, body []byte, output, tools bool) (string, []json.RawMessage, error) {

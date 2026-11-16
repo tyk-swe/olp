@@ -147,7 +147,7 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 		}
 		switch {
 		case tuple.Mode == "streaming":
-			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
+			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", func([]byte) error { return nil })
 		case aggregated:
 			var streamed *wire.Completion
 			if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, BodyLimit); err == nil {
