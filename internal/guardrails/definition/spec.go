@@ -8,7 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -26,14 +26,14 @@ type Draft struct {
 func NewDraft(project, name string, kind guardrails.Kind, configuration json.RawMessage, timeout int64, onError guardrails.OnError) (Draft, error) {
 	d := Draft{project: project, name: name, kind: kind, configuration: configuration, timeout: cmp.Or(timeout, 1000), onError: cmp.Or(onError, guardrails.FailClosed)}
 	if _, err := guardrails.ParseRevision(guardrails.Revision{Type: d.kind, Configuration: d.configuration, TimeoutMS: d.timeout, OnError: d.onError}); err != nil {
-		return Draft{}, access.Invalid("configuration", "Supply valid typed guardrail configuration, timeout and failure policy.")
+		return Draft{}, httpkit.Invalid("configuration", "Supply valid typed guardrail configuration, timeout and failure policy.")
 	}
 	return d, nil
 }
 
 func legacyDraft(project, name string, kind guardrails.Kind, policy *contentpolicy.Policy, timeout int64, onError guardrails.OnError) (Draft, error) {
 	if policy == nil || contentpolicy.Validate(policy) != nil {
-		return Draft{}, access.Invalid("policy", "Supply a valid bounded content policy.")
+		return Draft{}, httpkit.Invalid("policy", "Supply a valid bounded content policy.")
 	}
 	rules := policy.Rules
 	if rules == nil {
@@ -76,22 +76,22 @@ type edit struct {
 func parseEdit(in input) (edit, error) {
 	name := strings.TrimSpace(in.Name)
 	if !utf8.ValidString(name) || utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) {
-		return edit{}, access.Invalid("name", "Choose a name of 1–100 characters without control characters.")
+		return edit{}, httpkit.Invalid("name", "Choose a name of 1–100 characters without control characters.")
 	}
 	e := edit{name: name, configuration: in.Configuration, timeout: in.TimeoutMS, onError: in.OnError}
 	if len(in.Configuration) > 0 {
 		if len(in.Policy) > 0 {
-			return edit{}, access.Invalid("configuration", "Do not mix legacy policy and typed configuration.")
+			return edit{}, httpkit.Invalid("configuration", "Do not mix legacy policy and typed configuration.")
 		}
 		return e, nil
 	}
 	raw := bytes.TrimSpace(in.Policy)
 	if len(raw) == 0 || raw[0] != '{' {
-		return edit{}, access.Invalid("policy", "Supply a bounded content-policy object.")
+		return edit{}, httpkit.Invalid("policy", "Supply a bounded content-policy object.")
 	}
 	policy, err := contentpolicy.Decode(in.Policy)
 	if err != nil {
-		return edit{}, access.Invalid("policy", "Supply valid bounded RE2 block or redact rules.")
+		return edit{}, httpkit.Invalid("policy", "Supply valid bounded RE2 block or redact rules.")
 	}
 	e.legacy = policy
 	return e, nil

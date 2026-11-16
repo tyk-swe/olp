@@ -75,6 +75,14 @@ func resourceCommitContext(ctx context.Context) (context.Context, context.Cancel
 	return context.WithTimeout(context.WithoutCancel(ctx), resourceCommitTimeout)
 }
 
+func (s *Server) settleFence(ctx context.Context, settle func(context.Context) error) {
+	commit, cancel := resourceCommitContext(ctx)
+	defer cancel()
+	if err := settle(commit); err != nil {
+		s.log.Warn("retained resource fence not settled", "error", err.Error())
+	}
+}
+
 const maxResourceList = 100
 
 type pin struct {

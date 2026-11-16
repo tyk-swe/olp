@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
@@ -35,18 +36,18 @@ type Range struct {
 func ParseRange(query url.Values) (Range, error) {
 	startText, endText := query.Get("start"), query.Get("end")
 	if startText == "" || endText == "" {
-		return Range{}, access.Fail(http.StatusBadRequest, "invalid_range", "start and end query parameters are required, both YYYY-MM-DD")
+		return Range{}, httpkit.Fail(http.StatusBadRequest, "invalid_range", "start and end query parameters are required, both YYYY-MM-DD")
 	}
 	start, err := time.Parse(time.DateOnly, startText)
 	if err != nil {
-		return Range{}, access.Invalid("start", "start must be a YYYY-MM-DD date")
+		return Range{}, httpkit.Invalid("start", "start must be a YYYY-MM-DD date")
 	}
 	end, err := time.Parse(time.DateOnly, endText)
 	if err != nil {
-		return Range{}, access.Invalid("end", "end must be a YYYY-MM-DD date")
+		return Range{}, httpkit.Invalid("end", "end must be a YYYY-MM-DD date")
 	}
 	if !end.After(start) || end.Sub(start) > maxRangeDays*24*time.Hour {
-		return Range{}, access.Fail(http.StatusBadRequest, "invalid_range",
+		return Range{}, httpkit.Fail(http.StatusBadRequest, "invalid_range",
 			fmt.Sprintf("Use a positive range no longer than %d days, with end exclusive.", maxRangeDays))
 	}
 	return Range{Start: start, End: end}, nil
@@ -58,47 +59,47 @@ func providerFilter(raw string) (uuid.NullUUID, error) {
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		return uuid.NullUUID{}, access.Fail(http.StatusBadRequest, "invalid_identifier", "Use a valid UUID.")
+		return uuid.NullUUID{}, httpkit.Fail(http.StatusBadRequest, "invalid_identifier", "Use a valid UUID.")
 	}
 	return uuid.NullUUID{UUID: id, Valid: true}, nil
 }
 
-func (a *API) report(r *http.Request, p access.Principal) (access.Reply, error) {
+func (a *API) report(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	window, err := ParseRange(query)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	provider, err := providerFilter(query.Get("provider_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	ctx, pool := r.Context(), a.server.Pool
 	imports, err := visibleImports(ctx, pool, p, provider)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if provider.Valid && len(imports) == 0 {
-		return access.Reply{}, access.Fail(http.StatusNotFound, "not_found", "No billing import covers this provider.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "No billing import covers this provider.")
 	}
 	providers := importedProviders(imports)
 	coverage, err := coveredDays(ctx, pool, providers, window)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	invoiced, err := invoicedDays(ctx, pool, providers, window)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	spend, err := attributedSpend(ctx, pool, providers, window)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	currency, err := pricebook.InstallationCurrency(ctx, pool)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Reply{Status: http.StatusOK, Body: build(inputs{
+	return httpkit.Reply{Status: http.StatusOK, Body: build(inputs{
 		window:   window,
 		imports:  imports,
 		coverage: coverage,

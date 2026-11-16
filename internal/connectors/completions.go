@@ -11,9 +11,6 @@ import (
 
 var tgiCompletionFields = strings.Fields("model prompt max_tokens temperature top_p stream seed repetition_penalty frequency_penalty stop stream_options")
 
-// ValidateCompletionRequest qualifies the narrower TGI endpoint after defaults
-// and transport options are applied. Its per-prompt streaming usage is not an
-// aggregate request counter, so only single-prompt streams are admitted.
 func (c Config) ValidateCompletionRequest(document oif.Document) error {
 	if c.ProfileID != "tgi-completions" {
 		return nil
@@ -70,18 +67,4 @@ func (c Config) ValidateCompletionRequest(document oif.Document) error {
 		}
 	}
 	return nil
-}
-
-// Each native text-completion endpoint has an explicit profile. Generic
-// OpenAI-compatible hosting alone never qualifies the legacy dialect.
-func registerCompletionProfiles() {
-	for _, vendor := range []string{"openai", "vllm", "tgi", "fireworks", "together"} {
-		kind, hosting := "openai_compatible", "direct-compatible"
-		if vendor == "openai" {
-			kind, hosting = "openai", "direct-openai"
-		}
-		p := Profile{ID: vendor + "-completions", Revision: ProfileRevision, Label: vendor + " text completions", Kind: kind, Dialect: "openai-completions", DialectRevision: "m9-baseline-1", Hosting: hosting, Authentication: []string{"api_key", "headers", "none"}, Transport: "http", Operations: []string{"generation"}, OperationDialects: map[string]string{"generation": "openai-completions"}, SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: "https://platform.openai.com/docs/api-reference/completions", Strict: true}
-		completeProfileMetadata(&p)
-		profileRegistry = append(profileRegistry, p)
-	}
 }

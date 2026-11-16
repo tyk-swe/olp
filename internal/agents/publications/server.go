@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -19,25 +20,25 @@ type Server struct {
 func (s *Server) Register(mux *http.ServeMux) {
 	for _, kind := range []string{"toolset", "agent", "prompt"} {
 		root := "/api/v1/" + kind + "s"
-		s.access.Route(mux, "GET "+root, func(r *http.Request, p access.Principal) (access.Reply, error) { return s.list(r, p, kind) })
-		s.access.Route(mux, "POST "+root, func(r *http.Request, p access.Principal) (access.Reply, error) { return s.write(r, kind, "create") }, access.MaxBody(1<<20))
-		s.access.Route(mux, "GET "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.get(r, p, kind) })
-		s.access.Route(mux, "PUT "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.write(r, kind, "update") }, access.MaxBody(1<<20))
-		s.access.Route(mux, "DELETE "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.write(r, kind, "retire") })
-		s.access.Route(mux, "POST "+root+"/{publication_id}/publish", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.write(r, kind, "publish") })
-		s.access.Route(mux, "GET "+root+"/{publication_id}/revisions/{revision_id}", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.revision(r, p, kind) })
+		s.access.Route(mux, "GET "+root, func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.list(r, p, kind) })
+		s.access.Route(mux, "POST "+root, func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "create") }, access.MaxBody(1<<20))
+		s.access.Route(mux, "GET "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.get(r, p, kind) })
+		s.access.Route(mux, "PUT "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "update") }, access.MaxBody(1<<20))
+		s.access.Route(mux, "DELETE "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "retire") })
+		s.access.Route(mux, "POST "+root+"/{publication_id}/publish", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "publish") })
+		s.access.Route(mux, "GET "+root+"/{publication_id}/revisions/{revision_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.revision(r, p, kind) })
 	}
-	s.access.Route(mux, "PUT /api/v1/prompts/{publication_id}/labels/{label}", func(r *http.Request, p access.Principal) (access.Reply, error) { return s.write(r, "prompt", "label") })
+	s.access.Route(mux, "PUT /api/v1/prompts/{publication_id}/labels/{label}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, "prompt", "label") })
 }
 
-func (s *Server) list(r *http.Request, p access.Principal, kind string) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) list(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT id::text,kind,project_id::text,name,etag::text,latest_revision_id::text,retired FROM olp.agent_publications WHERE kind=$1 AND NOT retired AND id<$2 AND ($3 OR project_id=ANY($4::uuid[])) ORDER BY id DESC LIMIT $5`, kind, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (publicationSummary, error) {
@@ -46,14 +47,14 @@ func (s *Server) list(r *http.Request, p access.Principal, kind string) (access.
 		return item, err
 	})
 	if collectErr != nil {
-		return access.Reply{}, collectErr
+		return httpkit.Reply{}, collectErr
 	}
 
-	return access.ListReplyBy(items, page, func(item publicationSummary) string { return item.ID }), rows.Err()
+	return httpkit.ListReplyBy(items, page, func(item publicationSummary) string { return item.ID }), rows.Err()
 }
 
 func (s *Server) visible(r *http.Request, p access.Principal, kind string) (*agentcontract.Publication, error) {
-	id, err := access.IDParam(r, "publication_id")
+	id, err := httpkit.IDParam(r, "publication_id")
 	if err != nil {
 		return nil, err
 	}
@@ -66,27 +67,27 @@ func (s *Server) visible(r *http.Request, p access.Principal, kind string) (*age
 	}
 	return d, nil
 }
-func (s *Server) get(r *http.Request, p access.Principal, kind string) (access.Reply, error) {
+func (s *Server) get(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
 	d, err := s.visible(r, p, kind)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(d, d.ETag), nil
+	return httpkit.Detail(d, d.ETag), nil
 }
-func (s *Server) revision(r *http.Request, p access.Principal, kind string) (access.Reply, error) {
+func (s *Server) revision(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
 	d, err := s.visible(r, p, kind)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	id, err := access.IDParam(r, "revision_id")
+	id, err := httpkit.IDParam(r, "revision_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := LoadRevision(r.Context(), s.access.Pool, d.ID, id)
 	if err != nil {
-		return access.Reply{}, mapConflict(err)
+		return httpkit.Reply{}, mapConflict(err)
 	}
-	return access.Detail(v, d.ETag), nil
+	return httpkit.Detail(v, d.ETag), nil
 }
 
 type publicationSummary struct {

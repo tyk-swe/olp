@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 )
@@ -11,9 +12,9 @@ import (
 // index lists the reviewed plugins with whether each reviewed digest is
 // installed and approved here. It installs nothing: the digest of a module an
 // owner uploads is what ties it to an index entry.
-func (s *Management) index(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) index(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	if s.Index == nil {
-		return access.Reply{}, access.Fail(503, "plugin_index_unavailable", "This process holds no verified plugin index.")
+		return httpkit.Reply{}, httpkit.Fail(503, "plugin_index_unavailable", "This process holds no verified plugin index.")
 	}
 	var digests []string
 	for _, plugin := range s.Index.Index.Plugins {
@@ -23,7 +24,7 @@ func (s *Management) index(r *http.Request, _ access.Principal) (access.Reply, e
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT digest, approved_at IS NOT NULL FROM olp.plugins WHERE digest = ANY($1)", digests)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	// approved holds each installed digest, true once its origins are approved.
@@ -32,14 +33,14 @@ func (s *Management) index(r *http.Request, _ access.Principal) (access.Reply, e
 		var digest string
 		var isApproved bool
 		if err := rows.Scan(&digest, &isApproved); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		approved[digest] = isApproved
 	}
 	if err := rows.Err(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(indexResponse(s.Index, approved)), nil
+	return httpkit.OK(indexResponse(s.Index, approved)), nil
 }
 
 func indexResponse(signed *pluginindex.Signed, approved map[string]bool) contract.PluginIndexResponse {

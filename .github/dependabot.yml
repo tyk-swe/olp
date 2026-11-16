@@ -4,13 +4,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
-    directory: /
+    directories: [/, /.github/actions/setup]
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -18,13 +22,26 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /tests/qualification/clients
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 2
+    groups:
+      coding-clients:
+        patterns: ['*']
   - package-ecosystem: uv
     directory: /tests/fixtures/tokens
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -32,6 +49,21 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: ghcr.io/tyk-swe/olp
+      - dependency-name: olp-qualification-minio
+      - dependency-name: openllmproxy
     groups:
       minor-and-patch:
         update-types: [minor, patch]

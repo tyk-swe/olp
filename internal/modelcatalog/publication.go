@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/routes"
 )
 
@@ -41,7 +42,7 @@ func byProject(publications []projectPublication) map[string]Publication {
 }
 
 func SetProjectPublication(ctx context.Context, tx pgx.Tx, project string, enabled, pricesPublic bool) (Publication, error) {
-	publication := Publication{Enabled: enabled, PricesPublic: pricesPublic, ETag: access.NewID()}
+	publication := Publication{Enabled: enabled, PricesPublic: pricesPublic, ETag: httpkit.NewID()}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.model_catalog_project_settings(project_id,enabled,prices_public,etag) VALUES($1,$2,$3,$4) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,prices_public=excluded.prices_public,etag=excluded.etag`, project, publication.Enabled, publication.PricesPublic, publication.ETag); err != nil {
 		return Publication{}, err
 	}
@@ -49,7 +50,7 @@ func SetProjectPublication(ctx context.Context, tx pgx.Tx, project string, enabl
 }
 
 func setRoutePublication(ctx context.Context, tx pgx.Tx, routeID string, exposeUpstreamModels bool) (Exposure, error) {
-	exposure := Exposure{ExposeUpstreamModels: exposeUpstreamModels, ETag: access.NewID()}
+	exposure := Exposure{ExposeUpstreamModels: exposeUpstreamModels, ETag: httpkit.NewID()}
 	if err := routes.SetCatalogExposure(ctx, tx, routeID, exposure.ExposeUpstreamModels, exposure.ETag); err != nil {
 		return Exposure{}, err
 	}

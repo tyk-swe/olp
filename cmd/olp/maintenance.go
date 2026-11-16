@@ -65,12 +65,15 @@ func readPasswordFile(path string) (string, error) {
 	return string(data), nil
 }
 
-func Maintenance(ctx context.Context, c Config, command string, options MaintenanceOptions, output io.Writer) error {
-	timeout := c.StartupTimeout
-	if command == "reencrypt" {
-		timeout = 30 * time.Minute
+func maintenanceTimeout(c Config, command string) time.Duration {
+	if command == "migrate" || command == "reencrypt" {
+		return 30 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return c.StartupTimeout
+}
+
+func Maintenance(ctx context.Context, c Config, command string, options MaintenanceOptions, output io.Writer) error {
+	ctx, cancel := context.WithTimeout(ctx, maintenanceTimeout(c, command))
 	defer cancel()
 	connection, err := database.Configuration(c.DatabaseURL, c.DatabaseMaxConnections, c.RequestTimeout)
 	if err != nil {

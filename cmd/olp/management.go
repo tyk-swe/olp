@@ -4,7 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
@@ -33,7 +37,6 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
-	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -61,7 +64,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/settings"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
@@ -105,11 +107,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	m.Access.Register(mux)
 	projects.New(m.Access).Register(mux)
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
-	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
 	(&gateway.CacheManagement{Access: m.Access, Cache: m.ResponseCache}).Register(mux)
-	(&branding.Server{Access: m.Access}).Register(mux)
 	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := release.Publish(ctx, tx, actor)
 		return err
@@ -153,7 +153,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Fleet = m.Limits.Fleet
 	}
 	providerServer := providers.New(providers.Deps{
-		Access: m.Access, Egress: m.Egress, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
+		Access: m.Access, Egress: m.Egress, Getenv: m.Getenv, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {
@@ -204,4 +204,56 @@ func (m Management) limiter() *admission.Limiter {
 		return nil
 	}
 	return m.Limits.Limiter
+}
+
+type managementInputs struct {
+	config       Config
+	pool         *pgxpool.Pool
+	installation string
+	core         runtimeCore
+	limiter      *admission.Limiter
+	shared       *sharedLimits
+	gateway      *gateway.Server
+	agentTasks   *tasks.Store
+	agentPeers   *a2a.Peers
+	agentGrants  *personal.Store
+	media        *jobs.Service
+	spool        *staging.Spool
+	health       *observability.Cache
+	catalog      *catalog.Signed
+	catalogKeys  signing.Keyring
+	pluginIndex  *pluginindex.Signed
+	log          *slog.Logger
+}
+
+func newManagement(startup context.Context, in managementInputs) (Management, error) {
+	c, core, log := in.config, in.core, in.log
+	if err := access.PrepareInstallation(startup, in.pool, in.installation, core.auth, core.keys); err != nil {
+		return Management{}, err
+	}
+	identityClient := access.IdentityHTTPClient()
+	control := access.New(access.Config{
+		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Bootstrap: core.bootstrap, Egress: core.policy, Log: log,
+		OIDCClient: identityClient,
+		RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
+			_, err := release.Publish(ctx, tx, actor)
+			return err
+		},
+		ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
+		LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
+		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil, RetentionEnforced: in.limiter != nil, NotificationsActive: true,
+	})
+	// Installing reads a module's manifest once, which the
+	// interpreter is ready to do several times sooner.
+	pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
+	if err != nil {
+		return Management{}, err
+	}
+	return Management{
+		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants, Getenv: os.Getenv,
+		Access: control, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
+		Gateway: in.gateway, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
+		Log: log, PluginRuntime: pluginRuntime, PluginHost: core.pluginHost, Unconfined: core.unconfined,
+		Catalog: in.catalog, CatalogKeys: in.catalogKeys, PluginIndex: in.pluginIndex,
+	}, nil
 }

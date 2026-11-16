@@ -32,7 +32,7 @@ const (
 
 var googleBigQuery = vendor[googleScope, googleCredential, Cloud]{
 	family:       "google",
-	providerKind: "vertex_ai",
+	providerKind: connectors.KindVertexAI,
 	scope:        parseGoogleScope,
 	input:        googleCredentialInput,
 	credential:   parseGoogleCredential,

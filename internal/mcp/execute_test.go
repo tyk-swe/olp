@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -323,7 +324,7 @@ func newExecutionFixture(t *testing.T, scenario executionScenario) executionFixt
 		}
 		return executionPolicies{engine: engine}
 	}()
-	executor := NewExecutor(ExecutorOptions{Authority: executionAuthority{denySecond: scenario.denySecondCheck, checks: make(chan struct{}, 4)},
+	executor := NewExecutor(ExecutorOptions{Log: slog.New(slog.DiscardHandler), Authority: executionAuthority{denySecond: scenario.denySecondCheck, checks: make(chan struct{}, 4)},
 		Grants: executionGrants{revoked: scenario.revokedGrant}, Connect: func(context.Context, string, []byte, upstream.TransportOptions) (upstream.Upstream, error) {
 			return peer, nil
 		},

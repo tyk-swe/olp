@@ -75,7 +75,7 @@ function serveEditor(dialects: OperationDialect[] = []) {
   const load = vi.fn(() => json(draft));
   const replace = vi.fn(async (request: Request) => {
     route(request, 'PUT', `/api/v1/route-drafts/${draft.id}`);
-    expect(request.headers.get('If-Match')).toBe(draft.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${draft.etag}"`);
     expect(await request.json()).toMatchObject({
       slug: 'updated',
       operations: ['generation'],
@@ -85,7 +85,7 @@ function serveEditor(dialects: OperationDialect[] = []) {
   });
   const activate = vi.fn((request: Request) => {
     route(request, 'POST', `/api/v1/route-drafts/${draft.id}/activate`);
-    expect(request.headers.get('If-Match')).toBe(draft.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${draft.etag}"`);
     expect(request.headers.get('Idempotency-Key')).toBeTruthy();
     load.mockReturnValue(json({ ...draft, etag: activation.draft_etag }));
     return json(activation);

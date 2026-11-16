@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -128,16 +128,16 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 		return err
 	}
 	if current.ID != authority.ID || project == nil {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	if scope == "inference" && (!current.Allows(scope, resource, project, time.Now()) || !slices.Contains(current.TaskCapability.RouteRevisions, revision)) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	if scope == "tools" && (!current.AllowsResource(scope, resource, *project, time.Now()) || !slices.Contains(current.TaskCapability.ToolsetRevisions, revision)) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	if scope != "inference" && scope != "tools" {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	return taskCapabilityError(m.taskCapabilities().AdmitCallback(ctx, digest, scope, accountingID))
 }

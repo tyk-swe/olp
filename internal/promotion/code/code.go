@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -73,7 +74,7 @@ func parseCode(document contract.ConfigurationCode, names promotion.Names, deps 
 		promotion.Map(budgetEntries, func(e contract.ConfigurationCodeBudget) string { return e.Id.String() }),
 	)
 	if len(slices.Compact(slices.Sorted(slices.Values(ids)))) != len(ids) {
-		return Code{}, access.Invalid("code", "Use distinct artifact resource references.")
+		return Code{}, httpkit.Invalid("code", "Use distinct artifact resource references.")
 	}
 	accounts, err := promotion.TryMapIndex(accountEntries, func(_ int, e contract.ConfigurationCodeAccount) (Account, error) { return parseAccount(e) })
 	if err != nil {
@@ -108,7 +109,7 @@ func onlyDeclared(values bindings, code Code) error {
 	for _, group := range groups {
 		for ref := range group.values {
 			if !slices.Contains(group.refs, ref) {
-				return access.Invalid("code_bindings", "Bind only references declared in code configuration.")
+				return httpkit.Invalid("code_bindings", "Bind only references declared in code configuration.")
 			}
 		}
 	}

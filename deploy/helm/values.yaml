@@ -72,6 +72,10 @@ gateway:
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: ScheduleAnyway
+    zone:
+      enabled: false
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "4", memory: 2Gi }
@@ -97,6 +101,10 @@ control:
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: ScheduleAnyway
+    zone:
+      enabled: false
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -129,6 +137,10 @@ worker:
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: ScheduleAnyway
+    zone:
+      enabled: false
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -143,7 +155,7 @@ migration:
   # reapplies grants for tables it creates.
   runtimeRole: ""
   backoffLimit: 3
-  activeDeadlineSeconds: 600
+  activeDeadlineSeconds: 2100
   ttlSecondsAfterFinished: 300
   resources:
     requests: { cpu: 50m, memory: 128Mi }

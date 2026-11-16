@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -28,10 +29,10 @@ const (
 func parseSCIM(fragment nullable.Nullable[[]group]) ([]group, error) {
 	entries := fragment.GetOrEmpty()
 	if len(entries) > 1000 {
-		return nil, access.Invalid("scim_group_mappings", "At most 1000 group mappings are supported.")
+		return nil, httpkit.Invalid("scim_group_mappings", "At most 1000 group mappings are supported.")
 	}
 	if _, repeated := promotion.FirstRepeat(entries, func(g group) string { return promotion.Fold(g.Name) }); repeated {
-		return nil, access.Invalid("scim_group_mappings", invalidName)
+		return nil, httpkit.Invalid("scim_group_mappings", invalidName)
 	}
 	if err := promotion.Every(entries, validGroup); err != nil {
 		return nil, err
@@ -45,16 +46,16 @@ func validGroup(g group) error {
 	role, hasRole := promotion.Present(g.Role)
 	_, repeated := promotion.FirstRepeat(g.Projects, func(p grant) string { return promotion.Fold(p.Project) })
 	switch {
-	case access.ValidText("name", g.Name, 100) != nil:
-		return access.Invalid("scim_group_mappings", invalidName)
+	case httpkit.ValidText("name", g.Name, 100) != nil:
+		return httpkit.Invalid("scim_group_mappings", invalidName)
 	case g.AccessScope != "" && !g.AccessScope.Valid():
-		return access.Invalid("scim_group_mappings", "Use assigned or global scope.")
+		return httpkit.Invalid("scim_group_mappings", "Use assigned or global scope.")
 	case hasRole && !installationRole(role):
-		return access.Invalid("scim_group_mappings", "Unknown installation role.")
+		return httpkit.Invalid("scim_group_mappings", "Unknown installation role.")
 	case len(g.Projects) > 100:
-		return access.Invalid("scim_group_mappings", "At most 100 project grants per group.")
+		return httpkit.Invalid("scim_group_mappings", "At most 100 project grants per group.")
 	case repeated || slices.ContainsFunc(g.Projects, invalidGrant):
-		return access.Invalid("scim_group_mappings", "Use unique project names with viewer or manager roles.")
+		return httpkit.Invalid("scim_group_mappings", "Use unique project names with viewer or manager roles.")
 	}
 	return nil
 }
@@ -69,7 +70,7 @@ func installationRole(role contract.ConfigurationSCIMGroupMappingRole) bool {
 }
 
 func invalidGrant(p grant) bool {
-	return access.ValidText("project", p.Project, 100) != nil || !p.Role.Valid()
+	return httpkit.ValidText("project", p.Project, 100) != nil || !p.Role.Valid()
 }
 
 func readSCIM(ctx context.Context, q access.Queryer) ([]group, error) {
@@ -121,7 +122,7 @@ func planSCIM(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Ite
 	if slices.ContainsFunc(d.groups, func(g group) bool {
 		return slices.ContainsFunc(g.Projects, func(p grant) bool { return !known(p.Project) })
 	}) {
-		return nil, access.Invalid("scim_group_mappings", missingProject)
+		return nil, httpkit.Invalid("scim_group_mappings", missingProject)
 	}
 	existing := byName(current)
 	return promotion.Map(d.groups, func(g group) promotion.Item {
@@ -166,7 +167,7 @@ func extension(g group, directory promotion.Directory) (map[string]any, error) {
 	projects, err := promotion.TryMap(g.Projects, func(p grant) (any, error) {
 		id, ok := directory.ID(p.Project)
 		if !ok {
-			return nil, access.Invalid("scim_group_mappings", missingProject)
+			return nil, httpkit.Invalid("scim_group_mappings", missingProject)
 		}
 		return map[string]any{"value": id, "role": string(p.Role)}, nil
 	})

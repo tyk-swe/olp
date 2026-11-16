@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -26,10 +26,12 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
+	"github.com/tyk-swe/olp/internal/gateway/delegation"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/models"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -42,6 +44,7 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -86,17 +89,23 @@ type Config struct {
 	WebRTCHeartbeat   time.Duration
 }
 
-// Runtime is the pinned authority, release and credential source.
-// *release.Manager implements it; fixtures and tests supply static releases.
-type Runtime interface {
-	// CheckRouteFidelity confirms a strict admission against current publication.
-	CheckRouteFidelity(context.Context, routing.Route) error
+type ReleaseSource interface {
 	Release() *release.Release
-	Authenticate(secret string) (*keyauthority.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *routinginputs.Inputs
-	release.Credentials
+}
+
+type KeyAuthenticator interface {
+	Authenticate(secret string) (*keyauthority.Authority, error)
+}
+
+type FidelityChecker interface {
+	// CheckRouteFidelity confirms a strict admission against current publication.
+	CheckRouteFidelity(context.Context, routing.Route) error
+}
+
+type GrantLifecycle interface {
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64
 	// CredentialRefused reports that the upstream refused a credential
@@ -105,8 +114,31 @@ type Runtime interface {
 	CredentialRefused(credentialID string, generation int64)
 }
 
+// Runtime is the pinned authority, release and credential source.
+// *release.Manager implements it; fixtures and tests supply static releases.
+type Runtime interface {
+	ReleaseSource
+	KeyAuthenticator
+	FidelityChecker
+	GrantLifecycle
+	release.Credentials
+}
+
+type Digester interface {
+	Digest(secrets.DigestPurpose, string) []byte
+}
+
+type BudgetAuthority interface {
+	BudgetAuthority(*string) (keyauthority.Authority, error)
+}
+
+type TaskAttemptAdmitter interface {
+	AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
+}
+
 type Dependencies struct {
 	Egress         *egress.Policy
+	Getenv         func(string) string
 	Log            *slog.Logger
 	Cache          *cache.Store
 	Guardrails     func(guardrails.Caller) guardrails.Evaluator
@@ -115,17 +147,24 @@ type Dependencies struct {
 	CodeResearch   codeforward.ResearchLedger
 	ResearchAuth   codeforward.ResearchAuthorizer
 	Runtime        Runtime
-	Sink           events.Sink
-	Admission      *quota.Admission
-	Debits         SessionDebitLedger
-	WorkflowRuns   WorkflowRunStore
-	WorkflowTools  WorkflowToolRunner
-	Traces         *traceingest.Store
-	Media          *MediaDeps
-	Staging        *staging.Spool
-	Uploads        *staging.Admission
-	Capture        *capture.Manager
-	Business       *telemetry.BusinessMetrics
+	// The five fields below are optional runtime capabilities. Leave any of
+	// them unset and it is taken from Runtime when Runtime provides it.
+	Digester                    Digester
+	BudgetAuthority             BudgetAuthority
+	TaskAttemptAdmitter         TaskAttemptAdmitter
+	TaskCapabilityAuthenticator consumerauth.TaskCapabilityAuthenticator
+	DelegationReauthenticator   DelegationReauthenticator
+	Sink                        events.Sink
+	Admission                   *quota.Admission
+	Debits                      SessionDebitLedger
+	WorkflowRuns                WorkflowRunStore
+	WorkflowTools               WorkflowToolRunner
+	Traces                      *traceingest.Store
+	Media                       *MediaDeps
+	Staging                     *staging.Spool
+	Uploads                     *staging.Admission
+	Capture                     *capture.Manager
+	Business                    *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 	Batches   *batches.Store
@@ -164,7 +203,7 @@ func New(deps Dependencies, cfg Config) *Server {
 	config := normalizedConfig(cfg)
 	pool := inferencePool(config)
 
-	auth := connectors.NewAuth(policy)
+	auth := connectors.NewAuth(policy, deps.Getenv)
 	auth.Signer = config.Signer
 	// The tokenizers parse their rank tables on first use, which would land on
 	// the first request that needs one. A table that cannot be read leaves its
@@ -215,21 +254,31 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.code.Register(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
-	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
+	mux.Handle("POST /v1/delegations", delegation.New(delegation.Dependencies{Gate: s.gate, Keys: s.deps.Runtime, Begin: func(w http.ResponseWriter, r *http.Request) { s.begin(w, r) }}))
 	mux.Handle("POST /v1/traces", traceingest.New(s.deps.Runtime, s.cfg.TrustedProxies, s.deps.Traces))
-	s.registerNative(mux)
+	catalog := models.New(models.Dependencies{
+		Gate:     s.gate,
+		Begin:    func(w http.ResponseWriter, r *http.Request) *release.Release { return s.begin(w, r).release },
+		Now:      s.now,
+		Workflow: s.workflowCapability,
+	})
+	s.registerNative(mux, catalog)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
 	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCallsCreate)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(wire.Chat))
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
-	mux.HandleFunc("GET /v1/models", s.models)
-	mux.HandleFunc("GET /v1/models/{model}", s.model)
+	mux.HandleFunc("GET /v1/models", catalog.List)
+	mux.HandleFunc("GET /v1/models/{model}", catalog.Get)
 	mux.HandleFunc("OPTIONS /v1/", s.preflight)
 	mux.HandleFunc("OPTIONS /bedrock/", s.preflight)
 	mux.HandleFunc("/v1/", s.unknown)
 	mux.HandleFunc("/bedrock/", s.unknown)
+}
+
+func (s *Server) workflowCapability(ctx context.Context, rel *release.Release, authority keyauthority.Authority, route routing.Route, surface string) *routing.WorkflowCapability {
+	return mcp.DescribeReachableWorkflow(ctx, s.deps.WorkflowTools, authority, rel, route, surface, s.deps.WorkflowRuns != nil && s.deps.Debits != nil, s.now())
 }
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
@@ -943,64 +992,6 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *fault.Error {
 	return s.enforceContentPolicy(x)
 }
 
-// modelObject renders a route as an OpenAI model object.
-func (s *Server) modelObject(ctx context.Context, release *release.Release, authority keyauthority.Authority, route *routing.Route) map[string]any {
-	capabilities := s.modelCapabilities(ctx, release, authority, *route, "openai")
-	return map[string]any{
-		"id":           route.Slug,
-		"object":       "model",
-		"created":      route.PublishedAt.Unix(),
-		"owned_by":     "openllmproxy",
-		"capabilities": capabilities,
-	}
-}
-
-type modelCapabilities struct {
-	routing.RouteCapabilities
-	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
-}
-
-func (s *Server) modelCapabilities(ctx context.Context, release *release.Release, authority keyauthority.Authority, route routing.Route, surface string) modelCapabilities {
-	return modelCapabilities{
-		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot(), route),
-		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.deps.WorkflowTools, authority, release, route, surface, s.deps.WorkflowRuns != nil && s.deps.Debits != nil, s.now()),
-	}
-}
-
-func (s *Server) models(w http.ResponseWriter, r *http.Request) {
-	req := s.begin(w, r)
-	authority, e := s.gate.Authenticate(r, "models_read")
-	if e != nil {
-		fault.WriteError(w, e)
-		return
-	}
-	now := s.now()
-	data := []map[string]any{}
-	for _, slug := range req.release.Snapshot().RouteSlugs() {
-		if authority.Allows("models_read", slug, req.release.Snapshot().Route(slug).ProjectID, now) {
-			route := req.release.Snapshot().Route(slug)
-			data = append(data, s.modelObject(r.Context(), req.release, authority, &route))
-		}
-	}
-	fault.WriteJSON(w, map[string]any{"object": "list", "data": data})
-}
-
-func (s *Server) model(w http.ResponseWriter, r *http.Request) {
-	req := s.begin(w, r)
-	authority, e := s.gate.Authenticate(r, "models_read")
-	if e != nil {
-		fault.WriteError(w, e)
-		return
-	}
-	slug := r.PathValue("model")
-	route, ok := req.release.Snapshot().FindRoute(slug)
-	if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
-		fault.WriteError(w, fault.ModelNotFound(slug))
-		return
-	}
-	fault.WriteJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
-}
-
 // WriteAdmissionOverload renders the surface's 503 rejection. The public
 // admission middleware calls it before routing, so the request context is the
 // only state available — writeSurfaceError applies the write deadline itself.
@@ -1100,10 +1091,32 @@ func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *conn
 }
 
 func normalizedDependencies(deps Dependencies) Dependencies {
+	digester := deps.Digester
+	if digester == nil {
+		digester, _ = deps.Runtime.(Digester)
+	}
+	budgetAuthority := deps.BudgetAuthority
+	if budgetAuthority == nil {
+		budgetAuthority, _ = deps.Runtime.(BudgetAuthority)
+	}
+	taskAttempts := deps.TaskAttemptAdmitter
+	if taskAttempts == nil {
+		taskAttempts, _ = deps.Runtime.(TaskAttemptAdmitter)
+	}
+	taskAuth := deps.TaskCapabilityAuthenticator
+	if taskAuth == nil {
+		taskAuth, _ = deps.Runtime.(consumerauth.TaskCapabilityAuthenticator)
+	}
+	delegationAuth := deps.DelegationReauthenticator
+	if delegationAuth == nil {
+		delegationAuth, _ = deps.Runtime.(DelegationReauthenticator)
+	}
 	return Dependencies{
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
 		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
-		Runtime: deps.Runtime, Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
+		Runtime: deps.Runtime, Digester: digester, BudgetAuthority: budgetAuthority, TaskAttemptAdmitter: taskAttempts,
+		TaskCapabilityAuthenticator: taskAuth, DelegationReauthenticator: delegationAuth,
+		Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
 		Traces: deps.Traces, Media: deps.Media, Staging: deps.Staging, Uploads: deps.Uploads, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
 	}
 }
@@ -1120,7 +1133,7 @@ func configuredSink(sink events.Sink, log *slog.Logger) events.Sink {
 func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
 	authority, failure := s.gate.Authenticate(r, "models_read")
 	if failure != nil {
-		return keyauthority.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
+		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
 	}
 	return authority, nil
 }

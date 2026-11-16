@@ -161,7 +161,7 @@ func priceRanges(snapshot *routing.View, route routing.Route, inputs *routinginp
 			if !ok || !provider.Enabled {
 				continue
 			}
-			price := inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
+			price := inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 			if price == nil {
 				missing = true
 				continue

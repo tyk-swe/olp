@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -37,7 +37,7 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	f := providerFixture{pool: pool, owner: uuid.NewString(),
-		server: providers.New(providers.Deps{Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}})}
+		server: providers.New(providers.Deps{Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, Getenv: func(string) string { return "" }})}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users (id,email,display_name,role,etag) VALUES ($1::uuid,$1::text || '@example.com','Provider fixture','owner',$1::uuid)`, f.owner); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 			t.Fatal(err)
 		}
 		err := p.store(t, p.name, `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:10/v1"}`)
-		if problem := (*access.Problem)(nil); !errors.As(err, &problem) || problem.Code != "credential_destination_changed" {
+		if problem := (*httpkit.Problem)(nil); !errors.As(err, &problem) || problem.Code != "credential_destination_changed" {
 			t.Fatalf("moving a stored credential to another endpoint = %v, want credential_destination_changed", err)
 		}
 	})

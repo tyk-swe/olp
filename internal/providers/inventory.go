@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -18,43 +19,43 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(map[string]any{"items": connection.Kinds()}), nil
+func (s *Server) kinds(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	return httpkit.OK(map[string]any{"items": connection.Kinds()}), nil
 }
 
-func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
-	kind := r.PathValue("provider_kind")
+func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	kind := connectors.Kind(r.PathValue("provider_kind"))
 	if _, ok := connection.LookupKind(kind); !ok {
-		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
+		return httpkit.Reply{}, httpkit.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return access.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
+	return httpkit.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
 }
 
-func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(connection.Vendors()), nil
+func (s *Server) listVendors(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	return httpkit.OK(connection.Vendors()), nil
 }
 
-func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) inventory(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	query := r.URL.Query()
 	search := strings.TrimSpace(query.Get("search"))
 	if len(search) > 100 {
-		return access.Reply{}, access.Fail(400, "invalid_query", "Use at most 100 search characters.")
+		return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "Use at most 100 search characters.")
 	}
 	surface := query.Get("surface")
 	switch surface {
 	case "", "openai", "anthropic", "gemini", "bedrock", "native":
 	default:
-		return access.Reply{}, access.Fail(400, "invalid_query", "Unknown surface.")
+		return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "Unknown surface.")
 	}
 	var enabled *bool
 	if raw := query.Get("enabled"); raw != "" {
 		v, err := strconv.ParseBool(raw)
 		if err != nil {
-			return access.Reply{}, access.Fail(400, "invalid_query", "enabled must be true or false.")
+			return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "enabled must be true or false.")
 		}
 		enabled = &v
 	}
@@ -72,7 +73,7 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		AND ($6 OR p.project_id=ANY($7::uuid[]))
 		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1, principal.AllProjects, principal.ProjectIDs())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (inventoryItem, error) {
@@ -95,9 +96,9 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		return item, nil
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item inventoryItem) string { return item.Model.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item inventoryItem) string { return item.Model.ID }), nil
 }
 
 type inventoryItem struct {
@@ -112,18 +113,18 @@ type inventoryItem struct {
 
 // generations lists installation-wide runtime releases, which span every
 // project and name their publishers, so it requires installation reach.
-func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) profiles(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
+	return httpkit.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
 }
 
-func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) operationDialects(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	items := []map[string]any{}
 	for _, d := range operationregistry.Catalog().Dialects() {
 		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
 	}
-	return access.OK(map[string]any{"items": items}), nil
+	return httpkit.OK(map[string]any{"items": items}), nil
 }

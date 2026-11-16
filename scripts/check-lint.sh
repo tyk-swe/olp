@@ -5,11 +5,14 @@ cd "$(dirname "$0")/.."
 # check-dependencies.sh. Enabled checks live in staticcheck.conf.
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
+./scripts/check-imports.sh
+
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
   [fault]="" [events]="" [traceingest]=""
-  [health]="events" [ingress]="fault" [quota]="events fault"
-  [codeforward]="events fault ingress quota"
+  [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
+  [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
+  [codeforward/coderesearch]="" [codeforward/codexwire]=""
 )
 while read -r package imports; do
   [[ $package == "$gateway" ]] && continue

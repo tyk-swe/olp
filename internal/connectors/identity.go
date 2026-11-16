@@ -15,7 +15,6 @@ func IsServingIdentityHeader(name string) bool {
 	}
 }
 
-// ServingIdentity identifies the configured model and its pinned environment.
 func (c Config) ServingIdentity(providerID, revisionID, model string) oif.ServingIdentity {
 	profile, _ := c.Profile()
 	binding := c.Bindings[model]

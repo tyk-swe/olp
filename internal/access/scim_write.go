@@ -10,38 +10,39 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
-func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, error) {
+func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
 	var body scim.Document
 	var err error
 	if r.Method != "DELETE" {
 		body, err = scim.Decode(r.Body)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	create := r.Method == "POST"
-	id := NewID()
+	id := httpkit.NewID()
 	var current scim.Document
 	var etag string
 	if !create {
-		id, err = IDParam(r, "scim_id")
+		id, err = httpkit.IDParam(r, "scim_id")
 		if err != nil {
-			return Reply{}, scim.Fail(404, "", "The resource was not found.")
+			return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
 		}
 		current, etag, err = s.scimRead(r, tx, group, id)
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if match := r.Header.Get("If-Match"); match != "" && match != "*" && match != `"`+etag+`"` && match != `W/"`+etag+`"` {
-			return Reply{}, scim.Fail(412, "invalidVers", "The resource changed; read its current version.")
+			return httpkit.Reply{}, scim.Fail(412, "invalidVers", "The resource changed; read its current version.")
 		}
 	}
 	if r.Method == "PUT" {
@@ -56,12 +57,12 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 	if r.Method == "PATCH" {
 		body, err = scim.Patch(current, body, group, scimSelector(r, tx))
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	managed, err := scimManagedProjects(r, tx)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var affected []string
 	kind := "user"
@@ -73,34 +74,34 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		affected = []string{id}
 	}
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if orphaned, err := scimOrphansProject(r, tx, managed); err != nil || orphaned {
 		if err == nil {
 			err = scim.Fail(409, "", "Keep at least one project manager.")
 		}
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "scim."+kind+"."+strings.ToLower(r.Method), kind, id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if r.Method == "DELETE" {
-		return Reply{Status: 204}, tx.Commit(r.Context())
+		return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
 	}
 	resource, etag, err := s.scimRead(r, tx, group, id)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply := Detail(resource, etag)
+	reply := httpkit.Detail(resource, etag)
 	if create {
 		reply.Status = 201
 		reply.Location = s.Origin + "/scim/v2/Users/" + id
@@ -192,7 +193,7 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.scim_users SET deleted_at=now() WHERE user_id=$1", id); err != nil {
 			return "", err
 		}
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$2,updated_at=now() WHERE id=$1", id, NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$2,updated_at=now() WHERE id=$1", id, httpkit.NewID()); err != nil {
 			return "", err
 		}
 		_, err := tx.Exec(r.Context(), "DELETE FROM olp.scim_group_members WHERE user_id=$1", id)
@@ -340,7 +341,7 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 		} else if !errors.Is(e, pgx.ErrNoRows) {
 			return "", e
 		} else {
-			if _, e = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,access_scope,role_management,etag) VALUES($1,$2,$3,$4,$5,$6,'provisioned',$7)", id, address, display, extension["role"], active, extension["accessScope"], NewID()); e != nil {
+			if _, e = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,access_scope,role_management,etag) VALUES($1,$2,$3,$4,$5,$6,'provisioned',$7)", id, address, display, extension["role"], active, extension["accessScope"], httpkit.NewID()); e != nil {
 				return "", e
 			}
 			if _, e = tx.Exec(r.Context(), "INSERT INTO olp.provisioned_users(source,external_id,user_id) VALUES('scim',$1::uuid::text,$1::uuid)", id); e != nil {
@@ -351,7 +352,7 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_users(user_id,document) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET document=excluded.document,deleted_at=NULL", id, data); err != nil {
 		return "", err
 	}
-	_, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$2,display_name=$3,active=$4,updated_at=now(),etag=$5 WHERE id=$1", id, address, display, active, NewID())
+	_, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$2,display_name=$3,active=$4,updated_at=now(),etag=$5 WHERE id=$1", id, address, display, active, httpkit.NewID())
 	return id, err
 }
 
@@ -463,9 +464,9 @@ func (s *Server) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Do
 	}
 	data, _ := json.Marshal(stored)
 	if method == "POST" {
-		_, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_groups(id,document,etag) VALUES($1,$2,$3)", id, data, NewID())
+		_, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_groups(id,document,etag) VALUES($1,$2,$3)", id, data, httpkit.NewID())
 	} else {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.scim_groups SET document=$2,etag=$3,updated_at=now() WHERE id=$1", id, data, NewID())
+		_, err = tx.Exec(r.Context(), "UPDATE olp.scim_groups SET document=$2,etag=$3,updated_at=now() WHERE id=$1", id, data, httpkit.NewID())
 	}
 	if err != nil {
 		return nil, err

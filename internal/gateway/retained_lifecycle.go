@@ -273,11 +273,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
-		defer func() {
-			commitCtx, cancel := resourceCommitContext(r.Context())
-			defer cancel()
-			_ = lifecycle.Close(commitCtx)
-		}()
+		defer s.settleFence(r.Context(), lifecycle.Close)
 	}
 	native, failure := s.pinnedDo(ctx, x, p, e.Method, endpoint, body, "application/json")
 	if failure != nil {
@@ -348,10 +344,8 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 }
 
 func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug string, body []byte) ([]byte, *fault.Error) {
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
 	canonical, err := canonicalBatchJSON(body)
@@ -700,7 +694,7 @@ func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *f
 		return fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	if p.attempt.Price == nil {
-		p.attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
+		p.attempt.Price = x.routingInputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
 	}
 	if p.attempt.Price != nil || x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt) != nil {
 		return policyUnavailable("unsupported_pricing", "Agent resource control does not support priced execution. Use an unpriced resource route.")

@@ -369,7 +369,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		space.Fingerprint = space.Fingerprint + ":" + hexDigest(canonical)
 		canonical = append(canonical, []byte(query)...)
 	}
-	parallel := x.startParallel(ctx, func() {})
+	parallel := s.startParallel(ctx, x, func() {})
 	if parallel != nil {
 		defer parallel.cancel()
 	}
@@ -451,7 +451,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		}
 	}
 	if rev := x.attemptCardRevision(a.ProviderID, at); rev != nil {
-		if charge, ok := rev.Charge(u, at, true, costPtr, p.Kind, p.VendorID, a.UpstreamModel, x.operationName()); ok {
+		if charge, ok := rev.Charge(u, at, true, costPtr, string(p.Kind), p.VendorID, a.UpstreamModel, x.operationName()); ok {
 			c.budgetCharge = charge.String()
 		}
 	}

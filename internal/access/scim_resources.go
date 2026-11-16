@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	filter "github.com/scim2/filter-parser/v2"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -35,20 +36,20 @@ func (s *Server) scimRead(r *http.Request, q Queryer, group bool, id string) (sc
 	return d, etag, err
 }
 
-func (s *Server) scimGet(r *http.Request, _ Principal, group bool) (Reply, error) {
-	id, err := IDParam(r, "scim_id")
+func (s *Server) scimGet(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
-		return Reply{}, scim.Fail(404, "", "The resource was not found.")
+		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
 	}
 	d, etag, err := s.scimRead(r, s.Pool, group, id)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	projection, err := scim.ParseProjection(r.URL.Query().Get("attributes"), r.URL.Query().Get("excludedAttributes"), scimResourceSchema(group))
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Detail(projection.Apply(d), etag), nil
+	return httpkit.Detail(projection.Apply(d), etag), nil
 }
 
 func scimResourceSchema(group bool) string {
@@ -58,15 +59,15 @@ func scimResourceSchema(group bool) string {
 	return scim.UserSchema
 }
 
-func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, error) {
+func (s *Server) scimList(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
 	values := r.URL.Query()
 	if r.Method == "POST" {
 		body, e := scim.Decode(r.Body)
 		if e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 		if e = scim.Schema(body, scim.SearchSchema); e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 		values = url.Values{}
 		for _, key := range []string{"filter", "sortBy", "sortOrder", "startIndex", "count", "attributes", "excludedAttributes"} {
@@ -81,13 +82,13 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 					for _, x := range v {
 						str, ok := x.(string)
 						if !ok {
-							return Reply{}, scim.Invalid("Attribute selection must contain strings.")
+							return httpkit.Reply{}, scim.Invalid("Attribute selection must contain strings.")
 						}
 						parts = append(parts, str)
 					}
 					values.Set(key, strings.Join(parts, ","))
 				default:
-					return Reply{}, scim.Invalid("The search parameter has the wrong type.")
+					return httpkit.Reply{}, scim.Invalid("The search parameter has the wrong type.")
 				}
 			}
 		}
@@ -97,7 +98,7 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 	if raw := values.Get("startIndex"); raw != "" {
 		start, err = strconv.Atoi(raw)
 		if err != nil {
-			return Reply{}, scim.Invalid("startIndex must be an integer.")
+			return httpkit.Reply{}, scim.Invalid("startIndex must be an integer.")
 		}
 		if start < 1 {
 			start = 1
@@ -106,7 +107,7 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 	if raw := values.Get("count"); raw != "" {
 		count, err = strconv.Atoi(raw)
 		if err != nil {
-			return Reply{}, scim.Invalid("count must be an integer.")
+			return httpkit.Reply{}, scim.Invalid("count must be an integer.")
 		}
 		if count < 0 {
 			count = 0
@@ -116,23 +117,23 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 		}
 	}
 	if start > 10000000 {
-		return Reply{}, scim.Invalid("startIndex exceeds the supported offset.")
+		return httpkit.Reply{}, scim.Invalid("startIndex exceeds the supported offset.")
 	}
 	schema := scimResourceSchema(group)
 	projection, err := scim.ParseProjection(values.Get("attributes"), values.Get("excludedAttributes"), schema)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	compiled := scim.SQLFilter{Schema: schema}
 	where, err := compiled.Compile(values.Get("filter"), "resource")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	order := "id ASC"
 	if by := values.Get("sortBy"); by != "" {
 		expression, e := compiled.Sort(by, "resource")
 		if e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 		direction := "ASC"
 		switch values.Get("sortOrder") {
@@ -140,7 +141,7 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 			direction = "DESC"
 		case "", "ascending":
 		default:
-			return Reply{}, scim.Invalid("Use ascending or descending sort order.")
+			return httpkit.Reply{}, scim.Invalid("Use ascending or descending sort order.")
 		}
 		order = expression + " " + direction + " NULLS LAST,id ASC"
 	}
@@ -151,16 +152,16 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 	var total int64
 	var data []byte
 	if err = s.Pool.QueryRow(r.Context(), query, compiled.Args...).Scan(&total, &data); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var resources []scim.Document
 	if err = json.Unmarshal(data, &resources); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	for i, d := range resources {
 		resources[i] = projection.Apply(d)
 	}
-	return OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(resources), "Resources": resources}), nil
+	return httpkit.OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(resources), "Resources": resources}), nil
 }
 
 func scimSelector(r *http.Request, tx pgx.Tx) scim.Select {

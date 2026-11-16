@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -31,7 +31,7 @@ func NotifyGrantLapsed(ctx context.Context, tx pgx.Tx, lapse GrantLapse) error {
 		return err
 	}
 	for _, rule := range rules {
-		if _, err := tx.Exec(ctx, insertGrantLapseDeliverySQL, access.NewID(), rule, lapse.CredentialID, payload); err != nil {
+		if _, err := tx.Exec(ctx, insertGrantLapseDeliverySQL, httpkit.NewID(), rule, lapse.CredentialID, payload); err != nil {
 			return err
 		}
 	}

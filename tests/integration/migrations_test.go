@@ -315,6 +315,24 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	}
 }
 
+func TestMigrationsIgnoreTheSessionStatementTimeout(t *testing.T) {
+	t.Parallel()
+	_, address := harness.EmptyDatabase(t)
+	config, err := database.Configuration(address, 2, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
+	pool, err := database.Open(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

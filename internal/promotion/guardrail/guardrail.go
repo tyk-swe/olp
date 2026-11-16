@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
@@ -43,14 +44,14 @@ type reference struct {
 
 func parseGuardrails(entries []contract.ConfigurationGuardrail) ([]Guardrail, error) {
 	if len(entries) > 1000 {
-		return nil, access.Invalid("guardrails", "Declare at most 1000 guardrails.")
+		return nil, httpkit.Invalid("guardrails", "Declare at most 1000 guardrails.")
 	}
 	parsed, err := promotion.TryMap(entries, parseGuardrail)
 	if err != nil {
 		return nil, err
 	}
 	if _, repeated := promotion.FirstRepeat(parsed, guardrailKey); repeated {
-		return nil, access.Invalid("guardrails", invalidGuardrails)
+		return nil, httpkit.Invalid("guardrails", invalidGuardrails)
 	}
 	return parsed, nil
 }
@@ -58,11 +59,11 @@ func parseGuardrails(entries []contract.ConfigurationGuardrail) ([]Guardrail, er
 func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	project, name := strings.TrimSpace(entry.Project), strings.TrimSpace(entry.Name)
 	if !promotion.ValidLabel(name) || (project != "" && !promotion.ValidLabel(project)) || entry.Configuration == nil {
-		return Guardrail{}, access.Invalid("guardrails", invalidGuardrails)
+		return Guardrail{}, httpkit.Invalid("guardrails", invalidGuardrails)
 	}
 	configuration, err := json.Marshal(*entry.Configuration)
 	if err != nil {
-		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
+		return Guardrail{}, httpkit.Invalid("guardrails", invalidConfiguration)
 	}
 	revision := guardrails.Revision{
 		Type:          guardrails.Kind(entry.Type),
@@ -72,7 +73,7 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	}
 	spec, err := guardrails.ParseRevision(revision)
 	if err != nil {
-		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
+		return Guardrail{}, httpkit.Invalid("guardrails", invalidConfiguration)
 	}
 	refs := spec.References()
 	credentials := promotion.Filter([]reference{{promotion.Ref(refs.Credential), false}, {promotion.Ref(refs.Network), true}}, func(r reference) bool { return r.ref != "" })
@@ -96,10 +97,10 @@ func claim(r reference) promotion.Claim {
 	return promotion.Claim{Ref: r.ref, Accept: promotion.SealedOnly("Guardrail credentials require sealed secret bindings.", func(secret string) error {
 		field := "secret_bindings." + string(r.ref)
 		if len(secret) > promotion.MaxSecret || guardrails.ValidateCredential([]byte(secret)) != nil {
-			return access.Invalid(field, "Supply a bounded guardrail credential object.")
+			return httpkit.Invalid(field, "Supply a bounded guardrail credential object.")
 		}
 		if r.network && egress.ValidateConnectionSecret([]byte(secret)) != nil {
-			return access.Invalid(field, "Supply a valid network credential object.")
+			return httpkit.Invalid(field, "Supply a valid network credential object.")
 		}
 		return nil
 	})}

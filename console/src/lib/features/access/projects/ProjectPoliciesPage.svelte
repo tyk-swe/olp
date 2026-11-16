@@ -16,6 +16,7 @@
   import Menu from '#lib/components/Menu.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { useRole } from '../session/useRole.svelte';
   import {
@@ -38,6 +39,7 @@
     projects.data?.find((project) => project.id === projectId)
   );
   const queryClient = useQueryClient();
+  const deleteIntent = useMutationIntent();
   const canManage = $derived(
     access.allows('GET /api/v1/projects/{project_id}')
   );
@@ -86,7 +88,9 @@
     if (!confirmed) return;
     actionProblem = '';
     try {
-      await deleteProject(project, crypto.randomUUID());
+      await deleteIntent.submit(project, (input, requestId) =>
+        deleteProject(input, requestId)
+      );
       await queryClient.invalidateQueries({ queryKey: projectKeys.root });
       notify(`Deleted ${project.name}`);
       await goto(resolve('projects'));

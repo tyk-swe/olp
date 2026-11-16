@@ -8,6 +8,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -84,86 +85,86 @@ func Register(mux *http.ServeMux, deps Deps) {
 	deps.Access.Route(mux, "POST /api/v1/configuration/apply", s.apply, access.MaxBody(maxDocument), access.Deadline(60*time.Second))
 }
 
-func (s server) export(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s server) export(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	current, err := read(r.Context(), s.access.Pool)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := identity.Authorize(current.identity, p); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	exportedAt := time.Now().UTC().Truncate(time.Second)
 	document, err := current.render(&exportedAt)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	digest, err := promotion.Digest(document)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(contract.ConfigurationExportResponse{Digest: digest, Document: document}), nil
+	return httpkit.OK(contract.ConfigurationExportResponse{Digest: digest, Document: document}), nil
 }
 
-func (s server) plan(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s server) plan(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	d, err := s.decode(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := authorize(r.Context(), s.access.Pool, p, d); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	result, err := evaluate(r.Context(), s.access.Pool, d)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(result), nil
+	return httpkit.OK(result), nil
 }
 
-func (s server) apply(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s server) apply(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	d, err := s.decode(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.mutate(r, d, nil)
 }
 
-func (s server) mutate(r *http.Request, d desired, ready *prepared) (access.Reply, error) {
+func (s server) mutate(r *http.Request, d desired, ready *prepared) (httpkit.Reply, error) {
 	ctx := r.Context()
 	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
 	if err := authorize(ctx, tx, p, d); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	requestPrint, err := d.fingerprint()
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := s.access.Replay(r, tx, p, requestPrint)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(ctx)
 	}
 	if ready == nil && d.needsPrepare() {
 		if err := tx.Rollback(ctx); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		prepared, err := s.prepare(ctx, p, d)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return s.mutate(r, d, &prepared)
 	}
 	result, err := evaluate(ctx, tx, d)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(result.Conflicts) > 0 || len(result.Blockers) > 0 {
-		return access.Reply{Status: http.StatusConflict, Body: notApplicable{
+		return httpkit.Reply{Status: http.StatusConflict, Body: notApplicable{
 			Type:                      "https://openllmproxy.dev/problems/configuration_not_applicable",
 			Title:                     http.StatusText(http.StatusConflict),
 			Status:                    http.StatusConflict,
@@ -173,29 +174,29 @@ func (s server) mutate(r *http.Request, d desired, ready *prepared) (access.Repl
 	}
 	for _, step := range s.appliers(d, promotion.ValueOf(ready), r) {
 		if err := step(ctx, tx, p); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err := access.Audit(ctx, tx, r, p.Actor(), "configuration.apply", "configuration", result.Digest, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	reply := access.OK(result)
+	reply := httpkit.OK(result)
 	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(ctx)
 }
 
 func (s server) decode(r *http.Request) (desired, error) {
 	var request contract.ConfigurationPromotionRequest
-	if err := access.DecodeUnique(r, &request, maxDocument); err != nil {
+	if err := httpkit.DecodeUnique(r, &request, maxDocument); err != nil {
 		return desired{}, err
 	}
 	if request.Document.ApiVersion == "" {
-		return desired{}, access.Invalid("document", "Send the configuration artifact.")
+		return desired{}, httpkit.Invalid("document", "Send the configuration artifact.")
 	}
 	if !request.Document.ApiVersion.Valid() {
-		return desired{}, access.Fail(http.StatusUnprocessableEntity, "unsupported_api_version", "The artifact declares an unsupported api_version.")
+		return desired{}, httpkit.Fail(http.StatusUnprocessableEntity, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	document, err := guardrail.Upgrade(request.Document)
 	if err != nil {

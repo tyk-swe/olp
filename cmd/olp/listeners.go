@@ -26,7 +26,8 @@ type boundListener struct {
 
 // bindListeners opens every socket before serving traffic and closes earlier
 // sockets if a later bind fails. Request lifetimes are independent of startup.
-func bindListeners(startup context.Context, configs []listenerConfig, c Config, requests context.Context) ([]boundListener, error) {
+func bindListeners(startup context.Context, configs []listenerConfig, c Config, requests context.Context, log *slog.Logger) ([]boundListener, error) {
+	errorLog := slog.NewLogLogger(log.Handler(), slog.LevelError)
 	listeners := make([]boundListener, 0, len(configs))
 	for _, config := range configs {
 		socket, err := (&net.ListenConfig{}).Listen(startup, "tcp", config.address)
@@ -41,6 +42,7 @@ func bindListeners(startup context.Context, configs []listenerConfig, c Config, 
 			socket: socket,
 			server: &listenerServer{
 				handler:  config.handler,
+				errorLog: errorLog,
 				limit:    c.MaxConnections,
 				age:      time.Duration(c.ConnectionMaxAgeSeconds) * time.Second,
 				drain:    time.Duration(c.ConnectionDrainTimeoutSeconds) * time.Second,

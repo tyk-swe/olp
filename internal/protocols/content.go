@@ -102,7 +102,7 @@ func (w *inspector) inputFields(family wire.Format, fields map[string]json.RawMe
 		}
 	case wire.Bedrock:
 		w.bedrockFields(fields)
-	case "bedrock_count":
+	case wire.BedrockCount:
 		w.field(fields, "input", func(raw json.RawMessage) json.RawMessage {
 			return w.object(raw, func(input map[string]json.RawMessage) {
 				w.field(input, "converse", func(raw json.RawMessage) json.RawMessage {

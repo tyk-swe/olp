@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -20,6 +21,7 @@ import (
 // admitted until the handler closes it, and Shutdown closes it at its deadline.
 type listenerServer struct {
 	handler     http.Handler
+	errorLog    *log.Logger
 	limit       int
 	age, drain  time.Duration
 	mu          sync.Mutex
@@ -95,7 +97,7 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 		protocols.SetHTTP1(true)
 		protocols.SetUnencryptedHTTP2(true)
 		server := &http.Server{
-			Handler: s.handler, Protocols: protocols,
+			Handler: s.handler, Protocols: protocols, ErrorLog: s.errorLog,
 			ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 32 * 1024,
 			BaseContext: func(net.Listener) context.Context { return s.requests },
 			ConnState: func(_ net.Conn, state http.ConnState) {

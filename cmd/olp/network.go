@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/surface"
 )
@@ -32,11 +33,11 @@ func managementNetwork(allowed, trusted []netip.Prefix, next http.Handler) http.
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		problem := access.Fail(http.StatusForbidden, "management_ip_not_allowed", "Management access is not allowed from this client address.")
+		problem := httpkit.Fail(http.StatusForbidden, "management_ip_not_allowed", "Management access is not allowed from this client address.")
 		if strings.HasPrefix(r.URL.Path, "/scim/") {
 			access.WriteSCIMError(w, problem)
 		} else {
-			access.WriteProblem(w, problem)
+			httpkit.WriteProblem(w, problem)
 		}
 	})
 }

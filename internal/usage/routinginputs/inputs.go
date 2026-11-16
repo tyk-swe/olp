@@ -8,9 +8,13 @@ import (
 	"math"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
+
+type Querier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
 
 const RefreshInterval = 10 * time.Second
 
@@ -219,7 +223,7 @@ func (i *Inputs) Metrics(provider, model, operation, mode string, now time.Time)
 // LoadRoutingInputs reads the same immutable rates and persisted successful
 // attempt measurements used by accounting. A failed refresh leaves its old
 // snapshot in place; performance expires independently after sixty seconds.
-func Load(ctx context.Context, q access.Queryer, now time.Time) (*Inputs, error) {
+func Load(ctx context.Context, q Querier, now time.Time) (*Inputs, error) {
 	in := &Inputs{RefreshedAt: now, Performance: map[string]Performance{}}
 	rows, err := q.Query(ctx, `WITH ranked AS (
  SELECT p.*,r.id AS rid,r.revision,r.effective_at,row_number() OVER
@@ -302,7 +306,7 @@ func Load(ctx context.Context, q access.Queryer, now time.Time) (*Inputs, error)
 
 // loadRoutingDiscounts reads the multipliers in force plus those scheduled
 // within 90 days; a bounded catalogue keeps each plan's pin lookup cheap.
-func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, in *Inputs) error {
+func loadRoutingDiscounts(ctx context.Context, q Querier, now time.Time, in *Inputs) error {
 	rows, err := q.Query(ctx, `SELECT id::text,provider_kind,vendor_id,provider_id::text,
  multiplier::text,effective_at,created_at
  FROM (
@@ -341,7 +345,7 @@ func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, 
 // loadRoutingRateCards reads every card with its in-force and scheduled
 // revisions and their prices, plus the organization of every project a card
 // may resolve through.
-func loadRoutingRateCards(ctx context.Context, q access.Queryer, now time.Time, in *Inputs) error {
+func loadRoutingRateCards(ctx context.Context, q Querier, now time.Time, in *Inputs) error {
 	in.ProjectOrganizations = map[string]string{}
 	rows, err := q.Query(ctx, `SELECT id::text,organization_id::text FROM olp.projects
  WHERE organization_id IS NOT NULL`)

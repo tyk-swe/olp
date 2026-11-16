@@ -28,6 +28,7 @@ jobs:
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       scripts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.scripts == 'true' }}
+      workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -50,6 +51,8 @@ jobs:
             go:
               - 'Makefile'
               - 'scripts/check-lint.sh'
+              - 'scripts/check-imports.sh'
+              - 'scripts/project-imports.txt'
               - 'staticcheck.conf'
               - '**/*.go'
               - 'go.mod'
@@ -122,6 +125,8 @@ jobs:
               - 'docs/**'
               - '**/*.md'
               - '.github/workflows/ci.yml'
+            workflows:
+              - '.github/**'
   check-go:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -129,7 +134,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup
         with:
           node-modules: false
       - run: make check-go
@@ -140,9 +147,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: '>=10.26.0'
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
@@ -151,13 +158,15 @@ jobs:
       - run: make check-console
   test-unit-go:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
-        uses: ./.github/actions/setup
+        uses: $/.github/actions/setup
         with:
           node-modules: "false"
           go-cache-suffix: -test-unit-go-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-unit.sh') }}
@@ -178,9 +187,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: '>=10.26.0'
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
@@ -195,8 +204,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
-        uses: ./.github/actions/setup
+        uses: $/.github/actions/setup
         with:
           node-modules: "false"
           go-cache-suffix: -test-integration-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-integration.sh') }}
@@ -217,8 +228,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
-        uses: ./.github/actions/setup
+        uses: $/.github/actions/setup
         with:
           node-modules: "false"
           go-cache-suffix: -test-e2e-api-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-e2e.sh') }}
@@ -239,8 +252,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
-        uses: ./.github/actions/setup
+        uses: $/.github/actions/setup
         with:
           go-cache-suffix: -test-e2e-browser-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-e2e.sh') }}
           go-cache-restore-suffix: -test-e2e-browser-
@@ -275,7 +290,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup
       - run: make check-contracts
       - run: node scripts/check-release-version.mjs
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -290,8 +307,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
+  workflows:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          version: 1.32.0
+          advanced-security: false
+          annotations: true
   dependencies:
     needs: changes
     if: needs.changes.outputs.deps == 'true'
@@ -299,7 +332,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup
         with:
           go-cache: false
       - run: ./scripts/check-dependencies.sh
@@ -310,5 +345,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup
       - run: make build

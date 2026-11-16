@@ -14,7 +14,7 @@ import (
 var contracts = buildContracts()
 
 func buildContracts() *oif.Registry {
-	families := []wire.Format{wire.Completions, wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count", wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
+	families := []wire.Format{wire.Completions, wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.BedrockCount, wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
 	operations := []oif.Operation{}
 	bindings := []oif.Binding{}
 	seen := map[oif.Identity]bool{}
@@ -27,7 +27,7 @@ func buildContracts() *oif.Registry {
 		binding := oif.Binding{Dialect: d.Dialect, Operation: d.Operation}
 		// Bedrock bodies name no model: Converse addresses it in the URL, and
 		// Rerank by the ARN its configuration carries.
-		if family.Surface() != "gemini" && family != wire.Bedrock && family != "bedrock_count" && family != wire.BedrockRerank {
+		if family.Surface() != "gemini" && family != wire.Bedrock && family != wire.BedrockCount && family != wire.BedrockRerank {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/model", Origin: oif.IdentityBinding, Kind: oif.String})
 		}
 		if family == wire.GeminiCount {
@@ -104,7 +104,7 @@ func PrepareIdentity(r *wire.Request, model string) (oif.Prepared, error) {
 		return oif.Prepared{}, err
 	}
 	changes := []oif.Change{}
-	if r.Family.Surface() != "gemini" && r.Family != wire.Bedrock && r.Family != "bedrock_count" {
+	if r.Family.Surface() != "gemini" && r.Family != wire.Bedrock && r.Family != wire.BedrockCount {
 		encoded, _ := json.Marshal(model)
 		changes = append(changes, oif.Change{Pointer: "/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published route model binding"})
 	}

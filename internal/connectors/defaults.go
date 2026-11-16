@@ -15,20 +15,12 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-// DefaultSet is owned by one operation/dialect contract. NativeOptions remains
-// payload data; none of its members can change addressing, credentials or state
-// authority. Null inside Values is a native value, never a management reset.
 type DefaultSet struct {
 	Dialect       string                     `json:"dialect"`
 	Values        map[string]json.RawMessage `json:"values,omitempty"`
 	NativeOptions map[string]json.RawMessage `json:"native_options,omitempty"`
 }
 
-// Binding identifies a configured serving environment separately from secrets.
-// PrincipalID/Snapshot are operator declarations until independently observed
-// (a grant's observed principal replaces a declared one; see
-// Config.ServingPrincipal); omitted values remain unknown. Credential secret
-// versions are not identities.
 type Binding struct {
 	Model         string                `json:"model,omitempty"`
 	Deployment    string                `json:"deployment,omitempty"`
@@ -39,8 +31,6 @@ type Binding struct {
 	Defaults      map[string]DefaultSet `json:"defaults,omitempty"`
 }
 
-// DefaultProvenance identifies a configured omission filler. Actual request
-// members, including null/zero/false/empty, always win atomically over defaults.
 type DefaultProvenance struct {
 	Pointer string `json:"pointer"`
 	Source  string `json:"source"`
@@ -280,7 +270,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 		if binding.Model != "" && binding.Deployment != "" {
 			return errors.New("a binding cannot provide both model and deployment")
 		}
-		if binding.Deployment != "" && c.Kind != "azure_openai" {
+		if binding.Deployment != "" && c.Kind != KindAzureOpenAI {
 			return errors.New("deployment bindings belong to Azure hosting")
 		}
 		if binding.Region != "" && binding.Region != c.CloudRegion {
@@ -323,14 +313,10 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 				}
 			}
 		}
-
 	}
 	return nil
 }
 
-// DefaultsFor resolves provider -> binding inheritance without recursive merges.
-// A whole member (including an array/schema/null) from the binding replaces the
-// provider member. Request member presence is applied by the operation lowerer.
 func (c Config) DefaultsFor(operation, model string) (map[string]json.RawMessage, []DefaultProvenance, error) {
 	p, err := c.profile()
 	if err != nil {

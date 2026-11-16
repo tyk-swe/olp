@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -31,10 +32,10 @@ type catalog struct{ templates, groups []string }
 func parseWorkload(fragment nullable.Nullable[[]contract.ConfigurationWorkloadIssuer]) ([]contract.ConfigurationWorkloadIssuer, error) {
 	entries := fragment.GetOrEmpty()
 	if len(entries) > 64 {
-		return nil, access.Invalid("workload_issuers", "Use at most 64 issuers.")
+		return nil, httpkit.Invalid("workload_issuers", "Use at most 64 issuers.")
 	}
 	if _, repeated := promotion.FirstRepeat(entries, func(issuer contract.ConfigurationWorkloadIssuer) string { return issuer.Issuer }); repeated {
-		return nil, access.Invalid("workload_issuers", "Issuer URLs must be unique.")
+		return nil, httpkit.Invalid("workload_issuers", "Issuer URLs must be unique.")
 	}
 	if err := promotion.Every(entries, validIssuer); err != nil {
 		return nil, err
@@ -44,7 +45,7 @@ func parseWorkload(fragment nullable.Nullable[[]contract.ConfigurationWorkloadIs
 
 func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	if err := promotion.Every(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) error {
-		return access.ValidText("workload_issuers", strings.TrimSpace(m.Project), 100)
+		return httpkit.ValidText("workload_issuers", strings.TrimSpace(m.Project), 100)
 	}); err != nil {
 		return err
 	}
@@ -202,7 +203,7 @@ func prepareIssuer(ctx context.Context, deps Deps, issuer contract.Configuration
 		return prepared, nil
 	}
 	if _, err := workload.Fetch(ctx, deps.Identity, issuer.JwksUrl); err != nil {
-		return preparedIssuer{}, access.Fail(422, "workload_keys_unavailable", "The declared public signing keys could not be verified through identity egress.")
+		return preparedIssuer{}, httpkit.Fail(422, "workload_keys_unavailable", "The declared public signing keys could not be verified through identity egress.")
 	}
 	return prepared, nil
 }
@@ -229,12 +230,12 @@ func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, 
 		return err
 	}
 	if !prepared || current.ETag != etag {
-		return access.Fail(409, "configuration_changed", "Workload trust changed during endpoint validation; plan and retry.")
+		return httpkit.Fail(409, "configuration_changed", "Workload trust changed during endpoint validation; plan and retry.")
 	}
 	config, err := configOf(issuer, func(name string) (string, error) {
 		id, ok := directory.ID(name)
 		if !ok {
-			return "", access.Invalid("workload_issuers", unknownProject)
+			return "", httpkit.Invalid("workload_issuers", unknownProject)
 		}
 		return id, nil
 	})
@@ -252,5 +253,5 @@ func issuerID(current access.StoredWorkloadIssuer, exists bool) string {
 	if exists {
 		return current.ID
 	}
-	return access.NewID()
+	return httpkit.NewID()
 }

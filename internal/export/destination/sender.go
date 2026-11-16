@@ -63,7 +63,7 @@ type Sender struct {
 func NewSender(policy *egress.Policy, getenv func(string) string, installation string) *Sender {
 	client := policy.Client(DeliveryTimeout)
 	client.Timeout = DeliveryTimeout
-	return &Sender{installation: installation, policy: policy, auth: connectors.NewAuth(policy), client: client, getenv: getenv}
+	return &Sender{installation: installation, policy: policy, auth: connectors.NewAuth(policy, getenv), client: client, getenv: getenv}
 }
 
 func (s *Sender) Send(ctx context.Context, target Target, record Record) error {

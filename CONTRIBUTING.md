@@ -130,7 +130,9 @@ SDKs remains part of the product contract.
 Use current stable dependencies and update Go and pnpm through their package
 managers. Commit the corresponding lockfiles with each update.
 `scripts/check-dependencies.sh` checks reachable Go
-vulnerabilities, licenses and production JavaScript packages. Image qualification
+vulnerabilities, licenses and production JavaScript packages. A reachable
+advisory that was reviewed and does not apply is accepted there by pinning its
+ID and `modified` time, so a revised record fails the check again. Image qualification
 also scans runtime/build SBOMs and retains native linking/license evidence.
 
 The embedded OpenAI token ranks carry their MIT notice and SHA-256 checks;

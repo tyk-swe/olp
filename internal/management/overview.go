@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -18,7 +19,7 @@ func (o *Overview) Register(mux *http.ServeMux) {
 	o.Access.Route(mux, "GET /api/v1/overview", o.summary)
 }
 
-func (o *Overview) summary(r *http.Request, p access.Principal) (access.Reply, error) {
+func (o *Overview) summary(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	var err error
 	var response contract.OverviewResponse
 	err = o.Access.Pool.QueryRow(r.Context(),
@@ -31,7 +32,7 @@ func (o *Overview) summary(r *http.Request, p access.Principal) (access.Reply, e
 		p.AllProjects, p.ProjectIDs()).
 		Scan(&response.ActiveProviders, &response.ActiveRoutes, &response.EnabledModels, &response.UsableApiKey)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(response), nil
+	return httpkit.OK(response), nil
 }

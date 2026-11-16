@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type ownerKind string
@@ -47,7 +48,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 		if id == nil {
 			return Owner{}, invalid("owner.id", "Name the "+kind+".")
 		}
-		parsed, err := access.ParseUUID(*id)
+		parsed, err := httpkit.ParseUUID(*id)
 		if err != nil {
 			return Owner{}, invalid("owner.id", "Use a valid identifier.")
 		}

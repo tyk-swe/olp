@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
@@ -30,10 +31,10 @@ func parseConnection(name string, e contract.ConfigurationCodeConnection) (Conne
 	}
 	network := configuration.Options.Network
 	if network != nil && network.CredentialID != "" {
-		return Connection{}, access.Invalid("code.connections", "Use a network credential reference instead of an installation credential ID.")
+		return Connection{}, httpkit.Invalid("code.connections", "Use a network credential reference instead of an installation credential ID.")
 	}
 	if e.NetworkCredentialRef != nil && (*e.NetworkCredentialRef != string(provider.NetworkRef(name)) || network == nil) {
-		return Connection{}, access.Invalid("code.connections", "Use the named provider network credential reference.")
+		return Connection{}, httpkit.Invalid("code.connections", "Use the named provider network credential reference.")
 	}
 	return Connection{Configuration: configuration, Network: e.NetworkCredentialRef != nil}, nil
 }
@@ -54,7 +55,7 @@ func portableConnection(configuration connection.Configuration) Connection {
 func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
 	prepared, err := connection.Prepare(ctx, in.deps.Drafts.ConnectionPolicy(q), c.Configuration)
 	if _, refused := provider.Refusal(err); refused {
-		return pin{}, access.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
+		return pin{}, httpkit.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
 	}
 	if err != nil {
 		return pin{}, err
@@ -65,11 +66,11 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 		return pin{}, err
 	}
 	if !found {
-		return pin{}, access.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
+		return pin{}, httpkit.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
 	}
 	id, current := target.ID, target.Configuration
 	if configuration.Kind != current.Kind || configuration.AuthMode != current.AuthMode || configuration.ProfileID != current.ProfileID {
-		return pin{}, access.Invalid("code.routes.published.connections", "Frozen connections must retain the destination provider's kind, authentication and profile.")
+		return pin{}, httpkit.Invalid("code.routes.published.connections", "Frozen connections must retain the destination provider's kind, authentication and profile.")
 	}
 	if err := enrolled(ctx, q, id, configuration, pool, in); err != nil {
 		return pin{}, err
@@ -81,7 +82,7 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 func enrolled(ctx context.Context, q access.Queryer, providerID string, configuration connection.Configuration, pool string, in scope) error {
 	at := slices.IndexFunc(in.pools, func(p resolved[access.CodePoolInput]) bool { return p.ref == pool })
 	if at < 0 {
-		return access.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
+		return httpkit.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
 	}
 	members := in.pools[at].input.AccountIDs
 	for _, account := range in.accounts {
@@ -93,7 +94,7 @@ func enrolled(ctx context.Context, q access.Queryer, providerID string, configur
 			return err
 		}
 		if !matches {
-			return access.Invalid("code.routes.published.connections", "Bind destination account credentials enrolled for the frozen provider profile and revision.")
+			return httpkit.Invalid("code.routes.published.connections", "Bind destination account credentials enrolled for the frozen provider profile and revision.")
 		}
 	}
 	return nil
@@ -104,7 +105,7 @@ func networked(configuration, current connection.Configuration, network bool) (c
 		return configuration, nil
 	}
 	if configuration.Options.Network == nil || current.Options.Network == nil || current.Options.Network.CredentialID == "" {
-		return connection.Configuration{}, access.Invalid("code.connections.network_credential_ref", "Bind the named destination provider network credential first.")
+		return connection.Configuration{}, httpkit.Invalid("code.connections.network_credential_ref", "Bind the named destination provider network credential first.")
 	}
 	return configuration.WithNetworkCredential(current.Options.Network.CredentialID), nil
 }

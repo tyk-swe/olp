@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // maxReportRows bounds the groups a selector or experiment report returns.
@@ -203,26 +204,26 @@ func ReadExperiments(ctx context.Context, q access.Queryer, f Filters) (Experime
 	return report, err
 }
 
-func (s *API) selectorSavings(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) selectorSavings(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	filters, err := usageFilters(r, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	report, err := ReadSelectorSavings(r.Context(), s.Access.Pool, filters)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(report), nil
+	return httpkit.OK(report), nil
 }
 
-func (s *API) shadowExperiments(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *API) shadowExperiments(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	filters, err := usageFilters(r, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	report, err := ReadExperiments(r.Context(), s.Access.Pool, filters)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(report), nil
+	return httpkit.OK(report), nil
 }

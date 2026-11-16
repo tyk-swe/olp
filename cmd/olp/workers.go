@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
@@ -55,7 +56,34 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *jobs.Service, credentials release.Credentials, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *imports.Worker, reference *catalog.Signed) func() {
+type workerDeps struct {
+	pool         *pgxpool.Pool
+	vk           *coordination.Client
+	store        *debits.Store
+	shared       *sharedLimits
+	stream       string
+	mediaService *jobs.Service
+	credentials  release.Credentials
+	pluginHost   *plugins.Host
+	keys         *secrets.KeyRing
+	auth         *secrets.AuthKey
+	installation string
+	region       string
+	hostname     string
+	policy       *egress.Policy
+	log          *slog.Logger
+	exporter     *stream.Worker
+	focusWorker  *focus.Worker
+	importer     *imports.Worker
+	reference    *catalog.Signed
+}
+
+func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDeps) func() {
+	pool, vk, store, shared, streamName := d.pool, d.vk, d.store, d.shared, d.stream
+	mediaService, credentials, pluginHost := d.mediaService, d.credentials, d.pluginHost
+	keys, auth, policy, log := d.keys, d.auth, d.policy, d.log
+	installation, region, hostname := d.installation, d.region, d.hostname
+	exporter, focusWorker, importer, reference := d.exporter, d.focusWorker, d.importer, d.reference
 	var wg sync.WaitGroup
 	var limiter *admission.Limiter
 	var syncer *debits.Syncer
@@ -64,9 +92,9 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		limiter, syncer, fleetState = shared.Limiter, shared.Syncer, shared.Fleet
 	}
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
-	wg.Go(func() { managedExporter.Run(ctx, log) })
-	wg.Go(func() { mediaService.Run(ctx) })
-	batchAuth := connectors.NewAuth(policy)
+	wg.Go(supervise(func() { managedExporter.Run(ctx, log) }))
+	wg.Go(supervise(func() { mediaService.Run(ctx) }))
+	batchAuth := connectors.NewAuth(policy, os.Getenv)
 	batchAuth.Signer = pluginHost
 	batchWorker := reconcile.New(reconcile.Deps{
 		Pool: pool, Store: batches.NewStore(pool),
@@ -76,50 +104,50 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		Client: policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(128),
 		Limiter: limiter, Log: log, Now: time.Now,
 	})
-	wg.Go(func() { batchWorker.Run(ctx) })
+	wg.Go(supervise(func() { batchWorker.Run(ctx) }))
 	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Log: log}
-	wg.Go(func() { retained.Run(ctx) })
+	wg.Go(supervise(func() { retained.Run(ctx) }))
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
-	wg.Go(func() { refresher.Run(ctx) })
+	wg.Go(supervise(func() { refresher.Run(ctx) }))
 	allowanceReader := &codeallowance.Reader{
 		Pool: pool, Store: codesessions.New(pool),
 		Authorizer: &codeaccounts.Authorizer{Pool: pool, Credentials: credentials, Plugins: pluginHost},
 		Client:     policy.Client(30 * time.Second), Log: log,
 	}
-	wg.Go(func() { allowanceReader.Run(ctx) })
-	wg.Go(func() { exporter.Run(ctx) })
-	wg.Go(func() { focusWorker.Run(ctx) })
+	wg.Go(supervise(func() { allowanceReader.Run(ctx) }))
+	wg.Go(supervise(func() { exporter.Run(ctx) }))
+	wg.Go(supervise(func() { focusWorker.Run(ctx) }))
 	// The billing importer needs only PostgreSQL and provider egress, so it
 	// runs on every worker replica, coordination store or not.
 	if importer != nil {
-		wg.Go(func() { importer.Run(ctx) })
+		wg.Go(supervise(func() { importer.Run(ctx) }))
 	}
-	wg.Go(func() {
+	wg.Go(supervise(func() {
 		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
 			Pool: pool, Keys: keys, Installation: installation, Log: log,
 			Sender: notifications.NewSender(*policy), Fleet: fleetState, Catalog: reference,
-			NewID: access.NewID, Now: time.Now,
+			NewID: httpkit.NewID, Now: time.Now,
 		})
-	})
-	wg.Go(func() { runDebitReconciliation(ctx, pool, store, syncer, log) })
-	wg.Go(func() { recoverWorkflowModels(ctx, store, log) })
-	wg.Go(func() { runMaintenance(ctx, pool, log) })
-	wg.Go(func() { completeness.RunEpochDetection(ctx, pool, log) })
+	}))
+	wg.Go(supervise(func() { runDebitReconciliation(ctx, pool, store, syncer, log) }))
+	wg.Go(supervise(func() { recoverWorkflowModels(ctx, store, log) }))
+	wg.Go(supervise(func() { runMaintenance(ctx, pool, log) }))
+	wg.Go(supervise(func() { completeness.RunEpochDetection(ctx, pool, log) }))
 	if limiter == nil {
 		return wg.Wait
 	}
-	wg.Go(func() {
+	wg.Go(supervise(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.
-		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: stream, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
+		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: streamName, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
 			log.Error("request metadata consumer stopped", "error", err)
 		}
-	})
-	wg.Go(func() {
+	}))
+	wg.Go(supervise(func() {
 		connect := func(context.Context) (ledger.Installer, error) { return limiter, nil }
 		ledger.Worker{Pool: pool, Region: region, Connect: connect, Checkpoint: costCheckpoint(pool, region), Log: log}.Run(ctx)
-	})
+	}))
 	return wg.Wait
 }
 

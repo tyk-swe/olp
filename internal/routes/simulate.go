@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -45,10 +46,10 @@ type simulationInput struct {
 
 func tokenDemand(estimated, output *int64) (*routing.TokenDemand, error) {
 	if estimated != nil && *estimated < 0 {
-		return nil, access.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
+		return nil, httpkit.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
 	}
 	if output != nil && *output < 0 {
-		return nil, access.Invalid("max_output_tokens", "Use a non-negative output bound.")
+		return nil, httpkit.Invalid("max_output_tokens", "Use a non-negative output bound.")
 	}
 	if estimated == nil && output == nil {
 		return nil, nil
@@ -157,92 +158,92 @@ func validTuple(operation, surface, mode string) error {
 		return nil
 	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {
-		return access.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
+		return httpkit.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
 	}
 	if !slices.Contains([]string{"openai", "anthropic", "gemini"}, surface) {
-		return access.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
+		return httpkit.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
 	}
 	if !connectors.Supports("openai", "openai", operation, surface, mode) {
-		return access.Fail(422, "mode_unavailable", "This operation does not support the requested surface and mode.")
+		return httpkit.Fail(422, "mode_unavailable", "This operation does not support the requested surface and mode.")
 	}
 	return nil
 }
 
-func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "draft_id")
+func (s *Server) simulateDraft(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input simulationInput
-	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err = validTuple(input.Operation, input.Surface, input.Mode); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = input.Preferences.Validate("preferences"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(input.Seed) > 256 {
-		return access.Reply{}, access.Invalid("seed", "Use at most 256 characters.")
+		return httpkit.Reply{}, httpkit.Invalid("seed", "Use at most 256 characters.")
 	}
 	if err = validSimulationLabels(input); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := loadDraft(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := p.Project(d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	live, err := s.resolve(r.Context(), s.Access.Pool, d.Targets)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	routingID := d.ID
 	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	snapshot, err := release.ReadSnapshot(r.Context(), tx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	fidelity, err := routing.DecodeFidelity(d.Fidelity)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
 	if route.Behavior, err = routing.DecodeBehavior(d.Behavior); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	route.Policy, _, err = loadPolicy(r.Context(), tx, "route-draft", d.ID, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	snapshot.Routes[d.Slug] = route
 	inputs, err := s.routingInputs(r, tx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	m := s.newSimulation(r.Context(), snapshot, input, inputs, demand)
 	m.key = func(route routing.Route) (inspectionKeyContext, error) {
@@ -253,7 +254,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	}
 	explained, err := s.explain(m, d.Slug)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	named := explained.Legs[0]
 	decisions := named.Decisions
@@ -271,7 +272,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		}
 		targets = append(targets, map[string]any{"target_id": decision.TargetID, "provider_id": decision.ProviderID, "provider_name": name, "provider_model": decision.UpstreamModel, "priority": decision.Priority, "eligible": decision.Eligible, "attempt": decision.Attempt, "reason": decision.Reason, "decision": decision})
 	}
-	return access.OK(struct {
+	return httpkit.OK(struct {
 		Seed             string                      `json:"deterministic_seed"`
 		Operation        string                      `json:"operation"`
 		Surface          string                      `json:"surface"`
@@ -306,25 +307,25 @@ type simulationRequest struct {
 
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
-func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) simulateRouting(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	var input simulationRequest
-	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
+		return httpkit.Reply{}, err
 	}
 	operation := "generation"
 	if raw, ok := input.Operation["operation"]; ok {
 		if err := json.Unmarshal(raw, &operation); err != nil {
-			return access.Reply{}, access.Invalid("operation.operation", "Use an operation name.")
+			return httpkit.Reply{}, httpkit.Invalid("operation.operation", "Use an operation name.")
 		}
 	}
 	if err := validTuple(operation, input.Surface, input.Mode); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := input.Preferences.Validate("preferences"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if len(input.Seed) > 256 {
-		return access.Reply{}, access.Invalid("seed", "Use at most 256 characters.")
+		return httpkit.Reply{}, httpkit.Invalid("seed", "Use at most 256 characters.")
 	}
 	var request struct {
 		Route string `json:"route"`
@@ -332,13 +333,13 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	}
 	if raw, ok := input.Operation["request"]; ok {
 		if err := json.Unmarshal(raw, &request); err != nil {
-			return access.Reply{}, access.Invalid("operation.request", "Use a request object.")
+			return httpkit.Reply{}, httpkit.Invalid("operation.request", "Use a request object.")
 		}
 	}
 	var slug string
 	if raw, present := input.Operation["route"]; present {
 		if json.Unmarshal(raw, &slug) != nil {
-			return access.Reply{}, access.Invalid("operation.route", "Name the route to simulate.")
+			return httpkit.Reply{}, httpkit.Invalid("operation.route", "Name the route to simulate.")
 		}
 	}
 	if slug == "" {
@@ -348,33 +349,33 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		slug = request.Model
 	}
 	if !routeidentity.ValidSlug(slug) {
-		return access.Reply{}, access.Invalid("operation.request.route", "Name the route to simulate.")
+		return httpkit.Reply{}, httpkit.Invalid("operation.request.route", "Name the route to simulate.")
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	snapshot, err := release.ReadSnapshot(r.Context(), tx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	route := snapshot.Routes[slug]
 	if _, ok := snapshot.Routes[slug]; ok {
 		if err := p.Project(route.ProjectID, access.View); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if _, err = s.inspectionKey(r, tx, p, input.APIKeyID, route); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	inputs, err := s.routingInputs(r, tx)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	inspection := simulationInput{
 		Operation: operation, Surface: input.Surface, Mode: input.Mode, Seed: input.Seed,
@@ -385,7 +386,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		Attribution: input.Attribution, ClassifierLabels: input.ClassifierLabels,
 	}
 	if err = validSimulationLabels(inspection); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	m := s.newSimulation(r.Context(), snapshot, inspection, inputs, demand)
 	m.key = func(route routing.Route) (inspectionKeyContext, error) {
@@ -396,9 +397,9 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	}
 	leg, _, _, err := s.leg(m, slug, "")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(leg.Decisions), nil
+	return httpkit.OK(leg.Decisions), nil
 }
 
 // Register mounts the route surface.
@@ -438,11 +439,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 func validSimulationLabels(input simulationInput) error {
 	for field, labels := range map[string]map[string]string{"attribution": input.Attribution, "classifier_labels": input.ClassifierLabels} {
 		if len(labels) > 16 {
-			return access.Invalid(field, "Use at most 16 labels.")
+			return httpkit.Invalid(field, "Use at most 16 labels.")
 		}
 		for name, value := range labels {
 			if name == "" || len(name) > 64 || len(value) > 256 {
-				return access.Invalid(field, "Use names of 1 to 64 characters and values of at most 256.")
+				return httpkit.Invalid(field, "Use names of 1 to 64 characters and values of at most 256.")
 			}
 		}
 	}

@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -58,9 +61,9 @@ func loadRevision(ctx context.Context, q access.Queryer, providerID, ref string)
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
 	}
-	id, err := access.ParseUUID(ref)
+	id, err := httpkit.ParseUUID(ref)
 	if err != nil {
-		return nil, access.Fail(404, "not_found", "Unknown revision.")
+		return nil, httpkit.Fail(404, "not_found", "Unknown revision.")
 	}
 	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id=$2", providerID, id))
 }
@@ -95,7 +98,7 @@ type revisionSummary struct {
 
 type revisionListItem struct {
 	revisionSummary
-	Kind string `json:"kind"`
+	Kind connectors.Kind `json:"kind"`
 }
 
 type revisionDetail struct {
@@ -109,21 +112,21 @@ func (v *revisionRow) summary() revisionSummary {
 	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
-func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (revisionListItem, error) {
 		v, err := scanRevision(row)
@@ -133,41 +136,41 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 		return revisionListItem{revisionSummary: v.summary(), Kind: v.Configuration.Kind}, nil
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
+	return httpkit.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
-func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisionModels(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items := []modelReply{}
 	for _, m := range v.Models {
@@ -176,28 +179,28 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 		}
 	}
 	slices.SortFunc(items, func(a, b modelReply) int { return strings.Compare(b.ID, a.ID) })
-	return access.ListReplyBy(items, page, modelID), nil
+	return httpkit.ListReplyBy(items, page, modelID), nil
 }
 
 func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	to, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("to"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	a, b := from.Configuration, to.Configuration
 	fromModels := map[string]routing.RevisionModel{}
@@ -246,7 +249,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	for _, list := range []*[]string{&added, &removed, &changed, &capsAdded, &capsRemoved} {
 		slices.Sort(*list)
 	}
-	return access.OK(map[string]any{
+	return httpkit.OK(map[string]any{
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
 		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,

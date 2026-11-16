@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -67,40 +67,40 @@ func parseStripeMeter(_ Type, settings json.RawMessage) (Spec, error) {
 		return nil, err
 	}
 	if input.EventName == nil || !stripeEventName.MatchString(*input.EventName) {
-		return nil, access.Invalid("settings.event_name", "event_name is required: 1 to 100 of letters, digits, underscore, dot, colon or dash")
+		return nil, httpkit.Invalid("settings.event_name", "event_name is required: 1 to 100 of letters, digits, underscore, dot, colon or dash")
 	}
 	spec := StripeMeter{EventName: *input.EventName, Value: MeterCharge, Customers: input.Customers, CustomerKey: "stripe_customer_id", ValueKey: "value"}
 	if input.Value != nil {
 		if !input.Value.valid() {
-			return nil, access.Invalid("settings.value", "value must be charge, cost, input_tokens, output_tokens, total_tokens or requests")
+			return nil, httpkit.Invalid("settings.value", "value must be charge, cost, input_tokens, output_tokens, total_tokens or requests")
 		}
 		spec.Value = *input.Value
 	}
 	if len(spec.Customers) < 1 || len(spec.Customers) > 1000 {
-		return nil, access.Invalid("settings.customers", "customers must map from 1 to 1000 projects")
+		return nil, httpkit.Invalid("settings.customers", "customers must map from 1 to 1000 projects")
 	}
 	for project, customer := range spec.Customers {
 		if parsed, err := uuid.Parse(project); err != nil || parsed.String() != project {
-			return nil, access.Invalid("settings.customers", "customers keys must be canonical project UUIDs")
+			return nil, httpkit.Invalid("settings.customers", "customers keys must be canonical project UUIDs")
 		}
 		if !stripeCustomerID.MatchString(customer) {
-			return nil, access.Invalid("settings.customers", "customers values must be cus_ identifiers")
+			return nil, httpkit.Invalid("settings.customers", "customers values must be cus_ identifiers")
 		}
 	}
 	if input.CustomerKey != nil {
 		if !stripeFieldKey.MatchString(*input.CustomerKey) {
-			return nil, access.Invalid("settings.customer_key", "customer_key must be 1 to 64 of letters, digits or underscore")
+			return nil, httpkit.Invalid("settings.customer_key", "customer_key must be 1 to 64 of letters, digits or underscore")
 		}
 		spec.CustomerKey = *input.CustomerKey
 	}
 	if input.ValueKey != nil {
 		if !stripeFieldKey.MatchString(*input.ValueKey) {
-			return nil, access.Invalid("settings.value_key", "value_key must be 1 to 64 of letters, digits or underscore")
+			return nil, httpkit.Invalid("settings.value_key", "value_key must be 1 to 64 of letters, digits or underscore")
 		}
 		spec.ValueKey = *input.ValueKey
 	}
 	if spec.CustomerKey == spec.ValueKey {
-		return nil, access.Invalid("settings.value_key", "customer_key and value_key must differ")
+		return nil, httpkit.Invalid("settings.value_key", "customer_key and value_key must differ")
 	}
 	return spec, nil
 }

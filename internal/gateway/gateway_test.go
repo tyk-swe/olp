@@ -44,6 +44,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
@@ -70,6 +71,7 @@ type fakeRuntime struct {
 	// refused records the credential versions the upstream refused.
 	refused            []string
 	refusedGenerations []int64
+	onSecret           func(id string)
 }
 
 func (f *fakeRuntime) Release() *release.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
@@ -110,6 +112,12 @@ func (f *fakeRuntime) Eligibility(id string) routing.Eligibility {
 // Secret serves eligible credentials the pinned release installed. The fake's
 // secret authority, for callers that pin no release, is its current release.
 func (f *fakeRuntime) Secret(_ context.Context, pinned *release.Release, id string) ([]byte, int64, error) {
+	f.mu.Lock()
+	onSecret := f.onSecret
+	f.mu.Unlock()
+	if onSecret != nil {
+		onSecret(id)
+	}
 	if f.Eligibility(id) != routing.Eligible {
 		return nil, 0, release.ErrCredentialUnavailable
 	}
@@ -134,6 +142,58 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 	defer f.mu.Unlock()
 	f.refused = append(f.refused, id)
 	f.refusedGenerations = append(f.refusedGenerations, generation)
+}
+
+type facetRuntime struct{ *fakeRuntime }
+
+func (facetRuntime) Digest(secrets.DigestPurpose, string) []byte { return []byte("derived") }
+
+func (facetRuntime) BudgetAuthority(*string) (keyauthority.Authority, error) {
+	return keyauthority.Authority{}, nil
+}
+
+func (facetRuntime) AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error {
+	return nil
+}
+
+func (facetRuntime) AuthenticateTaskCapability(context.Context, string) (*keyauthority.Authority, error) {
+	return &keyauthority.Authority{}, nil
+}
+
+func (facetRuntime) ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error) {
+	return &keyauthority.Authority{}, nil
+}
+
+type stubDigester struct{}
+
+func (stubDigester) Digest(secrets.DigestPurpose, string) []byte { return []byte("explicit") }
+
+func TestNormalizedDependenciesDerivesRuntimeFacets(t *testing.T) {
+	t.Parallel()
+	derived := normalizedDependencies(Dependencies{Runtime: facetRuntime{&fakeRuntime{}}, Egress: &egress.Policy{}})
+	if derived.Digester == nil || string(derived.Digester.Digest(secrets.BatchLineDigest, "x")) != "derived" {
+		t.Fatal("Digester was not derived from the runtime")
+	}
+	if derived.BudgetAuthority == nil {
+		t.Fatal("BudgetAuthority was not derived from the runtime")
+	}
+	if derived.TaskAttemptAdmitter == nil {
+		t.Fatal("TaskAttemptAdmitter was not derived from the runtime")
+	}
+	if derived.TaskCapabilityAuthenticator == nil {
+		t.Fatal("TaskCapabilityAuthenticator was not derived from the runtime")
+	}
+	if derived.DelegationReauthenticator == nil {
+		t.Fatal("DelegationReauthenticator was not derived from the runtime")
+	}
+	explicit := normalizedDependencies(Dependencies{Runtime: facetRuntime{&fakeRuntime{}}, Digester: stubDigester{}, Egress: &egress.Policy{}})
+	if got := string(explicit.Digester.Digest(secrets.BatchLineDigest, "x")); got != "explicit" {
+		t.Fatalf("explicit Digester lost to derivation: %s", got)
+	}
+	absent := normalizedDependencies(Dependencies{Runtime: &fakeRuntime{}, Egress: &egress.Policy{}})
+	if absent.Digester != nil || absent.BudgetAuthority != nil || absent.TaskAttemptAdmitter != nil || absent.TaskCapabilityAuthenticator != nil || absent.DelegationReauthenticator != nil {
+		t.Fatal("facets appeared for a runtime that does not provide them")
+	}
 }
 
 type envelopes struct {
@@ -295,6 +355,7 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 		dependencies = extra[0]
 	}
 	dependencies.Runtime, dependencies.Egress, dependencies.Log, dependencies.Sink = rt, &policy, slog.New(slog.NewTextHandler(io.Discard, nil)), sink
+	dependencies.Getenv = func(string) string { return "" }
 	gw := New(dependencies, cfg)
 	mux := http.NewServeMux()
 	gw.Register(mux)
@@ -665,7 +726,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

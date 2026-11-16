@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 )
 
@@ -67,11 +67,11 @@ func loadAgentResourceAuthority(ctx context.Context, tx pgx.Tx) (map[string]agen
 // at least every PollInterval; stale authority is never accepted.
 func (m *Manager) AuthorizeAgentResource(a keyauthority.Authority, scope, id, revision, project string) error {
 	if a.TaskCapability != nil && (scope != "tools" || !slices.Contains(a.TaskCapability.ToolsetRevisions, revision)) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	now := time.Now()
 	if !a.AllowsResource(scope, id, project, now) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -79,11 +79,11 @@ func (m *Manager) AuthorizeAgentResource(a keyauthority.Authority, scope, id, re
 		return ErrStaleAuthority
 	}
 	if !m.authority.currentAgentPrincipal(a, scope, id, project, now) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	resource, ok := m.authority.agentResources[id]
 	if !ok || resource.ProjectID != project || !resource.Revisions[revision] || (scope == "tools" && resource.Kind != "toolset") || (scope == "agents" && resource.Kind != "agent") {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	return nil
 }
@@ -158,11 +158,11 @@ func loadMCPToolAuthority(ctx context.Context, tx pgx.Tx) (map[string]mcpToolAut
 }
 func (m *Manager) AuthorizeMCPTool(a keyauthority.Authority, id, revision, project, server, serverRevision string) error {
 	if a.TaskCapability != nil && !slices.Contains(a.TaskCapability.ToolsetRevisions, revision) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	now := time.Now()
 	if !a.AllowsResource("tools", id, project, now) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -170,14 +170,14 @@ func (m *Manager) AuthorizeMCPTool(a keyauthority.Authority, id, revision, proje
 		return ErrStaleAuthority
 	}
 	if !m.authority.currentAgentPrincipal(a, "tools", id, project, now) {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	toolset, ok := m.authority.mcpTools[revision]
 	if !ok || toolset.PublicationID != id || toolset.ProjectID != project {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	if server != "" && toolset.Servers[server] != serverRevision {
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	}
 	return nil
 }
