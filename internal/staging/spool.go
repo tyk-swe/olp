@@ -27,6 +27,8 @@ const (
 	handleBytes                = 32
 
 	cleanupConcurrency    = 4
+	cleanupQueueCapacity  = 32
+	cleanupMaxAttempts    = 5
 	cleanupInitialBackoff = 25 * time.Millisecond
 	cleanupMaxBackoff     = 2 * time.Second
 )
@@ -111,9 +113,12 @@ type Spool struct {
 	mu      sync.Mutex
 	entries map[string]spoolEntry
 
-	usedBytes  atomic.Int64
-	janitorSem chan struct{}
-	closed     atomic.Bool
+	usedBytes    atomic.Int64
+	janitorMu    sync.Mutex
+	janitorQueue chan *cleanupJob
+	janitorDone  chan struct{}
+	janitors     sync.WaitGroup
+	closed       atomic.Bool
 }
 
 func NewSpool(baseDir string, capacity int64, log *slog.Logger) (*Spool, error) {
@@ -128,12 +133,17 @@ func NewSpool(baseDir string, capacity int64, log *slog.Logger) (*Spool, error) 
 		return nil, err
 	}
 	s := &Spool{
-		root:       root,
-		owner:      owner,
-		capacity:   capacity,
-		log:        log,
-		entries:    map[string]spoolEntry{},
-		janitorSem: make(chan struct{}, cleanupConcurrency),
+		root:         root,
+		owner:        owner,
+		capacity:     capacity,
+		log:          log,
+		entries:      map[string]spoolEntry{},
+		janitorQueue: make(chan *cleanupJob, cleanupQueueCapacity),
+		janitorDone:  make(chan struct{}),
+	}
+	s.janitors.Add(cleanupConcurrency)
+	for range cleanupConcurrency {
+		go s.janitor()
 	}
 	return s, nil
 }
@@ -367,34 +377,82 @@ type cleanupJob struct {
 }
 
 func (s *Spool) enqueueCleanup(job *cleanupJob) {
-	go func() {
-		s.janitorSem <- struct{}{}
-		defer func() { <-s.janitorSem }()
-		backoff := cleanupInitialBackoff
-		var attempts int64
-		for {
-			err := os.Remove(job.path)
-			if err == nil || errors.Is(err, os.ErrNotExist) {
-				s.release(job.bytes)
-				return
-			}
-			attempts++
-			if attempts == 1 || attempts%60 == 0 {
-				s.log.Warn("media spool janitor could not remove an artifact",
-					"error", err, "attempts", attempts)
-			}
-			time.Sleep(backoff)
-			backoff *= 2
-			if backoff > cleanupMaxBackoff {
-				backoff = cleanupMaxBackoff
-			}
+	s.janitorMu.Lock()
+	defer s.janitorMu.Unlock()
+	if s.closed.Load() {
+		s.release(job.bytes)
+		return
+	}
+	select {
+	case s.janitorQueue <- job:
+	default:
+		s.release(job.bytes)
+	}
+}
+
+func (s *Spool) janitor() {
+	defer s.janitors.Done()
+	for {
+		select {
+		case job := <-s.janitorQueue:
+			s.clean(job)
+		case <-s.janitorDone:
+			return
 		}
-	}()
+	}
+}
+
+func (s *Spool) clean(job *cleanupJob) {
+	backoff := cleanupInitialBackoff
+	for attempts := int64(1); ; attempts++ {
+		select {
+		case <-s.janitorDone:
+			s.release(job.bytes)
+			return
+		default:
+		}
+		err := os.Remove(job.path)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			s.release(job.bytes)
+			return
+		}
+		if attempts == 1 || attempts%60 == 0 {
+			s.log.Warn("media spool janitor could not remove an artifact",
+				"error", err, "attempts", attempts)
+		}
+		if attempts >= cleanupMaxAttempts {
+			s.release(job.bytes)
+			return
+		}
+		select {
+		case <-s.janitorDone:
+			s.release(job.bytes)
+			return
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > cleanupMaxBackoff {
+			backoff = cleanupMaxBackoff
+		}
+	}
 }
 
 func (s *Spool) Close() error {
 	if s.closed.Swap(true) {
 		return nil
+	}
+	s.janitorMu.Lock()
+	close(s.janitorDone)
+	s.janitorMu.Unlock()
+	s.janitors.Wait()
+draining:
+	for {
+		select {
+		case job := <-s.janitorQueue:
+			s.release(job.bytes)
+		default:
+			break draining
+		}
 	}
 	defer s.owner.Close()
 	return os.RemoveAll(s.root)

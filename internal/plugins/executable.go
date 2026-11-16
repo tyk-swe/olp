@@ -198,6 +198,7 @@ type process struct {
 	// reason says why the process stopped; done is closed once it is set.
 	reason string
 	done   chan struct{}
+	caps   chan struct{}
 	// exited is set once the process exited, after which its ID no longer
 	// names its process group.
 	exited bool
@@ -499,6 +500,21 @@ func (p *process) reap(stdout, stderr *os.File) {
 	p.stop(reason)
 }
 
+func (p *process) acquireCapability() (chan struct{}, bool) {
+	p.mu.Lock()
+	if p.caps == nil {
+		p.caps = make(chan struct{}, defaultLimits.Instances)
+	}
+	caps := p.caps
+	p.mu.Unlock()
+	select {
+	case caps <- struct{}{}:
+		return caps, true
+	default:
+		return nil, false
+	}
+}
+
 // receive serves the plugin's frames until it closes standard output, or
 // until one breaks the protocol, which it describes.
 func (p *process) receive(frames *bufio.Reader) string {
@@ -518,8 +534,14 @@ func (p *process) receive(frames *bufio.Reader) string {
 				return violation
 			}
 		case frame.Request != nil:
+			sem, ok := p.acquireCapability()
+			if !ok {
+				_ = p.send(abi.Frame{ID: frame.ID, Response: &abi.Response{Error: &abi.Error{Code: abi.CodeInternal, Message: "OLP could not serve the request."}}})
+				continue
+			}
 			ctx := p.grants(frame.Call)
 			go func() {
+				defer func() { <-sem }()
 				defer panics.Recover(p.log, "plugin capability", func(error) {
 					_ = p.send(abi.Frame{ID: frame.ID, Response: &abi.Response{Error: &abi.Error{Code: abi.CodeInternal, Message: "OLP could not serve the request."}}})
 				})

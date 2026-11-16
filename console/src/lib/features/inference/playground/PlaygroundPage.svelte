@@ -219,7 +219,7 @@
             autocomplete="off"
             placeholder="Provider default"
             aria-describedby="max-output-help"
-          /><small id="max-output-help">1 through 1000000.</small>
+          /><small id="max-output-help">1 through 1048576.</small>
         </div>
       </div>
       <div class="form-field">

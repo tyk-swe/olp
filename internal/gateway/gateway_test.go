@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -42,7 +43,9 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -1254,5 +1257,156 @@ func TestResourceListsRejectInvalidCursor(t *testing.T) {
 				}
 			})
 		}
+		t.Run(list.kind+"/trailing limit characters", func(t *testing.T) {
+			response := h.do(t.Context(), http.MethodGet, list.path+"?limit=10abc", fullKey, nil, nil)
+			defer response.Body.Close()
+			var body struct {
+				Error struct {
+					Code  string `json:"code"`
+					Param string `json:"param"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != 400 || body.Error.Code != "invalid_value" || body.Error.Param != "limit" {
+				t.Errorf("limit response = %d %#v, want 400 invalid_value at limit", response.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestRetainedGeminiKeyQueryParamDropped(t *testing.T) {
+	t.Parallel()
+	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "context_cache", Surface: "gemini", Kind: "context_cache"}, Action: "list"}
+	server := &Server{}
+	query, failure := server.retainedQuery(t.Context(), &call{}, endpoint, nil, url.Values{"key": {"secret"}, "pageSize": {"10"}})
+	if failure != nil {
+		t.Fatalf("retainedQuery with key: %v", failure)
+	}
+	if _, forwarded := query["key"]; forwarded {
+		t.Fatalf("key forwarded upstream in %v", query)
+	}
+	if query.Get("pageSize") != "10" {
+		t.Fatalf("pageSize = %v, want 10", query)
+	}
+	openAIEndpoint := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "vector_store", Surface: "openai", Kind: "vector_store"}, Action: "list"}
+	if _, failure := server.retainedQuery(t.Context(), &call{}, openAIEndpoint, nil, url.Values{"key": {"secret"}}); failure == nil {
+		t.Fatal("key accepted on non-Gemini surface")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/gemini/v1beta/cachedContents?key=secret&pageSize=0", nil)
+	var captured *fault.Error
+	status := server.listRetainedGeneric(httptest.NewRecorder(), request, &call{}, keyauthority.Authority{}, endpoint, func(err *fault.Error) { captured = err })
+	if status != 400 || captured == nil || !strings.Contains(captured.Message, "Page size") {
+		t.Fatalf("list with key and pageSize=0 = %d %+v, want 400 page size error", status, captured)
+	}
+}
+
+func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
+	t.Parallel()
+	all := []*resources.Resource{
+		{ID: "stale-1"}, {ID: "hidden-1"}, {ID: "valid-1"}, {ID: "valid-2"}, {ID: "stale-2"}, {ID: "valid-3"},
+	}
+	fetchFrom := func(rows []*resources.Resource) func(string, int) ([]*resources.Resource, *fault.Error) {
+		return func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+			start := 0
+			if cursor != "" {
+				start = len(rows)
+				for i, row := range rows {
+					if row.ID == cursor {
+						start = i + 1
+						break
+					}
+				}
+			}
+			if start >= len(rows) {
+				return nil, nil
+			}
+			return rows[start:min(start+count, len(rows))], nil
+		}
+	}
+	authorize := func(row *resources.Resource) *fault.Error {
+		switch {
+		case strings.HasPrefix(row.ID, "stale"):
+			return pinUnavailable()
+		case strings.HasPrefix(row.ID, "hidden"):
+			return fault.NotFoundError("not_found", "No resource with this identifier exists for this key.")
+		case row.ID == "broken-1":
+			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
+		}
+		return nil
+	}
+	ids := func(page []*resources.Resource) []string {
+		got := make([]string, len(page))
+		for i, row := range page {
+			got[i] = row.ID
+		}
+		return got
+	}
+
+	page, hasMore, err := listedResourcePage(10, "", fetchFrom(all), authorize)
+	if err != nil {
+		t.Fatalf("mixed page error: %v", err)
+	}
+	if hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
+		t.Fatalf("mixed page = %v hasMore=%v, want only the valid rows and no continuation", ids(page), hasMore)
+	}
+
+	page, hasMore, err = listedResourcePage(2, "", fetchFrom(all), authorize)
+	if err != nil {
+		t.Fatalf("refilled page error: %v", err)
+	}
+	if !hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
+		t.Fatalf("refilled page = %v hasMore=%v, want [valid-1 valid-2] with a continuation", ids(page), hasMore)
+	}
+	page, hasMore, err = listedResourcePage(2, "valid-2", fetchFrom(all), authorize)
+	if err != nil {
+		t.Fatalf("following page error: %v", err)
+	}
+	if hasMore || !slices.Equal(ids(page), []string{"valid-3"}) {
+		t.Fatalf("following page = %v hasMore=%v, want [valid-3] and no continuation", ids(page), hasMore)
+	}
+
+	staleOnly := []*resources.Resource{{ID: "stale-1"}, {ID: "stale-2"}, {ID: "stale-3"}}
+	page, hasMore, err = listedResourcePage(2, "", fetchFrom(staleOnly), authorize)
+	if err != nil {
+		t.Fatalf("all-stale page error: %v", err)
+	}
+	if hasMore || len(page) != 0 {
+		t.Fatalf("all-stale page = %v hasMore=%v, want empty with no continuation", ids(page), hasMore)
+	}
+
+	broken := []*resources.Resource{{ID: "valid-1"}, {ID: "broken-1"}}
+	if _, _, err := listedResourcePage(2, "", fetchFrom(broken), authorize); err == nil || err.Status != http.StatusInternalServerError {
+		t.Fatalf("broken row error = %v, want the request to fail with 500", err)
+	}
+	fetchErr := fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
+	failingFetch := func(string, int) ([]*resources.Resource, *fault.Error) { return nil, fetchErr }
+	if _, _, err := listedResourcePage(2, "", failingFetch, authorize); err != fetchErr {
+		t.Fatalf("fetch error = %v, want %v", err, fetchErr)
+	}
+}
+
+func TestFileDownloadHeadersForceAttachmentForHTML(t *testing.T) {
+	t.Parallel()
+	const body = "<html><body>hello</body></html>"
+	recorder := httptest.NewRecorder()
+	setFileDownloadHeaders(recorder.Header(), "text/html; charset=utf-8", int64(len(body)))
+	if _, err := recorder.WriteString(body); err != nil {
+		t.Fatal(err)
+	}
+	response := recorder.Result()
+	defer response.Body.Close()
+	if got := response.Header.Get("Content-Disposition"); got != "attachment" {
+		t.Errorf("Content-Disposition = %q, want attachment", got)
+	}
+	if got := response.Header.Get("Content-Security-Policy"); !strings.Contains(got, "sandbox") {
+		t.Errorf("Content-Security-Policy = %q, want sandbox policy", got)
+	}
+	if got := response.Header.Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	if got := response.Header.Get("Content-Length"); got != fmt.Sprint(len(body)) {
+		t.Errorf("Content-Length = %q", got)
 	}
 }

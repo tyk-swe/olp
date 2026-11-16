@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/debits"
@@ -282,5 +284,37 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 	}
 	if _, err := holding("0.40"); err != nil {
 		t.Errorf("got %v for 0.40 after the held 0.60 was refunded", err)
+	}
+}
+
+type stubLedgerInstaller struct{}
+
+func (stubLedgerInstaller) InstallSnapshot(context.Context, limits.Snapshot) (limits.Installed, error) {
+	return limits.Installed{}, nil
+}
+
+func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
+	t.Parallel()
+	_, address := harness.Database(t)
+	config, err := database.Configuration(address, 2, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
+	pool, err := database.Open(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	leader, err := ledger.TryAcquireLeader(t.Context(), pool, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leader == nil {
+		t.Fatal("got no leader on a fresh database, want the reconciliation leader")
+	}
+	defer leader.Close(t.Context())
+	if _, err := leader.Reconcile(t.Context(), stubLedgerInstaller{}, time.Now()); err != nil {
+		t.Fatalf("got %v reconciling under a 1ms pool statement timeout, want the leader pass to run under its own budget", err)
 	}
 }

@@ -619,6 +619,9 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		if name == "beta" && e.Operation == "skill" && len(values) == 1 && values[0] == "true" {
 			continue
 		}
+		if name == "key" && e.Surface == "gemini" && len(values) == 1 && values[0] != "" {
+			continue
+		}
 		if (name != pageSizeParam && name != cursorParam && !(name == "order" && e.Surface == "openai")) || len(values) != 1 {
 			fail(fault.InvalidRequest("invalid_parameter", "Unsupported or repeated list parameter.", &name))
 			return 400

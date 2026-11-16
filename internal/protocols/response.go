@@ -390,16 +390,22 @@ type geminiTokenDetail struct {
 // geminiDetailCounts folds one detail array into the modality share it
 // describes. Negative counts mark the observation inconsistent so the caller
 // drops the detail rather than bill audio at a text rate.
-func geminiDetailCounts(detail []geminiTokenDetail) (audio, image int64) {
+func geminiDetailCounts(detail []geminiTokenDetail) (audio, image int64, err error) {
 	for _, entry := range detail {
 		switch entry.Modality {
 		case "AUDIO":
+			if entry.TokenCount > math.MaxInt64-audio {
+				return 0, 0, protocolError("usage count overflow")
+			}
 			audio += entry.TokenCount
 		case "IMAGE", "VIDEO":
+			if entry.TokenCount > math.MaxInt64-image {
+				return 0, 0, protocolError("usage count overflow")
+			}
 			image += entry.TokenCount
 		}
 	}
-	return audio, image
+	return audio, image, nil
 }
 
 // geminiUsageDetails reads the modality detail arrays on a usageMetadata or
@@ -428,7 +434,10 @@ func geminiUsageDetails(u *wire.Usage, f Object) error {
 				return protocolError("invalid usage count")
 			}
 		}
-		audio, image := geminiDetailCounts(detail)
+		audio, image, countErr := geminiDetailCounts(detail)
+		if countErr != nil {
+			return countErr
+		}
 		if audio > 0 {
 			*slot.audio = &audio
 		}

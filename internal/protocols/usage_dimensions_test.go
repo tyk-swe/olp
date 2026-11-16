@@ -40,4 +40,10 @@ func TestGeminiUsageModalityAndGrounding(t *testing.T) {
 	if !reflect.DeepEqual(u.ToolCalls, want) {
 		t.Fatalf("tool calls %v, want %v", u.ToolCalls, want)
 	}
+	overflow := `{"candidates":[{"index":0,"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}],
+		"usageMetadata":{"promptTokenCount":40,"candidatesTokenCount":10,"totalTokenCount":50,
+			"promptTokensDetails":[{"modality":"IMAGE","tokenCount":9223372036854775807},{"modality":"VIDEO","tokenCount":1}]}}`
+	if _, err := decodeGemini([]byte(overflow), "gemini", false); err == nil {
+		t.Fatal("overflowing image detail decoded without an error")
+	}
 }

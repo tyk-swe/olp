@@ -20,8 +20,8 @@ const nullablePackage = "github.com/oapi-codegen/nullable"
 // duplicate keys into last-writer-wins configuration. Source errors never echo
 // values or names that might contain secrets.
 func DecodeUnique(r *http.Request, destination any, limit int64) error {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		return Fail(415, "unsupported_media_type", "Send an application/json request.")
+	if err := requireJSONContentType(r); err != nil {
+		return err
 	}
 	original := r.Body
 	defer original.Close()

@@ -274,6 +274,16 @@ it.each(['requestsPerMinute', 'tokensPerMinute', 'maxConcurrency'] as const)(
   }
 );
 
+it.each(['requestsPerMinute', 'maxConcurrency'] as const)(
+  'rejects %s above 2147483647 and accepts 2147483647',
+  (field) => {
+    expect(validateApiKey({ name: 'key', [field]: 2147483648 })).toHaveProperty(
+      field
+    );
+    expect(validateApiKey({ name: 'key', [field]: 2147483647 })).toEqual({});
+  }
+);
+
 it.each(['dailyCostLimit', 'weeklyCostLimit', 'monthlyCostLimit'] as const)(
   'validates the precision and positivity of %s',
   (field) => {

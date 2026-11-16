@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -105,9 +106,17 @@ type ParentMutation struct {
 func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
 func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
 
-func Decode(r *http.Request, v any) error {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+func requireJSONContentType(r *http.Request) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
 		return Fail(415, "unsupported_media_type", "Send an application/json request.")
+	}
+	return nil
+}
+
+func Decode(r *http.Request, v any) error {
+	if err := requireJSONContentType(r); err != nil {
+		return err
 	}
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()

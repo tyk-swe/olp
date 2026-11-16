@@ -2,12 +2,15 @@ package staging
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stage(t *testing.T, spool *Spool, body io.Reader, maximum int64) (*Artifact, error) {
@@ -173,5 +176,74 @@ func TestNewSpoolReclaimsOnlySpoolsNobodyOwns(t *testing.T) {
 	}
 	if _, err := os.Stat(live.root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("closing left the spool directory behind: %v", err)
+	}
+}
+
+func unremovablePath(t *testing.T, root, name string) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kept"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
+	outside := t.TempDir()
+
+	retrying := newSpool(t)
+	stuck := unremovablePath(t, outside, "stuck")
+	if !retrying.tryReserve(10) {
+		t.Fatal("could not reserve bytes for a cleanup job")
+	}
+	retrying.enqueueCleanup(&cleanupJob{path: stuck, bytes: 10})
+	deadline := time.Now().Add(3 * time.Second)
+	for retrying.UsedBytes() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if retrying.UsedBytes() != 0 {
+		t.Fatalf("got %d bytes still in use for a path that cannot be removed, want the reservation released once cleanup gives up", retrying.UsedBytes())
+	}
+	if _, err := os.Stat(filepath.Join(stuck, "kept")); err != nil {
+		t.Fatalf("the unremovable path went away, so the release did not come from giving up: %v", err)
+	}
+	if err := retrying.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before := runtime.NumGoroutine()
+	spool := newSpool(t)
+	settled := runtime.NumGoroutine()
+	for i := range 24 {
+		path := unremovablePath(t, outside, fmt.Sprintf("job-%d", i))
+		if !spool.tryReserve(10) {
+			t.Fatal("could not reserve bytes for a cleanup job")
+		}
+		spool.enqueueCleanup(&cleanupJob{path: path, bytes: 10})
+	}
+	growth := 0
+	until := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(until) {
+		growth = max(growth, runtime.NumGoroutine()-settled)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if growth > cleanupConcurrency+2 {
+		t.Fatalf("got %d extra goroutines for 24 cleanup jobs, want at most %d", growth, cleanupConcurrency+2)
+	}
+	if err := spool.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if spool.UsedBytes() != 0 {
+		t.Fatalf("got %d bytes still in use after closing, want every cleanup reservation released", spool.UsedBytes())
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+4 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > before+4 {
+		t.Fatalf("got %d goroutines after closing, want the cleanup workers stopped (started from %d)", got, before)
 	}
 }

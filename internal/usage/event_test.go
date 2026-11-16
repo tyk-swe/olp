@@ -250,6 +250,26 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			e.CachedInputTokens = &huge
 			e.CacheWriteInputTokens = &huge
 		}},
+		{"attempt paired audio and image shares overflowing the input total", func(e *Event) {
+			huge := int64(math.MaxInt64)
+			e.Attempts[1].Usage.AudioInputTokens = &huge
+			e.Attempts[1].Usage.ImageInputTokens = &huge
+		}},
+		{"attempt paired cached audio and image shares overflowing the cached total", func(e *Event) {
+			huge, total, cached := int64(math.MaxInt64), int64(math.MaxInt64), int64(7)
+			e.Attempts[1].Usage.InputTokens = &total
+			e.Attempts[1].Usage.CachedInputTokens = &cached
+			e.Attempts[1].Usage.AudioInputTokens = &huge
+			e.Attempts[1].Usage.CachedAudioInputTokens = &huge
+			e.Attempts[1].Usage.ImageInputTokens = &huge
+			e.Attempts[1].Usage.CachedImageInputTokens = &huge
+		}},
+		{"attempt paired audio and image shares overflowing the output total", func(e *Event) {
+			huge, total := int64(math.MaxInt64), int64(7)
+			e.Attempts[1].Usage.OutputTokens = &total
+			e.Attempts[1].Usage.AudioOutputTokens = &huge
+			e.Attempts[1].Usage.ImageOutputTokens = &huge
+		}},
 		{"malformed media units", func(e *Event) {
 			units := "1.2.3"
 			e.Attempts[1].Usage.MediaUnits = &units

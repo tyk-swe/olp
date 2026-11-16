@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,10 @@ func TryAcquireLeader(ctx context.Context, pool *pgxpool.Pool, region string) (*
 		return nil, err
 	}
 	conn := acquired.Hijack()
+	if _, err := conn.Exec(ctx, "SET statement_timeout = "+strconv.FormatInt(reconciliationPassTimeout.Milliseconds(), 10)); err != nil {
+		closeLeaderConn(ctx, conn)
+		return nil, err
+	}
 	var held bool
 	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID(region)).Scan(&held); err != nil {
 		closeLeaderConn(ctx, conn)

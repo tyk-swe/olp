@@ -258,7 +258,9 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 			if capacity {
 				OrderSlots(rows[i].slots, state)
 			}
-			rows[i].attempt.Slots = slotIDs(rows[i].slots)
+			if options.CheckSlots {
+				rows[i].attempt.Slots = slotIDs(rows[i].slots)
+			}
 		}
 	}
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {

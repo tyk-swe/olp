@@ -24,7 +24,7 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
   }
   if (!email) errors.email = 'Enter your email address.';
   // Client-side shape check only; the API remains the authoritative email validator.
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  else if (!/^[^\s@]+@[^\s@]+$/.test(email)) {
     errors.email = 'Enter a valid email address.';
   } else if (email.length > 254) errors.email = 'Use 254 characters or fewer.';
   Object.assign(

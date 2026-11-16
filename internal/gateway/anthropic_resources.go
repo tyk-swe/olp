@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -269,8 +270,7 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged provider file could not be read.")
 		}
 		defer opened.File.Close()
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Length", fmt.Sprint(artifact.ContentLength))
+		setFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The results response could not be bounded.")
 		}
@@ -323,32 +323,47 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		s.refuse(x, w, err)
 		return
 	}
-	var rows []*resources.Resource
-	var listErr error
-	if before != "" {
-		rows, listErr = s.deps.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, limit+1, before)
-	} else {
-		rows, listErr = s.deps.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, limit+1, cursor)
-	}
-	if listErr != nil {
-		if errors.Is(listErr, resources.ErrNotFound) {
+	listFailure := func(err error) *fault.Error {
+		if errors.Is(err, resources.ErrNotFound) {
 			param := "after_id"
 			if before != "" {
 				param = "before_id"
 			}
-			s.refuse(x, w, fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param))
-			return
+			return fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param)
 		}
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read."))
+		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
+	}
+	authorize := func(row *resources.Resource) *fault.Error {
+		return s.authorizeListedResource(r.Context(), authority, row)
+	}
+	var rows []*resources.Resource
+	var hasMore bool
+	var listErr *fault.Error
+	if before != "" {
+		rows, hasMore, listErr = listedResourcePage(limit, before, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+			batch, err := s.deps.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, count, cursor)
+			if err != nil {
+				return nil, listFailure(err)
+			}
+			slices.Reverse(batch)
+			return batch, nil
+		}, authorize)
+		slices.Reverse(rows)
+	} else {
+		rows, hasMore, listErr = listedResourcePage(limit, cursor, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+			batch, err := s.deps.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, count, cursor)
+			if err != nil {
+				return nil, listFailure(err)
+			}
+			return batch, nil
+		}, authorize)
+	}
+	if listErr != nil {
+		s.refuse(x, w, listErr)
 		return
 	}
-	rows, hasMore := anthropicListPage(rows, limit, before != "")
 	items, ids := make([]json.RawMessage, 0, len(rows)), make([]string, 0, len(rows))
 	for _, row := range rows {
-		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
-			s.refuse(x, w, authErr)
-			return
-		}
 		object, err := s.anthropicResourceObject(row, kind, r)
 		if err != nil {
 			s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."))
@@ -357,16 +372,6 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		items, ids = append(items, object), append(ids, row.ID)
 	}
 	s.writeStateJSON(w, x, anthropicListBody(items, ids, hasMore))
-}
-
-func anthropicListPage(rows []*resources.Resource, limit int, before bool) ([]*resources.Resource, bool) {
-	if len(rows) <= limit {
-		return rows, false
-	}
-	if before {
-		return rows[len(rows)-limit:], true
-	}
-	return rows[:limit], true
 }
 
 func anthropicListBody(items []json.RawMessage, ids []string, hasMore bool) []byte {

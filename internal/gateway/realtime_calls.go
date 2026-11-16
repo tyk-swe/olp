@@ -81,6 +81,12 @@ func (s *Server) holdWebRTCExposure(keyID string, until time.Time) {
 	if s.webrtcExposures == nil {
 		s.webrtcExposures = map[string]time.Time{}
 	}
+	now := s.now()
+	for key, expiry := range s.webrtcExposures {
+		if now.After(expiry) {
+			delete(s.webrtcExposures, key)
+		}
+	}
 	if current, ok := s.webrtcExposures[keyID]; !ok || until.After(current) {
 		s.webrtcExposures[keyID] = until
 	}

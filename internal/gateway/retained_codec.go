@@ -383,6 +383,11 @@ func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpo
 		}
 		v := values[0]
 		switch name {
+		case "key":
+			if e.Surface != "gemini" || v == "" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+			continue
 		case "limit", "page_size", "pageSize":
 			n, err := strconv.Atoi(v)
 			if e.Action != "list" || err != nil || n < 1 || n > 100 {

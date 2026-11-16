@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -24,6 +25,13 @@ func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byt
 	}
 	// Failed reads keep their deadline while HTTP/1 drains the remaining body.
 	return body, failure
+}
+
+func setFileDownloadHeaders(h http.Header, contentType string, contentLength int64) {
+	h.Set("Content-Type", contentType)
+	h.Set("Content-Length", strconv.FormatInt(contentLength, 10))
+	h.Set("Content-Disposition", "attachment")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 }
 
 func copyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64) (int64, error) {

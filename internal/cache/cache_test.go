@@ -1,12 +1,20 @@
 package cache
 
 import (
+	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"math"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func canonical(t *testing.T, raw string) string {
@@ -139,6 +147,149 @@ func TestPromptPolicyValidateRequiresASessionLabelForSessionKeys(t *testing.T) {
 		if err := c.policy.Validate(); (err == nil) != c.accepted {
 			t.Errorf("%s: got %v, accepted=%v", name, err, c.accepted)
 		}
+	}
+}
+
+type fakeCommander struct {
+	values map[string]string
+	hashes map[string]map[string]string
+}
+
+func (f *fakeCommander) Do(_ context.Context, a ...string) (any, error) {
+	switch a[0] {
+	case "EVAL":
+		if a[1] == lookupScript {
+			return f.lookup(a)
+		}
+		if a[1] == putScript {
+			hash := map[string]string{"sealed": a[4], "bucket": a[6]}
+			if a[7] != "" {
+				hash["vector"] = a[7]
+			}
+			f.hashes[a[3]] = hash
+			return int64(1), nil
+		}
+		return nil, errors.New("unsupported script")
+	case "FT.CREATE":
+		return "OK", nil
+	case "FT.SEARCH":
+		start := strings.Index(a[2], "{")
+		end := strings.Index(a[2], "}")
+		if start < 0 || end < 0 || end < start {
+			return nil, errors.New("unsupported query")
+		}
+		bucket := a[2][start+1 : end]
+		keys := []string{}
+		for key, hash := range f.hashes {
+			if hash["bucket"] == bucket && hash["vector"] != "" {
+				keys = append(keys, key)
+			}
+		}
+		slices.Sort(keys)
+		reply := []any{int64(len(keys))}
+		for _, key := range keys {
+			reply = append(reply, key, []any{"__vector_score", "0"})
+		}
+		return reply, nil
+	case "HGET":
+		if hash, ok := f.hashes[a[1]]; ok {
+			if value, ok := hash[a[2]]; ok {
+				return value, nil
+			}
+		}
+		return nil, nil
+	case "SET":
+		f.values[a[1]] = a[2]
+		return "OK", nil
+	case "GET":
+		if value, ok := f.values[a[1]]; ok {
+			return value, nil
+		}
+		return nil, nil
+	case "MGET":
+		reply := make([]any, len(a)-1)
+		for i, key := range a[1:] {
+			if value, ok := f.values[key]; ok {
+				reply[i] = value
+			}
+		}
+		return reply, nil
+	}
+	return nil, errors.New("unsupported command")
+}
+
+func (f *fakeCommander) lookup(a []string) (any, error) {
+	n, err := strconv.Atoi(a[2])
+	if err != nil {
+		return nil, err
+	}
+	keys := a[3 : 3+n]
+	argv := a[3+n:]
+	generations := make([]string, n)
+	for i, key := range keys {
+		if value, ok := f.values[key]; ok {
+			generations[i] = value
+		} else {
+			f.values[key] = argv[i]
+			generations[i] = argv[i]
+		}
+	}
+	suffix := strings.Join(generations, ":")
+	key := argv[n] + ":" + suffix
+	sum := sha1.Sum(fmt.Appendf(nil, "%s:%s", argv[n+1], suffix))
+	bucket := hex.EncodeToString(sum[:])
+	entry := ""
+	if argv[n+2] == "1" {
+		entry = f.hashes[key]["sealed"]
+	}
+	reply := []any{key, bucket, entry}
+	for _, generation := range generations {
+		reply = append(reply, generation)
+	}
+	return reply, nil
+}
+
+func TestNearestMissesWhenPurgeFollowsTicketResolution(t *testing.T) {
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{
+		Client:       &fakeCommander{values: map[string]string{}, hashes: map[string]map[string]string{}},
+		Keys:         ring,
+		Auth:         secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), "installation"),
+		Installation: "installation",
+	}
+	space := Space{Project: "project", Route: "route", NamedRoute: "named", Scope: "key", Fingerprint: "caller"}
+	policy := Policy{Mode: "semantic", EmbeddingRoute: "embeddings", AllowUnsealedVectors: true, TTLSeconds: 60}
+	vector := []float32{1, 0}
+	stored, err := store.Begin(t.Context(), space, []byte("request"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.VectorSpace = "embed"
+	if err := store.Put(t.Context(), stored, Entry{Body: []byte("answer")}, policy, Controls{}, vector); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := store.Begin(t.Context(), space, []byte("similar request"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket.VectorSpace = "embed"
+	entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
+	if err != nil || entry == nil || string(entry.Body) != "answer" {
+		t.Fatalf("got entry %v and %v before any purge, want the stored answer", entry, err)
+	}
+	bare := Ticket{Key: ticket.Key, Bucket: ticket.Bucket, VectorSpace: ticket.VectorSpace}
+	if entry, _, err := store.Nearest(t.Context(), bare, vector, policy, Controls{}); err != nil || entry != nil {
+		t.Errorf("got entry %v and %v for a ticket without generation data, want a miss", entry, err)
+	}
+	if err := store.Purge(t.Context(), "project", space.Project); err != nil {
+		t.Fatal(err)
+	}
+	entry, _, err = store.Nearest(t.Context(), ticket, vector, policy, Controls{})
+	if err != nil || entry != nil {
+		t.Fatalf("got entry %v and %v after purging the project, want a miss", entry, err)
 	}
 }
 

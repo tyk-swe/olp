@@ -659,8 +659,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The file response could not be bounded.")
 		}
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Length", fmt.Sprint(artifact.ContentLength))
+		setFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
 		if res.Kind == resources.KindStrictFile {
 			w.Header().Set("X-OLP-Content-SHA256", artifact.Digest)
 		}
