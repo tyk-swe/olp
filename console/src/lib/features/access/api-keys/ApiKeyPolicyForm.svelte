@@ -850,11 +850,6 @@
     background: var(--surface-raised);
   }
   .checks.routes p,
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
-  }
   .limits {
     grid-template-columns: repeat(3, 1fr);
   }

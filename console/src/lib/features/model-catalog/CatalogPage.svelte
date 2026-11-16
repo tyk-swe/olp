@@ -5,6 +5,10 @@
   import { catalogKeys } from './catalogKeys';
   import { errorMessage } from '#lib/management/http.js';
   import { copyText } from '#lib/clipboard.js';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import PageHeader from '#lib/components/PageHeader.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
 
   let { publicProjectId = '' }: { publicProjectId?: string } = $props();
   const catalog = createQuery(() => ({
@@ -15,7 +19,6 @@
         : listCatalog(signal)
   }));
   let search = $state('');
-  let copied = $state('');
   let copyError = $state('');
   const models = $derived(
     (catalog.data?.items ?? []).filter((model) =>
@@ -31,29 +34,31 @@
         : `${value.minimum}–${value.maximum}`
       : 'Unknown';
   async function copy(code: string, label: string) {
-    copied = copyError = '';
-    if (await copyText(code)) copied = label;
+    copyError = '';
+    if (await copyText(code)) notify(`Copied ${label} example.`);
     else copyError = 'Copy is unavailable. Select and copy the example text.';
   }
 </script>
 
 <svelte:head><title>Model catalog · OpenLLMProxy</title></svelte:head>
-<header class="catalog-heading">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1>Model catalog</h1>
-    <p class="muted">
-      {#if publicProjectId}Published routes shared by this project’s owner, with
-        capabilities and SDK examples.{:else}Published routes available to your
-        account, with common capabilities and current declared prices.{/if}
-    </p>
-  </div>
-  <button
+{#snippet refresh()}<button
     class="button button-secondary"
     disabled={catalog.isFetching}
     onclick={() => catalog.refetch()}>Refresh catalog</button
-  >
-</header>
+  >{/snippet}
+{#if publicProjectId}<PageHeader
+    title="Model catalog"
+    description="Published routes shared by this project’s owner, with capabilities and SDK examples."
+    actions={refresh}
+  />
+{:else}<div class="toolbar">
+    <p class="section-help">
+      Published routes available to your account, with common capabilities and
+      current declared prices.
+    </p>
+    {@render refresh()}
+  </div>
+{/if}
 <label class="catalog-search"
   >Find a route<input
     class="filter-control"
@@ -63,15 +68,16 @@
   /></label
 >
 {#if catalog.isPending}<p role="status">Loading the model catalog…</p>
-{:else if catalog.isError}<p class="error" role="alert">
-    {errorMessage(catalog.error)}
-  </p>
-{:else if models.length === 0}<p class="muted">
-    No published routes match this view.
-  </p>
+{:else if catalog.isError}<Callout tone="danger"
+    >{errorMessage(catalog.error)}</Callout
+  >
+{:else if models.length === 0}<EmptyState title="No published routes">
+    {search.trim()
+      ? 'No published route matches this search.'
+      : 'Publish a route to list it here.'}
+  </EmptyState>
 {/if}
-{#if copyError}<p class="error" role="alert">{copyError}</p>{/if}
-{#if copied}<p role="status">Copied {copied} example.</p>{/if}
+{#if copyError}<Callout tone="danger">{copyError}</Callout>{/if}
 {#if !publicProjectId}<DisclosureSettings />{/if}
 <div class="catalog-grid">
   {#each models as model (model.id)}
@@ -182,12 +188,6 @@
 </div>
 
 <style>
-  h1 {
-    font-size: 1.75rem;
-    line-height: 1.2;
-    font-weight: 600;
-    margin: 0.5rem 0;
-  }
   h2 {
     font-size: 1.25rem;
     font-weight: 600;
@@ -195,16 +195,6 @@
   h3 {
     font-weight: 600;
     margin-top: 1rem;
-  }
-  .catalog-heading {
-    display: flex;
-    align-items: start;
-    justify-content: space-between;
-    gap: 1.5rem;
-    margin-bottom: 1.5rem;
-  }
-  h1 {
-    margin: 0;
   }
   h2,
   h3 {
@@ -276,13 +266,7 @@
     border-radius: var(--radius-control);
     font-size: 0.8125rem;
   }
-  .error {
-    color: var(--danger);
-  }
   @media (max-width: 40rem) {
-    .catalog-heading {
-      flex-direction: column;
-    }
     .facts {
       grid-template-columns: 1fr;
     }

@@ -149,12 +149,12 @@
     Protect password sign-in with an authenticator app or a security key. Linked
     identity sign-in follows your identity provider’s policy.
   </p>
-  {#if error}<p class="form-alert" role="alert">
+  {#if error}<p class="inline-problem" role="alert">
       {error}
     </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if status.isPending}<p role="status">
       Loading authenticators…
-    </p>{:else if status.isError}<p class="form-alert" role="alert">
+    </p>{:else if status.isError}<p class="inline-problem" role="alert">
       {errorMessage(status.error, 'Authenticators could not be loaded.')}
     </p>
     <button class="button button-secondary" onclick={() => status.refetch()}

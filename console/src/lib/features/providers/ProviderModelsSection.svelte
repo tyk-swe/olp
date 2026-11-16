@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
@@ -199,7 +200,7 @@ model-b"></textarea>
     <div class="loading-state" role="status">Loading models…</div>
   {:else if visibleModelPage}
     {@const modelPage = visibleModelPage}
-    <div class="table-shell">
+    <ScrollTable label="Discovered models">
       <table class="data-table">
         <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead
         ><tbody>
@@ -256,7 +257,7 @@ model-b"></textarea>
             >{/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(pageState, modelPage.nextCursor)}
       label="Provider model pages"

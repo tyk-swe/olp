@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
@@ -209,7 +210,7 @@
   {:else if !bindings.data?.length}<p>
       No cloud retrieval bindings are configured.
     </p>
-  {:else}<div class="table-shell">
+  {:else}<ScrollTable label="Cloud retrieval bindings">
       <table class="data-table">
         <caption class="sr-only">Cloud retrieval bindings</caption>
         <thead
@@ -239,7 +240,7 @@
             </tr>{/each}</tbody
         >
       </table>
-    </div>{/if}
+    </ScrollTable>{/if}
   {#if editor}
     <form
       onsubmit={(event) => {
@@ -398,9 +399,6 @@
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  .table-shell {
-    overflow-x: auto;
   }
   td small {
     display: block;

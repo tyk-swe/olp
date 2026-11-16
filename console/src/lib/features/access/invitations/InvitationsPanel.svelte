@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -285,7 +286,7 @@
     >Invite someone by email and choose their role.</EmptyState
   >
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Invitations">
     <table class="data-table">
       <thead
         ><tr
@@ -338,7 +339,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(pagination, invitations.data?.nextCursor)}
     label="Invitation pages"

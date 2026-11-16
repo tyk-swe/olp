@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
@@ -209,7 +210,7 @@
     {:else if !executables.data?.length}
       <p class="muted">The unconfined plugin directory holds no executables.</p>
     {:else}
-      <div class="table-shell">
+      <ScrollTable label="Unconfined plugin executables">
         <table class="data-table">
           <thead
             ><tr
@@ -251,7 +252,7 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
     {#if review}
       <section class="review" aria-labelledby="unconfined-review-heading">
@@ -273,7 +274,7 @@
             <dd>{review.abi_version}</dd>
           </div>
         </dl>
-        <div class="table-shell">
+        <ScrollTable label="Plugin profiles">
           <table class="data-table">
             <thead
               ><tr
@@ -293,7 +294,7 @@
               {/each}
             </tbody>
           </table>
-        </div>
+        </ScrollTable>
         <p class="muted">
           Declared origins:
           {#each review.manifest.origins as origin, index (origin)}{index

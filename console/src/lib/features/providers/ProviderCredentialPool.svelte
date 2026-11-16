@@ -204,7 +204,7 @@
     </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
-  {#if pool.isError}<p role="alert">
+  {#if pool.isError}<p class="inline-problem" role="alert">
       Credentials could not be loaded. <button
         type="button"
         onclick={() => pool.refetch()}>Retry</button

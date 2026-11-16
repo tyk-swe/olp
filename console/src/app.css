@@ -649,6 +649,11 @@ input[type='file']::file-selector-button:hover {
   letter-spacing: -0.02em;
 }
 
+.section-help {
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
+}
+
 /* A button that reads as a link: used for refresh and reveal affordances that
    would be too loud as a filled button. */
 .text-button {

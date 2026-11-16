@@ -15,7 +15,7 @@
   } = $props();
 </script>
 
-<p role="alert">
+<p class="inline-problem" role="alert">
   {errorMessage(error)}
   <button class="text-button" type="button" onclick={onRetry}
     >{retryLabel}</button

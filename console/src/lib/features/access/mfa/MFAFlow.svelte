@@ -111,7 +111,7 @@
   }
 </script>
 
-{#if error}<p class="form-alert" role="alert">{error}</p>{/if}
+{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 {#if codes}
   <h3>Save your recovery codes</h3>
   <p>

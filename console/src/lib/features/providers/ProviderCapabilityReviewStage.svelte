@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import type {
     CapabilityCertification,
     CapabilityDeclaration,
@@ -80,7 +81,7 @@
     </p>
   </div>
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Models to review">
     <table class="data-table">
       <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead>
       <tbody>
@@ -131,7 +132,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(pagination, nextCursor)}
     label="Provider wizard model pages"

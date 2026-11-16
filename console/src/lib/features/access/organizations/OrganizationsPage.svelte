@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -118,13 +119,10 @@
 </script>
 
 <svelte:head><title>Organizations · OpenLLMProxy</title></svelte:head>
-<header>
-  <h1>Organizations</h1>
-  <p>
-    Group projects under shared management and budgets. Installation roles still
-    determine which operations each person can perform.
-  </p>
-</header>
+<PageHeader
+  title="Organizations"
+  description="Group projects under shared management and budgets. Installation roles still determine which operations each person can perform."
+/>
 {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
 
 {#if canCreate}
@@ -212,13 +210,15 @@
       organizationId={selected}
       {editable}
     />{/key}
-  <section aria-labelledby="organization-members">
+  <section class="section" aria-labelledby="organization-members">
     <h2 id="organization-members">Organization members</h2>
-    <p>
+    <p class="section-help">
       Managers inherit management of every contained project. Direct project
       memberships remain independent. Add existing users by their user ID.
     </p>
-    {#if members.isError}<p role="alert">{errorMessage(members.error)}</p>{/if}
+    {#if members.isError}<p class="inline-problem" role="alert">
+        {errorMessage(members.error)}
+      </p>{/if}
     {#each members.data ?? [] as m (m.user_id)}<p>
         {m.email} · {m.role} · installation {m.installation_role}
         {#if editable}<button
@@ -268,9 +268,9 @@
         >
       </form>{/if}
   </section>
-  <section aria-labelledby="organization-projects">
+  <section class="section" aria-labelledby="organization-projects">
     <h2 id="organization-projects">Projects</h2>
-    {#if projects.isError}<p role="alert">
+    {#if projects.isError}<p class="inline-problem" role="alert">
         {errorMessage(projects.error)}
       </p>{/if}
     {#if editable}<form
@@ -351,7 +351,7 @@
         </form>{/if}
       <h3>Direct project members</h3>
       <p>Organization memberships above apply in addition to this list.</p>
-      {#if directMembers.isError}<p role="alert">
+      {#if directMembers.isError}<p class="inline-problem" role="alert">
           {errorMessage(directMembers.error)}
         </p>{/if}
       {#each directMembers.data ?? [] as m (m.user_id)}<p>
@@ -419,7 +419,6 @@
   }
   section {
     border-top: 1px solid var(--border);
-    margin-top: 2rem;
-    padding-top: 1rem;
+    padding-top: 1.5rem;
   }
 </style>

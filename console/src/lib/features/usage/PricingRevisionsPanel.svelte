@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -467,13 +468,7 @@
               ><span class="badge">{revision.prices.length} entries</span
               ></summary
             >
-            <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-            <div
-              class="table-shell"
-              tabindex="0"
-              role="region"
-              aria-label={`Prices in revision ${revision.revision}`}
-            >
+            <ScrollTable label={`Prices in revision ${revision.revision}`}>
               <table class="data-table">
                 <caption class="sr-only"
                   >Prices in revision {revision.revision}</caption
@@ -519,7 +514,7 @@
                     >{/each}</tbody
                 >
               </table>
-            </div>
+            </ScrollTable>
           </details>
         {/each}
       </div>
@@ -575,7 +570,7 @@
   }
   /* The price table sits flush inside its revision card; the hairline on top
      separates it from the summary instead of stacking a second frame. */
-  details .table-shell {
+  details :global(.table-shell) {
     border: 0;
     border-top: 1px solid var(--border-hairline);
     border-radius: 0;

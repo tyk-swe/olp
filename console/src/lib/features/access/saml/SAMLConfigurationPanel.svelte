@@ -93,13 +93,13 @@
   </p>
   {#if query.isPending}<p role="status">
       Loading SAML configuration…
-    </p>{:else if query.isError}<p role="alert">
+    </p>{:else if query.isError}<p class="inline-problem" role="alert">
       {errorMessage(query.error, 'SAML configuration is unavailable.')}
     </p>
     <button class="button button-secondary" onclick={() => query.refetch()}
       >Retry</button
     >{:else}
-    {#if error}<p role="alert" class="form-alert">
+    {#if error}<p class="inline-problem" role="alert">
         {error}
       </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
     <form onsubmit={save}>

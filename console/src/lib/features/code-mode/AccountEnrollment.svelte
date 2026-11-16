@@ -161,7 +161,7 @@
   {#if provider.isPending || kinds.isPending}
     <p role="status">Loading grant capabilities…</p>
   {:else if provider.isError || kinds.isError}
-    <p role="alert">
+    <p class="inline-problem" role="alert">
       Could not load grant capabilities. <button
         class="text-button"
         type="button"

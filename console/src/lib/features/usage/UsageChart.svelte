@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import type { UsagePoint } from '#lib/features/usage/usage.js';
   import {
     formatCompact,
@@ -135,13 +136,7 @@
     </div>
     <details>
       <summary>View chart data</summary>
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Chart data table"
-      >
+      <ScrollTable label="Chart data table">
         <table class="data-table">
           <caption class="sr-only"
             >Exact usage values shown in the time-series chart</caption
@@ -176,7 +171,7 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     </details>
   {/if}
 </figure>

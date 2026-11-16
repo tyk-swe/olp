@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
@@ -259,7 +260,7 @@
         <div class="declarations">
           <section aria-labelledby={`${headingId}-profiles`}>
             <h3 id={`${headingId}-profiles`}>Profiles</h3>
-            <div class="table-shell">
+            <ScrollTable label="Plugin profiles">
               <table class="data-table">
                 <thead
                   ><tr
@@ -284,7 +285,7 @@
                   {/each}
                 </tbody>
               </table>
-            </div>
+            </ScrollTable>
           </section>
           <section aria-labelledby={`${headingId}-origins`}>
             <h3 id={`${headingId}-origins`}>Declared origins</h3>

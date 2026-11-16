@@ -108,9 +108,9 @@
   }
 </script>
 
-<section aria-label={title}>
+<section class="section" aria-label={title}>
   <h2>{title}</h2>
-  <p>
+  <p class="section-help">
     Caps total inference spend, including shadow traffic and probes. Every
     applicable budget must allow a request. Subscription token allowances remain
     separate.
@@ -174,7 +174,7 @@
           >
         </div>
       </fieldset>
-      <p>
+      <p class="section-help">
         Blank limits remove the cap without resetting spend. Windows currently
         follow the installation budget time zone; weeks begin on Monday.
         Unpriced attempts accrue no USD; {query.data?.usage.unpriced_attempts ??
@@ -202,7 +202,6 @@
 <style>
   section {
     border-top: 1px solid var(--border);
-    margin-top: 1.5rem;
     padding-top: 1.5rem;
   }
   fieldset {

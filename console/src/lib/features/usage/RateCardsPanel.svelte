@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -263,7 +264,7 @@
       provider costs you.</EmptyState
     >
   {:else}
-    <div class="table-shell" role="region" aria-label="Rate cards">
+    <ScrollTable label="Rate cards">
       <table class="data-table">
         <caption class="sr-only">Rate cards by owner</caption>
         <thead
@@ -433,7 +434,7 @@
           {/each}</tbody
         >
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(pagination, cards.data?.nextCursor)}
       label="Rate card pages"

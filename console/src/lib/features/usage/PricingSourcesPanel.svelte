@@ -526,11 +526,6 @@
     gap: 1rem;
     padding: 1.25rem;
   }
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
-  }
   .source-list {
     display: grid;
     gap: 0.75rem;

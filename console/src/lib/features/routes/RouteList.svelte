@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
@@ -139,13 +140,9 @@
       {#if activeRoutes.isPlaceholderData}
         <p class="updating" role="status">Updating…</p>
       {/if}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Published routes table"
-        aria-busy={activeRoutes.isPlaceholderData}
+      <ScrollTable
+        label="Published routes table"
+        busy={activeRoutes.isPlaceholderData}
       >
         <table class="data-table">
           <thead
@@ -196,7 +193,7 @@
               >{/each}</tbody
           >
         </table>
-      </div>
+      </ScrollTable>
     {/if}
     {#if !activeRoutes.isError}<CursorPagination
         {...cursorPaginationProps(
@@ -232,14 +229,7 @@
       {#if drafts.isPlaceholderData}
         <p class="updating" role="status">Updating…</p>
       {/if}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Route drafts table"
-        aria-busy={drafts.isPlaceholderData}
-      >
+      <ScrollTable label="Route drafts table" busy={drafts.isPlaceholderData}>
         <table class="data-table">
           <thead>
             <tr>
@@ -293,7 +283,7 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
     {#if !drafts.isError}<CursorPagination
         {...cursorPaginationProps(

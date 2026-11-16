@@ -201,7 +201,7 @@
     Restrictions apply together with installation, route, and API-key policies.
     Requests can narrow provider access.
   </p>
-  {#if policy.isError}<p role="alert">
+  {#if policy.isError}<p class="inline-problem" role="alert">
       Policy could not be loaded. <button
         type="button"
         onclick={() => policy.refetch()}>Retry</button

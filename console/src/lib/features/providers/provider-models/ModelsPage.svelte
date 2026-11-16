@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
@@ -271,7 +272,7 @@
   {#if models.isPlaceholderData}
     <p class="updating" role="status">Updating…</p>
   {/if}
-  <div class="table-shell" aria-busy={models.isPlaceholderData}>
+  <ScrollTable label="Provider models" busy={models.isPlaceholderData}>
     <table class="data-table">
       <thead
         ><tr
@@ -341,7 +342,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
 
 {#if !models.isPending && !models.isError}<CursorPagination

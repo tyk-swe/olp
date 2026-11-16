@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { resolve } from '$app/paths';
@@ -231,7 +232,7 @@
     </div>
   {/if}
 
-  <div class="table-shell">
+  <ScrollTable label="Members">
     <table class="data-table">
       <thead
         ><tr
@@ -316,7 +317,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(pagination, users.data.nextCursor)}
     hasPrevious={!busy && pagination.history.length > 0}

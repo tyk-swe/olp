@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -389,7 +390,7 @@
       >Create one when a script or pipeline needs to manage this installation.</EmptyState
     >
   {:else}
-    <div class="table-shell">
+    <ScrollTable label="Management tokens">
       <table class="data-table">
         <thead
           ><tr
@@ -436,7 +437,7 @@
           {/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(pagination, tokens.data?.nextCursor)}
       label="Management token pages"
