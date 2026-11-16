@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -30,7 +31,7 @@ func Configuration(rawURL, caFile string, timeout time.Duration) (Config, error)
 			return Config{}, errors.New("invalid OLP_VALKEY_URL port")
 		}
 	}
-	option, err := valkey.ParseURL(rawURL)
+	option, err := valkey.ParseURL(databaseURL(rawURL, u))
 	if err != nil || option.SelectDB < 0 {
 		return Config{}, errors.New("invalid OLP_VALKEY_URL database")
 	}
@@ -51,6 +52,13 @@ func Configuration(rawURL, caFile string, timeout time.Duration) (Config, error)
 	}
 	option.TLSConfig.RootCAs = roots
 	return Config{option: option, timeout: timeout}, nil
+}
+
+func databaseURL(rawURL string, parsed *url.URL) string {
+	if parsed.EscapedPath() == "/" {
+		return strings.TrimSuffix(rawURL, "/")
+	}
+	return rawURL
 }
 
 type Client struct {
