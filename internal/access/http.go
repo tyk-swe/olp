@@ -2,28 +2,23 @@
 package access
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/mail"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -120,42 +115,6 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 	return nil
 }
 
-type Problem struct {
-	Status              int
-	Code, Detail, Field string
-}
-
-func (p *Problem) Error() string { return p.Code }
-func Fail(status int, code, detail string) error {
-	return &Problem{Status: status, Code: code, Detail: detail}
-}
-func Invalid(field, detail string) error {
-	return &Problem{Status: 422, Code: "validation_failed", Detail: detail, Field: field}
-}
-func Forbidden() error {
-	return Fail(403, "permission_denied", "The current role cannot perform this operation.")
-}
-
-type Reply struct {
-	Status         int             `json:"status"`
-	Body           any             `json:"body"`
-	ETag           string          `json:"etag,omitempty"`
-	Location       string          `json:"location,omitempty"`
-	Cookies        []*http.Cookie  `json:"-"`
-	CSRF           string          `json:"-"`
-	ParentMutation *ParentMutation `json:"parent_mutation,omitempty"`
-}
-
-// ParentMutation records the atomic parent transition caused by a child edit.
-// Clients can account for their own writes without adopting an unrelated edit.
-type ParentMutation struct {
-	Previous string `json:"previous"`
-	Current  string `json:"current"`
-}
-
-func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
-func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
-
 func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
 	// Management responses carry credentials and member data; the public
 	// perimeter adds the rest of the API's security headers.
@@ -185,21 +144,21 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 		return r, cancel, err
 	}
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-		return r, cancel, Fail(403, "origin_denied", "Use the configured console origin.")
+		return r, cancel, httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" && r.URL.Path != "/api/v1/saml/complete" {
-		return r, cancel, Fail(403, "origin_denied", "Cross-site access is not allowed.")
+		return r, cancel, httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
 	return r, cancel, nil
 }
 
 // serve applies the management transport guards, runs fn, and writes its
 // Reply or problem.
-func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
+func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Request) (httpkit.Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r, cancel, err := s.guard(w, r, maxBody, timeout)
 		defer cancel()
-		var result Reply
+		var result httpkit.Reply
 		if err == nil {
 			result, err = fn(r)
 		}
@@ -272,49 +231,11 @@ func (w *streamWriter) Unwrap() http.ResponseWriter {
 }
 
 func (s *Server) writeProblem(w http.ResponseWriter, err error) {
-	p, known := problemFor(err)
+	p, known := httpkit.ProblemFor(err)
 	if !known {
 		s.log.Error("management request failed", failure(err)...)
 	}
-	renderProblem(w, p)
-}
-
-func WriteProblem(w http.ResponseWriter, err error) {
-	p, _ := problemFor(err)
-	renderProblem(w, p)
-}
-
-func problemFor(err error) (*Problem, bool) {
-	if known, ok := errors.AsType[*Problem](err); ok {
-		return known, true
-	}
-	if validation, ok := errors.AsType[*authority.ValidationError](err); ok {
-		return &Problem{Status: 422, Code: "validation_failed", Detail: validation.Detail, Field: validation.Field}, true
-	}
-	if contract := ContractProblem(err); contract != nil {
-		return contract, true
-	}
-	if refusal, ok := errors.AsType[interface {
-		error
-		RoutingRefusal() (string, string)
-	}](err); ok {
-		code, message := refusal.RoutingRefusal()
-		return &Problem{Status: 422, Code: code, Detail: message}, true
-	}
-	if validation, ok := errors.AsType[interface {
-		error
-		RoutingValidation() (string, string)
-	}](err); ok {
-		field, message := validation.RoutingValidation()
-		return &Problem{Status: 422, Code: "validation_failed", Detail: message, Field: field}, true
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}, true
-	}
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok && pg.Code == "23505" {
-		return &Problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}, true
-	}
-	return &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}, false
+	httpkit.RenderProblem(w, p)
 }
 
 // failure describes an unexpected error by category only, because driver and
@@ -326,40 +247,12 @@ func failure(err error) []any {
 	return []any{"error_type", fmt.Sprintf("%T", err)}
 }
 
-func renderProblem(w http.ResponseWriter, p *Problem) {
-	body := map[string]any{"type": "https://openllmproxy.dev/problems/" + p.Code, "title": http.StatusText(p.Status), "status": p.Status, "detail": p.Detail}
-	if p.Field != "" {
-		body["errors"] = map[string]any{p.Field: []any{map[string]string{"code": p.Code, "message": p.Detail}}}
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	if p.Status == 429 {
-		w.Header().Set("Retry-After", "60")
-	}
-	w.WriteHeader(p.Status)
-	json.NewEncoder(w).Encode(body)
-}
-
-func Decode(r *http.Request, v any) error {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		return Fail(415, "unsupported_media_type", "Send an application/json request.")
-	}
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(v); err != nil {
-		return Fail(400, "invalid_json", "The request body is not valid for this operation.")
-	}
-	var extra any
-	if d.Decode(&extra) != io.EOF {
-		return Fail(400, "invalid_json", "Send one JSON document.")
-	}
-	return nil
-}
 func checkCookies(r *http.Request) error {
 	seen := map[string]string{}
 	for _, c := range r.Cookies() {
 		if strings.HasPrefix(c.Name, "__Host-olp_") {
 			if value, ok := seen[c.Name]; ok && value != c.Value {
-				return Fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
+				return httpkit.Fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
 			}
 			seen[c.Name] = c.Value
 		}
@@ -377,42 +270,18 @@ func cookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: httpOnly, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())}
 }
 func clearCookie(name string) *http.Cookie { c := cookie(name, "", 0, true); c.MaxAge = -1; return c }
-func Match(r *http.Request, etag string) error {
-	value := r.Header.Get("If-Match")
-	if value == "" {
-		return Fail(428, "precondition_required", "Reload the record and send its ETag in If-Match.")
-	}
-	if value != `"`+etag+`"` {
-		return Fail(412, "etag_mismatch", "This record changed. Reload it before saving.")
-	}
-	return nil
-}
-func IDParam(r *http.Request, name string) (string, error) {
-	v := r.PathValue(name)
-	id, err := uuid.Parse(v)
-	if err != nil {
-		return "", Fail(400, "invalid_identifier", "Use a valid UUID.")
-	}
-	return id.String(), nil
-}
-func ValidText(field, value string, max int) error {
-	if strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > max {
-		return Invalid(field, "Use 1–"+strconv.Itoa(max)+" characters.")
-	}
-	return nil
-}
 func email(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	a, err := mail.ParseAddress(value)
 	if err != nil || a.Address != value || len(value) > 254 {
-		return "", Invalid("email", "Enter a valid email address.")
+		return "", httpkit.Invalid("email", "Enter a valid email address.")
 	}
 	return value, nil
 }
 func password(value string) error {
 	n := utf8.RuneCountInString(value)
 	if n < 12 || n > 1024 {
-		return Invalid("password", "Use 12–1024 characters.")
+		return httpkit.Invalid("password", "Use 12–1024 characters.")
 	}
 	return nil
 }
@@ -484,85 +353,6 @@ func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Acto
 	if actor.token != "" {
 		tokenID = actor.token
 	}
-	_, err := tx.Exec(ctx, auditInsertSQL, NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
+	_, err := tx.Exec(ctx, auditInsertSQL, httpkit.NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
 	return err
-}
-
-type Pagination struct {
-	Limit  int
-	Before string
-}
-
-func Page(r *http.Request) (Pagination, error) {
-	return PageBy(r, "ffffffff-ffff-ffff-ffff-ffffffffffff", func(raw string) (string, error) {
-		v, err := uuid.Parse(raw)
-		return v.String(), err
-	})
-}
-
-func PageBy(r *http.Request, first string, cursor func(string) (string, error)) (Pagination, error) {
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 200 {
-			return Pagination{}, Invalid("limit", "Use a page size from 1 to 200.")
-		}
-		limit = n
-	}
-	raw := r.URL.Query().Get("cursor")
-	if raw == "" {
-		return Pagination{Limit: limit, Before: first}, nil
-	}
-	b, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return Pagination{}, Invalid("cursor", "Invalid pagination cursor.")
-	}
-	before, err := cursor(string(b))
-	if err != nil {
-		return Pagination{}, Invalid("cursor", "Invalid pagination cursor.")
-	}
-	return Pagination{Limit: limit, Before: before}, nil
-}
-func ListReply(items []map[string]any, p Pagination) Reply {
-	return ListReplyBy(items, p, func(item map[string]any) string { return item["id"].(string) })
-}
-
-// ListReplyBy paginates records using the identifier ordered by their query.
-func ListReplyBy[T any](items []T, p Pagination, id func(T) string) Reply {
-	return OK(ListPage(items, p, id))
-}
-
-type ListBody[T any] struct {
-	Items      []T     `json:"items"`
-	NextCursor *string `json:"next_cursor"`
-}
-
-func ListPage[T any](items []T, p Pagination, id func(T) string) ListBody[T] {
-	switch {
-	case len(items) > p.Limit:
-		cursor := base64.RawURLEncoding.EncodeToString([]byte(id(items[p.Limit-1])))
-		return ListBody[T]{Items: items[:p.Limit], NextCursor: &cursor}
-	case items == nil:
-		return ListBody[T]{Items: []T{}}
-	}
-	return ListBody[T]{Items: items}
-}
-
-func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var b []byte
-		var item map[string]any
-		if err := rows.Scan(&b); err != nil {
-			return nil, err
-		}
-		decoder := json.NewDecoder(bytes.NewReader(b))
-		decoder.UseNumber()
-		if err := decoder.Decode(&item); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
 }

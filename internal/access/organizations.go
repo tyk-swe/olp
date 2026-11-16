@@ -2,6 +2,8 @@ package access
 
 import (
 	"context"
+
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // Organization membership widens project scope, never installation roles or
@@ -15,7 +17,7 @@ func (p Principal) Organization(id string, need Need) error {
 		return NotFound
 	}
 	if need == Change && role != "manager" {
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	return nil
 }

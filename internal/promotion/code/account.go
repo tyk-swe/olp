@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
@@ -23,8 +24,8 @@ type Account struct {
 }
 
 func parseAccount(e contract.ConfigurationCodeAccount) (Account, error) {
-	if access.ValidText("code", e.Project, 100) != nil || access.ValidText("code", e.Provider, 100) != nil || access.ValidText("code", e.CredentialRef, 200) != nil {
-		return Account{}, access.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
+	if httpkit.ValidText("code", e.Project, 100) != nil || httpkit.ValidText("code", e.Provider, 100) != nil || httpkit.ValidText("code", e.CredentialRef, 200) != nil {
+		return Account{}, httpkit.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 	}
 	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Settings: codeaccounts.Settings{Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}}
 	return account, account.Settings.Validate()
@@ -89,13 +90,13 @@ func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory 
 		return resolved[codeaccounts.Input]{}, err
 	}
 	if !found {
-		return resolved[codeaccounts.Input]{}, access.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
+		return resolved[codeaccounts.Input]{}, httpkit.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
 	}
 	ids, err := codeaccounts.AccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
 	if err != nil {
 		return resolved[codeaccounts.Input]{}, err
 	}
-	to, err := lookup(access.NewID(), ids)
+	to, err := lookup(httpkit.NewID(), ids)
 	return resolved[codeaccounts.Input]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
 }
 
@@ -104,7 +105,7 @@ func accountChange(ctx context.Context, q access.Queryer, a resolved[codeaccount
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, access.NewID(), a.input, a.to.existing)
+			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, httpkit.NewID(), a.input, a.to.existing)
 			return err
 		},
 	}, err

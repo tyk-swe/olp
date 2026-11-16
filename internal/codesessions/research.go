@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 )
@@ -33,7 +34,7 @@ func researchAccount(ctx context.Context, q access.Queryer, route codemode.Route
 		AND (NOT $5 OR (p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=$4))`,
 		route.Tools.AccountID, route.PoolID, route.ProjectID, codeplans.ZAIProfile, draft).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &a.Name, &a.Enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return a, access.Invalid("tools", "Choose an enabled, enrolled Z.ai global account in this project's route pool.")
+		return a, httpkit.Invalid("tools", "Choose an enabled, enrolled Z.ai global account in this project's route pool.")
 	}
 	return a, err
 }
@@ -56,7 +57,7 @@ func (s *Store) AuthorizeResearch(ctx context.Context, route codemode.Route, key
 	// A provider draft can change without changing the published route.
 	account, err = researchAccount(ctx, tx, route, false)
 	if err != nil {
-		if _, invalid := errors.AsType[*access.Problem](err); invalid {
+		if _, invalid := errors.AsType[*httpkit.Problem](err); invalid {
 			return authority, account, codemode.Refuse(403, "code_research_account_unavailable")
 		}
 		return authority, account, err
@@ -67,7 +68,7 @@ func (s *Store) AuthorizeResearch(ctx context.Context, route codemode.Route, key
 // Research sessions retain only opaque transport and authorization metadata.
 // A key, publication, account or credential change makes lookup fail closed.
 func (s *Store) ResearchSession(ctx context.Context, id string, b codemode.ResearchSessionBinding) (string, error) {
-	if _, err := access.ParseUUID(id); err != nil {
+	if _, err := httpkit.ParseUUID(id); err != nil {
 		return "", codemode.Refuse(404, "code_research_session_invalid")
 	}
 	var upstream string
@@ -123,7 +124,7 @@ func (s *Store) CreateResearchSession(ctx context.Context, b codemode.ResearchSe
 	if !available {
 		return "", codemode.Refuse(429, "code_research_session_limit")
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	_, err = tx.Exec(ctx, `INSERT INTO olp.code_research_sessions(id,api_key_id,revision_id,service,account_id,credential_id,generation,upstream_id,expires_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+interval '1 hour')`, id, b.APIKeyID, b.RevisionID, b.Service, b.AccountID, b.CredentialID, b.Generation, upstream)
 	if err != nil {

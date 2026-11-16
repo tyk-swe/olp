@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
@@ -92,20 +93,20 @@ type delegationPairBudget struct {
 	Usage   *PairBudget                `db:"usage"`
 }
 
-func (s *DelegationManagement) listDelegations(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, pageErr := access.Page(r)
+func (s *DelegationManagement) listDelegations(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, pageErr := httpkit.Page(r)
 	if pageErr != nil {
-		return access.Reply{}, pageErr
+		return httpkit.Reply{}, pageErr
 	}
 	project, projectErr := delegationProjectFilter(r, p)
 	if projectErr != nil {
-		return access.Reply{}, projectErr
+		return httpkit.Reply{}, projectErr
 	}
 	delegation := r.URL.Query().Get("delegation_id")
 	if delegation != "" {
 		id, err := uuid.Parse(delegation)
 		if err != nil || id == uuid.Nil || id.String() != delegation {
-			return access.Reply{}, access.Invalid("delegation_id", "Use a canonical delegation UUID.")
+			return httpkit.Reply{}, httpkit.Invalid("delegation_id", "Use a canonical delegation UUID.")
 		}
 	}
 	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
@@ -118,7 +119,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
  AND ($6='' OR d.id=NULLIF($6,'')::uuid)
  ORDER BY d.id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1, delegation)
 	if queryErr != nil {
-		return access.Reply{}, queryErr
+		return httpkit.Reply{}, queryErr
 	}
 	records, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (delegationPairRecord, error) {
 		data, dataErr := pgx.RowToStructByName[delegationRow](row)
@@ -131,14 +132,14 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
 		}, nil
 	})
 	if collectErr != nil {
-		return access.Reply{}, collectErr
+		return httpkit.Reply{}, collectErr
 	}
 	if len(records) == 0 {
-		return access.ListReplyBy([]DelegationView{}, page, func(item DelegationView) string { return item.ID }), nil
+		return httpkit.ListReplyBy([]DelegationView{}, page, func(item DelegationView) string { return item.ID }), nil
 	}
 	pairInput, marshalErr := json.Marshal(records)
 	if marshalErr != nil {
-		return access.Reply{}, marshalErr
+		return httpkit.Reply{}, marshalErr
 	}
 	budgetRows, budgetQueryErr := s.Access.Pool.Query(r.Context(), `WITH entries AS MATERIALIZED (
  SELECT ordinality::int AS ordinal,(value->>'project_id')::uuid AS project_id,value->>'digest' AS digest
@@ -153,7 +154,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
  FROM entries LEFT JOIN budgets ON budgets.project_id=entries.project_id AND budgets.digest=entries.digest
  ORDER BY entries.ordinal`, pairInput, page.Limit)
 	if budgetQueryErr != nil {
-		return access.Reply{}, budgetQueryErr
+		return httpkit.Reply{}, budgetQueryErr
 	}
 	items, budgetCollectErr := pgx.CollectRows(budgetRows, func(row pgx.CollectableRow) (DelegationView, error) {
 		budget, dataErr := pgx.RowToStructByName[delegationPairBudget](row)
@@ -169,9 +170,9 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
 		return DelegationView{DelegationRecord: records[budget.Ordinal-1].Record, BudgetPolicy: budget.Policy, Budget: *budget.Usage}, nil
 	})
 	if budgetCollectErr != nil {
-		return access.Reply{}, budgetCollectErr
+		return httpkit.Reply{}, budgetCollectErr
 	}
-	return access.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
 }
 
 func delegationProjectFilter(r *http.Request, p access.Principal) (string, error) {
@@ -181,7 +182,7 @@ func delegationProjectFilter(r *http.Request, p access.Principal) (string, error
 	}
 	id, err := uuid.Parse(project)
 	if err != nil || id == uuid.Nil || id.String() != project {
-		return "", access.Invalid("project_id", "Use a canonical project UUID.")
+		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
 	}
 	if err := p.Project(&project, access.View); err != nil {
 		return "", err

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -126,13 +126,13 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	if key.id != "" {
 		for name := range input.Attribution {
 			if !slices.Contains(key.authority.Policy.AllowedAttributionKeys, name) && key.authority.Policy.AttributionDefaults[name] == "" && key.authority.ProjectAttributionPolicy.Defaults[name] == "" {
-				return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "An attribution label is not allowed by the selected key.")
+				return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("attribution", "An attribution label is not allowed by the selected key.")
 			}
 		}
 	}
 	labels, err := key.authority.ResolveAttribution(input.Attribution)
 	if err != nil {
-		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
+		return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
 	}
 	key.authority.Attribution, input.Attribution = labels, labels
 	semantic, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
@@ -154,7 +154,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	workflow := input.Operation == "generation" && named.ToolExecution == "gateway"
 	inspectionRequest, err := workflowInspectionRequest(parsed, workflow)
 	if err != nil {
-		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("request", "The workflow controls could not be processed.")
+		return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("request", "The workflow controls could not be processed.")
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
 	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)

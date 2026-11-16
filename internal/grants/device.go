@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -159,7 +160,7 @@ func stands(ctx context.Context, q access.Queryer, providerID, id, principal str
 	case outcome != "":
 		s.Status = Status(outcome)
 	case continued:
-		return s, access.Fail(409, "grant_enrollment_used", "A poll of this device authorization failed, which ended the grant enrollment. Start another.")
+		return s, httpkit.Fail(409, "grant_enrollment_used", "A poll of this device authorization failed, which ended the grant enrollment. Start another.")
 	default:
 		s.Status, s.Interval = Pending, time.Duration(interval)*time.Second
 	}

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -36,7 +36,7 @@ func ConvertUnique[T any](from any) (T, error) {
 		return to, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if err := access.DecodeUnique(request, &to, int64(len(data))); err != nil {
+	if err := httpkit.DecodeUnique(request, &to, int64(len(data))); err != nil {
 		return to, err
 	}
 	return to, nil

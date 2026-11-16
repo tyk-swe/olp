@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -57,7 +58,7 @@ func Promote(ctx context.Context, tx pgx.Tx, actor, draftID, routeID string) err
 		return err
 	}
 	if displaces {
-		return access.Invalid("guardrail_attachments", "A promoted attachment cannot remove an existing policy.")
+		return httpkit.Invalid("guardrail_attachments", "A promoted attachment cannot remove an existing policy.")
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by)
  SELECT gen_random_uuid(),'route',$2,policy_revision_id,position,gen_random_uuid(),$3 FROM olp.guardrail_draft_attachments WHERE draft_id=$1

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 func TestProjectAuthorityForInvestigations(t *testing.T) {
@@ -40,7 +41,7 @@ func TestProjectAuthorityForInvestigations(t *testing.T) {
 				}
 				return
 			}
-			var problem *access.Problem
+			var problem *httpkit.Problem
 			if !errors.As(err, &problem) || problem.Status != tc.status {
 				t.Fatalf("project authority returned %v, want status %d", err, tc.status)
 			}

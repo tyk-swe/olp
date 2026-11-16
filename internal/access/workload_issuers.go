@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -16,50 +17,50 @@ func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
 
 const workloadIssuerJSON = `i.document||jsonb_build_object('id',i.id,'etag',i.etag,'created_at',i.created_at,'updated_at',i.updated_at,'created_by',i.created_by)`
 
-func (s *Server) workloadIssuers(r *http.Request, _ Principal) (Reply, error) {
-	page, e := Page(r)
+func (s *Server) workloadIssuers(r *http.Request, _ Principal) (httpkit.Reply, error) {
+	page, e := httpkit.Page(r)
 	if e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	rows, e := s.Pool.Query(r.Context(), "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
 	if e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	defer rows.Close()
-	items, e := JSONRows(rows)
-	return ListReply(items, page), e
+	items, e := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, page), e
 }
-func (s *Server) workloadIssuer(r *http.Request, _ Principal) (Reply, error) {
-	id, e := IDParam(r, "issuer_id")
+func (s *Server) workloadIssuer(r *http.Request, _ Principal) (httpkit.Reply, error) {
+	id, e := httpkit.IDParam(r, "issuer_id")
 	if e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	var data json.RawMessage
 	var etag string
 	e = s.Pool.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+",i.etag::text FROM olp.workload_issuers i WHERE id=$1", id).Scan(&data, &etag)
-	return Detail(data, etag), e
+	return httpkit.Detail(data, etag), e
 }
-func (s *Server) createWorkloadIssuer(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) createWorkloadIssuer(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return s.writeWorkloadIssuer(r, p, true)
 }
-func (s *Server) putWorkloadIssuer(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) putWorkloadIssuer(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return s.writeWorkloadIssuer(r, p, false)
 }
-func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) (Reply, error) {
+func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) (httpkit.Reply, error) {
 	var input workload.Config
-	if e := DecodeUnique(r, &input, 65536); e != nil {
-		return Reply{}, e
+	if e := httpkit.DecodeUnique(r, &input, 65536); e != nil {
+		return httpkit.Reply{}, e
 	}
 	if err := ValidateWorkloadConfig(input); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 
-	id := NewID()
+	id := httpkit.NewID()
 	if !create {
 		var err error
-		id, err = IDParam(r, "issuer_id")
+		id, err = httpkit.IDParam(r, "issuer_id")
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	// A key-ID revocation must work even during a JWKS outage. Fetch only for
@@ -70,7 +71,7 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 		// issuer URLs cannot be created again, so skipping preflight cannot change trust.
 		var exists bool
 		if err := s.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.workload_issuers WHERE issuer=$1)", input.Issuer).Scan(&exists); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		verifyKeys = !exists
 	}
@@ -78,60 +79,60 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 		var oldURL string
 		var oldEnabled bool
 		if err := s.Pool.QueryRow(r.Context(), "SELECT document->>'jwks_url',(document->>'enabled')::boolean FROM olp.workload_issuers WHERE id=$1", id).Scan(&oldURL, &oldEnabled); err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		verifyKeys = !oldEnabled || oldURL != input.JWKSURL
 	}
 	if verifyKeys {
 		if _, err := workload.Fetch(r.Context(), s.oidcClient, input.JWKSURL); err != nil {
-			return Reply{}, Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
+			return httpkit.Reply{}, httpkit.Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
 		}
 	}
 
 	tx, p, e := s.BeginMutation(r)
 	if e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	defer tx.Rollback(r.Context())
 	var replay ReplayClaim
 	var oldETag, issuer string
 	if create {
-		var old *Reply
+		var old *httpkit.Reply
 		replay, old, e = s.Replay(r, tx, p, input)
 		if e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 		if old != nil {
 			return *old, tx.Commit(r.Context())
 		}
 	} else {
 		if e = tx.QueryRow(r.Context(), "SELECT etag::text,issuer FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&oldETag, &issuer); e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
-		if e = Match(r, oldETag); e != nil {
-			return Reply{}, e
+		if e = httpkit.Match(r, oldETag); e != nil {
+			return httpkit.Reply{}, e
 		}
 		if issuer != input.Issuer {
-			return Reply{}, Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
+			return httpkit.Reply{}, httpkit.Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
 		}
 	}
 	etag, e := s.StoreWorkloadIssuer(r.Context(), tx, p, id, input, create)
 	if e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	if e = Audit(r.Context(), tx, r, p.Actor(), "workload_issuer.update", "workload_issuer", id, "success"); e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
 	var output json.RawMessage
 	if e = tx.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id=$1", id).Scan(&output); e != nil {
-		return Reply{}, e
+		return httpkit.Reply{}, e
 	}
-	reply := Detail(output, etag)
+	reply := httpkit.Detail(output, etag)
 	if create {
 		reply.Status = 201
 		reply.Location = "/api/v1/workload-issuers/" + id
 		if e = s.CompleteReplay(r, tx, replay, reply); e != nil {
-			return Reply{}, e
+			return httpkit.Reply{}, e
 		}
 	}
 	return reply, tx.Commit(r.Context())
@@ -145,11 +146,11 @@ func WorkloadKeyPolicy(m workload.Mapping) keyauthority.KeyPolicy {
 // ValidateWorkloadConfig checks declared identity URLs without fetching them.
 func ValidateWorkloadConfig(input workload.Config) error {
 	if input.Validate() != nil {
-		return Invalid("issuer", "Supply a bounded issuer, audiences, signature algorithms and explicit claim mappings.")
+		return httpkit.Invalid("issuer", "Supply a bounded issuer, audiences, signature algorithms and explicit claim mappings.")
 	}
 	for _, raw := range []string{input.Issuer, input.JWKSURL} {
 		if oidcURL(raw) != nil {
-			return Invalid("issuer", "Use secure identity endpoint URLs.")
+			return httpkit.Invalid("issuer", "Use secure identity endpoint URLs.")
 		}
 	}
 
@@ -172,7 +173,7 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 			return "", err
 		}
 		if issuer != input.Issuer {
-			return "", Invalid("issuer", "The issuer URL is immutable.")
+			return "", httpkit.Invalid("issuer", "The issuer URL is immutable.")
 		}
 	}
 	var e error
@@ -211,12 +212,12 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 		}
 		for _, mapping := range input.Mappings {
 			policy, _ := json.Marshal(WorkloadKeyPolicy(mapping))
-			if _, err := tx.Exec(ctx, "UPDATE olp.api_keys SET policy=$3,etag=$4 WHERE workload_issuer_id=$1 AND workload_mapping=$2", id, mapping.Name, policy, NewID()); err != nil {
+			if _, err := tx.Exec(ctx, "UPDATE olp.api_keys SET policy=$3,etag=$4 WHERE workload_issuer_id=$1 AND workload_mapping=$2", id, mapping.Name, policy, httpkit.NewID()); err != nil {
 				return "", err
 			}
 		}
 	}
-	etag := NewID()
+	etag := httpkit.NewID()
 	data, _ := json.Marshal(input)
 	if create {
 		var count int
@@ -224,7 +225,7 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 			return "", e
 		}
 		if count >= 64 {
-			return "", Invalid("issuer", "At most 64 workload issuers can be registered.")
+			return "", httpkit.Invalid("issuer", "At most 64 workload issuers can be registered.")
 		}
 		_, e = tx.Exec(ctx, "INSERT INTO olp.workload_issuers(id,issuer,document,created_by,etag) VALUES($1,$2,$3,$4,$5)", id, input.Issuer, data, p.UserID(), etag)
 	} else {
@@ -267,7 +268,7 @@ func ValidateWorkloadBindings(ctx context.Context, q Queryer, id string, input w
 			}
 		}
 		if !found {
-			return Fail(409, "workload_mapping_in_use", "A registered principal's mapping and project cannot be removed or reassigned; disable the issuer to stop access.")
+			return httpkit.Fail(409, "workload_mapping_in_use", "A registered principal's mapping and project cannot be removed or reassigned; disable the issuer to stop access.")
 		}
 	}
 	return nil

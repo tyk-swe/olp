@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -87,7 +88,7 @@ type listed struct {
 	body json.RawMessage
 }
 
-func listSinks(ctx context.Context, q access.Queryer, page access.Pagination, p access.Principal) ([]listed, error) {
+func listSinks(ctx context.Context, q access.Queryer, page httpkit.Pagination, p access.Principal) ([]listed, error) {
 	rows, err := q.Query(ctx, listSinksSQL, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err
@@ -127,7 +128,7 @@ func lockSink(ctx context.Context, q access.Queryer, id string) (stored, error) 
 	return sink, access.NotFoundOr(err)
 }
 
-func listGaps(ctx context.Context, q access.Queryer, sinkID string, page access.Pagination, p access.Principal) ([]Gap, error) {
+func listGaps(ctx context.Context, q access.Queryer, sinkID string, page httpkit.Pagination, p access.Principal) ([]Gap, error) {
 	rows, err := q.Query(ctx, listGapsSQL, sinkID, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err

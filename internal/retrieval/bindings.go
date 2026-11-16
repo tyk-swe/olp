@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 type Input struct {
@@ -41,27 +42,27 @@ type Server struct{ Access *access.Server }
 func normalizeInput(in Input) (Input, error) {
 	name := strings.TrimSpace(in.Name)
 	route := strings.TrimSpace(in.Route)
-	if err := access.ValidText("name", name, 100); err != nil {
+	if err := httpkit.ValidText("name", name, 100); err != nil {
 		return Input{}, err
 	}
 	if _, err := uuid.Parse(in.ProjectID); err != nil {
-		return Input{}, access.Invalid("project_id", "Choose an owning project.")
+		return Input{}, httpkit.Invalid("project_id", "Choose an owning project.")
 	}
 	if _, err := uuid.Parse(in.TargetID); err != nil {
-		return Input{}, access.Invalid("target_id", "Choose one route target.")
+		return Input{}, httpkit.Invalid("target_id", "Choose one route target.")
 	}
 	if route == "" || len(route) > 128 || !ResourceValid(in.Backend, in.Resource) {
-		return Input{}, access.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
+		return Input{}, httpkit.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
 	}
 	if err := ValidateFields(in.Backend, in.Fields); err != nil {
-		return Input{}, access.Invalid("fields", err.Error())
+		return Input{}, httpkit.Invalid("fields", err.Error())
 	}
 	if len(in.KeyGrants) > 2000 {
-		return Input{}, access.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
+		return Input{}, httpkit.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
 	}
 	for _, key := range in.KeyGrants {
 		if parsed, err := uuid.Parse(key); err != nil || parsed.String() != key {
-			return Input{}, access.Invalid("key_grants", "Use canonical API-key UUIDs.")
+			return Input{}, httpkit.Invalid("key_grants", "Use canonical API-key UUIDs.")
 		}
 	}
 	return Input{
@@ -155,7 +156,7 @@ func ValidateAuthority(ctx context.Context, q access.Queryer, in Input) (string,
 		return "", err
 	}
 	if len(providers) != 1 {
-		return "", access.Invalid("target_id", "Choose a retrieval target in this project's route or draft with the matching backend kind and resource.")
+		return "", httpkit.Invalid("target_id", "Choose a retrieval target in this project's route or draft with the matching backend kind and resource.")
 	}
 	var count int
 	err = q.QueryRow(ctx, "SELECT count(*) FROM olp.api_keys WHERE id=ANY($1::uuid[]) AND project_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())", in.KeyGrants, in.ProjectID).Scan(&count)
@@ -163,7 +164,7 @@ func ValidateAuthority(ctx context.Context, q access.Queryer, in Input) (string,
 		return "", err
 	}
 	if count != len(in.KeyGrants) {
-		return "", access.Invalid("key_grants", "Every grant must name an active API key in this project.")
+		return "", httpkit.Invalid("key_grants", "Every grant must name an active API key in this project.")
 	}
 	return providers[0], nil
 }
@@ -177,16 +178,16 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Binding, in Inp
 		return Binding{}, err
 	}
 	if current != nil && (current.RetiredAt != nil || current.ProjectID != normalized.ProjectID) {
-		return Binding{}, access.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
+		return Binding{}, httpkit.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
 	}
 	id, revision := nextBindingIdentity(current)
 	next := Binding{
 		Input:      normalized,
 		ProviderID: provider,
 		ID:         id,
-		RevisionID: access.NewID(),
+		RevisionID: httpkit.NewID(),
 		Revision:   revision,
-		ETag:       access.NewID(),
+		ETag:       httpkit.NewID(),
 	}
 	raw, err := json.Marshal(struct {
 		Input
@@ -214,7 +215,7 @@ func nextBindingIdentity(current *Binding) (string, int64) {
 	if current != nil {
 		return current.ID, current.Revision + 1
 	}
-	return access.NewID(), 1
+	return httpkit.NewID(), 1
 }
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/retrieval-bindings", s.list)
@@ -224,140 +225,140 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "DELETE /api/v1/retrieval-bindings/{binding_id}", s.write)
 	s.Access.Route(mux, "GET /api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}", s.revision)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+bindingColumns+bindingJoin+" WHERE b.retired_at IS NULL AND b.id<$1 AND ($2 OR b.project_id=ANY($3::uuid[])) ORDER BY b.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
 		d, err := scanBinding(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		raw, _ := json.Marshal(d)
 		var item map[string]any
 		_ = json.Unmarshal(raw, &item)
 		items = append(items, item)
 	}
-	return access.ListReply(items, page), rows.Err()
+	return httpkit.ListReply(items, page), rows.Err()
 }
-func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "binding_id")
+func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "binding_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := Load(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = p.Project(&d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(d, d.ETag), nil
+	return httpkit.Detail(d, d.ETag), nil
 }
-func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "binding_id")
+func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "binding_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	version, err := access.IDParam(r, "revision_id")
+	version, err := httpkit.IDParam(r, "revision_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := Load(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = p.Project(&d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var raw json.RawMessage
 	var n int64
 	err = s.Access.Pool.QueryRow(r.Context(), "SELECT definition,revision FROM olp.retrieval_binding_revisions WHERE id=$1 AND binding_id=$2", version, id).Scan(&raw, &n)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var definition Input
 	if err = json.Unmarshal(raw, &definition); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(map[string]any{"id": version, "binding_id": id, "revision": n, "definition": definition}, version), nil
+	return httpkit.Detail(map[string]any{"id": version, "binding_id": id, "revision": n, "definition": definition}, version), nil
 }
 func readBindingInput(r *http.Request) (Input, error) {
 	if r.Method == http.MethodDelete {
 		return Input{}, nil
 	}
 	var in Input
-	if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
+	if err := httpkit.DecodeUnique(r, &in, 64<<10); err != nil {
 		return Input{}, err
 	}
 	return normalizeInput(in)
 }
 
-func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) write(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	retire := r.Method == http.MethodDelete
 	in, err := readBindingInput(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	if err = p.Authorize(access.Configure); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	id := r.PathValue("binding_id")
 	var current *Binding
 	if id != "" {
-		if _, err = access.IDParam(r, "binding_id"); err != nil {
-			return access.Reply{}, err
+		if _, err = httpkit.IDParam(r, "binding_id"); err != nil {
+			return httpkit.Reply{}, err
 		}
 		current, err = Load(r.Context(), tx, id, true)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		if err = p.Project(&current.ProjectID, access.Change); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	} else {
 		if err = s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	claim, replay, err := s.Access.Replay(r, tx, p, in)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replay != nil {
 		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
-		if err = access.Match(r, current.ETag); err != nil {
-			return access.Reply{}, err
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, err
 		}
 		if current.RetiredAt != nil {
-			return access.Reply{}, access.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
+			return httpkit.Reply{}, httpkit.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
 		}
 	}
 	action := "retrieval_binding.update"
-	reply := access.Reply{Status: http.StatusNoContent}
+	reply := httpkit.Reply{Status: http.StatusNoContent}
 	if retire {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", id, access.NewID())
+		_, err = tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
 		action = "retrieval_binding.retire"
 	} else {
 		var next Binding
 		next, err = Save(r.Context(), tx, p.UserID(), current, in)
 		if err == nil {
 			id = next.ID
-			reply = access.Detail(next, next.ETag)
+			reply = httpkit.Detail(next, next.ETag)
 			if current == nil {
 				action = "retrieval_binding.create"
 				reply.Status = 201
@@ -368,18 +369,18 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 	if err != nil {
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" {
-			return access.Reply{}, access.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
+			return httpkit.Reply{}, httpkit.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
 		}
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "retrieval_binding", id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
 }

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
@@ -127,7 +127,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDe
 		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
 			Pool: pool, Keys: keys, Installation: installation, Log: log,
 			Sender: notifications.NewSender(*policy), Fleet: fleetState, Catalog: reference,
-			NewID: access.NewID, Now: time.Now,
+			NewID: httpkit.NewID, Now: time.Now,
 		})
 	}))
 	wg.Go(supervise(func() { runDebitReconciliation(ctx, pool, store, syncer, log) }))

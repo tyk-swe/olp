@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -39,7 +40,7 @@ func Planner(desired []Sink, names promotion.Names, bindings promotion.Bindings,
 func acceptCredential(credential promotion.Credential) error {
 	sealed, ok := credential.(promotion.Sealed)
 	if !ok || len(sealed.Secret) < 1 || len(sealed.Secret) > 4096 {
-		return access.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
+		return httpkit.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
 	}
 	return nil
 }
@@ -215,7 +216,7 @@ func owningProject(owner Owner, projects promotion.Directory, principal access.P
 	}
 	id, present := projects.ID(scoped.Name)
 	if !present {
-		return nil, access.Invalid("sinks.project", "The owning project is not declared or present at the destination.")
+		return nil, httpkit.Invalid("sinks.project", "The owning project is not declared or present at the destination.")
 	}
 	if err := principal.Project(&id, access.Change); err != nil {
 		return nil, err
@@ -224,10 +225,10 @@ func owningProject(owner Owner, projects promotion.Directory, principal access.P
 }
 
 func write(ctx context.Context, tx pgx.Tx, s Sink, projectID *string, current stored, found bool, actor string) (string, error) {
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if found {
 		return current.id, sinks.Update(ctx, tx, current.id, s.spec(projectID), etag)
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	return id, sinks.Insert(ctx, tx, id, s.spec(projectID), etag, actor)
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -41,7 +42,7 @@ type codeRoute struct {
 	Adapters []codemode.Adapter `json:"adapters"`
 }
 
-func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) codeRoutes(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
 		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
 		||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("v.connections")+`)
@@ -70,95 +71,95 @@ type CodeRouteInput struct {
 	Enabled                 bool                           `json:"enabled"`
 }
 
-func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	var in CodeRouteInput
-	if err := access.Decode(r, &in); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &in); err != nil {
+		return httpkit.Reply{}, err
 	}
 	input, validationError := in.Validated()
 	if validationError != nil {
-		return access.Reply{}, validationError
+		return httpkit.Reply{}, validationError
 	}
 	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
-func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "id")
+func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var document []byte
 	var project, etag string
 	if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = p.Project(&project, access.Change); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := s.Access.Replay(r, tx, p, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	if err = access.Match(r, etag); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Match(r, etag); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var route codemode.Route
 	if err = json.Unmarshal(document, &route); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	route = published.Route
 	adapters := published.Adapters
 	if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_route.publish", "code_route", id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	out := access.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
+	out := httpkit.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
 	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return out, tx.Commit(r.Context())
 }
 
-func (s *Server) codeRevisions(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "id")
+func (s *Server) codeRevisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var project string
 	if err = s.Access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.code_routes WHERE id=$1`, id).Scan(&project); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = p.Project(&project, access.View); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
 		FROM olp.code_route_revisions WHERE route_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := access.JSONRows(rows)
-	return access.ListReply(items, page), err
+	items, err := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, page), err
 }
 
 // codePublication reads the configurations of the providers behind a pool's
@@ -220,7 +221,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 		return nil, err
 	}
 	if !matches {
-		return nil, access.Fail(404, "not_found", "The pool was not found.")
+		return nil, httpkit.Fail(404, "not_found", "The pool was not found.")
 	}
 	if out.Tools != nil {
 		if _, err := codesessions.ResearchAccount(ctx, tx, out); err != nil {
@@ -234,14 +235,14 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 			return nil, err
 		}
 		if slug != in.Slug {
-			return nil, access.Invalid("slug", "The route slug is immutable.")
+			return nil, httpkit.Invalid("slug", "The route slug is immutable.")
 		}
 	}
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.route_drafts WHERE slug=$1)`, in.Slug).Scan(&matches); err != nil {
 		return nil, err
 	}
 	if matches {
-		return nil, access.Invalid("slug", "This slug belongs to an ordinary route.")
+		return nil, httpkit.Invalid("slug", "This slug belongs to an ordinary route.")
 	}
 	document, _ := json.Marshal(out)
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
@@ -251,34 +252,34 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 
 func (in CodeRouteInput) validate() error {
 	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, InitialRecoveryAttempts: in.InitialRecoveryAttempts}).ValidatePaidTargets(); err != nil {
-		return access.Invalid("paid_targets", err.Error())
+		return httpkit.Invalid("paid_targets", err.Error())
 	}
 	if in.InitialRecoveryAttempts < 0 || in.InitialRecoveryAttempts > 2 {
-		return access.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
+		return httpkit.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
 	}
 	if !bodylimit.Valid(in.MaxBodyBytes) {
-		return access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
+		return httpkit.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
 	if !routeidentity.ValidSlug(in.Slug) {
-		return access.Invalid("slug", "Use a route slug.")
+		return httpkit.Invalid("slug", "Use a route slug.")
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {
-		return access.Invalid("models", err.Error())
+		return httpkit.Invalid("models", err.Error())
 	}
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting}).ValidateAliases(); err != nil {
-		return access.Invalid("aliases", err.Error())
+		return httpkit.Invalid("aliases", err.Error())
 	}
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
-		return access.Invalid("model_pools", err.Error())
+		return httpkit.Invalid("model_pools", err.Error())
 	}
 	if err := in.Tools.Validate(); err != nil {
-		return access.Invalid("tools", err.Error())
+		return httpkit.Invalid("tools", err.Error())
 	}
 	return nil
 }
 
 func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
-	project, projectError := access.ParseUUID(in.ProjectID)
+	project, projectError := httpkit.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
 	}
@@ -288,13 +289,13 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	route := in
 	var err error
 	if err := route.ValidateAliases(); err != nil {
-		return nil, access.Invalid("aliases", err.Error())
+		return nil, httpkit.Invalid("aliases", err.Error())
 	}
 	if err := route.ValidateModelPools(); err != nil {
-		return nil, access.Invalid("model_pools", err.Error())
+		return nil, httpkit.Invalid("model_pools", err.Error())
 	}
 	if err = route.Tools.Validate(); err != nil {
-		return nil, access.Invalid("tools", err.Error())
+		return nil, httpkit.Invalid("tools", err.Error())
 	}
 	if route.Tools != nil {
 		if _, err = codesessions.ResearchAccount(ctx, tx, route); err != nil {
@@ -313,7 +314,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 				return nil, err
 			}
 			if !available {
-				return nil, access.Invalid("models", "Every model needs an enrolled pool account.")
+				return nil, httpkit.Invalid("models", "Every model needs an enrolled pool account.")
 			}
 		}
 	}
@@ -323,11 +324,11 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	}
 	if frozenPaid != nil {
 		if len(frozenPaid) != len(paidProviders) {
-			return nil, access.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+			return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
 		}
 		for id := range frozenPaid {
 			if _, ok := paidProviders[id]; !ok {
-				return nil, access.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+				return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
 			}
 		}
 		if err := ValidateCodePaidProviders(route, frozenPaid); err != nil {
@@ -353,14 +354,14 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 			return nil, err
 		}
 		if len(current) != len(frozen) {
-			return nil, access.Invalid("connections", "Frozen providers must match the publication pool.")
+			return nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
 		}
 		for provider, cfg := range frozen {
 			if _, ok := current[provider]; !ok {
-				return nil, access.Invalid("connections", "Frozen providers must match the publication pool.")
+				return nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
 			}
 			if _, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID); !ok {
-				return nil, access.Invalid("connections", "Frozen connections must support a coding adapter.")
+				return nil, httpkit.Invalid("connections", "Frozen connections must support a coding adapter.")
 			}
 		}
 		encoded, err := json.Marshal(frozen)
@@ -370,8 +371,8 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 		connections = encoded
 	}
 
-	route.RevisionID = access.NewID()
-	route.ETag = access.NewID()
+	route.RevisionID = httpkit.NewID()
+	route.ETag = httpkit.NewID()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	route.PublishedAt = &now
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {
@@ -429,26 +430,26 @@ func ValidateCodePaidProviders(route codemode.Route, published map[string]routin
 	for model, target := range route.AllPaidTargets() {
 		provider, exists := published[target.ProviderID]
 		if !exists {
-			return access.Invalid("paid_targets", "Choose a published metered provider in this project.")
+			return httpkit.Invalid("paid_targets", "Choose a published metered provider in this project.")
 		}
 		if _, ok := codeadapter.ForConnection(provider.Kind, provider.AuthMode, provider.ProfileID); ok {
-			return access.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
+			return httpkit.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
 		}
 		if _, ok := routing.CodePaidProtocol(provider, model); !ok {
-			return access.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
+			return httpkit.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
 		}
 		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool {
 			return slot.ID == target.SlotID && slot.Enabled && slot.CredentialID != nil && slot.CredentialVersion != nil
 		})
 		if slot < 0 {
-			return access.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
+			return httpkit.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
 		}
 	}
 	return nil
 }
 
 func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
-	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.PoolID})
+	ids, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.PoolID})
 	if err != nil {
 		return CodeRouteInput{}, err
 	}
@@ -456,7 +457,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 		if in.Tools == nil {
 			return nil, nil
 		}
-		account, accountError := access.ParseUUID(in.Tools.AccountID)
+		account, accountError := httpkit.ParseUUID(in.Tools.AccountID)
 		if accountError != nil {
 			return nil, accountError
 		}
@@ -489,7 +490,7 @@ func validatedCodeRouteTargets(input map[string]codemode.PaidTarget) (map[string
 			}
 		}
 	})
-	targets, targetError := access.ParseUUIDs(rawTargets)
+	targets, targetError := httpkit.ParseUUIDs(rawTargets)
 	if targetError != nil {
 		return nil, targetError
 	}

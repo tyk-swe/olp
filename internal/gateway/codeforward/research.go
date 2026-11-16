@@ -11,7 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/coderesearch"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward/coderesearch"
 )
 
 const researchTimeout = 2 * time.Minute

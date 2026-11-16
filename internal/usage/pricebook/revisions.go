@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -60,7 +61,7 @@ func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt ti
 		return Revision{}, fmt.Errorf("number pricing revision: %w", err)
 	}
 	revision := Revision{
-		ID:          access.NewID(),
+		ID:          httpkit.NewID(),
 		Revision:    number,
 		EffectiveAt: effectiveAt.UTC(),
 		CreatedBy:   actor,

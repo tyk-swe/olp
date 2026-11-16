@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -67,7 +67,7 @@ type Policy struct {
 }
 
 func invalid(message string) error {
-	return access.Invalid("capture_policy", message)
+	return httpkit.Invalid("capture_policy", message)
 }
 
 func (p Settings) validate() error {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -21,36 +22,36 @@ var listableStatuses = map[contract.NotificationDeliveryStatus]bool{
 	contract.NotificationDeliveryStatusFailed:    true,
 }
 
-func (s *Server) notificationDeliveries(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) notificationDeliveries(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	query := r.URL.Query()
 	ruleID, err := deliveryRule(strings.TrimSpace(query.Get("rule_id")))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	status, err := deliveryStatus(contract.NotificationDeliveryStatus(strings.TrimSpace(query.Get("status"))))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), listDeliveriesSQL,
 		page.Before, p.AllProjects, p.ProjectIDs(), ruleID, status, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := access.JSONRows(rows)
-	return access.ListReply(items, page), err
+	items, err := httpkit.JSONRows(rows)
+	return httpkit.ListReply(items, page), err
 }
 
 func deliveryRule(raw string) (*string, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	id, err := access.ParseUUID(raw)
+	id, err := httpkit.ParseUUID(raw)
 	if err != nil {
-		return nil, access.Invalid("rule_id", "Use a valid rule identifier.")
+		return nil, httpkit.Invalid("rule_id", "Use a valid rule identifier.")
 	}
 	return &id, nil
 }
@@ -60,7 +61,7 @@ func deliveryStatus(raw contract.NotificationDeliveryStatus) (*contract.Notifica
 		return nil, nil
 	}
 	if !listableStatuses[raw] {
-		return nil, access.Invalid("status", "Use pending, delivered, or failed.")
+		return nil, httpkit.Invalid("status", "Use pending, delivered, or failed.")
 	}
 	return &raw, nil
 }

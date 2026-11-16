@@ -6,7 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
-	"github.com/tyk-swe/olp/internal/codexwire"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 

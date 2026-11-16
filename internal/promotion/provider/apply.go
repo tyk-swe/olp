@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -131,7 +132,7 @@ func (a applying) resolveSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot 
 		return providers.DraftSlot{}, err
 	}
 	return providers.DraftSlot{
-		ID:           cmp.Or(current.id, access.NewID()),
+		ID:           cmp.Or(current.id, httpkit.NewID()),
 		Default:      slot.Default,
 		Position:     slot.Position,
 		Name:         slot.Name,

@@ -15,6 +15,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -124,7 +125,7 @@ func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p Principal, required b
 	if err := p.Authorize(Access); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, NewID(), p.UserID())
+	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, httpkit.NewID(), p.UserID())
 	return err
 }
 
@@ -144,11 +145,11 @@ func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, ti
 func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow, error) {
 	var f mfaFlow
 	if len(token) > 256 {
-		return f, Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	err := tx.QueryRow(r.Context(), `SELECT c.id::text,c.user_id::text,c.user_etag::text,c.mfa_revision::text,c.session_id::text,c.secret_id::text,c.purpose,c.data FROM olp.mfa_challenges c JOIN olp.users u ON u.id=c.user_id WHERE c.digest=$1 AND c.expires_at>clock_timestamp() AND c.attempts<5 AND u.etag=c.user_etag AND u.mfa_revision=c.mfa_revision AND u.active AND u.oidc_authorized FOR UPDATE OF c`, s.Auth.Digest(secrets.MFAChallengeDigest, token)).Scan(&f.ID, &f.UserID, &f.UserETag, &f.Revision, &f.SessionID, &f.SecretID, &f.Purpose, &f.Data)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return f, Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	if err != nil {
 		return f, err
@@ -159,27 +160,27 @@ func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow,
 			return f, e
 		}
 		if !enabled {
-			return f, Fail(401, "mfa_challenge_invalid", "Local sign-in is unavailable. Start authentication again.")
+			return f, httpkit.Fail(401, "mfa_challenge_invalid", "Local sign-in is unavailable. Start authentication again.")
 		}
 	}
 	if f.SessionID != nil {
 		p, err := s.Authenticate(r, tx)
 		if err != nil || p.SessionID != *f.SessionID || p.ID != f.UserID {
-			return f, Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+			return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 		}
 	}
 	return f, nil
 }
 
-func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string, session *string, data mfaFlowData) (Reply, error) {
+func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string, session *string, data mfaFlowData) (httpkit.Reply, error) {
 	u, err := s.mfaUser(r.Context(), tx, userID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	methods := []string{}
 	var totp, recovery bool
 	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE user_id=$1 AND kind='totp'),EXISTS(SELECT 1 FROM olp.mfa_recovery_codes WHERE user_id=$1)", userID).Scan(&totp, &recovery); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if totp {
 		methods = append(methods, "totp")
@@ -192,7 +193,7 @@ func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string
 	if len(u.Credentials) > 0 && webErr == nil {
 		creation, challenge, err := w.BeginLogin(u, webauthn.WithUserVerification(protocol.VerificationRequired))
 		if err != nil {
-			return Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		challenge.Expires = time.Now().Add(mfaTTL)
 		data.WebAuthn = challenge
@@ -200,23 +201,23 @@ func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string
 		methods = append(methods, "webauthn")
 	}
 	if purpose != "bootstrap" && len(methods) == 0 {
-		return Reply{}, Fail(403, "mfa_recovery_required", "No enrolled factor is available at this public origin. Restore the WebAuthn origin or use offline account recovery.")
+		return httpkit.Reply{}, httpkit.Fail(403, "mfa_recovery_required", "No enrolled factor is available at this public origin. Restore the WebAuthn origin or use offline account recovery.")
 	}
-	token, until, err := s.storeMFAFlow(r, tx, mfaFlow{ID: NewID(), UserID: userID, SessionID: session, Purpose: purpose, Data: data})
+	token, until, err := s.storeMFAFlow(r, tx, mfaFlow{ID: httpkit.NewID(), UserID: userID, SessionID: session, Purpose: purpose, Data: data})
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return Reply{Status: 202, Body: map[string]any{"challenge": token, "expires_at": until, "methods": methods, "enrollment_required": purpose == "bootstrap", "public_key": options, "webauthn_available": webErr == nil}}, nil
+	return httpkit.Reply{Status: 202, Body: map[string]any{"challenge": token, "expires_at": until, "methods": methods, "enrollment_required": purpose == "bootstrap", "public_key": options, "webauthn_available": webErr == nil}}, nil
 }
 
-func (s *Server) localSession(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
+func (s *Server) localSession(r *http.Request, tx pgx.Tx, userID string) (httpkit.Reply, error) {
 	enabled, err := mfaConfigured(r.Context(), tx, userID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	required, err := ReadLocalMFARequired(r.Context(), tx)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if enabled {
 		return s.mfaChallenge(r, tx, userID, "login", nil, mfaFlowData{})

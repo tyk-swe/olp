@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 func samlSignInRole(c samlConfiguration, managed, assigned string, data []byte) string {
@@ -52,53 +53,53 @@ func (s *Server) usableSAMLOwner(ctx context.Context, q Queryer) (bool, error) {
 	return false, rows.Err()
 }
 
-func (s *Server) samlIdentities(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) samlIdentities(r *http.Request, p Principal) (httpkit.Reply, error) {
 	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'issuer',issuer,'subject',subject,'email_at_link',email_at_link,'created_at',created_at,'last_login_at',last_login_at) FROM olp.saml_identities WHERE user_id=$1 ORDER BY created_at,id`, p.ID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	items, err := JSONRows(rows)
+	items, err := httpkit.JSONRows(rows)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	usable, err := usableSAMLIdentities(r, s.Pool, p)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return OK(map[string]any{"items": items, "linking_available": err == nil && c.Enabled, "reauthentication_available": len(usable) > 0}), nil
+	return httpkit.OK(map[string]any{"items": items, "linking_available": err == nil && c.Enabled, "reauthentication_available": len(usable) > 0}), nil
 }
 
-func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
-	id, err := IDParam(r, "identity_id")
+func (s *Server) unlinkSAML(r *http.Request, _ Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "identity_id")
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	if err = s.ConsumeRecent(r, tx, p, "saml_unlink", id); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	result, err := tx.Exec(r.Context(), "DELETE FROM olp.saml_identities WHERE id=$1 AND user_id=$2", id, p.ID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if result.RowsAffected() != 1 {
-		return Reply{}, Fail(404, "not_found", "The linked identity was not found.")
+		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The linked identity was not found.")
 	}
 	var local bool
 	if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL AND $2 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true) FROM olp.users WHERE id=$1", p.ID, !s.localLoginDisabled).Scan(&local); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var management string
 	if err = tx.QueryRow(r.Context(), "SELECT role_management FROM olp.users WHERE id=$1", p.ID).Scan(&management); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	// A SAML-managed account answers to the IdP, so neither its password nor an
 	// OIDC identity is a fallback that would let it keep a mapped role once the
@@ -108,24 +109,24 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 		if management != "saml" {
 			var e error
 			if usable, e = usableOIDCIdentities(r, tx, p, management != "oidc"); e != nil {
-				return Reply{}, e
+				return httpkit.Reply{}, e
 			}
 		}
 		if len(usable) == 0 {
 			c, e := loadSAML(r.Context(), tx)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
-				return Reply{}, e
+				return httpkit.Reply{}, e
 			}
 			rows, e := tx.Query(r.Context(), "SELECT role_claims FROM olp.saml_identities WHERE user_id=$1 AND issuer=$2", p.ID, c.EntityID)
 			if e != nil {
-				return Reply{}, e
+				return httpkit.Reply{}, e
 			}
 			found := false
 			for rows.Next() {
 				var raw []byte
 				if e = rows.Scan(&raw); e != nil {
 					rows.Close()
-					return Reply{}, e
+					return httpkit.Reply{}, e
 				}
 				if samlSignInRole(c, management, p.Role, raw) != "" {
 					found = true
@@ -134,36 +135,36 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 			e = rows.Err()
 			rows.Close()
 			if e != nil {
-				return Reply{}, e
+				return httpkit.Reply{}, e
 			}
 			if !found {
-				return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
+				return httpkit.Reply{}, httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 			}
 		}
 	}
 	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, NewID()); err != nil {
-		return Reply{}, err
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, httpkit.NewID()); err != nil {
+		return httpkit.Reply{}, err
 	}
 	// Removing an identity is no sign-in, so the rotated session keeps the
 	// method and MFA state of the session that asked.
 	strength, err := sessionStrength(r, tx, p.SessionID)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	session, err := s.newSession(r, tx, p.ID, strength)
 	if err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	session.Status = 204
 	session.Body = nil
 	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.unlink", "saml_identity", id, "success"); err != nil {
-		return Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return session, tx.Commit(r.Context())
 }

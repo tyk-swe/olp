@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codexwire"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
 )
 
 func TestAllowanceHeadersStampPercentPassiveWindows(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -163,8 +163,8 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 			revoked := owner
 			revoked.RevokedAt = &now
 			m.authority.agentPrincipals[owner.ID] = revoked
-		}, want: access.Forbidden()},
-		{name: "agent retired", change: func(m *Manager, _ *taskStoreFixture) { delete(m.authority.agentResources, publication) }, want: access.Forbidden()},
+		}, want: httpkit.Forbidden()},
+		{name: "agent retired", change: func(m *Manager, _ *taskStoreFixture) { delete(m.authority.agentResources, publication) }, want: httpkit.Forbidden()},
 		{name: "authority stale", change: func(m *Manager, _ *taskStoreFixture) {
 			m.authority.readAt = now.Add(-AuthorityStaleAfter - time.Second)
 		}, want: ErrStaleAuthority},
@@ -186,9 +186,9 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 		want     error
 	}{
 		{name: "pinned tool", scope: "tools", resource: "toolset", revision: "toolset-revision"},
-		{name: "foreign tool revision", scope: "tools", resource: "toolset", revision: "other", want: access.Forbidden()},
-		{name: "foreign route revision", scope: "inference", resource: "route", revision: "other", want: access.Forbidden()},
-		{name: "unsupported scope", scope: "agents", resource: publication, revision: revision, want: access.Forbidden()},
+		{name: "foreign tool revision", scope: "tools", resource: "toolset", revision: "other", want: httpkit.Forbidden()},
+		{name: "foreign route revision", scope: "inference", resource: "route", revision: "other", want: httpkit.Forbidden()},
+		{name: "unsupported scope", scope: "agents", resource: publication, revision: revision, want: httpkit.Forbidden()},
 		{name: "limit exhausted", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[1].err = pgx.ErrNoRows }, want: ErrTaskAttemptLimit},
 		{name: "store unavailable", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.beginErr = errors.New("unavailable") }, want: ErrStaleAuthority},
 		{name: "task ended", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[0].err = pgx.ErrNoRows }, want: ErrInvalidKey},

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 // Need is how a principal uses a project-bound resource.
@@ -18,7 +19,7 @@ const (
 	Change
 )
 
-var NotFound = Fail(404, "not_found", "The resource was not found.")
+var NotFound = httpkit.Fail(404, "not_found", "The resource was not found.")
 
 // Project decides p's access to a resource in projectID, where nil is the
 // unassigned boundary only installation-wide principals reach. A resource
@@ -37,7 +38,7 @@ func (p Principal) Project(projectID *string, need Need) error {
 		return NotFound
 	}
 	if need == Change && role != "manager" {
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	return nil
 }
@@ -61,7 +62,7 @@ func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, pro
 		if p.AllProjects {
 			return nil
 		}
-		return Forbidden()
+		return httpkit.Forbidden()
 	}
 	if err := p.Project(projectID, View); err != nil {
 		return err

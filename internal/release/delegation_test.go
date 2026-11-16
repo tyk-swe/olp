@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 func delegationPrincipals(project, issuer string) (keyauthority.Authority, keyauthority.Authority) {
@@ -90,7 +90,7 @@ func TestDelegationRequiresBothPrincipalsAuthority(t *testing.T) {
 				}
 				return
 			}
-			var problem *access.Problem
+			var problem *httpkit.Problem
 			if !errors.As(err, &problem) || problem.Status != 403 || problem.Code != "permission_denied" {
 				t.Fatalf("unauthorized delegation error = %v", err)
 			}

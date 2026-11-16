@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
@@ -66,7 +67,7 @@ func planStored(ctx context.Context, q access.Queryer, lookup installed, binding
 	if errors.Is(err, errProjectAbsent) {
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before applying this binding."), nil
 	}
-	if problem, ok := errors.AsType[*access.Problem](err); ok {
+	if problem, ok := errors.AsType[*httpkit.Problem](err); ok {
 		return promotion.Blocker(kind, binding.Name, problem.Detail), nil
 	}
 	if err != nil {

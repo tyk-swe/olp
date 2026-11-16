@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -52,35 +53,35 @@ func summarize(d Definition) serverSummary {
 
 func prepareRevision(current *Definition, candidate Definition) (Definition, error) {
 	if candidate.Catalog == nil {
-		return Definition{}, access.Invalid("catalog", "Certify a bounded tool catalog first.")
+		return Definition{}, httpkit.Invalid("catalog", "Certify a bounded tool catalog first.")
 	}
 	for name, price := range candidate.ToolPrices {
 		if !slices.ContainsFunc(candidate.Catalog.Tools, func(tool routing.MCPTool) bool { return tool.Name == name }) || !routing.ValidToolPrice(price) {
-			return Definition{}, access.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
+			return Definition{}, httpkit.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
 		}
 	}
 	if candidate.UnitPrice != nil && !routing.ValidToolPrice(*candidate.UnitPrice) {
-		return Definition{}, access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
+		return Definition{}, httpkit.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
 	}
 
 	effective := routing.EffectiveToolLimits(candidate.CallsPerMinute, candidate.MaxConcurrency, candidate.PerKeyCallsPerMinute, candidate.PerKeyMaxConcurrency)
 	if !effective.WithinInstallation() {
-		return Definition{}, access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
+		return Definition{}, httpkit.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
 	}
 	if current != nil && (current.Transport != candidate.Transport || !reflect.DeepEqual(current.Stdio, candidate.Stdio)) {
-		return Definition{}, access.Invalid("transport", "The registered transport and executable binding are immutable.")
+		return Definition{}, httpkit.Invalid("transport", "The registered transport and executable binding are immutable.")
 	}
 	if current != nil && (current.ProjectID != candidate.ProjectID || current.RetiredAt != nil) {
-		return Definition{}, access.Invalid("project_id", "The registered project is immutable.")
+		return Definition{}, httpkit.Invalid("project_id", "The registered project is immutable.")
 	}
 	id, revision := func() (string, int64) {
 		if current != nil {
 			return current.ID, current.Revision + 1
 		}
-		return access.NewID(), 1
+		return httpkit.NewID(), 1
 	}()
 	return Definition{
-		ID: id, ETag: access.NewID(), RevisionID: access.NewID(), Revision: revision,
+		ID: id, ETag: httpkit.NewID(), RevisionID: httpkit.NewID(), Revision: revision,
 		ProjectID: candidate.ProjectID, Name: candidate.Name, Endpoint: candidate.Endpoint, Transport: candidate.Transport,
 		Enabled: candidate.Enabled, HasCredential: candidate.CredentialID != nil, CredentialID: candidate.CredentialID,
 		Catalog: candidate.Catalog, CertifiedAt: candidate.CertifiedAt, RetiredAt: candidate.RetiredAt,
@@ -117,7 +118,7 @@ func persistServer(ctx context.Context, tx pgx.Tx, actor string, current *Defini
 		return err
 	}
 	if active >= 128 {
-		return access.Fail(409, "mcp_server_limit", "This installation already has 128 active MCP servers.")
+		return httpkit.Fail(409, "mcp_server_limit", "This installation already has 128 active MCP servers.")
 	}
 	_, err := tx.Exec(ctx, "INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,credential_id,latest_revision_id,etag,created_by,calls_per_minute,max_concurrency,per_key_calls_per_minute,per_key_max_concurrency,delegation_key_id,entra_client_secret_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)", next.ID, next.ProjectID, next.Name, next.Transport, next.Endpoint, next.Enabled, next.CredentialID, next.RevisionID, next.ETag, actor, next.CallsPerMinute, next.MaxConcurrency, next.PerKeyCallsPerMinute, next.PerKeyMaxConcurrency, next.DelegationKeyID, next.EntraClientSecretID)
 	return err
@@ -161,7 +162,7 @@ func ListActive(ctx context.Context, q access.Queryer) ([]Definition, error) {
 
 func UpdateLimits(ctx context.Context, tx pgx.Tx, id string, limits routing.ToolLimits, etag string) error {
 	if !limits.WithinInstallation() {
-		return access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
+		return httpkit.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")
 	}
 	_, err := tx.Exec(ctx, "UPDATE olp.mcp_servers SET calls_per_minute=$2,max_concurrency=$3,per_key_calls_per_minute=$4,per_key_max_concurrency=$5,etag=$6 WHERE id=$1", id, limits.CallsPerMinute, limits.MaxConcurrency, limits.PerKeyCallsPerMinute, limits.PerKeyMaxConcurrency, etag)
 	return err

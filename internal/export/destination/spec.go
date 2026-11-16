@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -58,7 +58,7 @@ var objectKinds = []kind{
 func lookup(sinkType Type, format Format) (kind, error) {
 	formats, ok := kinds[sinkType]
 	if !ok {
-		return kind{}, access.Invalid("type", "type must be https, otlp_logs, s3, gcs, azure_blob or stripe_meter")
+		return kind{}, httpkit.Invalid("type", "type must be https, otlp_logs, s3, gcs, azure_blob or stripe_meter")
 	}
 	i := slices.IndexFunc(formats, func(k kind) bool { return k.format == format })
 	if i < 0 {
@@ -66,7 +66,7 @@ func lookup(sinkType Type, format Format) (kind, error) {
 		for j, k := range formats {
 			names[j] = string(k.format)
 		}
-		return kind{}, access.Invalid("format", fmt.Sprintf("%s sinks support format %s", sinkType, strings.Join(names, " or ")))
+		return kind{}, httpkit.Invalid("format", fmt.Sprintf("%s sinks support format %s", sinkType, strings.Join(names, " or ")))
 	}
 	return formats[i], nil
 }
@@ -81,22 +81,22 @@ func ParseSpec(sinkType Type, format Format, settings json.RawMessage) (Spec, er
 
 func checkStreams(k kind, streams []Stream) error {
 	if len(streams) < 1 || len(streams) > 6 {
-		return access.Invalid("streams", "streams must contain from 1 to 6 entries")
+		return httpkit.Invalid("streams", "streams must contain from 1 to 6 entries")
 	}
 	seen := map[Stream]bool{}
 	for _, stream := range streams {
 		if !stream.Valid() || seen[stream] {
-			return access.Invalid("streams", "streams must contain distinct supported entries")
+			return httpkit.Invalid("streams", "streams must contain distinct supported entries")
 		}
 		seen[stream] = true
 	}
 	switch {
 	case k.only == MeteringStream && (len(streams) != 1 || streams[0] != MeteringStream):
-		return access.Invalid("streams", fmt.Sprintf("%s sinks carry only the metering stream", k.format))
+		return httpkit.Invalid("streams", fmt.Sprintf("%s sinks carry only the metering stream", k.format))
 	case k.only == FOCUSStream && (len(streams) != 1 || streams[0] != FOCUSStream):
-		return access.Invalid("streams", "csv_gzip sinks carry only the focus stream")
+		return httpkit.Invalid("streams", "csv_gzip sinks carry only the focus stream")
 	case k.only != FOCUSStream && seen[FOCUSStream]:
-		return access.Invalid("streams", "the focus stream requires a csv_gzip object sink")
+		return httpkit.Invalid("streams", "the focus stream requires a csv_gzip object sink")
 	}
 	return nil
 }
@@ -108,18 +108,18 @@ func decodeSettings(format Format, raw json.RawMessage, into any, accepted ...st
 	var fields map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := decoder.Decode(&fields); err != nil || fields == nil {
-		return access.Invalid("settings", "settings must be a JSON object")
+		return httpkit.Invalid("settings", "settings must be a JSON object")
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return access.Invalid("settings", "settings must be a single JSON object")
+		return httpkit.Invalid("settings", "settings must be a single JSON object")
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if !slices.Contains(accepted, field) {
-			return access.Invalid("settings", fmt.Sprintf("%s sinks do not accept settings.%s", format, field))
+			return httpkit.Invalid("settings", fmt.Sprintf("%s sinks do not accept settings.%s", format, field))
 		}
 	}
 	if err := json.Unmarshal(raw, into); err != nil {
-		return access.Invalid("settings", "settings must be a JSON object")
+		return httpkit.Invalid("settings", "settings must be a JSON object")
 	}
 	return nil
 }
