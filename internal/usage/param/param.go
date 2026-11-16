@@ -10,13 +10,12 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// list is the shape every paged accounting response shares.
 type Page struct {
 	Items      any     `json:"items"`
 	NextCursor *string `json:"next_cursor"`
 }
 
-// textParam treats a blank parameter as absent: a console that clears a
+// Text treats a blank parameter as absent: a console that clears a
 // filter sends an empty value, and filtering on the empty string would return
 // an empty page that looks like "no traffic".
 func Text(query url.Values, name string) *string {
@@ -64,7 +63,7 @@ func Time(query url.Values, name string) (*time.Time, error) {
 	return &utc, nil
 }
 
-// statusParam bounds the status filter to the codes a request can actually
+// Status bounds the status filter to the codes a request can actually
 // carry, so a typo returns an error instead of an empty page.
 func Status(query url.Values) (*int, error) {
 	raw := Text(query, "status_code")
@@ -100,4 +99,16 @@ func Cursor(query url.Values) (*usage.Cursor, error) {
 		return nil, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
 	}
 	return &usage.Cursor{At: at, ID: id}, nil
+}
+
+func RevisionCursor(query url.Values) (*int, error) {
+	raw := Text(query, "cursor")
+	if raw == nil {
+		return nil, nil
+	}
+	revision, err := strconv.Atoi(*raw)
+	if err != nil || revision < 1 {
+		return nil, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
+	}
+	return &revision, nil
 }

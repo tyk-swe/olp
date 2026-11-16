@@ -3,9 +3,6 @@ package rates
 import (
 	"encoding/json"
 	"fmt"
-	"time"
-
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Price is one rate in a pricing revision. Rates are exact decimal strings:
@@ -90,15 +87,6 @@ type PriceWindowPeriod struct {
 	Start      string `json:"start"`
 	End        string `json:"end"`
 	Multiplier string `json:"multiplier"`
-}
-
-// Cost prices one attempt's usage against this price, exactly as PostgreSQL
-// does when the attempt is accounted: the amount, and false when PostgreSQL
-// would record no cost because the usage is incomplete or a dimension it used
-// has no rate. startedAt decides which pricing window, if any, the attempt fell
-// in, and successful decides whether a per-request fee applies.
-func (p Price) Cost(u usage.AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
-	return parseRates(&p).cost(u, startedAt, successful, nil)
 }
 
 func UnmarshalPriceComponents(p *Price, toolCalls, tiers, windows *string, label string) error {

@@ -53,17 +53,9 @@ type Resolved struct {
 	NetworkSecret []byte
 }
 
-type ResolutionStage string
-
-const (
-	CredentialResolution ResolutionStage = "credential"
-	NetworkResolution    ResolutionStage = "network"
-	ConnectionResolution ResolutionStage = "connection"
-)
-
 type ResolutionError struct {
-	Stage ResolutionStage
-	Cause error
+	Connection bool
+	Cause      error
 }
 
 func (e *ResolutionError) Error() string { return e.Cause.Error() }
@@ -76,7 +68,7 @@ func (r Resolver) Bind(pinned *release.Release, target Target, caller CallerCred
 func (b Binding) Resolve(ctx context.Context) (Resolved, error) {
 	credential, err := b.Credential(ctx)
 	if err != nil {
-		return Resolved{}, &ResolutionError{Stage: CredentialResolution, Cause: err}
+		return Resolved{}, &ResolutionError{Cause: err}
 	}
 	client, network, err := b.resolveClient(ctx)
 	return Resolved{Credential: credential, Client: client, NetworkSecret: network}, err
@@ -117,7 +109,7 @@ func (b Binding) resolveClient(ctx context.Context) (*http.Client, []byte, error
 	}
 	secret, err := b.NetworkSecret(ctx)
 	if err != nil {
-		return nil, nil, &ResolutionError{Stage: NetworkResolution, Cause: err}
+		return nil, nil, &ResolutionError{Cause: err}
 	}
 	if provider.CredentialSource == "caller" {
 		client, err := b.resolver.Policy.EphemeralClient(provider.Network, secret, b.resolver.HeaderTimeout)
@@ -133,7 +125,7 @@ func (b Binding) resolveClient(ctx context.Context) (*http.Client, []byte, error
 
 func resolvedClient(client *http.Client, secret []byte, err error) (*http.Client, []byte, error) {
 	if err != nil {
-		return nil, secret, &ResolutionError{Stage: ConnectionResolution, Cause: err}
+		return nil, secret, &ResolutionError{Connection: true, Cause: err}
 	}
 	return client, secret, nil
 }

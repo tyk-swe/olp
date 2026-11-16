@@ -359,7 +359,7 @@ func priceUsageQuoted(ctx context.Context, tx pgx.Tx, event *usage.Event, usage 
 	// `complete` output is then "every used dimension has a rate", which is
 	// the flag unpriced facts are recorded under, and the cost it returns is
 	// gated on the usage being complete below.
-	document, err := json.Marshal(usage.WireWith(usage.Evidence.Observed(), true, usage.Evidence.Uncertain()))
+	document, err := json.Marshal(usage.WireWith(true))
 	if err != nil {
 		return AttemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}

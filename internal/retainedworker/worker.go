@@ -153,7 +153,7 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
 	if err != nil {
 		var failure *providerinvoke.ResolutionError
-		if errors.As(err, &failure) && failure.Stage != providerinvoke.ConnectionResolution {
+		if errors.As(err, &failure) && !failure.Connection {
 			return "credential_unavailable"
 		}
 		return "connection_unavailable"

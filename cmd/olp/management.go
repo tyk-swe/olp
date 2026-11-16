@@ -153,7 +153,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Fleet = m.Limits.Fleet
 	}
 	providerServer := providers.New(providers.Deps{
-		Access: m.Access, Egress: m.Egress, Getenv: m.Getenv, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
+		Access: m.Access, Egress: m.Egress, Getenv: m.Getenv, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {
@@ -241,7 +241,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 		},
 		ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
 		LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
-		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil, RetentionEnforced: in.limiter != nil, NotificationsActive: true,
+		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil,
 	})
 	// Installing reads a module's manifest once, which the
 	// interpreter is ready to do several times sooner.

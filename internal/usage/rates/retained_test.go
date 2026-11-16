@@ -10,7 +10,7 @@ import (
 func TestRetainedPricingExactUnitsAndDeferredFees(t *testing.T) {
 	p := Price{TrainingPerMillion: new("2.5"), StoragePerGiBDay: new("0.1"), CacheStoragePerMillionTokenHour: new("0.2"), ContainerPerSession: map[string]string{"4g": "0.12"}, PerRequest: new("99")}
 	u := usage.AttemptUsage{Evidence: usage.EvidenceObservedComplete, Deferred: true, UsageQuantities: usage.UsageQuantities{TrainingTokens: new(int64(1_000_000)), StorageByteSeconds: new("92771293593600"), CacheTokenSeconds: new("3600000000"), ContainerSessions: map[string]int64{"4g": 2}}}
-	got, ok := p.Cost(u, time.Now(), true)
+	got, ok := NewRoutingPrice(RoutingPrice{Price: p}).Cost(u, time.Now(), true, nil)
 	if !ok || got.String() != "3.04" {
 		t.Fatalf("exact retained units =%s %v", got.String(), ok)
 	}
@@ -18,7 +18,7 @@ func TestRetainedPricingExactUnitsAndDeferredFees(t *testing.T) {
 	// rounds once to one monetary unit; no component loses its fractional charge.
 	p = Price{TrainingPerMillion: new("0.00000049"), CacheStoragePerMillionTokenHour: new("0.001764")}
 	u = usage.AttemptUsage{Evidence: usage.EvidenceObservedComplete, Deferred: true, UsageQuantities: usage.UsageQuantities{TrainingTokens: new(int64(1)), CacheTokenSeconds: new("1")}}
-	got, ok = p.Cost(u, time.Now(), true)
+	got, ok = NewRoutingPrice(RoutingPrice{Price: p}).Cost(u, time.Now(), true, nil)
 	if !ok || got.String() != "0.000000000001" {
 		t.Fatalf("single monetary rounding =%s %v", got.String(), ok)
 	}
@@ -26,7 +26,7 @@ func TestRetainedPricingExactUnitsAndDeferredFees(t *testing.T) {
 
 func TestRetainedPricingMissingRatesAndExactQuantities(t *testing.T) {
 	for _, p := range []Price{{}, {StoragePerGiBDay: new("0.10000000000001")}, {ContainerPerSession: map[string]string{"wrong": "1"}}} {
-		if _, ok := p.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{StorageByteSeconds: new("1")}}, time.Now(), true); ok {
+		if _, ok := NewRoutingPrice(RoutingPrice{Price: p}).Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{StorageByteSeconds: new("1")}}, time.Now(), true, nil); ok {
 			t.Fatal("unrepresentable retained rate was priced")
 		}
 	}
@@ -43,12 +43,12 @@ func TestRetainedPricingMissingRatesAndExactQuantities(t *testing.T) {
 func TestRetainedEvalInvocationsPriceModelRequestsWithoutRepeatingSubmissionFee(t *testing.T) {
 	p := Price{InputPerMillion: new("0"), OutputPerMillion: new("0"), PerRequest: new("7")}
 	u := usage.AttemptUsage{Evidence: usage.EvidenceObservedComplete, Deferred: true, UsageQuantities: usage.UsageQuantities{InputTokens: new(int64(100)), OutputTokens: new(int64(10)), InvocationCount: new(int64(2))}}
-	got, ok := p.Cost(u, time.Now(), true)
+	got, ok := NewRoutingPrice(RoutingPrice{Price: p}).Cost(u, time.Now(), true, nil)
 	if !ok || got.String() != "14" {
 		t.Fatalf("actual model invocations=%s %v", got.String(), ok)
 	}
 	u.InvocationCount = new(int64(0))
-	got, ok = p.Cost(u, time.Now(), true)
+	got, ok = NewRoutingPrice(RoutingPrice{Price: p}).Cost(u, time.Now(), true, nil)
 	if !ok || !got.IsZero() {
 		t.Fatalf("zero invocations=%s %v", got.String(), ok)
 	}

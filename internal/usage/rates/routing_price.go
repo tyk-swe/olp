@@ -38,11 +38,11 @@ func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.T
 	return p.costBound(input, output, generation, discount, p.rates.windowAt(at))
 }
 
-func (p *RoutingPrice) MaximumWindowCostBound(input, output int64, generation bool, discount *RoutingDiscount) (Cost, bool) {
+func (p *RoutingPrice) maximumWindowCostBound(input, output int64, discount *RoutingDiscount) (Cost, bool) {
 	if p == nil {
 		return Cost{}, false
 	}
-	return p.costBound(input, output, generation, discount, p.rates.maximumWindow())
+	return p.costBound(input, output, true, discount, p.rates.maximumWindow())
 }
 
 func (p *RoutingPrice) costBound(input, output int64, generation bool, discount *RoutingDiscount, window *big.Int) (Cost, bool) {

@@ -222,7 +222,7 @@ func TestVertexNativeVideoUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	rate := func(s string) *string { return &s }
-	price := rates.Price{InputPerMillion: rate("1"), CachedInputPerMillion: rate("0.5"), ImageInputPerMillion: rate("5"), CachedImageInputPerMillion: rate("2"), OutputPerMillion: rate("1")}
+	price := rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{InputPerMillion: rate("1"), CachedInputPerMillion: rate("0.5"), ImageInputPerMillion: rate("5"), CachedImageInputPerMillion: rate("2"), OutputPerMillion: rate("1")}})
 	reference := usage.AttemptUsage{
 		Evidence: usage.EvidenceObservedComplete,
 		UsageQuantities: usage.UsageQuantities{
@@ -230,7 +230,7 @@ func TestVertexNativeVideoUsage(t *testing.T) {
 			ImageInputTokens: new(int64(7)), CachedImageInputTokens: new(int64(3)),
 		},
 	}
-	expectedCost, priced := price.Cost(reference, time.Time{}, true)
+	expectedCost, priced := price.Cost(reference, time.Time{}, true, nil)
 	if !priced {
 		t.Fatal("reference usage is unpriced")
 	}
@@ -251,7 +251,7 @@ func TestVertexNativeVideoUsage(t *testing.T) {
 		if got.ImageInputTokens == nil || *got.ImageInputTokens != 7 || got.CachedImageInputTokens == nil || *got.CachedImageInputTokens != 3 {
 			t.Errorf("%s visual usage = image %v, cached image %v, want 7 and 3", test.name, got.ImageInputTokens, got.CachedImageInputTokens)
 		}
-		cost, ok := price.Cost(usage.ObservedAttemptUsage(got, o.Complete(), "realtime"), time.Time{}, true)
+		cost, ok := price.Cost(usage.ObservedAttemptUsage(got, o.Complete(), "realtime"), time.Time{}, true, nil)
 		if !ok {
 			t.Fatalf("%s usage is unpriced", test.name)
 		}
