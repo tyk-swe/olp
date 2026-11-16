@@ -74,7 +74,9 @@
 {:else if models.length === 0}<EmptyState title="No published routes">
     {search.trim()
       ? 'No published route matches this search.'
-      : 'Publish a route to list it here.'}
+      : publicProjectId
+        ? 'This project has not shared any routes yet.'
+        : 'Publish a route to list it here.'}
   </EmptyState>
 {/if}
 {#if copyError}<Callout tone="danger">{copyError}</Callout>{/if}
