@@ -353,15 +353,3 @@ func (s *Store) BindDiscovered(ctx context.Context, child *Resource, submission 
 	}
 	return bound, nil
 }
-
-// Child checks both the child's owner and its immutable parent relationship.
-func (s *Store) Child(ctx context.Context, kind, owner, id string, parent *Resource) (*Resource, error) {
-	r, err := s.Get(ctx, kind, owner, id)
-	if err != nil {
-		return nil, err
-	}
-	if parent == nil || r.ParentID == nil || *r.ParentID != parent.UUID {
-		return nil, ErrNotFound
-	}
-	return r, nil
-}

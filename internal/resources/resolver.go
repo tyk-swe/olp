@@ -22,14 +22,14 @@ var (
 	ErrNoRows = errors.New("provider resource revision unavailable")
 )
 
-// Resolver rebuilds the historical provider pin that owns a retained
-// resource. Its credential's secret comes from the credential source.
 type ResolvedPin struct {
 	Invocation providerinvoke.Target
 	Route      routing.Route
 	Target     routing.Target
 }
 
+// Resolver rebuilds the historical provider pin that owns a retained
+// resource. Its credential's secret comes from the credential source.
 type Resolver struct {
 	pool *pgxpool.Pool
 }
@@ -48,10 +48,6 @@ func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation 
 	}
 	defer conn.Release()
 	return r.resolve(ctx, conn, res, operation)
-}
-
-func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (ResolvedPin, error) {
-	return r.resolve(ctx, tx, res, operation)
 }
 
 func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (ResolvedPin, error) {

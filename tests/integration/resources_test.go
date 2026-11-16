@@ -52,7 +52,7 @@ func TestStoredResourcesAnswerOnlyTheKeyThatOwnsThem(t *testing.T) {
 	}
 	list := func(keyID string, limit int, after string) []string {
 		t.Helper()
-		listed, err := store.List(ctx, resources.KindBatch, keyID, limit, after)
+		listed, err := store.ListKinds(ctx, []string{resources.KindBatch}, keyID, limit, after)
 		if err != nil {
 			t.Fatalf("list after %q: %v", after, err)
 		}
@@ -230,7 +230,7 @@ func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
 	if err := replayed.Dispatch(ctx); !errors.Is(err, resources.ErrSubmissionConflict) {
 		t.Fatalf("replay could dispatch another creation: %v", err)
 	}
-	listed, err := store.List(ctx, resources.KindFile, fixture.keyID, 10, "")
+	listed, err := store.ListKinds(ctx, []string{resources.KindFile}, fixture.keyID, 10, "")
 	if err != nil {
 		t.Fatal(err)
 	}

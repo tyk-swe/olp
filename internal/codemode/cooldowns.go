@@ -20,13 +20,6 @@ func CooldownClasses() [5]CooldownClass {
 	return [5]CooldownClass{CooldownQuota, CooldownEntitlement, CooldownRate, CooldownCapacity, CooldownConcurrency}
 }
 
-type Cooldown struct {
-	Class      CooldownClass `json:"class"`
-	Model      *string       `json:"model"`
-	RetryAt    time.Time     `json:"retry_at"`
-	ObservedAt *time.Time    `json:"observed_at,omitempty"`
-}
-
 func EarliestRecovery(now time.Time, times ...*time.Time) *time.Time {
 	var earliest *time.Time
 	for _, candidate := range times {
