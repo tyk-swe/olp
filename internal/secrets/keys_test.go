@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -135,14 +136,14 @@ func TestParseRingRejectsInvalidDocuments(t *testing.T) {
 		"no key material":   []byte(`{"active_version":1,"keys":[{"version":1}]}`),
 	}
 	for name, document := range documents {
-		if _, err := ParseRing(document); err == nil {
+		if _, err := ParseRingWithUnwrapper(context.Background(), document, nil); err == nil {
 			t.Fatalf("parsed %s ring without error", name)
 		}
 	}
 }
 
 func TestRingOpensCiphertextFromRetiredKeyVersion(t *testing.T) {
-	old, err := ParseRing(ringJSON(1, keyEntry(1, "01")))
+	old, err := ParseRingWithUnwrapper(context.Background(), ringJSON(1, keyEntry(1, "01")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +151,7 @@ func TestRingOpensCiphertextFromRetiredKeyVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated, err := ParseRing(ringJSON(2, keyEntry(1, "01")+","+keyEntry(2, "02")))
+	rotated, err := ParseRingWithUnwrapper(context.Background(), ringJSON(2, keyEntry(1, "01")+","+keyEntry(2, "02")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

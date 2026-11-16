@@ -70,7 +70,7 @@ func openDatastores(startup context.Context, c Config, pgConfig *pgxpool.Config,
 	// Shared state comes up before anything that admits or accounts for
 	// traffic, because both the gateway and the console are told at
 	// composition time whether this installation has a limiter at all.
-	stores.prefix = database.ValkeyNamespace(installation)
+	stores.prefix = coordination.Namespace(installation)
 	stores.debitStore = limitdebits.NewStore(pool)
 	if openValkey != nil {
 		vk, err := openValkey(startup)

@@ -44,7 +44,7 @@ func (p *Plan) ValidateResult(result oif.Result) error {
 			return err
 		}
 	}
-	if p.template.policy != nil && p.template.policy.HasOutput() {
+	if p.template.policy.HasOutput() {
 		if err := outputPolicyCoverage(p.Wire(), document); err != nil {
 			return err
 		}

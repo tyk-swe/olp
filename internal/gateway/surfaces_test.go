@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,7 +182,7 @@ type surfaceHarness struct {
 
 func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	t.Helper()
-	keys, err := secrets.ParseRing(fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32)))
+	keys, err := secrets.ParseRingWithUnwrapper(context.Background(), fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat("01", 32)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

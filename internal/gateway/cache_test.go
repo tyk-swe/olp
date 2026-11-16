@@ -103,7 +103,7 @@ func cacheHarness(t *testing.T) (*harness, *cacheMemory) {
 func enableTestCache(t *testing.T, h *harness) (*harness, *cacheMemory) {
 	t.Helper()
 	m := &cacheMemory{values: map[string]string{}}
-	keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("1", 64) + `"}]}`))
+	keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("1", 64)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

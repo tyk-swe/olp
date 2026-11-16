@@ -240,11 +240,3 @@ func (d Definition) renderLegacyMessages(vars map[string]string, limit int64) ([
 	}
 	return messages, err
 }
-
-func (d Definition) Render(vars map[string]string) (string, error) {
-	messages, err := d.RenderMessages(vars, MaxTemplateBytes)
-	if err != nil || len(messages) != 1 {
-		return "", ErrTemplate
-	}
-	return messages[0].Content, nil
-}

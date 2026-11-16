@@ -846,6 +846,7 @@ internal/promotion/retrievalbinding internal/promotion
 internal/promotion/retrievalbinding internal/promotion/project
 internal/promotion/retrievalbinding internal/providers
 internal/promotion/retrievalbinding internal/retrieval
+internal/promotion/retrievalbinding internal/retrieval/identity
 internal/promotion/retrievalbinding internal/routes
 internal/promotion/route internal/access
 internal/promotion/route internal/access/httpkit
