@@ -23,10 +23,6 @@ type Scope struct {
 	Kind  string
 	Count int
 }
-type Sequence struct {
-	Source oif.Value
-	Pair   bool
-}
 
 type ModerationRequest struct {
 	source oif.Request
@@ -42,9 +38,9 @@ func (r ModerationResult) Schema() oif.Identity { return identity("moderation") 
 func (r ModerationResult) Source() oif.Result   { return r.source }
 
 type PredictRequest struct {
-	source    oif.Request
-	batch     bool
-	sequences []Sequence
+	source oif.Request
+	batch  bool
+	count  int
 }
 
 func (r PredictRequest) Schema() oif.Identity { return identity("classification") }
@@ -56,8 +52,8 @@ func (r PredictResult) Schema() oif.Identity { return identity("classification")
 func (r PredictResult) Source() oif.Result   { return r.source }
 
 type ScoringRequest struct {
-	source                                oif.Request
-	sourceSentence, sentences, parameters oif.Value
+	source    oif.Request
+	sentences oif.Value
 }
 
 func (r ScoringRequest) Schema() oif.Identity { return identity("scoring") }

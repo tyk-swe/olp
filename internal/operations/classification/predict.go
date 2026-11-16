@@ -16,7 +16,7 @@ func predictRequest(source oif.Request) (oif.View, error) {
 	}
 	inputs := operations.Member(root, "inputs")
 	if inputs.Kind() == oif.String {
-		r.sequences = []Sequence{{Source: inputs}}
+		r.count = 1
 		return r, nil
 	}
 	if inputs.Kind() != oif.Array || len(inputs.Elements()) == 0 {
@@ -24,33 +24,29 @@ func predictRequest(source oif.Request) (oif.View, error) {
 	}
 	items := inputs.Elements()
 	if items[0].Kind() == oif.String {
-		sequence, err := sequence(inputs)
-		r.sequences = []Sequence{sequence}
-		return r, err
+		r.count = 1
+		return r, validSequence(inputs)
 	}
 	r.batch = true
+	r.count = len(items)
 	for _, item := range items {
-		seq, err := sequence(item)
-		if err != nil {
+		if err := validSequence(item); err != nil {
 			return r, err
 		}
-		r.sequences = append(r.sequences, seq)
 	}
 	return r, nil
 }
-func sequence(value oif.Value) (Sequence, error) {
-	r := Sequence{Source: value}
+func validSequence(value oif.Value) error {
 	items := value.Elements()
 	if value.Kind() != oif.Array || len(items) < 1 || len(items) > 2 {
-		return r, operations.Invalid("inputs", "Each sequence must contain one or two strings.")
+		return operations.Invalid("inputs", "Each sequence must contain one or two strings.")
 	}
 	for _, item := range items {
 		if item.Kind() != oif.String {
-			return r, operations.Invalid("inputs", "Sequence elements must be strings.")
+			return operations.Invalid("inputs", "Sequence elements must be strings.")
 		}
 	}
-	r.Pair = len(items) == 2
-	return r, nil
+	return nil
 }
 func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 	view, err := predictRequest(request)
@@ -66,7 +62,7 @@ func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 	sets := []oif.Value{root}
 	if req.batch {
 		sets = root.Elements()
-		if len(sets) != len(req.sequences) {
+		if len(sets) != req.count {
 			return r, operations.Violation("result", "prediction_batch_scope")
 		}
 	}

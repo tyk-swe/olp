@@ -97,11 +97,6 @@ func mediaDeleted(result *transport.Result) *media.VideoDeleteResult {
 	return deleted.VideoDeleteResult
 }
 
-func strictBlob(artifact *staging.Artifact) error {
-	_, err := artifact.BlobReference()
-	return err
-}
-
 func (s *Server) removeImages(images *media.ImageResult) {
 	for _, image := range images.Images {
 		if image.Handle == nil {

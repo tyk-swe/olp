@@ -439,7 +439,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	}
 	fact.Status = result.Status
 	if artifact := mediaArtifact(result.Payload); strictTemplate != nil && artifact != nil {
-		if strictBlob(artifact) != nil {
+		if _, err := artifact.BlobReference(); err != nil {
 			return fail(classProtocol, &attemptFailure{dispatched: true})
 		}
 	}

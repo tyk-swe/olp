@@ -26,10 +26,3 @@ unknown input extensions and model-owned TEI prompt prefixes cannot silently
 claim full text-policy coverage. Unknown output text and category names are
 inspected, while opaque result scopes refuse inspection. These checks block;
 they never redact or repair the native source.
-
-`classification_test.go` uses independently authored native JSON and corrupt
-counterexamples. It tests source conservation, array/result cardinality,
-precision, nullable/omitted controls, category correspondence, duplicate labels,
-policy coverage and model-only overlays. Operation
-registration, runtime and public-provider behavior are tested outside this
-package.
