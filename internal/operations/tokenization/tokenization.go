@@ -4,7 +4,6 @@ package tokenization
 
 import (
 	"encoding/json"
-	"slices"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -22,59 +21,25 @@ type CountRequest struct {
 
 func (r CountRequest) Schema() oif.Identity { return identity }
 func (r CountRequest) Source() oif.Request  { return r.source }
-func (r CountRequest) Scope() string        { return r.scope }
 
-// NativeCount retains its dialect-owned name and scope. Value stays an exact
-// source span, including integer tokens outside floating-point precision.
-type NativeCount struct {
-	Name, Scope, Pointer string
-	Value                oif.Value
-}
-type CountResult struct {
-	source oif.Result
-	counts []NativeCount
-}
+type CountResult struct{ source oif.Result }
 
-func (r CountResult) Schema() oif.Identity  { return identity }
-func (r CountResult) Source() oif.Result    { return r.source }
-func (r CountResult) Counts() []NativeCount { return slices.Clone(r.counts) }
-func (r CountResult) Method() string        { return "provider_native" }
+func (r CountResult) Schema() oif.Identity { return identity }
+func (r CountResult) Source() oif.Result   { return r.source }
 
 type TokenizeRequest struct {
 	source oif.Request
 	inputs oif.Value
-	batch  bool
 	count  int
 }
 
 func (r TokenizeRequest) Schema() oif.Identity { return identity }
 func (r TokenizeRequest) Source() oif.Request  { return r.source }
-func (r TokenizeRequest) Inputs() oif.Value    { return r.inputs }
-func (r TokenizeRequest) Batch() bool          { return r.batch }
 
-// NativeToken offsets stay in the provider's coordinate system. The view never
-// infers bytes versus code points, strips special tokens or normalizes text.
-type NativeToken struct {
-	Position                               int
-	ID, Text, Special, Start, Stop, Source oif.Value
-}
-type TokenSet struct {
-	InputIndex int
-	Source     oif.Value
-	tokens     []NativeToken
-}
-
-func (s TokenSet) Tokens() []NativeToken { return slices.Clone(s.tokens) }
-
-type TokenizeResult struct {
-	source oif.Result
-	sets   []TokenSet
-}
+type TokenizeResult struct{ source oif.Result }
 
 func (r TokenizeResult) Schema() oif.Identity { return identity }
 func (r TokenizeResult) Source() oif.Result   { return r.source }
-func (r TokenizeResult) Sets() []TokenSet     { return slices.Clone(r.sets) }
-func (r TokenizeResult) Method() string       { return "provider_native" }
 
 func Definitions() []operations.Dialect {
 	out := []operations.Dialect{}

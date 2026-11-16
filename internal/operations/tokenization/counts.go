@@ -214,8 +214,7 @@ func countField(id string) string {
 	}
 }
 func countResult(request oif.Request, source oif.Result, id string) (oif.View, error) {
-	view, err := countRequest(request, id)
-	if err != nil {
+	if _, err := countRequest(request, id); err != nil {
 		return nil, err
 	}
 	r := CountResult{source: source}
@@ -231,13 +230,11 @@ func countResult(request oif.Request, source oif.Result, id string) (oif.View, e
 	if id == "openai-input-tokens" && operations.String(operations.Member(root, "object")) != "response.input_tokens" {
 		return r, operations.Violation("object", "native_count_identity")
 	}
-	r.counts = append(r.counts, NativeCount{Name: name, Scope: view.(CountRequest).scope, Pointer: "/" + name, Value: value})
 	if id == "gemini-count-tokens" {
 		if cached, present := root.Lookup("cachedContentTokenCount"); present {
 			if _, ok := integer(cached, 64); !ok {
 				return r, operations.Violation("cachedContentTokenCount", "native_cached_count")
 			}
-			r.counts = append(r.counts, NativeCount{Name: "cachedContentTokenCount", Scope: "cached-content", Pointer: "/cachedContentTokenCount", Value: cached})
 		}
 		for _, field := range []string{"promptTokensDetails", "cacheTokensDetails"} {
 			details, present := root.Lookup(field)
@@ -247,7 +244,7 @@ func countResult(request oif.Request, source oif.Result, id string) (oif.View, e
 			if details.Kind() != oif.Array {
 				return r, operations.Violation(field, "native_modality_counts")
 			}
-			for i, item := range details.Elements() {
+			for _, item := range details.Elements() {
 				count := operations.Member(item, "tokenCount")
 				if item.Kind() != oif.Object || operations.Member(item, "modality").Kind() != oif.String {
 					return r, operations.Violation(field, "native_modality_counts")
@@ -255,7 +252,6 @@ func countResult(request oif.Request, source oif.Result, id string) (oif.View, e
 				if _, ok := integer(count, 64); !ok {
 					return r, operations.Violation(field, "native_modality_counts")
 				}
-				r.counts = append(r.counts, NativeCount{Name: "tokenCount", Scope: field + ":" + operations.String(operations.Member(item, "modality")), Pointer: "/" + field + "/" + strconv.Itoa(i) + "/tokenCount", Value: count})
 			}
 		}
 	}

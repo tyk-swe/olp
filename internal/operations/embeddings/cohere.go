@@ -296,15 +296,6 @@ func liftCohereResult(source oif.Request, result oif.Result) (Result, error) {
 				}
 				commonDimensions = vector.Format.LogicalDimensions
 			}
-			out.vectors = append(out.vectors, vector)
-		}
-	}
-	if commonDimensions != 0 {
-		for index := range out.vectors {
-			if !out.vectors[index].Format.DimensionsKnown {
-				out.vectors[index].Format.LogicalDimensions = commonDimensions
-				out.vectors[index].Format.DimensionsKnown = true
-			}
 		}
 	}
 	if billed := operations.Member(operations.Member(root, "meta"), "billed_units"); billed.Kind() == oif.Object {

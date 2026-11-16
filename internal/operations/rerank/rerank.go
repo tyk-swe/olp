@@ -27,21 +27,14 @@ type Request struct {
 
 func (r Request) Schema() oif.Identity { return identity }
 func (r Request) Source() oif.Request  { return r.source }
-func (r Request) Documents() oif.Value { return r.documents }
 
-type Ranked struct {
-	Position, InputIndex     int
-	Score, Document, InputID oif.Value
-}
 type Result struct {
 	source oif.Result
-	rows   []Ranked
 	usage  *operations.Usage
 }
 
 func (r Result) Schema() oif.Identity { return identity }
 func (r Result) Source() oif.Result   { return r.source }
-func (r Result) Rows() []Ranked       { return slices.Clone(r.rows) }
 
 func Definitions() []operations.Dialect {
 	out := []operations.Dialect{}
@@ -208,14 +201,13 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 		return out, operations.Violation("/results", "ranked_candidate_count")
 	}
 	seen := map[int]bool{}
-	for position, item := range items.Elements() {
+	for _, item := range items.Elements() {
 		index, ok := operations.Int(operations.Member(item, "index"))
 		if !ok || index < 0 || index >= int64(len(request.documents.Elements())) || seen[int(index)] {
 			return out, operations.Violation("/results/index", "document_identity")
 		}
 		seen[int(index)] = true
-		score := operations.Member(item, scoreName)
-		if !operations.Number(score) {
+		if !operations.Number(operations.Member(item, scoreName)) {
 			return out, operations.Violation("/results/score", "native_score")
 		}
 		document := operations.Member(item, documentName)
@@ -239,7 +231,6 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 
 			}
 		}
-		out.rows = append(out.rows, Ranked{Position: position, InputIndex: int(index), Score: score, Document: document, InputID: operations.Member(original, "id")})
 	}
 	if usage, present := root.Lookup("usage"); present {
 		tokens, ok := operations.Int(operations.Member(usage, "total_tokens"))

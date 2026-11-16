@@ -8,10 +8,11 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operations/generation"
 )
 
 var contracts = buildContracts()
+
+func field(v oif.Value, name string) oif.Value { out, _ := v.Lookup(name); return out }
 
 func buildContracts() *oif.Registry {
 	families := []wire.Format{wire.Completions, wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.BedrockCount, wire.Embeddings, wire.GeminiEmbeddings, wire.GeminiEmbeddingsBatch, wire.VertexEmbeddings, wire.BedrockEmbeddings, wire.Rerank, wire.BedrockRerank, wire.Moderation, wire.MistralFIM, wire.CohereChat}
@@ -47,12 +48,6 @@ func buildContracts() *oif.Registry {
 		}
 		if family == wire.Gemini {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/cachedContent", Origin: oif.ResourceBinding, Kind: oif.String})
-		}
-		if d.Operation == generation.Contract() {
-			adapter := generationAdapter{family}
-			binding.Request = adapter
-			binding.Result = adapter
-			binding.Event = adapter
 		}
 		bindings = append(bindings, binding)
 	}

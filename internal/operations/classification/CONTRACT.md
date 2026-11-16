@@ -30,6 +30,6 @@ they never redact or repair the native source.
 `classification_test.go` uses independently authored native JSON and corrupt
 counterexamples. It tests source conservation, array/result cardinality,
 precision, nullable/omitted controls, category correspondence, duplicate labels,
-policy coverage, immutable public accessors and model-only overlays. Operation
+policy coverage and model-only overlays. Operation
 registration, runtime and public-provider behavior are tested outside this
 package.

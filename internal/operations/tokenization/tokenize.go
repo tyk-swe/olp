@@ -14,7 +14,6 @@ func tokenizeRequest(source oif.Request) (oif.View, error) {
 	switch r.inputs.Kind() {
 	case oif.String:
 	case oif.Array:
-		r.batch = true
 		r.count = len(r.inputs.Elements())
 		if r.count == 0 {
 			return r, operations.Invalid("inputs", "A native tokenizer batch must not be empty.")
@@ -45,30 +44,27 @@ func tokenizeResult(request oif.Request, source oif.Result) (oif.View, error) {
 	if root.Kind() != oif.Array || len(root.Elements()) != view.(TokenizeRequest).count {
 		return r, operations.Violation("result", "tokenizer_input_scope")
 	}
-	for i, set := range root.Elements() {
+	for _, set := range root.Elements() {
 		if set.Kind() != oif.Array {
 			return r, operations.Violation("result", "native_token_sequence")
 		}
-		out := TokenSet{InputIndex: i, Source: set}
-		for j, item := range set.Elements() {
-			token := NativeToken{Position: j, ID: operations.Member(item, "id"), Text: operations.Member(item, "text"), Special: operations.Member(item, "special"), Start: operations.Member(item, "start"), Stop: operations.Member(item, "stop"), Source: item}
-			if item.Kind() != oif.Object || token.Text.Kind() != oif.String || token.Special.Kind() != oif.Boolean {
+		for _, item := range set.Elements() {
+			tokenID, startValue, stopValue := operations.Member(item, "id"), operations.Member(item, "start"), operations.Member(item, "stop")
+			if item.Kind() != oif.Object || operations.Member(item, "text").Kind() != oif.String || operations.Member(item, "special").Kind() != oif.Boolean {
 				return r, operations.Violation("result", "native_token_fields")
 			}
-			if _, ok := integer(token.ID, 32); !ok {
+			if _, ok := integer(tokenID, 32); !ok {
 				return r, operations.Violation("id", "native_token_identity")
 			}
-			if token.Start.Kind() == oif.Null && token.Stop.Kind() == oif.Null {
+			if startValue.Kind() == oif.Null && stopValue.Kind() == oif.Null {
 			} else {
-				start, sok := integer(token.Start, 64)
-				stop, eok := integer(token.Stop, 64)
+				start, sok := integer(startValue, 64)
+				stop, eok := integer(stopValue, 64)
 				if !sok || !eok || stop < start {
 					return r, operations.Violation("start", "native_token_offsets")
 				}
 			}
-			out.tokens = append(out.tokens, token)
 		}
-		r.sets = append(r.sets, out)
 	}
 	return r, nil
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -98,12 +97,8 @@ func mediaDeleted(result *transport.Result) *media.VideoDeleteResult {
 	return deleted.VideoDeleteResult
 }
 
-func strictBlob(descriptor oif.Descriptor, artifact *staging.Artifact) error {
-	blob, err := artifact.BlobReference()
-	if err != nil {
-		return err
-	}
-	_, err = oif.NewBlobResult(descriptor, blob, oif.Complete)
+func strictBlob(artifact *staging.Artifact) error {
+	_, err := artifact.BlobReference()
 	return err
 }
 

@@ -44,11 +44,10 @@ func scoringResult(request oif.Request, source oif.Result) (oif.View, error) {
 	if scores.Kind() != oif.Array || len(scores.Elements()) != len(view.(ScoringRequest).sentences.Elements()) {
 		return r, operations.Violation("result", "similarity_set_scope")
 	}
-	for position, score := range scores.Elements() {
+	for _, score := range scores.Elements() {
 		if score.Kind() != oif.Number {
 			return r, operations.Violation("result", "native_similarity_score")
 		}
-		r.scores = append(r.scores, Similarity{InputIndex: position, Score: score})
 	}
 	return r, nil
 }

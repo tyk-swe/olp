@@ -36,7 +36,6 @@ type Request struct {
 
 func (r Request) Schema() oif.Identity { return identity }
 func (r Request) Source() oif.Request  { return r.source }
-func (r Request) Inputs() int          { return r.inputs }
 func (r Request) Format() Format       { return r.format }
 
 // Vector identifies one input's native storage. Sparse coordinates and nested
@@ -49,14 +48,12 @@ type Vector struct {
 	StoredElements, StoredBytes, TokenVectors int
 }
 type Result struct {
-	source  oif.Result
-	vectors []Vector
-	usage   *operations.Usage
+	source oif.Result
+	usage  *operations.Usage
 }
 
 func (r Result) Schema() oif.Identity { return identity }
 func (r Result) Source() oif.Result   { return r.source }
-func (r Result) Vectors() []Vector    { return slices.Clone(r.vectors) }
 
 func Definitions() []operations.Dialect {
 	definitions := []struct{ id, surface, path, relative string }{
@@ -454,11 +451,9 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 				} else if entry.Name != "float" {
 					return out, operations.Violation("/embeddingsByType", "native_dtype_map")
 				}
-				vector, err := validateVector(entry.Value, format, 0)
-				if err != nil {
+				if _, err := validateVector(entry.Value, format, 0); err != nil {
 					return out, err
 				}
-				out.vectors = append(out.vectors, vector)
 			}
 		} else {
 			values = []oif.Value{operations.Member(root, "embedding")}
@@ -500,11 +495,9 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 				format.DimensionsKnown = true
 			}
 		}
-		vector, err := validateVector(value, format, index)
-		if err != nil {
+		if _, err := validateVector(value, format, index); err != nil {
 			return out, err
 		}
-		out.vectors = append(out.vectors, vector)
 	}
 	return out, nil
 }

@@ -134,7 +134,6 @@ type Bound struct {
 	Effective  oif.Request
 	Receipt    oif.Receipt
 	Parts      []Part
-	Assets     []oif.BlobRequest
 }
 
 func (t *Template) receipt(d oif.Descriptor, dispositions []oif.Disposition) oif.Receipt {
@@ -367,24 +366,8 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 		}
 		dispositions = append(dispositions, oif.Disposition{Field: "/parts/" + part.Name, Disposition: "introduced", Rule: string(origin), Evidence: "media/native-openai/1"})
 	}
-	for _, part := range parts {
-		if !part.Blob.Valid() {
-			continue
-		}
-		d.Assets = append(d.Assets, oif.Asset{ID: part.Blob.ID(), Digest: part.Blob.Digest(), MediaType: part.Blob.MediaType(), Size: part.Blob.Size()})
-	}
 	bound.Descriptor = d
 	bound.Receipt = t.receipt(d, dispositions)
-	for _, part := range parts {
-		if !part.Blob.Valid() {
-			continue
-		}
-		asset, err := oif.NewBlobRequest(d, part.Blob)
-		if err != nil {
-			return Bound{}, err
-		}
-		bound.Assets = append(bound.Assets, asset)
-	}
 	return bound, nil
 }
 

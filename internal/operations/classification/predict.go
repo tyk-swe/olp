@@ -7,7 +7,7 @@ import (
 
 func predictRequest(source oif.Request) (oif.View, error) {
 	root := source.Document().Root()
-	r := PredictRequest{source: source, rawScores: operations.Member(root, "raw_scores")}
+	r := PredictRequest{source: source}
 	if root.Kind() != oif.Object {
 		return r, operations.Invalid("request", "Use a native prediction object.")
 	}
@@ -58,7 +58,7 @@ func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 		return nil, err
 	}
 	req := view.(PredictRequest)
-	r := PredictResult{source: source, batch: req.batch, rawScores: req.rawScores}
+	r := PredictResult{source: source}
 	root := source.Source().Root()
 	if root.Kind() != oif.Array {
 		return r, operations.Violation("result", "prediction_scope")
@@ -70,19 +70,16 @@ func predictResult(request oif.Request, source oif.Result) (oif.View, error) {
 			return r, operations.Violation("result", "prediction_batch_scope")
 		}
 	}
-	for inputIndex, set := range sets {
+	for _, set := range sets {
 		if set.Kind() != oif.Array || len(set.Elements()) == 0 {
 			return r, operations.Violation("result", "prediction_set")
 		}
-		out := PredictionSet{InputIndex: inputIndex, Source: set}
-		for position, item := range set.Elements() {
+		for _, item := range set.Elements() {
 			label, score := operations.Member(item, "label"), operations.Member(item, "score")
 			if item.Kind() != oif.Object || label.Kind() != oif.String || score.Kind() != oif.Number {
 				return r, operations.Violation("result", "native_prediction")
 			}
-			out.rows = append(out.rows, Prediction{Position: position, Label: label, Score: score, Source: item})
 		}
-		r.sets = append(r.sets, out)
 	}
 	return r, nil
 }
