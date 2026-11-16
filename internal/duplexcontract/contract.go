@@ -30,7 +30,7 @@ const (
 type Profile struct {
 	Dialect           string
 	ProfileID         string
-	Kind              string
+	Kind              connectors.Kind
 	Hosting           string
 	Vendor            string
 	TranscriptionOnly bool

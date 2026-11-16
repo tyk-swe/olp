@@ -132,10 +132,8 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 	if p.provider.CredentialSource == "caller" {
 		return batchSubmission{}, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
 	}
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
 	}
 	now := s.now()
@@ -340,8 +338,8 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	if p.hold != nil {
 		fact.Budgets = append([]string(nil), p.hold.budgets...)
 	}
-	fact.Price = inputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
-	fact.Discount = inputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, now)
+	fact.Price = inputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
+	fact.Discount = inputs.Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, now)
 	fact.PricingPinned = true
 	fact.CardPinned = true
 	fact.CardRevisionID = nil
@@ -366,7 +364,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	}
 	if p.provider.ProfileID == connectors.BedrockBatchProfile {
 		uncertain := aggregateTariffNeedsPerRecordUsage(fact.Price) ||
-			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(p.provider.Kind, p.provider.VendorID, p.model, lineOperation))
+			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(string(p.provider.Kind), p.provider.VendorID, p.model, lineOperation))
 		policy, err := withPolicyFlag(*event.Attempts[0].Routing.Policy, "batch_aggregate_pricing_uncertain", uncertain)
 		if err != nil {
 			return nil, err

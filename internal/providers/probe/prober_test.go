@@ -22,10 +22,10 @@ import (
 var loopback = egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 
 func prober(policy egress.Policy) *Prober {
-	return New(&policy, nil, nil, nil)
+	return New(&policy, func(string) string { return "" }, nil, nil, nil)
 }
 
-func upstreamConnection(t *testing.T, kind, endpoint string) Target {
+func upstreamConnection(t *testing.T, kind connectors.Kind, endpoint string) Target {
 	t.Helper()
 	stored, err := json.Marshal(connection.Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, AuthMode: connectors.AuthAPIKey, Endpoint: new(endpoint)}})
 	if err != nil {
@@ -121,9 +121,10 @@ func TestModelProbeRefusesAHostThatResolvesToABlockedAddress(t *testing.T) {
 func TestModelDiscoveryFollowsPagesToTheEnd(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
-		kind, parameter string
-		pages           map[string]string
-		want            []listedModel
+		kind      connectors.Kind
+		parameter string
+		pages     map[string]string
+		want      []listedModel
 	}{
 		"anthropic has_more and last_id": {connectors.KindAnthropic, "after_id", map[string]string{
 			"":         `{"data":[{"id":"claude-a","display_name":"Claude A"},{"id":"claude-b"}],"has_more":true,"last_id":"claude-b"}`,

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1-trixie AS go-build
+FROM golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9 AS go-build
 ARG TARGETARCH
 ARG OLP_VERSION
 # The release workflow builds with the release tag, so the binary trusts only
@@ -25,11 +25,11 @@ RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \
 RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
 RUN cp internal/operations/tokenization/estimate/ranks/LICENSE /out/TIKTOKEN-LICENSE
 
-FROM node:lts-alpine AS console-build
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS console-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV CI=true
 WORKDIR /src
-RUN npm install --global 'pnpm@>=10.26.0'
+RUN npm install --global pnpm@12.21.0
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
 RUN pnpm install --frozen-lockfile --store-dir /pnpm/store

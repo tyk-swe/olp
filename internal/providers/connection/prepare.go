@@ -285,7 +285,7 @@ func servingVendor(p Prepared) error {
 		}
 		return nil
 	}
-	if kind, ok := vendors.Kind(providerconfig.Value(p.document.Options.VendorID)); !ok || kind != p.document.Kind {
+	if kind, ok := vendors.Kind(providerconfig.Value(p.document.Options.VendorID)); !ok || connectors.Kind(kind) != p.document.Kind {
 		return invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	return nil

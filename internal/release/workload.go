@@ -182,7 +182,7 @@ func (m *Manager) authenticateWorkload(raw string) (*keyauthority.Authority, err
 	base.AgentPrincipal = identity.Mapping.AgentPrincipal
 	base.ExpiresAt = &identity.ExpiresAt
 	if identity.Mapping.EndUserClaim != nil {
-		if !access.ValidEndUserIdentifier(identity.EndUser) {
+		if !keyauthority.ValidEndUserIdentifier(identity.EndUser) {
 			return nil, ErrInvalidKey
 		}
 		base.EndUserDigest = m.EndUserDigest(base.ProjectID, identity.EndUser)

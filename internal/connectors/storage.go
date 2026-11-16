@@ -9,15 +9,9 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-// Storage tokens authorize only the cloud service's HTTPS endpoints. Check
-// before acquiring credentials, even when the general egress policy admits
-// other hosts.
-func storageDestination(endpoint *url.URL, kind string) bool {
+func storageDestination(endpoint *url.URL, kind Kind) bool {
 	if endpoint == nil {
 		return false
-	}
-	if cloudTestDestination(endpoint) {
-		return true
 	}
 	if endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Opaque != "" ||
 		(endpoint.Port() != "" && endpoint.Port() != "443") {
@@ -43,21 +37,19 @@ func storageDestination(endpoint *url.URL, kind string) bool {
 	return false
 }
 
-// ApplyGoogleStorage uses Google's storage endpoint contract, independently
-// of the regional Vertex AI provider endpoint contract.
-func (a *Auth) ApplyGoogleStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+func (a *Auth) ApplyGoogleStorage(ctx context.Context, req *http.Request, mode AuthMode, secret []byte) (egress.Sensitive, error) {
 	if !storageDestination(req.URL, "gcs") {
 		return egress.Sensitive{}, ErrAuthentication
 	}
-	if mode != "adc" && mode != "service_account" {
+	if mode != AuthADC && mode != AuthServiceAccount {
 		return egress.Sensitive{}, ErrCredentialRejected
 	}
 	token, err := a.googleToken(ctx, Config{Kind: "gcs", AuthMode: mode}, secret)
 	if err != nil {
 		return egress.Sensitive{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token.Value)
+	req.Header.Set("Authorization", "Bearer "+token)
 	var sensitive egress.Sensitive
-	sensitive.Add(string(secret), token.Value)
+	sensitive.Add(string(secret), token)
 	return sensitive, nil
 }

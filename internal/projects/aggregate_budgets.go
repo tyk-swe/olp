@@ -10,7 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/settings"
 )
 
 func (s *Server) projectBudget(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -123,7 +122,7 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, proje
 		if etag, err = SetOrganizationBudget(r.Context(), tx, id, policy); err != nil {
 			return access.Reply{}, err
 		}
-	} else if etag, err = settings.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
+	} else if etag, err = access.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {

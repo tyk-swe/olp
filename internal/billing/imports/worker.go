@@ -31,6 +31,7 @@ type Deps struct {
 	Keys         *secrets.KeyRing
 	Installation string
 	Egress       egress.Policy
+	Getenv       func(string) string
 	Log          *slog.Logger
 	Now          func() time.Time
 	S3Endpoint   string
@@ -211,7 +212,7 @@ func (in importInputs) Cloud(ctx context.Context) (source.Cloud, error) {
 		Resume:     in.record.resume(),
 		Failures:   in.record.ConsecutiveFailures,
 		Client:     in.client(network, secret),
-		Auth:       connectors.NewBillingAuth(&in.worker.deps.Egress, authClient),
+		Auth:       connectors.NewBillingAuth(&in.worker.deps.Egress, authClient, in.worker.deps.Getenv),
 		S3Endpoint: in.worker.deps.S3Endpoint,
 	}, nil
 }

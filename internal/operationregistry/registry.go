@@ -43,4 +43,4 @@ func PolicyFor(operation string) Policy {
 }
 
 func Lookup(id string) (operations.Dialect, bool) { return catalog.Lookup(id, operations.Revision) }
-func Identity(id string) oif.Identity             { return oif.Identity{ID: id, Revision: operations.Revision} }
+func identity(id string) oif.Identity             { return oif.Identity{ID: id, Revision: operations.Revision} }

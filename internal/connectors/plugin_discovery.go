@@ -8,12 +8,8 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// listingPath is a path of one or more segments under the address.
 var listingPath = regexp.MustCompile(`^(/[A-Za-z0-9._~!$'()*+,;=:@-]+)+$`)
 
-// validateDiscovery checks a hosting adaptation's model listing. Its cursor
-// parameter joins the address's query, so it must not be one the profile
-// places.
 func validateDiscovery(declared abi.Hosting) error {
 	discovery := declared.Discovery
 	if discovery == nil {
@@ -46,8 +42,6 @@ func validateDiscovery(declared abi.Hosting) error {
 	return nil
 }
 
-// Discovery returns the model listing the profile declares, if it declares
-// one.
 func (p *PluginProfile) Discovery() (abi.Discovery, bool) {
 	declared := p.declared.Hosting.Discovery
 	if declared == nil {

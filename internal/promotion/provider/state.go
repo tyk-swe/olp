@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/imports"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -16,7 +17,7 @@ import (
 
 type destination struct {
 	id        string
-	kind      string
+	kind      connectors.Kind
 	project   *string
 	network   *string
 	billing   *imports.Config
@@ -100,7 +101,7 @@ func readDestination(row providers.ProviderSnapshot, billing map[string]imports.
 	}
 	return destination{
 		id:        row.ID,
-		kind:      row.Kind,
+		kind:      connectors.Kind(row.Kind),
 		project:   row.Project,
 		network:   row.Network,
 		billing:   imported,

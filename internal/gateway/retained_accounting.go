@@ -175,8 +175,8 @@ func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retai
 		return retainedAdmissionPlan{}, fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	attempt := p.attempt
-	attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
-	attempt.Discount = x.routingInputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, x.request.startedAt)
+	attempt.Price = x.routingInputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
+	attempt.Discount = x.routingInputs.Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, x.request.startedAt)
 	if x.retained.use == retainedHousekeeping {
 		bound := x.attemptCostBound(attempt)
 		charge := x.attemptChargeBound(attempt, bound)

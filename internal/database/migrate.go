@@ -30,6 +30,9 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = 0"); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
 		return errors.New("migration lock unavailable")
 	}

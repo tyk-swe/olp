@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -196,6 +197,10 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetI
 	route := x.route
 	go func() {
 		defer close(done)
+		defer panics.Recover(s.log, "workflow authority monitor", func(error) {
+			result <- fault.ServerError(http.StatusInternalServerError, "internal_error", "The workflow tool authority could not be checked.")
+			cancel()
+		})
 		ticker := time.NewTicker(4 * time.Second)
 		defer ticker.Stop()
 		for {

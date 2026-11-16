@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -58,15 +59,17 @@ func parseGoogleScope(raw json.RawMessage) (googleScope, error) {
 }
 
 type googleCredential interface {
-	googleAuth() (mode string, secret []byte)
+	googleAuth() (mode connectors.AuthMode, secret []byte)
 }
 
 type googleServiceAccount struct{ key json.RawMessage }
 
 type googleADC struct{}
 
-func (c googleServiceAccount) googleAuth() (string, []byte) { return "service_account", c.key }
-func (googleADC) googleAuth() (string, []byte)              { return "adc", nil }
+func (c googleServiceAccount) googleAuth() (connectors.AuthMode, []byte) {
+	return connectors.AuthServiceAccount, c.key
+}
+func (googleADC) googleAuth() (connectors.AuthMode, []byte) { return connectors.AuthADC, nil }
 
 type googleCredentialDocument struct {
 	Source         Kind            `json:"source,omitempty"`

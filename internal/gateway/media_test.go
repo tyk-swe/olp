@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"log/slog"
 	"maps"
 	"mime"
 	"mime/multipart"
@@ -199,7 +200,7 @@ func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.
 func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	t.Helper()
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +324,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	return record
 }
 
-func vendor(kind, vendorID string) func(*routing.Provider) {
+func vendor(kind connectors.Kind, vendorID string) func(*routing.Provider) {
 	return func(p *routing.Provider) { p.Kind, p.VendorID = kind, vendorID }
 }
 

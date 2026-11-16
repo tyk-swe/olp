@@ -115,6 +115,7 @@ func (f billingFixture) importDue(t *testing.T, s3Endpoint string) {
 	importer := imports.NewWorker(imports.Deps{
 		Pool: f.pool, Keys: f.keys, Installation: f.installation, Log: slog.New(slog.DiscardHandler), Now: time.Now,
 		Egress:     egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
+		Getenv:     func(string) string { return "" },
 		S3Endpoint: s3Endpoint,
 	})
 	if err := importer.Pass(t.Context()); err != nil {

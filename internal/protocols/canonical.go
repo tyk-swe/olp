@@ -189,7 +189,7 @@ func encodeCanonical(c *Generation, family wire.Format, model, operation string)
 		return nil, unsupported("reasoning_effort")
 	}
 	switch family {
-	case "bedrock", "bedrock_count":
+	case wire.Bedrock, wire.BedrockCount:
 		return encodeBedrock(c, model, operation)
 	case wire.Chat, wire.InputTokens:
 		return encodeOpenAIGeneration(c, model, count)

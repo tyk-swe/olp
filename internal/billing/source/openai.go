@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 var openAIProject = regexp.MustCompile(`^proj_[A-Za-z0-9]{1,64}$`)
@@ -18,7 +20,7 @@ type openAIScope struct {
 
 var openAI = vendor[openAIScope, apiKey, Polling]{
 	family:       "api_key",
-	providerKind: "openai",
+	providerKind: connectors.KindOpenAI,
 	scope: func(raw json.RawMessage) (openAIScope, error) {
 		scope, err := parseIDScope[openAIScope](raw)
 		if err != nil {

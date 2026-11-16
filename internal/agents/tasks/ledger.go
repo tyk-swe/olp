@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type Store struct {
 	syncer  *limitdebits.Syncer
 	limiter *admission.Limiter
 	auth    *secrets.AuthKey
+	log     *slog.Logger
 }
 
 type reservation struct {
@@ -104,7 +106,9 @@ func (l *Store) reserve(ctx context.Context, authority keyauthority.Authority, r
 	}
 	if err := l.syncer.Admit(ctx, res.DispatchID, res.ClaimID, boundaries.Admissions()); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		_ = l.debits.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID)
+		if releaseErr := l.debits.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); releaseErr != nil {
+			l.log.Warn("agent task reservation not released", "dispatch_id", res.DispatchID, "error", releaseErr.Error())
+		}
 		cancel()
 		return reservation{}, err
 	}
@@ -197,19 +201,26 @@ func (l *Store) release(ctx context.Context, res reservation) {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := l.debits.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); err != nil {
+		l.log.Warn("agent task reservation not released", "dispatch_id", res.DispatchID, "error", err.Error())
 		return
 	}
-	_, _ = l.pool.Exec(releaseCtx, `DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1`, res.DispatchID)
-	_, _ = l.pool.Exec(releaseCtx, `WITH removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id) UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID)
+	if _, err := l.pool.Exec(releaseCtx, `WITH capabilities AS (DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1),
+		removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id)
+		UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID); err != nil {
+		l.log.Warn("agent task admission not released", "dispatch_id", res.DispatchID, "error", err.Error())
+	}
 }
 
 func (l *Store) unknown(ctx context.Context, res reservation) {
 	unknownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := l.debits.MarkUnknown(unknownCtx, res.DispatchID, res.ClaimID); err != nil && !errors.Is(err, limitdebits.ErrState) {
+		l.log.Warn("agent task outcome not marked unknown", "dispatch_id", res.DispatchID, "error", err.Error())
 		return
 	}
-	_, _ = l.pool.Exec(unknownCtx, `UPDATE olp.a2a_tasks SET state='outcome_unknown' WHERE id=(SELECT task_id FROM olp.a2a_task_admissions WHERE dispatch_id=$1) AND state='active'`, res.DispatchID)
+	if _, err := l.pool.Exec(unknownCtx, `UPDATE olp.a2a_tasks SET state='outcome_unknown' WHERE id=(SELECT task_id FROM olp.a2a_task_admissions WHERE dispatch_id=$1) AND state='active'`, res.DispatchID); err != nil {
+		l.log.Warn("agent task outcome not marked unknown", "dispatch_id", res.DispatchID, "error", err.Error())
+	}
 }
 
 type Limits struct {
@@ -218,6 +229,6 @@ type Limits struct {
 	Limiter *admission.Limiter
 }
 
-func New(pool *pgxpool.Pool, l Limits, auth *secrets.AuthKey) *Store {
-	return &Store{pool: pool, debits: l.Debits, syncer: l.Syncer, limiter: l.Limiter, auth: auth}
+func New(pool *pgxpool.Pool, l Limits, auth *secrets.AuthKey, log *slog.Logger) *Store {
+	return &Store{pool: pool, debits: l.Debits, syncer: l.Syncer, limiter: l.Limiter, auth: auth, log: log}
 }

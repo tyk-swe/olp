@@ -142,11 +142,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be fenced."))
 		return
 	}
-	defer func() {
-		commitCtx, cancel := resourceCommitContext(r.Context())
-		defer cancel()
-		_ = lifecycle.Close(commitCtx)
-	}()
+	defer s.settleFence(r.Context(), lifecycle.Close)
 	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, lifecycle, fail)
 }
 

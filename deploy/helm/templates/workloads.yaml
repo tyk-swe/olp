@@ -329,12 +329,21 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or $component.topologySpread.enabled $root.Values.topologySpreadConstraints }}
+      {{- $spread := $component.topologySpread }}
+      {{- if or $spread.enabled $spread.zone.enabled $root.Values.topologySpreadConstraints }}
       topologySpreadConstraints:
-        {{- if $component.topologySpread.enabled }}
-        - maxSkew: {{ $component.topologySpread.maxSkew }}
-          topologyKey: {{ $component.topologySpread.topologyKey | quote }}
-          whenUnsatisfiable: {{ $component.topologySpread.whenUnsatisfiable }}
+        {{- if $spread.enabled }}
+        - maxSkew: {{ $spread.maxSkew }}
+          topologyKey: {{ $spread.topologyKey | quote }}
+          whenUnsatisfiable: {{ $spread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 14 }}
+        {{- end }}
+        {{- if $spread.zone.enabled }}
+        - maxSkew: {{ $spread.zone.maxSkew }}
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: {{ $spread.zone.whenUnsatisfiable }}
           labelSelector:
             matchLabels:
               {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 14 }}
