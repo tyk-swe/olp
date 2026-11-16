@@ -15,13 +15,13 @@ func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				stream.Rewriter(func(_ []byte, text string) ([]byte, error) { return []byte(text), nil })
-				if out, err := stream.Push(t.Context(), []byte("cat"), "cat"); err != nil || len(out) != 0 {
+				stream.SegmentRewriter(func(_ []byte, texts map[string]string) ([]byte, error) { return []byte(texts["stream"]), nil })
+				if out, err := stream.PushSegments(t.Context(), []byte("cat"), []Delta{{ID: "stream", Text: "cat"}}); err != nil || len(out) != 0 {
 					t.Fatalf("acted on an unconfirmed word boundary: %q %v", out, err)
 				}
 				var output strings.Builder
 				if suffix != "" {
-					out, err := stream.Push(t.Context(), []byte(suffix), suffix)
+					out, err := stream.PushSegments(t.Context(), []byte(suffix), []Delta{{ID: "stream", Text: suffix}})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -54,8 +54,8 @@ func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
 	}
 	engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, OutputStream, Block, false, nil)
 	stream, _ := NewStream(engine, Evaluation{}, 1024)
-	_, _ = stream.Push(t.Context(), []byte("cat"), "cat")
-	if _, err := stream.Push(t.Context(), []byte(" "), " "); !errors.Is(err, ErrBlocked) {
+	_, _ = stream.PushSegments(t.Context(), []byte("cat"), []Delta{{ID: "stream", Text: "cat"}})
+	if _, err := stream.PushSegments(t.Context(), []byte(" "), []Delta{{ID: "stream", Text: " "}}); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("did not block a confirmed word: %v", err)
 	}
 }

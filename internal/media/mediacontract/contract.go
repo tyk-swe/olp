@@ -401,7 +401,7 @@ func multipartDefaultParts(name string, raw json.RawMessage) []Part {
 }
 
 func (t *Template) inspectJSONInput(doc oif.Document, reserve func(int) error) error {
-	if t.policy == nil || !t.policy.HasInput() {
+	if !t.policy.HasInput() {
 		return nil
 	}
 	known := map[string]bool{"model": true, "prompt": true, "input": true, "voice": true, "n": true, "size": true, "quality": true, "response_format": true, "style": true, "user": true, "background": true, "moderation": true, "output_compression": true, "output_format": true, "partial_images": true, "stream": true, "instructions": true, "speed": true, "stream_format": true}

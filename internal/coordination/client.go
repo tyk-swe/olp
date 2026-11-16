@@ -172,3 +172,5 @@ func reply(result valkey.ValkeyResult) (any, error) {
 	_, refused := valkey.IsValkeyErr(err)
 	return nil, &CommandError{Cause: err, Ambiguous: !refused}
 }
+
+func Namespace(installation string) string { return "olp:" + installation + ":" }

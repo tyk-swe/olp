@@ -275,7 +275,7 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 	if err != nil {
 		return "", "", err
 	}
-	ring, err := secrets.ParseRing([]byte(s.env.master))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(s.env.master), nil)
 	if err != nil {
 		return "", "", err
 	}

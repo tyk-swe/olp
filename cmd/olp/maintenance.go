@@ -152,7 +152,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 			return errors.New("master-key version is active or still referenced; finish rotation before retirement")
 		}
 	}
-	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
+	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": coordination.Namespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
 	if command == "doctor" {
 		referenceCatalog, err := catalog.Embedded()
 		if err != nil {

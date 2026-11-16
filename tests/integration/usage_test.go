@@ -235,7 +235,7 @@ func TestFocusRetainedHistoryCompleteness(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	ring, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("42", 32) + `"}]}`))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("42", 32)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1045,7 +1045,7 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	ring, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("42", 32) + `"}]}`))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("42", 32)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1229,7 +1229,7 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 				t.Fatal(err)
 			}
 			auth := secrets.NewAuthKey(make([]byte, 32), installation)
-			keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+			keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1630,7 +1630,7 @@ func TestCloudEventsRetryPreservesSettings(t *testing.T) {
 					t.Fatal(err)
 				}
 				auth := secrets.NewAuthKey(make([]byte, 32), installation)
-				keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+				keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2077,7 +2077,7 @@ func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, strin
 	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+	keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2289,7 +2289,7 @@ func TestNotificationRetryPreservesBudgetSubject(t *testing.T) {
 				t.Fatal(err)
 			}
 			auth := secrets.NewAuthKey(make([]byte, 32), installation)
-			keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+			keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/coordination"
 )
@@ -223,11 +222,8 @@ func sessionReplyFields(value any) (map[string]string, bool, error) {
 }
 
 func sessionRecordFromFields(id string, binding Binding, fields map[string]string) (Record, error) {
-	createdMS, createdErr := strconv.ParseInt(fields["created_at_ms"], 10, 64)
-	activeMS, activeErr := strconv.ParseInt(fields["last_active_at_ms"], 10, 64)
 	initialized := fields["initialized"]
-	if createdErr != nil || activeErr != nil || createdMS < 0 || activeMS < 0 ||
-		(initialized != "0" && initialized != "1") ||
+	if (initialized != "0" && initialized != "1") ||
 		fields["installation_id"] == "" || fields["project_id"] == "" ||
 		fields["principal_digest"] == "" || fields["protocol"] == "" ||
 		fields["toolset_id"] == "" || fields["toolset_revision_id"] == "" || fields["release_id"] == "" {
@@ -257,7 +253,6 @@ func sessionRecordFromFields(id string, binding Binding, fields map[string]strin
 		ID: id, Binding: stored, Protocol: fields["protocol"],
 		ToolsetID: fields["toolset_id"], ToolsetRevisionID: fields["toolset_revision_id"],
 		ReleaseID: fields["release_id"], Certifications: certifications,
-		CreatedAt: time.UnixMilli(createdMS).UTC(), LastActiveAt: time.UnixMilli(activeMS).UTC(),
 		Initialized: initialized == "1",
 	}, nil
 }

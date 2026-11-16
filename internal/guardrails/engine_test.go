@@ -450,7 +450,7 @@ func BenchmarkGuardrailStreaming(b *testing.B) {
 			b.Fatal(err)
 		}
 		for range 100 {
-			if _, err = stream.Push(b.Context(), frame, text); err != nil {
+			if _, err = stream.PushSegments(b.Context(), frame, []Delta{{ID: "stream", Text: text}}); err != nil {
 				b.Fatal(err)
 			}
 		}

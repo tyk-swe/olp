@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
 type Input struct {
@@ -51,7 +52,7 @@ func normalizeInput(in Input) (Input, error) {
 	if _, err := uuid.Parse(in.TargetID); err != nil {
 		return Input{}, httpkit.Invalid("target_id", "Choose one route target.")
 	}
-	if route == "" || len(route) > 128 || !ResourceValid(in.Backend, in.Resource) {
+	if route == "" || len(route) > 128 || !identity.ValidResource(in.Backend, in.Resource) {
 		return Input{}, httpkit.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
 	}
 	if err := ValidateFields(in.Backend, in.Fields); err != nil {

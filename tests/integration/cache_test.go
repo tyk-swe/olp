@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +20,7 @@ var cachePolicy = cache.Policy{Mode: "exact", TTLSeconds: 60}
 
 func keyRing(t *testing.T, key string) *secrets.KeyRing {
 	t.Helper()
-	ring, err := secrets.ParseRing(fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat(key, 32)))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat(key, 32)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
