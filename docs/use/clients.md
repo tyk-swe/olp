@@ -379,6 +379,19 @@ unchanged when retrying the same request after a client or network failure.
 A retry of a committed result returns the exact recorded delivery and
 performs no inference.
 
+Each Chat Completions request in the workflow carries the contract in headers.
+The submission identity is the Unix time in milliseconds, a dot and a random
+UUID, and the gateway refuses one older than fifteen minutes or more than five
+minutes ahead of its clock with `invalid_submission_identity`. The first turn
+sends no handle, and every later turn sends the `olp.handle` value from the
+previous ready delivery.
+
+```http
+X-OLP-Continuation: chat-anthropic-tools-v1
+X-OLP-Submission-ID: <unix-milliseconds>.<uuid>
+X-OLP-Continuation-Handle: <olp.handle from the previous ready delivery>
+```
+
 The route's API key needs `inference`, route access and
 `allow_provider_state:true`. The handle references encrypted native reasoning
 and complete provider dependencies in the existing resource authority for up
