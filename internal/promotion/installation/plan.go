@@ -8,7 +8,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/settings"
 )
 
 const mfaDetail = "Change the local sign-in policy; factors, challenges and recovery codes remain installation-local."
@@ -51,13 +50,13 @@ func MFAApplier(desired Settings) promotion.Applier {
 
 func TimeZoneApplier(desired Settings) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		return settings.ApplyBudgetTimeZone(ctx, tx, p, desired.TimeZone)
+		return access.ApplyBudgetTimeZone(ctx, tx, p, desired.TimeZone)
 	}
 }
 
 func BudgetApplier(desired Settings) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		changed, err := settings.ApplyInstallationBudget(ctx, tx, p, desired.Budget)
+		changed, err := access.ApplyInstallationBudget(ctx, tx, p, desired.Budget)
 		if err != nil || !changed {
 			return err
 		}

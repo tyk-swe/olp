@@ -75,24 +75,24 @@ func (f FOCUS) Start() (*time.Time, error) {
 }
 
 type objectAuth struct {
-	ambient, explicit string
+	ambient, explicit connectors.AuthMode
 	regional          bool
 }
 
 func authFor(provider Type) objectAuth {
 	switch provider {
 	case contract.CreateExportSinkRequestTypeS3:
-		return objectAuth{ambient: "default_chain", explicit: "static", regional: true}
+		return objectAuth{ambient: connectors.AuthDefaultChain, explicit: connectors.AuthStatic, regional: true}
 	case contract.CreateExportSinkRequestTypeGcs:
-		return objectAuth{ambient: "adc", explicit: "service_account"}
+		return objectAuth{ambient: connectors.AuthADC, explicit: connectors.AuthServiceAccount}
 	}
-	return objectAuth{ambient: "azure_default", explicit: "azure_client_secret"}
+	return objectAuth{ambient: connectors.AuthAzureDefault, explicit: connectors.AuthAzureClientSecret}
 }
 
 type objectCredential struct {
-	AuthMode string          `json:"auth_mode"`
-	Secret   json.RawMessage `json:"secret"`
-	Region   string          `json:"region"`
+	AuthMode connectors.AuthMode `json:"auth_mode"`
+	Secret   json.RawMessage     `json:"secret"`
+	Region   string              `json:"region"`
 }
 
 type Store struct {
@@ -204,7 +204,7 @@ func (s *Sender) authorize(ctx context.Context, request *http.Request, store Sto
 		if region == "" {
 			return sendError("credential", errors.New("s3 requires a region in the credential, the endpoint or the workload environment"))
 		}
-		_, err := s.auth.Apply(ctx, request, connectors.Config{Kind: "bedrock", SigningService: "s3", CloudRegion: region, AuthMode: credential.AuthMode}, credential.Secret, body)
+		_, err := s.auth.Apply(ctx, request, connectors.Config{Kind: connectors.KindBedrock, SigningService: "s3", CloudRegion: region, AuthMode: credential.AuthMode}, credential.Secret, body)
 		return err
 	case contract.CreateExportSinkRequestTypeGcs:
 		_, err := s.auth.ApplyGoogleStorage(ctx, request, credential.AuthMode, credential.Secret)

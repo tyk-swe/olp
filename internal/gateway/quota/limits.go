@@ -102,9 +102,11 @@ const (
 
 func (a *Admission) Ready() bool { return a != nil && a.limiter != nil }
 
+var discard = slog.New(slog.DiscardHandler)
+
 func (a *Admission) Logger() *slog.Logger {
-	if a == nil || a.log == nil {
-		return slog.Default()
+	if a == nil {
+		return discard
 	}
 	return a.log
 }

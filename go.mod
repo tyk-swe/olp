@@ -2,6 +2,8 @@ module github.com/tyk-swe/olp
 
 go 1.26.0
 
+toolchain go1.27.4
+
 require (
 	cloud.google.com/go/auth v0.24.3
 	cloud.google.com/go/bigquery v1.86.2

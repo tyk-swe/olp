@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -311,6 +312,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 			pipeW.CloseWithError(err)
 			return err
 		}
+		defer panics.Recover(s.log, "multipart upload", func(err error) { sendDone <- failure(err) })
 		writeFile := func() error {
 			opened, err := s.deps.Staging.Open(file.Handle)
 			if err != nil {

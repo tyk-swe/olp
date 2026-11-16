@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
@@ -359,7 +360,7 @@ type guardrailResult struct {
 	err    error
 }
 
-func (x *call) startParallel(ctx context.Context, cancelUpstream context.CancelFunc) *parallelGuardrail {
+func (s *Server) startParallel(ctx context.Context, x *call, cancelUpstream context.CancelFunc) *parallelGuardrail {
 	if !x.guardrailEngine.HasPhase(guardrails.InputParallel) {
 		return nil
 	}
@@ -370,6 +371,10 @@ func (x *call) startParallel(ctx context.Context, cancelUpstream context.CancelF
 	p := &parallelGuardrail{result: make(chan guardrailResult, 1), cancel: cancel}
 	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.InputParallel, Segments: slices.Clone(x.guardrailInput), InternalModel: x.internalGuardrail}
 	go func() {
+		defer panics.Recover(s.log, "parallel guardrail", func(err error) {
+			p.result <- guardrailResult{err: err}
+			cancelUpstream()
+		})
 		result, err := x.guardrailEngine.Evaluate(evalctx, request, nil)
 		p.result <- guardrailResult{result, err}
 		if err != nil {

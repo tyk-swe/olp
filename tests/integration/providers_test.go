@@ -37,7 +37,7 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	f := providerFixture{pool: pool, owner: uuid.NewString(),
-		server: providers.New(providers.Deps{Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}})}
+		server: providers.New(providers.Deps{Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, Getenv: func(string) string { return "" }})}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users (id,email,display_name,role,etag) VALUES ($1::uuid,$1::text || '@example.com','Provider fixture','owner',$1::uuid)`, f.owner); err != nil {
 		t.Fatal(err)
 	}

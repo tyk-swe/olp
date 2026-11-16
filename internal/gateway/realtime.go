@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -1013,24 +1014,28 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 				return relayEnd{err: err, client: !inspect}
 			}
 			if inspect {
-				usageMu.Lock()
-				if u := responses.providerFrame(typ, data, x.strict()); u != nil {
-					usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
-					usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
-					if u.CachedInputTokens != nil {
-						cached := *u.CachedInputTokens
-						if usage.CachedInputTokens != nil {
-							cached = quota.AddBounded(cached, *usage.CachedInputTokens)
+				func() {
+					usageMu.Lock()
+					defer usageMu.Unlock()
+					if u := responses.providerFrame(typ, data, x.strict()); u != nil {
+						usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
+						usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
+						if u.CachedInputTokens != nil {
+							cached := *u.CachedInputTokens
+							if usage.CachedInputTokens != nil {
+								cached = quota.AddBounded(cached, *usage.CachedInputTokens)
+							}
+							usage.CachedInputTokens = &cached
 						}
-						usage.CachedInputTokens = &cached
+						have = true
 					}
-					have = true
-				}
-				usageMu.Unlock()
+				}()
 			} else if x.strict() {
-				usageMu.Lock()
-				responses.clientFrame(typ, data)
-				usageMu.Unlock()
+				func() {
+					usageMu.Lock()
+					defer usageMu.Unlock()
+					responses.clientFrame(typ, data)
+				}()
 			}
 			if inspect && typ == websocket.MessageText &&
 				(bytes.Contains(data, []byte(`"error"`)) || bytes.Contains(data, []byte(`\`))) {
@@ -1056,8 +1061,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 	}
 	done := make(chan relayEnd, 2)
 	remaining := 2
-	go func() { done <- forward(conn, client, false) }()
-	go func() { done <- forward(client, conn, true) }()
+	relay := func(dst, src duplexPeer, inspect bool) {
+		defer panics.Recover(s.log, "realtime relay", func(err error) { done <- relayEnd{err: err} })
+		done <- forward(dst, src, inspect)
+	}
+	go relay(conn, client, false)
+	go relay(client, conn, true)
 	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)

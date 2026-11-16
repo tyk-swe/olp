@@ -40,8 +40,8 @@ type Prober struct {
 	slots       chan struct{}
 }
 
-func New(policy *egress.Policy, signer connectors.Signer, carriers *plugins.Host, secrets NetworkSecrets) *Prober {
-	auth := connectors.NewAuth(policy)
+func New(policy *egress.Policy, getenv func(string) string, signer connectors.Signer, carriers *plugins.Host, secrets NetworkSecrets) *Prober {
+	auth := connectors.NewAuth(policy, getenv)
 	auth.Signer = signer
 	return &Prober{
 		egress:      policy,

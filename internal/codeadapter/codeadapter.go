@@ -17,14 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/plugin/abi"
-)
-
-// A code account's connection is a plugin provider that authenticates with a
-// grant: connectors.KindPlugin and connectors.AuthGrant.
-const (
-	kindPlugin = "plugin"
-	authGrant  = "grant"
 )
 
 // Coding clients with a generated configuration.
@@ -357,8 +351,8 @@ func Lookup(adapter codemode.Adapter) (Vendor, bool) {
 
 // ForConnection returns the row of a provider connection: a plugin profile
 // that authenticates with a grant.
-func ForConnection(kind, authMode, profileID string) (Vendor, bool) {
-	if kind != kindPlugin || authMode != authGrant {
+func ForConnection(kind connectors.Kind, authMode connectors.AuthMode, profileID string) (Vendor, bool) {
+	if kind != connectors.KindPlugin || authMode != connectors.AuthGrant {
 		return Vendor{}, false
 	}
 	for _, v := range vendors {
@@ -441,7 +435,7 @@ func (v Vendor) Address(profileID string) (string, bool) {
 // config, a jsonb expression, or NULL when no adapter accepts it.
 func SQL(config string) string {
 	var b strings.Builder
-	b.WriteString("CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id'")
+	b.WriteString("CASE WHEN " + config + "->>'kind'='" + string(connectors.KindPlugin) + "' AND " + config + "->>'auth_mode'='" + string(connectors.AuthGrant) + "' THEN CASE " + config + "->>'profile_id'")
 	for _, v := range vendors {
 		for _, profile := range v.profiles {
 			b.WriteString(" WHEN '" + profile + "' THEN '" + string(v.Adapter) + "'")

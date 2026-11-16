@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -173,6 +174,10 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 	reader, writer := io.Pipe()
 	done := make(chan translatedBatch, 1)
 	go func() {
+		defer panics.Recover(s.log, "managed batch translation", func(err error) {
+			_ = writer.CloseWithError(err)
+			done <- translatedBatch{err: fault.ServerError(http.StatusInternalServerError, "internal_error", "The batch file could not be translated.")}
+		})
 		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
 		done <- translatedBatch{manifest: manifest, err: err}
 	}()
@@ -355,10 +360,10 @@ func (t managedLineTarget) lineDefaults(operation wire.LineOperation) (protocols
 func (t managedLineTarget) encodeRequest(request *wire.Request, upstreamModel string, defaults protocols.Object) ([]byte, error) {
 	provider := t.pin.provider
 	if t.adapter == connectors.BatchGeminiManaged {
-		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, provider.Kind, provider.VendorID, upstreamModel, defaults)
+		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, string(provider.Kind), provider.VendorID, upstreamModel, defaults)
 		return encoded, err
 	}
-	encoded, _, err := protocols.Encode(request, provider.Kind, provider.VendorID, upstreamModel, defaults)
+	encoded, _, err := protocols.Encode(request, string(provider.Kind), provider.VendorID, upstreamModel, defaults)
 	return encoded, err
 }
 
@@ -406,10 +411,8 @@ func managedBatchEndpoint(adapter connectors.BatchAdapter, endpoint string) (wir
 }
 
 func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return nil, false
 	}
 	return digester.Digest(secrets.BatchLineDigest, customID), true

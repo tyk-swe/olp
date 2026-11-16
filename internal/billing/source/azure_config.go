@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 const azureMaxDocument = 16384
@@ -70,7 +72,7 @@ func parseAzureScope(raw json.RawMessage) (azureScope, error) {
 }
 
 type azureCredential interface {
-	azureAuth() (mode string, secret azureSecret)
+	azureAuth() (mode connectors.AuthMode, secret azureSecret)
 }
 
 type azureDefault struct{}
@@ -87,10 +89,12 @@ type azureSecret struct {
 	ClientSecret string `json:"client_secret"`
 }
 
-func (azureDefault) azureAuth() (string, azureSecret) { return "azure_default", azureSecret{} }
+func (azureDefault) azureAuth() (connectors.AuthMode, azureSecret) {
+	return connectors.AuthAzureDefault, azureSecret{}
+}
 
-func (c azureClientSecret) azureAuth() (string, azureSecret) {
-	return "azure_client_secret", azureSecret(c)
+func (c azureClientSecret) azureAuth() (connectors.AuthMode, azureSecret) {
+	return connectors.AuthAzureClientSecret, azureSecret(c)
 }
 
 type azureCredentialDocument struct {
@@ -106,7 +110,7 @@ func (c azureDefault) MarshalJSON() ([]byte, error) { return azureDocument(c) }
 
 func azureDocument(c azureCredential) ([]byte, error) {
 	mode, secret := c.azureAuth()
-	return json.Marshal(azureCredentialDocument{AuthMode: mode, TenantID: secret.TenantID, ClientID: secret.ClientID, ClientSecret: secret.ClientSecret})
+	return json.Marshal(azureCredentialDocument{AuthMode: string(mode), TenantID: secret.TenantID, ClientID: secret.ClientID, ClientSecret: secret.ClientSecret})
 }
 
 func azureCredentialPart(value string, limit int) bool {

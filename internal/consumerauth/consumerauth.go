@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/release"
 )
@@ -37,7 +36,7 @@ func (f *Failure) Error() string { return f.Code + ": " + f.Message }
 
 func HeaderEndUserDigest(auth any, r *http.Request, authority keyauthority.Authority) (string, *Failure) {
 	values := r.Header.Values("X-OLP-End-User")
-	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !access.ValidEndUserIdentifier(values[0]) {
+	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !keyauthority.ValidEndUserIdentifier(values[0]) {
 		return "", &Failure{Status: http.StatusBadRequest, Code: "invalid_end_user", Message: "Provide an end-user machine token of 1-128 characters in the key's configured source."}
 	}
 	digester, ok := auth.(interface{ EndUserDigest(*string, string) string })

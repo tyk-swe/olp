@@ -68,7 +68,7 @@ func (i Import) Read(ctx context.Context, in Inputs, emit func(Period) error) (*
 type Source struct {
 	kind         Kind
 	family       string
-	providerKind string
+	providerKind connectors.Kind
 	input        func(json.RawMessage) (string, error)
 	scope        func(json.RawMessage) (Scope, error)
 	credential   func(string) (Credential, error)
@@ -77,7 +77,7 @@ type Source struct {
 
 type vendor[S, C, R any] struct {
 	family       string
-	providerKind string
+	providerKind connectors.Kind
 	input        func(json.RawMessage) (string, error)
 	scope        func(json.RawMessage) (S, error)
 	credential   func(string) (C, error)
@@ -139,7 +139,7 @@ var sources = map[Kind]Source{
 	contract.GoogleBigquery:      bind(contract.GoogleBigquery, googleBigQuery),
 }
 
-func For(providerKind string) (Source, error) {
+func For(providerKind connectors.Kind) (Source, error) {
 	for _, source := range sources {
 		if source.providerKind == providerKind {
 			return source, nil

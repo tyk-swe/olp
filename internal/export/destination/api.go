@@ -366,7 +366,7 @@ func (a *API) filter(ctx context.Context, q access.Queryer, raw json.RawMessage,
 	if err := filterRoute(ctx, q, input.Route, sinkProject); err != nil {
 		return Filter{}, err
 	}
-	if input.Outcome != nil && !input.Outcome.Valid() {
+	if input.Outcome != nil && *input.Outcome != "success" && *input.Outcome != "failure" {
 		return Filter{}, access.Invalid("filter.outcome", "outcome must be success or failure")
 	}
 	return Filter{Project: project, Route: input.Route, Outcome: input.Outcome}, nil

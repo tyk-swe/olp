@@ -221,7 +221,7 @@ func WireFamily(kind, vendor string, source wire.Format) wire.Format {
 		return wire.Gemini
 	case "bedrock":
 		if count {
-			return "bedrock_count"
+			return wire.BedrockCount
 		}
 		if source.Operation() == "embeddings" {
 			return wire.BedrockEmbeddings
@@ -279,7 +279,7 @@ func countDefaults(encodedWire wire.Format, defaults Object) Object {
 	if len(defaults) == 0 {
 		return defaults
 	}
-	if encodedWire == wire.GeminiCount || encodedWire == "bedrock_count" {
+	if encodedWire == wire.GeminiCount || encodedWire == wire.BedrockCount {
 		return nil
 	}
 	out := maps.Clone(defaults)

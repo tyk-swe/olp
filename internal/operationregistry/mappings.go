@@ -9,8 +9,8 @@ import (
 
 func mappings() []operations.Mapping {
 	return []operations.Mapping{
-		{Source: Identity("openai-embeddings"), Target: Identity("voyage-embeddings"), Lower: lowerEmbedding, ValidateEffective: validateEmbeddingMapping, Project: projectEmbedding, Evidence: "qualified-openai-voyage-float-embedding/1"},
-		{Source: Identity("rerank"), Target: Identity("voyage-rerank"), Lower: lowerRerank, Project: projectRerank, Evidence: "qualified-rerank-voyage-selection/1"},
+		{Source: identity("openai-embeddings"), Target: identity("voyage-embeddings"), Lower: lowerEmbedding, ValidateEffective: validateEmbeddingMapping, Project: projectEmbedding, Evidence: "qualified-openai-voyage-float-embedding/1"},
+		{Source: identity("rerank"), Target: identity("voyage-rerank"), Lower: lowerRerank, Project: projectRerank, Evidence: "qualified-rerank-voyage-selection/1"},
 	}
 }
 func mappingChange(pointer, value string) oif.Change {

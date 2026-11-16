@@ -995,7 +995,7 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 			if _, err := pool.Exec(ctx, sql); err != nil {
 				t.Fatal(err)
 			}
-			a := access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys})
+			a := access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)})
 			mux := http.NewServeMux()
 			accounting.NewManagement(a).Register(mux)
 			serverHTTP := httptest.NewServer(mux)
@@ -1679,7 +1679,7 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), egress.Policy{}).Register(mux)
+	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), egress.Policy{}).Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))

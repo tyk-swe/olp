@@ -15,42 +15,26 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// A plugin profile's envelope and rewrites change the dialect's bodies around
-// OLP's codecs: rewrites change the prepared dialect request, which OIF
-// records, and the envelope wraps it on the way out and unwraps responses and
-// stream events on the way in, so codecs and OIF see plain dialect bodies.
-
-// memberName is how envelopes and rewrites name JSON object members.
 var memberName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 const memberNameRule = "1–128 letters, digits, underscores, hyphens and dots"
 
-// modelValue names the upstream model in envelope templates.
 const modelValue = "model"
 
-// hostingRewrite is the provenance of the changes a plugin profile's rewrites
-// make to a prepared request.
 const hostingRewrite oif.Origin = "hosting_rewrite"
 
-// boundMembers are the request members OLP binds in the plugin dialects that
-// carry them in the body: the model a target serves and the delivery, and its
-// usage reporting, the caller chose. Rewrites leave them alone. Gemini
-// addresses its model and delivery in the URL, so it binds none.
 var boundMembers = map[string][]string{
 	"openai-chat":        {"model", "stream", "stream_options"},
 	"openai-responses":   {"model", "stream"},
 	"anthropic-messages": {"model", "stream"},
 }
 
-// An envelope is a parsed abi.Envelope.
 type envelope struct {
 	request  string
 	fields   map[string]template
 	response string
 }
 
-// parseEnvelope reads an envelope whose field templates may reference the
-// model and what known admits of the profile's options.
 func parseEnvelope(declared *abi.Envelope, known func(name string) error) (*envelope, error) {
 	if declared == nil {
 		return nil, nil
@@ -88,9 +72,6 @@ func parseEnvelope(declared *abi.Envelope, known func(name string) error) (*enve
 	return parsed, nil
 }
 
-// envelopePlaceholders admits what envelope fields may reference: the model
-// and the options known admits, and never the credential, which stays out of
-// bodies.
 func envelopePlaceholders(known func(name string) error) func(name string) error {
 	return func(name string) error {
 		switch {
@@ -103,8 +84,6 @@ func envelopePlaceholders(known func(name string) error) func(name string) error
 	}
 }
 
-// wrap places a dialect request body in the envelope, with its fields
-// rendered from values.
 func (e *envelope) wrap(body []byte, values map[string]string) []byte {
 	var wrapped bytes.Buffer
 	wrapped.Grow(len(body) + 512)
@@ -129,8 +108,6 @@ func jsonString(s string) []byte {
 	return encoded
 }
 
-// unwrap returns the dialect body that an upstream body carries: the response
-// member of a JSON object that has it, and otherwise the body as it is.
 func (e *envelope) unwrap(body []byte) []byte {
 	document, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
@@ -143,10 +120,6 @@ func (e *envelope) unwrap(body []byte) []byte {
 	return carried.Bytes()
 }
 
-// envelopeStream unwraps each event of an upstream's server-sent events.
-// Events are bounded by the event limit, as the dialect's codec bounds them,
-// and a frame never grows: it is re-encoded in its shortest form, keeping
-// control frames and their IDs separate from subsequent data frames.
 type envelopeStream struct {
 	envelope *envelope
 	events   *sse.Decoder
@@ -172,7 +145,6 @@ func (s *envelopeStream) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// envelope returns the connector's plugin envelope, or nil.
 func (c Config) envelope() *envelope {
 	if c.Plugin == nil {
 		return nil
@@ -180,19 +152,12 @@ func (c Config) envelope() *envelope {
 	return c.Plugin.hosting.envelope
 }
 
-// envelopeValues are the values envelope templates place in a request for
-// model: the model and the provider's options. The credential is empty, as
-// no envelope template places it.
 func (c Config) envelopeValues(model string) map[string]string {
 	values := templateValues("", c.PluginOptions, nil)
 	values[modelValue] = c.Model(model)
 	return values
 }
 
-// WrapRequest returns the body OLP sends for a dialect request body to model:
-// the body in the envelope a plugin profile declares, the body adapted to a
-// hosting's API, such as SageMaker's or watsonx's, or the body as it is.
-// Apply signs what it returns.
 func (c Config) WrapRequest(body []byte, model string) []byte {
 	switch c.Kind {
 	case KindSageMaker:
@@ -207,9 +172,6 @@ func (c Config) WrapRequest(body []byte, model string) []byte {
 	return e.wrap(body, c.envelopeValues(model))
 }
 
-// UnwrapResponse returns the dialect response that an upstream's successful
-// unary response carries: the member a plugin profile's envelope names, or the
-// body as it is, such as an upstream error.
 func (c Config) UnwrapResponse(body []byte) []byte {
 	if c.Kind == KindWatsonx {
 		result, _ := watsonxResult(body, "chat.completion")
@@ -222,7 +184,6 @@ func (c Config) UnwrapResponse(body []byte) []byte {
 	return e.unwrap(body)
 }
 
-// unwrapStream unwraps the events of a plugin profile's upstream stream.
 func (c Config) unwrapStream(reader io.Reader, maxEventBytes int) io.Reader {
 	e := c.envelope()
 	if e == nil || e.response == "" {
@@ -231,11 +192,8 @@ func (c Config) unwrapStream(reader io.Reader, maxEventBytes int) io.Reader {
 	return &envelopeStream{envelope: e, events: sse.NewDecoder(reader, maxEventBytes)}
 }
 
-// maxRewriteDepth bounds how deeply a rewrite value nests, so that with its
-// path it stays well within the depth OLP reads requests to.
 const maxRewriteDepth = 32
 
-// A rewrite is a parsed abi.Rewrite.
 type rewrite struct {
 	op    string
 	path  []string
@@ -251,7 +209,6 @@ func parseRewrites(declared []abi.Rewrite, dialect string) ([]rewrite, error) {
 		field := fmt.Sprintf("hosting.rewrites[%d]", i)
 		switch r.Op {
 		case abi.RewriteSet, abi.RewriteDefault:
-			// OLP places the value in requests as it reads them.
 			if _, err := oif.ParseJSON(r.Value, oif.Limits{MaxDepth: maxRewriteDepth}); len(r.Value) == 0 || err != nil {
 				return nil, &ProfileError{Field: field + ".value", Message: fmt.Sprintf("Give the JSON value to %s the member to, at most %d levels deep and naming each member once.", r.Op, maxRewriteDepth)}
 			}
@@ -279,7 +236,6 @@ func parseRewrites(declared []abi.Rewrite, dialect string) ([]rewrite, error) {
 	return parsed, nil
 }
 
-// overlaps reports whether one path is the other or inside it.
 func overlaps(a, b []string) bool {
 	n := min(len(a), len(b))
 	return slices.Equal(a[:n], b[:n])
@@ -287,11 +243,6 @@ func overlaps(a, b []string) bool {
 
 func (r rewrite) pointer() string { return "/" + strings.Join(r.path, "/") }
 
-// change returns the overlay the rewrite makes to a request, or false when the
-// request already satisfies it: a default of a member the request has, or a
-// deletion of one it lacks. Setting a member creates the objects above it; an
-// ancestor that is not an object makes the request one the rewrite cannot
-// place.
 func (r rewrite) change(request oif.Document) (oif.Change, bool, error) {
 	change := oif.Change{Origin: hostingRewrite, Reason: "declared " + r.op + " of the plugin profile's hosting adaptation"}
 	parent := ""
@@ -324,9 +275,6 @@ func (r rewrite) change(request oif.Document) (oif.Change, bool, error) {
 	return oif.Change{}, false, nil
 }
 
-// Rewrite applies a plugin profile's declared rewrites to a prepared dialect
-// request, in order, and records each change in its provenance. Only the
-// declared rewrites apply.
 func (c Config) Rewrite(prepared oif.Prepared) (oif.Prepared, error) {
 	if c.Plugin == nil || len(c.Plugin.hosting.rewrites) == 0 {
 		return prepared, nil

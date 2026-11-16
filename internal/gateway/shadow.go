@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -121,6 +122,7 @@ func (s *Server) mirror(x *call) {
 				<-s.shadows.slots
 				s.shadows.running.Done()
 			}()
+			defer panics.Recover(s.log, "shadow", func(error) {})
 			s.runShadow(x, attempt)
 		}()
 	}

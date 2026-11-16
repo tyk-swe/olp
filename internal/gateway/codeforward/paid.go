@@ -107,11 +107,11 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 	demand := estimate.Walk(parsed).Estimate(estimate.ForModel(operation.Model), nil)
 	now := f.now()
 	inputs := f.runtime.RoutingInputs()
-	price := inputs.Price(provider.Kind, provider.ID, provider.VendorID, operation.Model, "generation", now)
+	price := inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, operation.Model, "generation", now)
 	if price == nil {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
-	discount := inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
+	discount := inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
 	cost, priced := price.CostBound(demand.InputExposure(), demand.Reply(), true, now, discount)
 	if !priced {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
@@ -124,7 +124,7 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 		if card == nil {
 			return cost, true
 		}
-		return card.ChargeBound(demand.InputExposure(), demand.Reply(), true, now, cost, provider.Kind, provider.VendorID, operation.Model, "generation")
+		return card.ChargeBound(demand.InputExposure(), demand.Reply(), true, now, cost, string(provider.Kind), provider.VendorID, operation.Model, "generation")
 	}()
 	if !chargePriced {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
@@ -286,7 +286,7 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		if p.card == nil {
 			return cost.String(), cost.String()
 		}
-		charge, chargeKnown := p.card.Charge(usage.ObservedAttemptUsage(measured, observed, "generation"), p.started, p.status >= 200 && p.status < 300, &cost, p.provider.Kind, p.provider.VendorID, a.model, "generation")
+		charge, chargeKnown := p.card.Charge(usage.ObservedAttemptUsage(measured, observed, "generation"), p.started, p.status >= 200 && p.status < 300, &cost, string(p.provider.Kind), p.provider.VendorID, a.model, "generation")
 		if !chargeKnown {
 			return cost.String(), ""
 		}

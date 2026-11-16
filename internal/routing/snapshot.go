@@ -19,15 +19,15 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/mediacontract"
+	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/routing/durablecontract"
+	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // Generation identifies one published runtime configuration.
@@ -123,14 +123,14 @@ type Provider struct {
 	PluginOptions            map[string]string                `json:"plugin_options,omitempty"`
 	ID                       string                           `json:"id"`
 	Name                     string                           `json:"name"`
-	Kind                     string                           `json:"kind"`
+	Kind                     connectors.Kind                  `json:"kind"`
 	Enabled                  bool                             `json:"enabled"`
 	DefaultSlotID            string                           `json:"default_slot_id,omitempty"`
 	ActiveCredential         *string                          `json:"active_credential"`
 	Capabilities             []Capability                     `json:"capabilities"`
 	RevisionID               string                           `json:"revision_id"`
 	Endpoint                 string                           `json:"endpoint,omitempty"`
-	AuthMode                 string                           `json:"auth_mode,omitempty"`
+	AuthMode                 connectors.AuthMode              `json:"auth_mode,omitempty"`
 	CredentialHeaders        []string                         `json:"credential_headers,omitempty"`
 	ParameterDefaults        map[string]json.RawMessage       `json:"parameter_defaults,omitempty"`
 	CloudRegion              string                           `json:"cloud_region,omitempty"`
@@ -439,7 +439,7 @@ func validUUID(value string) bool {
 func (p *Provider) Connector() connectors.Config {
 	mode := p.AuthMode
 	if mode == "" {
-		mode = "api_key"
+		mode = connectors.AuthAPIKey
 	}
 	identity := providerconfig.Identity[string]{
 		CredentialSource: p.CredentialSource, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision,

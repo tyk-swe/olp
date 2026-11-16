@@ -43,13 +43,13 @@ func (p *Prober) certifyNativeMedia(ctx context.Context, t Target, model string,
 	return p.certifyListedModel(ctx, t, model)
 }
 
-var mediaByCallOperations = map[string][]media.Operation{
+var mediaByCallOperations = map[connectors.Kind][]media.Operation{
 	connectors.KindVertexAI:    {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
 	connectors.KindBedrock:     {media.OpImageGeneration, media.OpSpeech},
 	connectors.KindAzureOpenAI: {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
 }
 
-func mediaByCall(kind, vendor, operation string) bool {
+func mediaByCall(kind connectors.Kind, vendor, operation string) bool {
 	op := media.Operation(operation)
 	if !slices.Contains(mediaByCallOperations[kind], op) {
 		return false
@@ -102,7 +102,7 @@ type mediaProbe struct {
 	Format  string `json:"response_format,omitempty"`
 }
 
-func mediaProbeRequest(kind, operation string) (*media.Request, *media.Error) {
+func mediaProbeRequest(kind connectors.Kind, operation string) (*media.Request, *media.Error) {
 	switch media.Operation(operation) {
 	case media.OpImageGeneration:
 		probe := mediaProbe{Model: "certification", Prompt: "A small blue square.", Count: 1}
@@ -111,7 +111,7 @@ func mediaProbeRequest(kind, operation string) (*media.Request, *media.Error) {
 		}
 		return decodeProbe(probe, media.DecodeImageGeneration)
 	case media.OpSpeech:
-		voices := map[string]mediaProbe{connectors.KindBedrock: {Voice: "Joanna"}, connectors.KindVertexAI: {Voice: "Kore", Format: "wav"}}
+		voices := map[connectors.Kind]mediaProbe{connectors.KindBedrock: {Voice: "Joanna"}, connectors.KindVertexAI: {Voice: "Kore", Format: "wav"}}
 		probe := cmp.Or(voices[kind], mediaProbe{Voice: "alloy"})
 		return decodeProbe(mediaProbe{Model: "certification", Input: "OK", Voice: probe.Voice, Format: probe.Format}, media.DecodeSpeech)
 	case media.OpTranscription:

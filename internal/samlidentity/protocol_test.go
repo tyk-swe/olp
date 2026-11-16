@@ -163,6 +163,30 @@ func respond(t *testing.T, assertionSigner, responseSigner *signer, i issue) []b
 	return raw
 }
 
+func resigned(t *testing.T, s *signer, response []byte, edit func(subject *etree.Element)) []byte {
+	t.Helper()
+	document := etree.NewDocument()
+	if err := document.ReadFromBytes(response); err != nil {
+		t.Fatal(err)
+	}
+	assertion := document.Root().SelectElement("Assertion")
+	assertion.RemoveChild(assertion.SelectElement("Signature"))
+	edit(assertion.SelectElement("Subject"))
+	assertion.AddChild(s.sign(t, assertion, ""))
+	raw, err := document.WriteToBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func outsideSAML(nameID *etree.Element) *etree.Element {
+	nameID.Space = "foreign"
+	nameID.CreateAttr("xmlns:foreign", "urn:example:foreign")
+	nameID.SetText("eve@example.com")
+	return nameID
+}
+
 func assertionIn(t *testing.T, response []byte) []byte {
 	t.Helper()
 	const opening, closing = "<saml:Assertion", "</saml:Assertion>"
@@ -208,6 +232,9 @@ func TestVerifyAcceptsOnlyTheSolicitedSignedAssertion(t *testing.T) {
 		"an expired assertion":                         respond(t, provider, nil, issue{age: 10 * time.Minute}),
 		"an assertion from the future":                 respond(t, provider, nil, issue{age: -10 * time.Minute}),
 		"an assertion valid for more than ten minutes": respond(t, provider, nil, issue{lifetime: 11 * time.Minute}),
+		"a second subject name outside the SAML namespace": resigned(t, provider, solicited, func(subject *etree.Element) {
+			subject.AddChild(outsideSAML(subject.SelectElement("NameID").Copy()))
+		}),
 	} {
 		if _, err := Verify(service, metadata, raw, requestID, instant); !errors.Is(err, ErrDocument) {
 			t.Errorf("%s: got %v, want %v", name, err, ErrDocument)

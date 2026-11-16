@@ -87,7 +87,7 @@ function serveWizard(
       return json({ items: [], provider });
     if (path === `/api/v1/providers/${provider.id}/probe`) {
       route(request, 'POST', path);
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       return probe();
     }
     if (path === '/api/v1/provider-kinds/openai_compatible/capabilities')
@@ -561,5 +561,5 @@ it('uses the reloaded version and a fresh request identity after explicitly disc
   await state.activate();
   expect(activate).toHaveBeenCalledTimes(2);
   expect(activate.mock.calls[1][0]).not.toBe(activate.mock.calls[0][0]);
-  expect(activate.mock.calls[1][1]).toBe(etag);
+  expect(activate.mock.calls[1][1]).toBe(`"${etag}"`);
 });

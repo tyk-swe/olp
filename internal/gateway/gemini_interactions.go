@@ -165,8 +165,8 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		x.pinnedSlot = &p.slot
-		p.attempt.Price = s.deps.Runtime.RoutingInputs().Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, "generation", s.now())
-		p.attempt.Discount = s.deps.Runtime.RoutingInputs().Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, s.now())
+		p.attempt.Price = s.deps.Runtime.RoutingInputs().Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, "generation", s.now())
+		p.attempt.Discount = s.deps.Runtime.RoutingInputs().Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, s.now())
 		deadline, _ := ctx.Deadline()
 		gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, x.estimate, deadline)
 		if gate.verdict != gateAdmitted {
