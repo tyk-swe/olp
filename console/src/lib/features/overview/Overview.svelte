@@ -16,7 +16,6 @@
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 
-  let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/v1');
   let copied = $state(false);
   let copyError = $state('');
@@ -31,7 +30,7 @@
   const recentRequests = createQuery(() => ({
     queryKey: requestKeys.overview(),
     queryFn: () => listRequests({ limit: 5 }),
-    enabled: controlConnected && services.retentionEnforced
+    enabled: services.retentionEnforced
   }));
   const activeProviders = $derived(overview.data?.active_providers ?? 0);
   const readyRoutes = $derived(overview.data?.active_routes ?? 0);
@@ -147,19 +146,12 @@
     </div>
   </article>
   <article class="card status-card">
-    <span
-      class:ready={controlConnected}
-      class:neutral={!controlConnected}
-      class="status-icon"
-      aria-hidden="true"><NavIcon name="health" /></span
+    <span class="status-icon ready" aria-hidden="true"
+      ><NavIcon name="health" /></span
     >
     <div>
       <p>Control API</p>
-      <strong
-        >{controlConnected
-          ? 'Console connected'
-          : 'Connection unavailable'}</strong
-      >
+      <strong>Console connected</strong>
     </div>
   </article>
 </section>

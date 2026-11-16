@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && node scripts/asset-manifest.mjs",
+    "build": "vite build",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .",
     "test": "svelte-kit sync && vitest run",
     "format": "prettier --write .",

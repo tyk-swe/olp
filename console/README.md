@@ -23,7 +23,7 @@ Run from the repository root after setup:
 | Command                    | Purpose                                                       |
 | -------------------------- | ------------------------------------------------------------- |
 | `make check-console`       | Generate types and check formatting, Svelte types, and ESLint |
-| `pnpm --dir console build` | Static assets and asset manifest                              |
+| `pnpm --dir console build` | Static assets                                                 |
 
 Management requests use the generated `openapi-fetch` client. Update
 `management/management.json` alongside Go handlers and run `make api`; never edit

@@ -9,10 +9,11 @@ export const SESSION_FRESHNESS_MS = 60_000;
  */
 export function sessionIsFresh(
   lastValidatedAt: number | undefined,
-  hasCsrfToken: boolean,
-  now = Date.now()
+  hasCsrfToken: boolean
 ): boolean {
-  return hasCsrfToken && now - (lastValidatedAt ?? 0) <= SESSION_FRESHNESS_MS;
+  return (
+    hasCsrfToken && Date.now() - (lastValidatedAt ?? 0) <= SESSION_FRESHNESS_MS
+  );
 }
 
 export function unauthorizedError(error: unknown): boolean {

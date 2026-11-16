@@ -4,7 +4,6 @@ import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 export type CodeAccount = Schemas['CodeAccount'];
-export type CodeAccountCooldown = Schemas['CodeAccountCooldown'];
 export type CodeAllowanceWindow = Schemas['CodeAllowanceWindow'];
 export type CodeAccountWrite = Schemas['CodeAccountWrite'];
 export type CodePool = Schemas['CodePool'];
@@ -299,22 +298,6 @@ export async function listCodeRevisions(
     await apiClient.GET('/api/v1/code/routes/{id}/revisions', {
       params: { path: { id }, query: { limit: 50, cursor } },
       signal
-    })
-  );
-}
-
-export async function requestCodeAccountAllowanceRead(
-  account: Pick<CodeAccount, 'id'>,
-  requestId: string
-) {
-  if (!requestId)
-    throw new Error('An allowance read requires a stable request ID.');
-  return unwrap(
-    await apiClient.POST('/api/v1/code/accounts/{id}/allowance-reads', {
-      params: {
-        path: { id: account.id },
-        header: { 'Idempotency-Key': requestId }
-      }
     })
   );
 }

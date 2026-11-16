@@ -3,7 +3,6 @@ import { apiClient } from '#lib/management/client.js';
 import { unwrap } from '#lib/management/http.js';
 
 export type Catalog = components['schemas']['ModelCatalogResponse'];
-export type CatalogModel = components['schemas']['CatalogModel'];
 export type Publication = components['schemas']['CatalogPublicationResponse'];
 export type Exposure = components['schemas']['RouteCatalogExposureResponse'];
 

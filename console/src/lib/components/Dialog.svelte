@@ -7,7 +7,6 @@
     placement = 'center',
     size = 'normal',
     children,
-    footer,
     canClose = () => true,
     onClose = () => {}
   }: {
@@ -16,7 +15,6 @@
     placement?: 'center' | 'side';
     size?: 'normal' | 'wide';
     children: Snippet<[close: () => void]>;
-    footer?: Snippet<[close: () => void]>;
     canClose?: () => boolean;
     onClose?: () => void;
   } = $props();
@@ -66,7 +64,6 @@
         {description}
       </p>{/if}
     <div class="content">{@render children(close)}</div>
-    {#if footer}<footer>{@render footer(close)}</footer>{/if}
   </div>
 </dialog>
 
@@ -159,16 +156,6 @@
     flex: 1 1 auto;
     overflow-y: auto;
     padding: 1.25rem 1.5rem 1.5rem;
-  }
-
-  footer {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-hairline);
-    background: var(--surface);
   }
 
   .close {

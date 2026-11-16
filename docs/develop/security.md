@@ -66,8 +66,7 @@ installation lock, so they commit only under authority that is still current.
 
 `internal/access/testdata/authorization.golden.json` records which callers
 every route admits. The authorization sweep calls every route as each of those
-callers against a real process, and the console's authorization is tested
-against the same file, so the console offers exactly what the server admits.
+callers against a real process.
 
 ## Project boundaries
 
