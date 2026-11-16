@@ -8,16 +8,6 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// PrepareGuardrail is called during release installation. Serving never loads
-// modules or reads management configuration as a side effect of a request.
-func (h *Host) PrepareGuardrail(ctx context.Context, digest string) error {
-	release, err := h.PinGuardrail(ctx, digest)
-	if err == nil {
-		release()
-	}
-	return err
-}
-
 // PinGuardrail keeps an approved module resident for a runtime release. The
 // returned function releases its cache reference after no request uses that
 // release, so ordinary provider traffic cannot evict a pinned guardrail.

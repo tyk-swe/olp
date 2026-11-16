@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/plugins"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -89,7 +90,7 @@ func (s *Server) permitExecutable(r *http.Request, _ access.Principal) (httpkit.
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if !plugins.ValidDigest(input.Digest) {
+	if !pluginidentity.ValidDigest(input.Digest) {
 		return httpkit.Reply{}, httpkit.Invalid("digest", "Use the reviewed executable digest.")
 	}
 	if !input.AcknowledgeRisk {

@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -80,7 +81,7 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (httpkit.Reply,
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if !ValidDigest(input.Digest) {
+	if !pluginidentity.ValidDigest(input.Digest) {
 		return httpkit.Reply{}, httpkit.Invalid("digest", "Name the executable by the lowercase hexadecimal SHA-256 digest you reviewed.")
 	}
 	if !input.AcknowledgeRisk {

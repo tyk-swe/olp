@@ -36,8 +36,6 @@ type Error struct {
 	Message string
 }
 
-func (e *Error) Error() string { return e.Message }
-
 func invalid(message string) *Error { return &Error{Kind: Invalid, Message: message} }
 
 var (

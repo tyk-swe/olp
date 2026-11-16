@@ -6,12 +6,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func (m *Manager) RecordInstallStatus(ctx context.Context, instance string) error {
-	if instance == "" {
-		return nil
-	}
+func (m *Manager) recordInstallStatus(ctx context.Context) error {
 	desired, installed, failed := m.installStatus()
-	_, err := m.pool.Exec(ctx, recordInstallStatusSQL, instance, desired, installed, failed)
+	_, err := m.pool.Exec(ctx, recordInstallStatusSQL, m.instanceID, desired, installed, failed)
 	return err
 }
 
