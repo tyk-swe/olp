@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -34,7 +35,7 @@
   }));
 </script>
 
-<svelte:head><title>A2A task · OpenLLMProxy</title></svelte:head>
+<PageTitle title="A2A task" />
 <a class="text-button" href={resolve('activity/tasks')}>All A2A tasks</a>
 <PageHeader title="Task" description={taskID} />
 {#if task.error}

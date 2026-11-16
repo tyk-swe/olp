@@ -34,6 +34,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
 	public := map[string]PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
+		"GET /api/v1/branding":            s.branding,
 		"GET /api/v1/auth/capabilities":   s.capabilities,
 		"POST /api/v1/auth/mfa/verify":    s.mfaVerify,
 		"POST /api/v1/auth/mfa/enroll":    s.mfaBootstrap,
@@ -74,7 +75,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v1/budget-groups/{budget_group_id}": s.budgetGroup, "PATCH /api/v1/budget-groups/{budget_group_id}": s.updateBudgetGroup,
 		"DELETE /api/v1/budget-groups/{budget_group_id}": s.deleteBudgetGroup,
 		"GET /api/v1/audit":                        s.auditEvents,
-		"GET /api/v1/branding":                     s.branding,
 		"GET /api/v1/settings":                     s.settings,
 		"GET /api/v1/settings/{key}":               s.setting,
 		"PUT /api/v1/settings/{key}":               s.updateSetting,

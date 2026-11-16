@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -84,7 +85,7 @@
   }
 </script>
 
-<svelte:head><title>New investigation · OpenLLMProxy</title></svelte:head>
+<PageTitle title="New investigation" />
 
 <a class="text-button" href={resolve('investigations')}>All investigations</a>
 

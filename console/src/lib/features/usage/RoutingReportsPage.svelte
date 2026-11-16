@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { dateTimeLocalValue, formatInteger } from '#lib/format.js';
@@ -63,7 +64,7 @@
   }
 </script>
 
-<svelte:head><title>Routing reports · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routing reports" />
 <form class="card form-card" onsubmit={apply}>
   <label class="form-field"
     >Start<input required type="datetime-local" bind:value={start} /></label

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -122,7 +123,7 @@
   }
 </script>
 
-<svelte:head><title>Plugins · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Plugins" />
 
 <PageHeader
   title="Plugins"

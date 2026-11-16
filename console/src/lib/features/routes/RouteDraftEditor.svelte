@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
@@ -38,7 +39,7 @@
   });
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <PageHeader
   title={editor.isNew

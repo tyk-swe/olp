@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import BrandingPanel from './BrandingPanel.svelte';
   import Callout from '#lib/components/Callout.svelte';
@@ -166,7 +167,7 @@
   }
 </script>
 
-<svelte:head><title>Settings · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Settings" />
 
 {#if view === 'general'}<BrandingPanel />{/if}
 

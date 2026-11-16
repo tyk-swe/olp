@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -32,7 +33,7 @@
   }));
 </script>
 
-<svelte:head><title>Investigations · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Investigations" />
 <PageHeader
   title="Investigations"
   description="Saved filters, evidence references and operator summaries for your projects."

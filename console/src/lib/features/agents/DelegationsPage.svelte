@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
@@ -43,7 +44,7 @@
   }));
 </script>
 
-<svelte:head><title>Delegations · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Delegations" />
 <form
   class="filter-bar"
   onsubmit={(event) => {

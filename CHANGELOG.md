@@ -7,8 +7,20 @@ semantic versioning and take their source from root `package.json`. The
 
 ## [Unreleased]
 
+### Added
+
+- Installation branding now covers a brand color. The General settings tab
+  takes a `#rrggbb` color with at least 4.5:1 contrast for white button text,
+  and the console derives readable shades of it for every surface. The
+  installation name and logo now also appear on the sign-in page, in browser
+  tab titles and as the favicon. Migration 0149 adds the `accent` column.
+
 ### Changed
 
+- `GET /api/v1/branding` no longer requires a session, so signed-out pages can
+  show the installation identity. `PUT /api/v1/branding` now requires an
+  `accent` field. The session response drops `installation_name` and
+  `installation_logo`, which clients should read from the branding endpoint.
 - Google BigQuery billing imports share the month walker that AWS and Azure
   use. A pass reads at most three months, newest first, and an unfinished
   backfill resumes a minute later. A closed month is not read again once its

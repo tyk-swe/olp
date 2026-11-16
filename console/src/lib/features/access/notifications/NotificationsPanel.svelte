@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
@@ -16,7 +17,7 @@
   const installationWide = $derived(holds(access.user, 'settings'));
 </script>
 
-<svelte:head><title>Notifications · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Notifications" />
 
 {#if !services.notificationsActive}
   <Callout tone="warning" title="Notifications aren’t being sent">

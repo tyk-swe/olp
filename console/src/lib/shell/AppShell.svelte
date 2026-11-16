@@ -4,7 +4,7 @@
   import type { Snippet } from 'svelte';
   import type { SessionUser } from '#lib/features/access/session/api.js';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
   import CommandPalette from '#lib/shell/CommandPalette.svelte';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import Sidebar from '#lib/shell/Sidebar.svelte';
@@ -13,23 +13,18 @@
   let {
     children,
     user,
-    installationName,
-    installationLogo = '',
     signingOut = false,
     signOutError = '',
     onSignOut
   }: {
     children: Snippet;
     user: SessionUser;
-    installationName: string;
-    installationLogo?: string;
     signingOut?: boolean;
     signOutError?: string;
     onSignOut: () => void;
   } = $props();
 
   const services = useServiceCapabilities();
-  const installationLabel = $derived(installationName || 'Local installation');
   const crumbs = $derived(breadcrumbs(page.url.pathname));
   let paletteOpen = $state(false);
   let drawer = $state<HTMLDialogElement>();
@@ -54,15 +49,7 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 {#snippet sidebar(onNavigate?: () => void)}
-  <Sidebar
-    {user}
-    installationName={installationLabel}
-    {installationLogo}
-    {signingOut}
-    {onSignOut}
-    onSearch={openSearch}
-    {onNavigate}
-  />
+  <Sidebar {user} {signingOut} {onSignOut} onSearch={openSearch} {onNavigate} />
 {/snippet}
 
 <div class="shell">
@@ -78,7 +65,7 @@
         onclick={() => drawer?.showModal()}><NavIcon name="menu" /></button
       >
       <span class="mobile-brand" aria-hidden="true"
-        ><BrandMark size={20} /></span
+        ><InstallationMark size={20} /></span
       >
       {#if crumbs.length}
         <nav class="crumbs" aria-label="Breadcrumb">

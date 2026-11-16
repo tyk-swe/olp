@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
@@ -160,7 +161,7 @@
   }
 </script>
 
-<svelte:head><title>API keys · OpenLLMProxy</title></svelte:head>
+<PageTitle title="API keys" />
 
 {#if secret}
   <ApiKeySecretDialog

@@ -18,7 +18,6 @@ type Schemas = components['schemas'];
 
 const session: Schemas['SessionResponse'] = {
   csrf_token: 'csrf',
-  installation_name: 'Installation',
   operations: ['read', 'configure'],
   user: {
     id: 'user-id',

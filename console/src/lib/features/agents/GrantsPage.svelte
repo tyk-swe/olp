@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
@@ -291,7 +292,7 @@
   onhashchange={() => consumeLocation(new URL(window.location.href))}
 />
 
-<svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Personal tool grants" />
 <PageHeader
   title="My connections"
   description="Grant standing is bound to one individual and the resource's authorization settings."

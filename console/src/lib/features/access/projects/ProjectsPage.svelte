@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -60,7 +61,7 @@
   }
 </script>
 
-<svelte:head><title>Projects · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Projects" />
 
 <PageHeader
   title="Projects"

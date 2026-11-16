@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery } from '@tanstack/svelte-query';
@@ -99,7 +100,7 @@
   }
 </script>
 
-<svelte:head><title>Provider resources · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Provider resources" />
 
 <PageHeader
   title="Provider resources"

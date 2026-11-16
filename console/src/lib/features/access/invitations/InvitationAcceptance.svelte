@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
@@ -130,8 +131,9 @@
   }
 </script>
 
+<PageTitle title="Accept invitation" />
+
 <svelte:head>
-  <title>Accept invitation · OpenLLMProxy</title>
   <meta name="referrer" content="no-referrer" />
 </svelte:head>
 

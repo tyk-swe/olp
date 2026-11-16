@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
@@ -149,7 +150,7 @@
   }
 </script>
 
-<svelte:head><title>Models · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Models" />
 
 <div class="toolbar">
   <div class="page-actions">

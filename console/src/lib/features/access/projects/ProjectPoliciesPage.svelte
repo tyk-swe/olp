@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { resolve } from '$app/paths';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -105,9 +106,7 @@
   );
 </script>
 
-<svelte:head
-  ><title>{selected?.name ?? 'Project'} · OpenLLMProxy</title></svelte:head
->
+<PageTitle title={selected?.name ?? 'Project'} />
 
 {#if projects.isPending}
   <div class="loading-state" role="status">Loading project…</div>

@@ -1,9 +1,10 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import OidcConfigurationPanel from '#lib/features/access/oidc/OidcConfigurationPanel.svelte';
   import SAMLConfigurationPanel from '#lib/features/access/saml/SAMLConfigurationPanel.svelte';
 </script>
 
-<svelte:head><title>Single sign-on · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Single sign-on" />
 
 <p class="lede">
   Let people sign in with your company identity provider. Set up OpenID Connect

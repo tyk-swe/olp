@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
@@ -139,7 +140,7 @@
   }
 </script>
 
-<svelte:head><title>Usage · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Usage" />
 
 <div class="toolbar">
   <SavedFilters
