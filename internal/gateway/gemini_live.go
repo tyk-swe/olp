@@ -628,9 +628,9 @@ func geminiUsageDetails(detail []geminilifecycle.LiveUsageDetail) (audio, image 
 	for _, entry := range detail {
 		switch entry.Modality {
 		case "AUDIO":
-			audio += entry.TokenCount
+			audio = quota.AddBounded(audio, entry.TokenCount)
 		case "IMAGE", "VIDEO":
-			image += entry.TokenCount
+			image = quota.AddBounded(image, entry.TokenCount)
 		}
 	}
 	return audio, image
@@ -641,26 +641,29 @@ func geminiLiveModality(u *wire.Usage, native *geminilifecycle.LiveUsage) {
 	if u == nil {
 		return
 	}
-	audio, image := geminiUsageDetails(native.PromptDetails)
-	if audio > 0 {
-		u.AudioInputTokens = &audio
+	if audio, image := geminiUsageDetails(native.PromptDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			u.AudioInputTokens = &audio
+		}
+		if image > 0 {
+			u.ImageInputTokens = &image
+		}
 	}
-	if image > 0 {
-		u.ImageInputTokens = &image
+	if audio, image := geminiUsageDetails(native.CacheDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			u.CachedAudioInputTokens = &audio
+		}
+		if image > 0 {
+			u.CachedImageInputTokens = &image
+		}
 	}
-	audio, image = geminiUsageDetails(native.CacheDetails)
-	if audio > 0 {
-		u.CachedAudioInputTokens = &audio
-	}
-	if image > 0 {
-		u.CachedImageInputTokens = &image
-	}
-	audio, image = geminiUsageDetails(native.ResponseDetails)
-	if audio > 0 {
-		u.AudioOutputTokens = &audio
-	}
-	if image > 0 {
-		u.ImageOutputTokens = &image
+	if audio, image := geminiUsageDetails(native.ResponseDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			u.AudioOutputTokens = &audio
+		}
+		if image > 0 {
+			u.ImageOutputTokens = &image
+		}
 	}
 }
 

@@ -145,6 +145,8 @@
       );
       if (drafts[setting.key]?.value === draft.value)
         delete drafts[setting.key];
+      else if (drafts[setting.key])
+        drafts[setting.key] = { ...drafts[setting.key], etag: updated.etag };
       if (setting.key === 'auth.local_login_enabled')
         await queryClient.invalidateQueries({
           queryKey: sessionKeys.serviceCapabilities

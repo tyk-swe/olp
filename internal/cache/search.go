@@ -58,7 +58,39 @@ type candidate struct {
 	score float64
 }
 
+func (s *Store) generationsCurrent(ctx context.Context, ticket Ticket) (bool, error) {
+	if len(ticket.GenerationKeys) == 0 || len(ticket.GenerationKeys) != len(ticket.GenerationValues) {
+		return false, nil
+	}
+	args := append([]string{"MGET"}, ticket.GenerationKeys...)
+	value, err := s.Client.Do(ctx, args...)
+	if err != nil {
+		return false, ErrUnavailable
+	}
+	list, ok := value.([]any)
+	if !ok || len(list) != len(ticket.GenerationKeys) {
+		return false, ErrUnavailable
+	}
+	for i, item := range list {
+		current, err := replyString(item)
+		if err != nil {
+			return false, err
+		}
+		if current != ticket.GenerationValues[i] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, policy Policy, controls Controls) (*Entry, float64, error) {
+	current, err := s.generationsCurrent(ctx, ticket)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !current {
+		return nil, 0, nil
+	}
 	p := policy.Effective()
 	name, err := s.index(ctx, len(vector))
 	if err != nil {

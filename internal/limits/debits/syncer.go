@@ -39,8 +39,11 @@ func (c *versionCache) record(owner string, version int64) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.seen) >= versionCacheSize {
-		clear(c.seen)
+	if _, ok := c.seen[owner]; !ok && len(c.seen) >= versionCacheSize {
+		for evicted := range c.seen {
+			delete(c.seen, evicted)
+			break
+		}
 	}
 	c.seen[owner] = version
 }

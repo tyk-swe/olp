@@ -770,26 +770,25 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, cursorErr)
 		return
 	}
-	rows, err := s.deps.Resources.ListKinds(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, pageSize+1, pageToken)
-	if errors.Is(err, resources.ErrNotFound) {
-		param := "pageToken"
-		s.refuse(x, w, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini batch owned by this key.", &param))
+	rows, hasMore, listErr := listedResourcePage(pageSize, pageToken, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.deps.Resources.ListKinds(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor)
+		if errors.Is(err, resources.ErrNotFound) {
+			param := "pageToken"
+			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini batch owned by this key.", &param)
+		}
+		if err != nil {
+			return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini batch list could not be read.")
+		}
+		return batch, nil
+	}, func(row *resources.Resource) *fault.Error {
+		return s.authorizeListedResource(r.Context(), authority, row)
+	})
+	if listErr != nil {
+		s.refuse(x, w, listErr)
 		return
-	}
-	if err != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini batch list could not be read."))
-		return
-	}
-	hasMore := len(rows) > pageSize
-	if hasMore {
-		rows = rows[:pageSize]
 	}
 	operations := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
-		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
-			s.refuse(x, w, authErr)
-			return
-		}
 		operation, projectErr := s.geminiBatchResourceObject(r.Context(), row, row.Metadata)
 		if projectErr != nil {
 			s.refuse(x, w, geminiBatchProjectionError(projectErr))

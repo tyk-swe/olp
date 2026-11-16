@@ -1,6 +1,7 @@
 package rates
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -66,6 +67,18 @@ func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 		{"cache tiers that exceed their total", Price{InputPerMillion: rate("5"), CachedInputPerMillion: rate("0.1")}, func() usage.AttemptUsage {
 			u := completeUsage()
 			u.InputTokens, u.CachedInputTokens = tokens(10), tokens(20)
+			return u
+		}},
+		{"paired audio and image input shares overflowing the input total", Price{InputPerMillion: rate("1"), OutputPerMillion: rate("1")}, func() usage.AttemptUsage {
+			u := completeUsage()
+			u.InputTokens = tokens(10)
+			u.AudioInputTokens, u.ImageInputTokens = tokens(math.MaxInt64), tokens(math.MaxInt64)
+			return u
+		}},
+		{"paired audio and image output shares overflowing the output total", Price{InputPerMillion: rate("1"), OutputPerMillion: rate("1")}, func() usage.AttemptUsage {
+			u := completeUsage()
+			u.InputTokens, u.OutputTokens = tokens(10), tokens(10)
+			u.AudioOutputTokens, u.ImageOutputTokens = tokens(math.MaxInt64), tokens(math.MaxInt64)
 			return u
 		}},
 	} {

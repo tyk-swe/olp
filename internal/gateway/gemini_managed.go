@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/batches"
@@ -260,8 +259,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
 	}
 	defer opened.File.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(part.Size, 10))
+	setFileDownloadHeaders(w.Header(), contentType, part.Size)
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file response could not be bounded.")
 	}

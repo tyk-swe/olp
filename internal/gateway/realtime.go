@@ -1022,13 +1022,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 					if u := responses.providerFrame(typ, data, x.strict()); u != nil {
 						usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
 						usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
-						if u.CachedInputTokens != nil {
-							cached := *u.CachedInputTokens
-							if usage.CachedInputTokens != nil {
-								cached = quota.AddBounded(cached, *usage.CachedInputTokens)
-							}
-							usage.CachedInputTokens = &cached
-						}
+						addUsageShare(&usage.CachedInputTokens, u.CachedInputTokens)
+						addUsageShare(&usage.AudioInputTokens, u.AudioInputTokens)
+						addUsageShare(&usage.CachedAudioInputTokens, u.CachedAudioInputTokens)
+						addUsageShare(&usage.AudioOutputTokens, u.AudioOutputTokens)
+						addUsageShare(&usage.ImageInputTokens, u.ImageInputTokens)
+						addUsageShare(&usage.CachedImageInputTokens, u.CachedImageInputTokens)
 						have = true
 					}
 				}()

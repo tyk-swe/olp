@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -782,8 +782,8 @@ func resourceListError(err error, message string) *fault.Error {
 func listArgs(r *http.Request) (int, string, *fault.Error) {
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
-		var parsed int
-		if _, err := fmt.Sscanf(raw, "%d", &parsed); err != nil || parsed < 1 || parsed > maxResourceList {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxResourceList {
 			param := "limit"
 			return 0, "", fault.InvalidRequest("invalid_value", "limit must be an integer between 1 and 100.", &param)
 		}

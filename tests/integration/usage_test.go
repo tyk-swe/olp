@@ -592,6 +592,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
+	t.Run("expiring records skip locked rows", func(t *testing.T) { testExpiringRecordsSkipLockedRows(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
 	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
@@ -706,6 +707,70 @@ func testAnchorRetention(t *testing.T, fixture usageFixture) {
 			}
 		})
 	}
+}
+
+func testExpiringRecordsSkipLockedRows(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	now := time.Now().UTC()
+	sessions := []struct {
+		id       string
+		expires  time.Time
+		retained bool
+	}{
+		{uuid.NewString(), now.Add(-time.Hour), false},
+		{uuid.NewString(), now.Add(-time.Hour), false},
+		{uuid.NewString(), now.Add(-time.Hour), true},
+		{uuid.NewString(), now.Add(time.Hour), true},
+	}
+	for _, session := range sessions {
+		digest := sha256.Sum256([]byte(session.id))
+		if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint)
+			VALUES($1,$2,$3,$4,'test')`, session.id, fixture.ownerID, digest[:], session.expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	locked, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locked.Rollback(context.WithoutCancel(t.Context()))
+	if _, err := locked.Exec(t.Context(), `SELECT id FROM olp.sessions WHERE id=$1 FOR UPDATE`, sessions[2].id); err != nil {
+		t.Fatal(err)
+	}
+	retained := func() {
+		t.Helper()
+		for _, session := range sessions {
+			var exists bool
+			if err := fixture.pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.sessions WHERE id=$1)`, session.id).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists != session.retained {
+				t.Errorf("session expiring at %s retained=%v, want %v", session.expires, exists, session.retained)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	report, err := retention.RunMaintenance(ctx, fixture.pool, now)
+	if err != nil || !report.LockAcquired {
+		t.Fatalf("maintenance did not finish while an expired session was locked: lock=%v error=%v", report.LockAcquired, err)
+	}
+	if report.SessionRows != 2 {
+		t.Fatalf("maintenance purged %d expired sessions, want the 2 unlocked ones", report.SessionRows)
+	}
+	retained()
+	if err := locked.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sessions[2].retained = false
+	report, err = retention.RunMaintenance(t.Context(), fixture.pool, now)
+	if err != nil || !report.LockAcquired {
+		t.Fatalf("maintenance after unlock: lock=%v error=%v", report.LockAcquired, err)
+	}
+	if report.SessionRows != 1 {
+		t.Fatalf("maintenance after unlock purged %d expired sessions, want the previously locked one", report.SessionRows)
+	}
+	retained()
 }
 
 func cleanupPublication(t *testing.T, fixture usageFixture, kind string) (string, string) {

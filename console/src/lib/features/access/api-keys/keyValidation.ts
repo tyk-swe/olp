@@ -44,6 +44,17 @@ export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
     }
   }
 
+  for (const field of ['requestsPerMinute', 'maxConcurrency'] as const) {
+    const limit = value[field];
+    if (
+      limit !== undefined &&
+      Number.isInteger(limit) &&
+      limit > 2_147_483_647
+    ) {
+      errors[field] = 'Use a positive whole number of at most 2147483647.';
+    }
+  }
+
   for (const field of [
     'dailyCostLimit',
     'weeklyCostLimit',

@@ -311,6 +311,10 @@
         >External credential bindings<textarea
           class="filter-control"
           bind:value={externalBindingsJSON}
+          oninput={() => {
+            plan = null;
+            applyResult = '';
+          }}
           readonly={busy}
           rows="4"
           maxlength="65536"

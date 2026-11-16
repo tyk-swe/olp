@@ -363,8 +363,7 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The staged results could not be read.")
 		}
 		defer opened.File.Close()
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Length", fmt.Sprint(artifact.ContentLength))
+		setFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The results response could not be bounded.")
 		}

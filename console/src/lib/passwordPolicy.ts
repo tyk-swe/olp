@@ -18,9 +18,8 @@ export function validatePasswordPolicy(
   confirmation: string,
   mismatch = 'Passwords do not match.'
 ): PasswordPolicyErrors {
-  if (password.length < PASSWORD_MIN_LENGTH)
-    return { password: PASSWORD_TOO_SHORT };
-  if (password.length > PASSWORD_MAX_LENGTH)
-    return { password: PASSWORD_TOO_LONG };
+  const length = [...password].length;
+  if (length < PASSWORD_MIN_LENGTH) return { password: PASSWORD_TOO_SHORT };
+  if (length > PASSWORD_MAX_LENGTH) return { password: PASSWORD_TOO_LONG };
   return password === confirmation ? {} : { confirmPassword: mismatch };
 }

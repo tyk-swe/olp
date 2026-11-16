@@ -35,13 +35,51 @@ func (s *Server) authorizeListedResource(ctx context.Context, authority keyautho
 		operation = retainedFileOperation(res)
 	}
 	resolved, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
-	if err != nil {
+	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return pinUnavailable()
+	}
+	if err != nil {
+		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
 	}
 	if !authority.Allows("inference", resolved.Route.Slug, resolved.Route.ProjectID, s.now()) {
 		return fault.NotFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
 	return nil
+}
+
+func listedResourcePage(limit int, cursor string, fetch func(cursor string, count int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, bool, *fault.Error) {
+	page := make([]*resources.Resource, 0, limit+1)
+	for len(page) <= limit {
+		count := max(limit+1-len(page), 101)
+		rows, fetchErr := fetch(cursor, count)
+		if fetchErr != nil {
+			return nil, false, fetchErr
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, row := range rows {
+			cursor = row.ID
+			if authErr := authorize(row); authErr != nil {
+				if authErr.Status != http.StatusNotFound && authErr.Status != http.StatusConflict {
+					return nil, false, authErr
+				}
+				continue
+			}
+			page = append(page, row)
+			if len(page) > limit {
+				break
+			}
+		}
+		if len(rows) < count {
+			break
+		}
+	}
+	hasMore := len(page) > limit
+	if hasMore {
+		page = page[:limit]
+	}
+	return page, hasMore, nil
 }
 
 // retainedUse is what a request does with a retained resource.

@@ -89,7 +89,11 @@ func (m *cacheMemory) Do(_ context.Context, a ...string) (any, error) {
 			if a[base+2] == "1" {
 				value = m.values[key]
 			}
-			return []any{key, bucket, value}, nil
+			reply := []any{key, bucket, value}
+			for _, generation := range v {
+				reply = append(reply, generation)
+			}
+			return reply, nil
 		}
 		m.values[a[3]] = a[4]
 		return int64(1), nil

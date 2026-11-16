@@ -506,25 +506,24 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
-	filtered, listErr := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
-	if listErr != nil {
-		if errors.Is(listErr, resources.ErrNotFound) {
-			s.cloudBatchFail(x, w, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after")))
-			return
+	filtered, hasMore, listErr := listedResourcePage(limit, after, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, count, cursor)
+		if errors.Is(err, resources.ErrNotFound) {
+			return nil, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after"))
 		}
-		s.cloudBatchFail(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed."))
+		if err != nil {
+			return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed.")
+		}
+		return batch, nil
+	}, func(row *resources.Resource) *fault.Error {
+		return s.authorizeListedResource(r.Context(), authority, row)
+	})
+	if listErr != nil {
+		s.cloudBatchFail(x, w, listErr)
 		return
-	}
-	hasMore := len(filtered) > limit
-	if hasMore {
-		filtered = filtered[:limit]
 	}
 	data := make([]json.RawMessage, 0, len(filtered))
 	for _, row := range filtered {
-		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
-			s.cloudBatchFail(x, w, authErr)
-			return
-		}
 		item, itemErr := listedCloudBatch(row)
 		if itemErr != nil {
 			s.cloudBatchFail(x, w, itemErr)
