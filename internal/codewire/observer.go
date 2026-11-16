@@ -43,6 +43,12 @@ func classify(body []byte, headers http.Header, operation string, caps ...string
 		return request, err
 	}
 	request.Operation = codemode.Operation{Name: operation, Model: model, Identity: identity}
+	if operation == string(codemode.ProtocolChat) {
+		request.ChatChoices = 1
+		if choices := count(field(root, "n")); choices != nil && *choices > 0 {
+			request.ChatChoices = *choices
+		}
+	}
 	if err := ValidateGenericRequest(root, headers, request); err != nil {
 		return request, err
 	}

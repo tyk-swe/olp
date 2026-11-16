@@ -313,6 +313,7 @@ func (o Operation) PublicModel() string {
 
 // Request is what OLP reads from a forwarded request body without rewriting it.
 type Request struct {
+	ChatChoices      int64
 	Recoverable      bool
 	Operation        Operation
 	PreviousResponse string

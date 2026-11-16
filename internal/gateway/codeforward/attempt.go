@@ -174,7 +174,7 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, observation.ChatChoices)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
 	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)

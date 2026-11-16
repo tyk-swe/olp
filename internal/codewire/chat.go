@@ -15,11 +15,15 @@ import (
 type Chat struct {
 	usage    codemode.Usage
 	charge   json.RawMessage
-	finished string
+	finished map[int64]string
+	expected int64
+	invalid  bool
 	terminal bool
 }
 
-func NewChat() *Chat { return &Chat{} }
+func NewChat(choices int64) *Chat {
+	return &Chat{finished: make(map[int64]string), expected: max(1, choices)}
+}
 
 func (c *Chat) Event(data []byte) codemode.Observation {
 	if c.terminal {
@@ -57,18 +61,38 @@ func (c *Chat) Unary(body []byte) codemode.Observation {
 	return c.finish()
 }
 
-// Finish ends a stream whose final chunk arrived without [DONE].
+// Finish reports the completion state at EOF.
 func (c *Chat) Finish() (codemode.Observation, bool) {
-	if c.terminal || c.finished == "" {
+	if c.terminal {
 		return codemode.Observation{}, false
 	}
 	return c.finish(), true
 }
 
 func (c *Chat) read(root oif.Value) {
-	for _, choice := range field(root, "choices").Elements() {
-		if reason, ok := field(choice, "finish_reason").Text(); ok && reason != "" {
-			c.finished = reason
+	choices := field(root, "choices").Elements()
+	for _, choice := range choices {
+		index, valid := func() (int64, bool) {
+			value := field(choice, "index")
+			if value.Kind() == oif.Absent && c.expected == 1 && len(choices) == 1 {
+				return 0, true
+			}
+			if reported := count(value); reported != nil && *reported < c.expected {
+				return *reported, true
+			}
+			return 0, false
+		}()
+		if !valid {
+			c.invalid = true
+			continue
+		}
+		reason, _ := field(choice, "finish_reason").Text()
+		previous, seen := c.finished[index]
+		if previous != "" && reason != "" && previous != reason {
+			c.invalid = true
+		}
+		if !seen || reason != "" {
+			c.finished[index] = reason
 		}
 	}
 	if usage := field(root, "usage"); usage.Kind() == oif.Object {
@@ -91,8 +115,14 @@ func (c *Chat) read(root oif.Value) {
 func (c *Chat) finish() codemode.Observation {
 	c.terminal = true
 	kind := "completed"
-	if c.finished == "length" {
+	if c.invalid || int64(len(c.finished)) != c.expected {
 		kind = "incomplete"
+	}
+	for _, reason := range c.finished {
+		if reason == "" || reason == "length" {
+			kind = "incomplete"
+			break
+		}
 	}
 	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: c.usage, AllowanceCharge: c.charge, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
 }
