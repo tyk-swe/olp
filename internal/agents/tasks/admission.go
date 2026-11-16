@@ -77,9 +77,9 @@ func lowerLimit(a, b *int64) *int64 {
 func finishRate(ctx context.Context, leases []*admission.Lease, dispatched bool) {
 	for _, lease := range leases {
 		if dispatched {
-			_ = lease.Release(context.WithoutCancel(ctx))
+			_ = lease.Settle(ctx, nil)
 		} else {
-			_ = lease.Refund(context.WithoutCancel(ctx))
+			_ = lease.Refund(ctx)
 		}
 	}
 }

@@ -463,41 +463,15 @@ func (a *Admission) Outage(keyID string, costBudget bool, cause error) *fault.Er
 	return nil
 }
 
-// SettleKey finishes the key reservation. A request that never dispatched an
-// attempt consumed nothing and is refunded in full; any other request keeps
-// its request and local token allowance, increases tokens for higher reported
-// usage, and returns the concurrency slot. The cost
-// it reserved becomes the cost it recorded. That is settled last, and a cost is
-// settled once, because it is the step whose loss costs least: the reservation
-// then lapses on its own and is removed sooner by the spend accounting records
-// for the request. A request that never dispatched, and one that recorded no cost
-// because its usage is still to come, have no spend to remove their reservation,
-// so it is given back by a release, which is retried like the others.
-//
-// The caller's context may already be cancelled — the client may have hung up,
-// which is exactly when the slot has to come back — so cancellation is dropped
-// and every step is retried on the caller's behalf by the limiter.
 func SettleKey(ctx context.Context, lease *admission.Lease, dispatched bool, actual *int64, log *slog.Logger) {
-	if lease == nil {
-		return
-	}
-	ctx = context.WithoutCancel(ctx)
-	if !dispatched {
-		if err := lease.Refund(ctx); err != nil {
-			log.Warn("limit reservation refund failed", "error", err.Error())
+	if dispatched {
+		if err := lease.Settle(ctx, actual); err != nil {
+			log.Warn("limit reservation settlement failed", "error", err.Error())
 		}
 		return
 	}
-	if actual != nil {
-		if err := lease.Reconcile(ctx, *actual); err != nil {
-			log.Warn("limit reservation reconcile failed", "error", err.Error())
-		}
-	}
-	if err := lease.Release(ctx); err != nil {
-		log.Warn("limit reservation release failed", "error", err.Error())
-	}
-	if err := lease.SettleCost(ctx); err != nil {
-		log.Warn("cost reservation settlement failed", "error", err.Error())
+	if err := lease.Refund(ctx); err != nil {
+		log.Warn("limit reservation refund failed", "error", err.Error())
 	}
 }
 

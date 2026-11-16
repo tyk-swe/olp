@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -132,11 +133,11 @@ func (le *Lease) held() *costReservation {
 	return le.cost.reservation
 }
 
-func (le *Lease) SettleCost(ctx context.Context) error {
+func (le *Lease) settleCost(ctx context.Context) error {
 	if le == nil {
 		return nil
 	}
-	err := le.joined.SettleCost(ctx)
+	err := le.joined.settleCost(ctx)
 	held := le.held()
 	if held == nil || le.cost.actual == "" {
 		return err
@@ -175,11 +176,11 @@ func (le *Lease) abandonCost(ctx context.Context, outage bool) {
 	}
 }
 
-func (le *Lease) Refund(ctx context.Context) error {
+func (le *Lease) refund(ctx context.Context) error {
 	if le == nil {
 		return nil
 	}
-	err := le.joined.Refund(ctx)
+	err := le.joined.refund(ctx)
 	if held := le.held(); held != nil {
 		err = errors.Join(err, le.limiter.release(ctx, held.hold))
 	}
@@ -213,11 +214,11 @@ func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	}))
 }
 
-func (le *Lease) Release(ctx context.Context) error {
+func (le *Lease) releaseConcurrency(ctx context.Context) error {
 	if le == nil {
 		return nil
 	}
-	err := le.joined.Release(ctx)
+	err := le.joined.releaseConcurrency(ctx)
 	rate := le.rate
 	if rate == nil || !rate.holdsConcurrency {
 		return err
@@ -225,6 +226,39 @@ func (le *Lease) Release(ctx context.Context) error {
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		return le.limiter.scripts.ReleaseConcurrency(ctx, rate.hold)
 	}))
+}
+
+func (le *Lease) Refund(ctx context.Context) error {
+	if le == nil {
+		return nil
+	}
+	if err := le.refund(ctx); err != nil {
+		return fmt.Errorf("refund limit reservation: %w", err)
+	}
+	return nil
+}
+
+// Settle keeps what a dispatched request consumed and gives back the rest.
+// Any cost recorded with SetActualCost settles last in a single attempt,
+// since a lost settle only leaves the reservation to lapse and be removed
+// by the request's spend accounting records.
+func (le *Lease) Settle(ctx context.Context, actualTokens *int64) error {
+	if le == nil {
+		return nil
+	}
+	var err error
+	if actualTokens != nil {
+		if e := le.Reconcile(ctx, *actualTokens); e != nil {
+			err = errors.Join(err, fmt.Errorf("reconcile limit reservation: %w", e))
+		}
+	}
+	if e := le.releaseConcurrency(ctx); e != nil {
+		err = errors.Join(err, fmt.Errorf("release limit reservation: %w", e))
+	}
+	if e := le.settleCost(ctx); e != nil {
+		err = errors.Join(err, fmt.Errorf("settle cost reservation: %w", e))
+	}
+	return err
 }
 
 func cleanup(ctx context.Context, run func(context.Context) error) error {

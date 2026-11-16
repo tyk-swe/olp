@@ -80,12 +80,12 @@ func (s *Executor) finishLeases(ctx context.Context, leases []*admission.Lease, 
 		finish := lease.Refund
 		action := "refund"
 		if dispatched {
-			finish = lease.Release
-			action = "release"
+			finish = func(ctx context.Context) error { return lease.Settle(ctx, nil) }
+			action = "settle"
 		}
-		if err := finish(context.WithoutCancel(ctx)); err != nil {
+		if err := finish(ctx); err != nil {
 			s.log.Warn("tool rate lease "+action+" failed, retrying once", "error", err)
-			if retryErr := finish(context.WithoutCancel(ctx)); retryErr != nil {
+			if retryErr := finish(ctx); retryErr != nil {
 				s.log.Warn("tool rate lease "+action+" failed after retry", "error", retryErr)
 			}
 		}

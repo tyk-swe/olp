@@ -715,7 +715,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		defer func() {
-			if err := workflowLease.Release(ctx); err != nil {
+			if err := workflowLease.Settle(ctx, nil); err != nil {
 				s.deps.Admission.Logger().Error("release workflow concurrency", "error", err)
 			}
 		}()
