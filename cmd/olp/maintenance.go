@@ -121,7 +121,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 	if err != nil {
 		return err
 	}
-	auth, keys, _, err := loadSecrets(ctx, pool, c, installation)
+	auth, keys, err := loadSecrets(ctx, c, installation)
 	if err != nil {
 		return err
 	}

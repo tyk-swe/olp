@@ -101,7 +101,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 func (s *Server) setupStatus(r *http.Request) (httpkit.Reply, error) {
 	var complete bool
 	err := s.Pool.QueryRow(r.Context(), "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete)
-	return httpkit.OK(map[string]bool{"setup_required": !complete}), err
+	_, configured := s.Bootstrap()
+	return httpkit.OK(map[string]bool{"setup_required": !complete, "bootstrap_token_configured": configured}), err
 }
 func (s *Server) capabilities(r *http.Request) (httpkit.Reply, error) {
 	var local, oidc, samlEnabled, captureEnabled bool
@@ -176,7 +177,8 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 	if err := s.admit(r, "setup", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if s.Bootstrap == "" || !hmac.Equal([]byte(s.Bootstrap), []byte(r.Header.Get("X-OLP-Setup-Token"))) {
+	token, configured := s.Bootstrap()
+	if !configured || !hmac.Equal([]byte(token), []byte(r.Header.Get("X-OLP-Setup-Token"))) {
 		return httpkit.Reply{}, httpkit.Fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
 	}
 	var input struct {

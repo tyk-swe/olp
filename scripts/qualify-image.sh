@@ -7,3 +7,4 @@ docker pull --platform "${OLP_IMAGE_PLATFORM:?set the native image platform}" "$
 ./scripts/smoke-image-modes.sh "$OLP_CONSOLE_E2E_IMAGE"
 ./scripts/scan-image.sh "$OLP_CONSOLE_E2E_IMAGE" "${RUNNER_TEMP:-/tmp}/olp-candidate-scan"
 ./scripts/smoke-image-services.sh "$OLP_CONSOLE_E2E_IMAGE" "${OLP_IMAGE_PLATFORM#linux/}"
+./scripts/smoke-image-compose.sh "$OLP_CONSOLE_E2E_IMAGE"

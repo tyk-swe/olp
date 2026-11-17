@@ -64,6 +64,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
@@ -231,7 +232,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	}
 	identityClient := access.IdentityHTTPClient()
 	control := access.New(access.Config{
-		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Bootstrap: core.bootstrap, Egress: core.policy, Log: log,
+		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Bootstrap: func() (string, bool) { return secrets.ReadBootstrapToken(c.BootstrapTokenFile) }, Egress: core.policy, Log: log,
 		OIDCClient: identityClient,
 		RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
 			_, err := release.Publish(ctx, tx, actor)

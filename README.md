@@ -25,7 +25,7 @@ Production operators should continue with
 
 ## Project status
 
-OpenLLMProxy 0.1.0 is still a work in progress. During 0.x, releases may change
+OpenLLMProxy is still a work in progress. During 0.x, releases may change
 the management API, configuration and storage formats. OLP therefore makes no
 compatibility, upgrade, mixed-version or rollback promises.
 

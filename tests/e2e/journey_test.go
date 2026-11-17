@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -184,4 +185,30 @@ func TestNotificationRuleRejectsNullEnabled(t *testing.T) {
 			t.Fatalf("enabled=%v, want %v", current["enabled"], enabled)
 		}
 	}
+}
+
+func TestFirstOwnerSetupWaitsForAMountedBootstrapToken(t *testing.T) {
+	t.Parallel()
+	pool, databaseURL := harness.Database(t)
+	env := harness.NewEnvironment(t, databaseURL, "Setup test")
+	harness.RunBinary(t, env, "migrate")
+	tokenFile := env.Values["OLP_BOOTSTRAP_TOKEN_FILE"]
+	if err := os.Remove(tokenFile); err != nil {
+		t.Fatal(err)
+	}
+	s := harness.StartProcess(t, pool, env)
+	status := func() any {
+		return s.Want(nil, "GET", "/api/v1/setup/status", nil, nil, http.StatusOK)["bootstrap_token_configured"]
+	}
+	if configured := status(); configured != false {
+		t.Fatalf("bootstrap_token_configured=%v without a token file", configured)
+	}
+	s.Want(nil, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": "a long service test password", "installation_name": "Setup test"}, map[string]string{"X-OLP-Setup-Token": env.Bootstrap}, http.StatusForbidden)
+	if err := os.WriteFile(tokenFile, []byte(env.Bootstrap), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if configured := status(); configured != true {
+		t.Fatalf("bootstrap_token_configured=%v after mounting the token", configured)
+	}
+	s.Owner()
 }

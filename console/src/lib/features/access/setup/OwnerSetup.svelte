@@ -225,8 +225,8 @@
       disabled={submitting}
     />
     <p class="field-hint" id="setup-token-hint">
-      Paste the one-time token supplied by your operator. It is not saved by
-      this console.
+      Print it on the server with <code>olp setup-token</code>. It is not saved
+      by this console.
     </p>
     {#if errors.setupToken}<p class="field-error" id="setupToken-error">
         {errors.setupToken}

@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -525,46 +524,26 @@ func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string
 	}
 }
 
-func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
+func loadSecrets(ctx context.Context, c Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, error) {
 	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" && (c.Mode.Management() || c.Mode == Worker || c.ConnectorConfigFile == "") {
-		return nil, nil, "", errors.New("this mode requires OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
+		return nil, nil, errors.New("this mode requires OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
 	}
 	raw, err := secrets.ReadFile(c.AuthHMACKeyFile)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	key, err := secrets.DecodeKey(string(raw))
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	var keys *secrets.KeyRing
 	if c.MasterKeyFile != "" {
 		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}, os.Getenv))
 		if err != nil {
-			return nil, nil, "", err
+			return nil, nil, err
 		}
 	}
-	var bootstrap string
-	if c.BootstrapTokenFile != "" {
-		data, err := secrets.ReadFile(c.BootstrapTokenFile)
-		if errors.Is(err, os.ErrNotExist) {
-			var complete bool
-			if err := pool.QueryRow(ctx, "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete); err != nil {
-				return nil, nil, "", errors.New("cannot inspect installation setup state")
-			}
-			if !complete {
-				return nil, nil, "", errors.New("bootstrap token file is required until setup is complete")
-			}
-		} else if err != nil {
-			return nil, nil, "", err
-		} else {
-			bootstrap = string(data)
-			if len(bootstrap) < 32 || len(bootstrap) > 256 {
-				return nil, nil, "", errors.New("bootstrap token must have 32–256 bytes")
-			}
-		}
-	}
-	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
+	return secrets.NewAuthKey(key, installation), keys, nil
 }
 
 // warnEgressExceptions announces operator exceptions to the provider egress

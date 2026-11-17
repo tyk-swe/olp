@@ -42,6 +42,14 @@ func ReadFile(path string) ([]byte, error) {
 	return []byte(strings.TrimSpace(string(data))), nil
 }
 
+func ReadBootstrapToken(path string) (string, bool) {
+	data, err := ReadFile(path)
+	if err != nil || len(data) < 32 || len(data) > 256 {
+		return "", false
+	}
+	return string(data), true
+}
+
 func DecodeKey(raw string) ([]byte, error) {
 	if b, err := hex.DecodeString(raw); err == nil && len(b) == 32 {
 		return b, nil

@@ -35,7 +35,7 @@ type Config struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            string
+	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 	Log                  *slog.Logger
 
@@ -53,7 +53,7 @@ type Server struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            string
+	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 
 	log                         *slog.Logger
@@ -67,10 +67,17 @@ type Server struct {
 	dummyPassword               string
 }
 
+func bootstrapSource(injected func() (string, bool)) func() (string, bool) {
+	if injected != nil {
+		return injected
+	}
+	return func() (string, bool) { return "", false }
+}
+
 func New(cfg Config) *Server {
 	return &Server{
 		RuntimePublisher: cfg.RuntimePublisher, Pool: cfg.Pool, Installation: cfg.Installation,
-		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: cfg.Bootstrap,
+		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: bootstrapSource(cfg.Bootstrap),
 		Egress: cfg.Egress, log: cfg.Log, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
 		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
 		managementNetworkRestricted: cfg.ManagementNetworkRestricted, responseCacheConfigured: cfg.ResponseCacheConfigured,

@@ -136,8 +136,7 @@ provider quotas.
 ## File-based secrets
 
 Use regular files with mode `0400`, `0440`, `0600`, or `0640`; group-write and
-world permissions are rejected. A configured bootstrap file may be absent after
-setup. Workers require both the HMAC and master keys, including with mounted
+world permissions are rejected. Workers require both the HMAC and master keys, including with mounted
 connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 `OLP_MASTER_KEY`, or `OLP_BOOTSTRAP_TOKEN` is set inline.
 
@@ -145,7 +144,7 @@ connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 | --- | --- | --- |
 | `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below; also supports [workload-identity wrapped keys](external-secrets.md). |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first-owner setup on `all` or `control` | Random 32–256-byte token for one-time owner setup. Read on every setup attempt, so it may be mounted after start or removed after setup. A missing, unreadable or wrongly sized file makes setup report that no token is configured. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
 ```json
@@ -164,24 +163,25 @@ both files for recovery; follow the
 [key rotation procedure](operations.md#master-key-rotation-and-recovery)
 before retiring any master-key version.
 
-Generate Compose files with the [secret helper](../../deploy/secrets/README.md).
-For local/test scripts, `source scripts/secrets.sh <private-directory>` creates
-missing secret files without printing their contents. Production secret
-distribution remains the operator's responsibility. Database and Valkey URLs
-also accept `_FILE` settings, mutually exclusive with their inline values.
+Compose generates these files on first start, see
+[Getting Started](../getting-started.md#install-olp). For local/test scripts,
+`source scripts/secrets.sh <private-directory>` creates missing secret files
+without printing their contents. `olp init-secrets --dir DIR --database-dir DIR`
+creates the same set as Compose without replacing existing files. Production
+secret distribution remains the operator's responsibility. Database and Valkey
+URLs also accept `_FILE` settings, mutually exclusive with their inline values.
 
 ## Compose-only variables
 
 Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
-the quick start. `.env.example` also defines `OLP_HOST_PORT`,
-`POSTGRES_PASSWORD`, `POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`.
-`OLP_COMPOSE_SECRETS_DIR` selects an absolute secret-directory override for
-Compose and its preparation/retirement helpers. These settings configure the
-wrapper rather than the binary. The encoded password is used in the database
-URL; PostgreSQL receives the raw password. The tracing overlay
+the quick start, and `OLP_HOST_PORT`, which also sets the default
+`OLP_PUBLIC_ORIGIN`. These settings configure the wrapper rather than the
+binary. Compose passes the generated database password to the binary through
+`PGPASSFILE`, so a custom `OLP_DATABASE_URL` may omit its password when it
+points at the bundled PostgreSQL. The tracing overlay
 `deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
-`OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from the same
-file; leave them empty to keep the binary defaults.
+`OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from `.env`;
+leave them empty to keep the binary defaults.
 
 ## OpenAI-compatible provider presets
 
@@ -346,9 +346,6 @@ default credential slot and enforces its slot and connection limits. Releases
 with enabled named slots require the master key so each attempt can use its
 published credential version. Database-encrypted revisions remain authoritative
 when the master key is configured.
-
-Production Compose can generate database credentials and their encoded URL using
-`scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).
 
 ## Configuration promotion artifacts
 

@@ -21,8 +21,11 @@ before installing (names and keys are configurable through `config`):
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
 Use the [secret-file formats](configuration.md#file-based-secrets) for the
-master-key ring and authentication key. A new installation also needs a 32-byte
-base64 bootstrap-token Secret mounted only into control pods. Keep all secret
+master-key ring and authentication key. The chart generates a one-time setup
+token Secret for control pods and keeps it across upgrades. Set
+`config.bootstrapTokenSecretName` to supply your own instead. After install,
+`helm install` prints the `olp setup-token` command for the first-owner form.
+Keep all secret
 values out of values files and shell history; the chart schema validates
 configured names and keys.
 
@@ -137,8 +140,6 @@ config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
   trustedProxyCidrs: 10.0.0.0/8
-  bootstrapTokenSecretName: olp-bootstrap-token
-  bootstrapTokenSecretKey: token
 ingress:
   enabled: true
   className: nginx
@@ -386,17 +387,43 @@ ingress, storage and DNS still need independent redundancy. Verify topology and
 failure behavior on the actual cluster; a successful Helm render is not a
 node-failure qualification.
 
-For a single-host production Compose installation, run
-`scripts/prepare-compose-production.sh`, then supply
-`--env-file deploy/secrets/production.env -f deploy/compose.yaml -f deploy/compose.production.yaml`
-to Compose, together with the documented bootstrap overlay for first setup. Set
-a real HTTPS public origin, qualified image digest and non-root UID/GID. The
-command creates a database password once and constructs its encoded URL;
-PostgreSQL reads the raw value from a mounted secret. For an externally chosen
-password, place it in `deploy/secrets/olp_database_password` with mode 0600
-before running the command. Existing database passwords must not be regenerated
-without an explicit database rotation. The overlay increases memory to include
-tmpfs spooling but remains a single-host deployment, not an HA profile.
+For a single-host production Compose installation, set a real HTTPS
+`OLP_PUBLIC_ORIGIN` and a qualified `OLP_IMAGE` digest in `.env`, then run
+
+```sh
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.production.yaml up -d
+```
+
+The first start generates the database password and application secrets into
+named volumes, as in [Getting Started](../getting-started.md#install-olp).
+Back up `olp-secrets` and `olp-database-secret` with the database, because
+losing them loses access to encrypted credentials and the database login. The
+overlay increases memory to include tmpfs spooling but remains a single-host
+deployment, not an HA profile.
+
+### Upgrading an older Compose installation
+
+Installations started before Compose generated its own secrets kept them in
+`deploy/secrets` and used `POSTGRES_PASSWORD` from `.env`. Copy the existing
+files into the new volumes before the first start with the new Compose file,
+or init-secrets will create fresh keys that cannot read the existing data.
+
+```sh
+docker compose -f deploy/compose.yaml create init-secrets
+docker run --rm -v "$PWD/deploy/secrets:/old:ro" \
+  -v openllmproxy_olp-secrets:/run/olp/secrets \
+  -v openllmproxy_olp-database-secret:/run/olp/database \
+  -e POSTGRES_PASSWORD="<the old POSTGRES_PASSWORD>" \
+  busybox sh -ec '
+    cp /old/olp_master_key /old/olp_auth_hmac_key /run/olp/secrets/
+    printf %s "$POSTGRES_PASSWORD" > /run/olp/database/postgres_password
+    chown 65532:65532 /run/olp/secrets/* /run/olp/database/postgres_password
+    chmod 0400 /run/olp/secrets/*
+    chmod 0444 /run/olp/database/postgres_password'
+docker compose -f deploy/compose.yaml up -d
+```
+
+init-secrets keeps the copied files and adds the setup token and `pgpass`.
 
 The image includes SPDX attestations for the runtime plus Go and console build
 stages. Inspect them with
