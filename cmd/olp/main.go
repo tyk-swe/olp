@@ -42,7 +42,7 @@ func run(ctx context.Context, args []string) error {
 			fmt.Printf("olp %s\n", Version)
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]\n       olp <keys|routes|providers|usage|config|api> COMMAND [options]\n       olp client-env CLIENT --url ORIGIN --key-file FILE [--model ROUTE] [--format FORMAT] [--surface SURFACE]")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp init-secrets --dir DIR --database-dir DIR\n       olp setup-token\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]\n       olp <keys|routes|providers|usage|config|api> COMMAND [options]\n       olp client-env CLIENT --url ORIGIN --key-file FILE [--model ROUTE] [--format FORMAT] [--surface SURFACE]")
 			return nil
 		case "account":
 			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
@@ -86,6 +86,13 @@ func run(ctx context.Context, args []string) error {
 				return err
 			}
 			return Maintenance(ctx, c, command, maintenance, os.Stdout)
+		case "init-secrets":
+			return initSecrets(args[1:], os.Stdout)
+		case "setup-token":
+			if len(args) != 1 {
+				return errors.New("setup-token takes no arguments")
+			}
+			return setupToken(os.Getenv, os.Stdout)
 		case "health-probe":
 			if len(args) != 1 {
 				return errors.New("health-probe takes no arguments")

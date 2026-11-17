@@ -27,7 +27,6 @@ config:
   databaseMaxConnections: 10
   publicOrigin: https://olp.example.com
   trustedProxyCidrs: 10.42.0.0/16
-  bootstrapTokenSecretName: olp-bootstrap
 tracing:
   sampleRatio: 0.01
 ingress:

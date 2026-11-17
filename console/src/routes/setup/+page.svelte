@@ -1,48 +1,16 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { onMount } from 'svelte';
-  import { errorMessage } from '#lib/management/http.js';
-  import { getSetupStatus } from '#lib/features/access/setup/api.js';
-  import OwnerSetup from '#lib/features/access/setup/OwnerSetup.svelte';
-  import SetupFrame from '#lib/shell/SetupFrame.svelte';
-  import BrandMark from '#lib/shell/BrandMark.svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { brandingKey } from '#lib/shell/branding/branding.js';
+  import SetupPage from '#lib/features/access/setup/SetupPage.svelte';
 
-  let setupView = $state<'checking' | 'ready' | 'error'>('checking');
-  let message = $state('');
-  let activeController: AbortController | undefined;
   const queryClient = useQueryClient();
-
-  async function checkStatus() {
-    activeController?.abort();
-    activeController = new AbortController();
-    setupView = 'checking';
-    message = '';
-    try {
-      const status = await getSetupStatus(activeController.signal);
-      if (!status.setup_required) {
-        await goto(resolve(''), { replace: true });
-        return;
-      }
-      setupView = 'ready';
-    } catch (error) {
-      if (activeController.signal.aborted) return;
-      message = errorMessage(error, 'The setup status could not be loaded.');
-      setupView = 'error';
-    }
-  }
 
   function finishSetup() {
     void queryClient.invalidateQueries({ queryKey: brandingKey });
     void goto(resolve(''), { replace: true });
   }
-
-  onMount(() => {
-    void checkStatus();
-    return () => activeController?.abort();
-  });
 </script>
 
 <svelte:head>
@@ -53,58 +21,4 @@
   />
 </svelte:head>
 
-<SetupFrame>
-  {#if setupView === 'checking'}
-    <div class="status-card" role="status">
-      <BrandMark size={40} animated />
-      <h2>Checking this installation</h2>
-      <p>
-        The console is asking the local control API whether first-run setup is
-        required.
-      </p>
-    </div>
-  {:else if setupView === 'error'}
-    <div class="status-card" role="alert">
-      <span class="error-symbol" aria-hidden="true">!</span>
-      <h2>Setup is not reachable</h2>
-      <p>{message}</p>
-      <button class="button button-primary" type="button" onclick={checkStatus}
-        >Try again</button
-      >
-    </div>
-  {:else}
-    <OwnerSetup onComplete={finishSetup} />
-  {/if}
-</SetupFrame>
-
-<style>
-  .status-card {
-    display: grid;
-    justify-items: start;
-  }
-
-  .status-card h2 {
-    margin: 1.25rem 0 0;
-    font-size: 1.75rem;
-    font-weight: 400;
-    letter-spacing: -0.031em;
-    line-height: 1.1;
-  }
-
-  .status-card p {
-    margin: 0.65rem 0 1.25rem;
-    color: var(--foreground-muted);
-  }
-
-  .error-symbol {
-    display: grid;
-    width: 2.5rem;
-    height: 2.5rem;
-    place-items: center;
-    border: 1px solid var(--danger);
-    border-radius: var(--radius-control);
-    color: var(--danger);
-    font-size: 1.25rem;
-    font-weight: 500;
-  }
-</style>
+<SetupPage onDone={finishSetup} />

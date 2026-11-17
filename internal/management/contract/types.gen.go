@@ -16552,11 +16552,13 @@ type SetupRequest struct {
 	Password         *string `json:"password,omitempty"`
 }
 
-// SetupStatus Unauthenticated first-run probe. It deliberately carries nothing but the
-// boolean: the installation name is an authenticated detail the console reads
+// SetupStatus Unauthenticated first-run probe. It deliberately carries nothing but
+// booleans: the installation name is an authenticated detail the console reads
 // from `SessionResponse`.
 type SetupStatus struct {
-	SetupRequired bool `json:"setup_required"`
+	// BootstrapTokenConfigured Whether the server can read a bootstrap token, without revealing it
+	BootstrapTokenConfigured bool `json:"bootstrap_token_configured"`
+	SetupRequired            bool `json:"setup_required"`
 }
 
 // ShadowExperiment A route's primary path compared with one shadow target over the requests the shadow mirrored, from metadata only.

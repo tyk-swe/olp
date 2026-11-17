@@ -31,7 +31,6 @@ type namedCloser struct {
 type runtimeCore struct {
 	auth          *secrets.AuthKey
 	keys          *secrets.KeyRing
-	bootstrap     string
 	policy        *egress.Policy
 	business      *telemetry.BusinessMetrics
 	responseCache *cache.Store
@@ -46,17 +45,16 @@ type runtimeCore struct {
 }
 
 func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.Pool, installation string, vk *coordination.Client, deadline *time.Time, log *slog.Logger) (runtimeCore, error) {
-	auth, keys, bootstrap, err := loadSecrets(startup, pool, c, installation)
+	auth, keys, err := loadSecrets(startup, c, installation)
 	if err != nil {
 		return runtimeCore{}, err
 	}
 	policy := &egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 	core := runtimeCore{
-		auth:      auth,
-		keys:      keys,
-		bootstrap: bootstrap,
-		policy:    policy,
-		business:  telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels),
+		auth:     auth,
+		keys:     keys,
+		policy:   policy,
+		business: telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels),
 	}
 	fail := func(err error) (runtimeCore, error) {
 		for i := len(core.closers) - 1; i >= 0; i-- {

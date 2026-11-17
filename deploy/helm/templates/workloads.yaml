@@ -216,7 +216,7 @@ spec:
             - name: OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS
               value: {{ $providerEgressAllowHttpHosts | quote }}
             {{- end }}
-            {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+            {{- if eq $componentName "control" }}
             - name: OLP_BOOTSTRAP_TOKEN_FILE
               value: /run/secrets/bootstrap-token/token
             {{- end }}
@@ -265,7 +265,7 @@ spec:
               mountPath: /run/secrets/otlp-headers
               readOnly: true
             {{- end }}
-            {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+            {{- if eq $componentName "control" }}
             - name: bootstrap-token
               mountPath: /run/secrets/bootstrap-token
               readOnly: true
@@ -301,13 +301,14 @@ spec:
               - key: {{ required "tracing.headersSecretKey is required when tracing.headersSecretName is set" $root.Values.tracing.headersSecretKey | quote }}
                 path: headers
         {{- end }}
-        {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
+        {{- if eq $componentName "control" }}
         - name: bootstrap-token
           secret:
-            secretName: {{ $root.Values.config.bootstrapTokenSecretName | quote }}
+            secretName: {{ include "olp.bootstrapTokenSecretName" $root | quote }}
+            optional: true
             defaultMode: 0440
             items:
-              - key: {{ required "config.bootstrapTokenSecretKey is required" $root.Values.config.bootstrapTokenSecretKey | quote }}
+              - key: {{ $root.Values.config.bootstrapTokenSecretKey | quote }}
                 path: token
         {{- end }}
         - name: tmp

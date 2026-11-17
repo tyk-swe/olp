@@ -14,6 +14,15 @@ semantic versioning and take their source from root `package.json`. The
   and the console derives readable shades of it for every surface. The
   installation name and logo now also appear on the sign-in page, in browser
   tab titles and as the favicon. Migration 0149 adds the `accent` column.
+- `olp init-secrets` creates the master-key ring, authentication HMAC key,
+  setup token, database password and `pgpass` without replacing existing
+  files. `olp setup-token` prints the first-owner setup link and token.
+- The Helm chart generates a setup token Secret when
+  `config.bootstrapTokenSecretName` is empty and prints the `olp setup-token`
+  command after install.
+- `GET /api/v1/setup/status` reports `bootstrap_token_configured`, and the
+  console explains a missing token instead of showing a form that cannot
+  succeed.
 
 ### Changed
 
@@ -21,6 +30,17 @@ semantic versioning and take their source from root `package.json`. The
   show the installation identity. `PUT /api/v1/branding` now requires an
   `accent` field. The session response drops `installation_name` and
   `installation_logo`, which clients should read from the branding endpoint.
+- Compose generates its secrets into the `olp-secrets` and
+  `olp-database-secret` volumes on first start, so
+  `docker compose -f deploy/compose.yaml up` needs no preparation step. The
+  bootstrap overlay, `deploy/secrets`, the secret preparation and retirement
+  scripts, `POSTGRES_PASSWORD`, `OLP_UID` and `OLP_GID` are gone. Existing
+  Compose installations must copy their keys and database password into the
+  volumes first, see
+  [Deployment](docs/operate/deployment.md#upgrading-an-older-compose-installation).
+- The server reads `OLP_BOOTSTRAP_TOKEN_FILE` on every setup attempt instead of
+  at startup, so a token mounted after start works and a missing one no longer
+  needs special handling.
 - Google BigQuery billing imports share the month walker that AWS and Azure
   use. A pass reads at most three months, newest first, and an unfinished
   backfill resumes a minute later. A closed month is not read again once its

@@ -1,7 +1,8 @@
 name: openllmproxy
 
 x-database-environment: &database-environment
-  OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp:${POSTGRES_PASSWORD_URL_ENCODED:-olp}@postgres:5432/olp}
+  OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp@postgres:5432/olp}
+  PGPASSFILE: /run/olp/secrets/pgpass
   OLP_DATABASE_MAX_CONNECTIONS: ${OLP_DATABASE_MAX_CONNECTIONS:-20}
 
 x-application-environment: &application-environment
@@ -17,7 +18,7 @@ x-application-environment: &application-environment
   OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS: ${OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS:-30}
   OLP_VALKEY_URL: ${OLP_VALKEY_URL:-redis://valkey:6379}
   OLP_CACHE_VALKEY_URL: ${OLP_CACHE_VALKEY_URL:-}
-  OLP_PUBLIC_ORIGIN: ${OLP_PUBLIC_ORIGIN:-http://localhost:8080}
+  OLP_PUBLIC_ORIGIN: ${OLP_PUBLIC_ORIGIN:-http://localhost:${OLP_HOST_PORT:-8080}}
   OLP_LOCAL_LOGIN_ENABLED: ${OLP_LOCAL_LOGIN_ENABLED:-true}
   # Experimental. The directory of OLP_IMAGE that holds unconfined plugin
   # executables; setting it enables the unconfined plugin tier. Empty runs
@@ -39,22 +40,20 @@ x-application-environment: &application-environment
   OLP_CONSOLE_DIR: /opt/olp/console
   OLP_MEDIA_SPOOL_DIR: /var/lib/olp/media
   OLP_MEDIA_SPOOL_CAPACITY_BYTES: ${OLP_MEDIA_SPOOL_CAPACITY_BYTES:-1073741824}
-  OLP_MASTER_KEY_FILE: /run/secrets/olp_master_key
-  OLP_AUTH_HMAC_KEY_FILE: /run/secrets/olp_auth_hmac_key
+  OLP_MASTER_KEY_FILE: /run/olp/secrets/olp_master_key
+  OLP_AUTH_HMAC_KEY_FILE: /run/olp/secrets/olp_auth_hmac_key
+  OLP_BOOTSTRAP_TOKEN_FILE: /run/olp/secrets/olp_bootstrap_token
   OLP_LOG_LEVEL: ${OLP_LOG_LEVEL:-info}
 
 x-olp-container: &olp-container
   image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:0.2.0}
   read_only: true
-  # Compose bind-mounts file-backed secrets with host ownership. Run as the
-  # invoking non-root user so mode-0600 development secrets remain readable.
-  user: "${OLP_UID:-1000}:${OLP_GID:-1000}"
   tmpfs:
     - /tmp:size=64m,mode=1777
     # The application admits up to 50 MiB per image part. Keep a bounded 1-GiB
     # application budget inside a 2-GiB filesystem so concurrent accepted
     # uploads have explicit headroom for filesystem metadata and in-flight I/O.
-    - /var/lib/olp/media:size=2g,mode=0700,uid=${OLP_UID:-1000},gid=${OLP_GID:-1000}
+    - /var/lib/olp/media:size=2g,mode=0700,uid=65532,gid=65532
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -62,12 +61,20 @@ x-olp-container: &olp-container
   pids_limit: 512
 
 services:
+  init-secrets:
+    <<: *olp-container
+    command: ["init-secrets", "--dir", "/run/olp/secrets", "--database-dir", "/run/olp/database"]
+    volumes:
+      - olp-secrets:/run/olp/secrets
+      - olp-database-secret:/run/olp/database
+    restart: "no"
+
   postgres:
     image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     environment:
       POSTGRES_DB: olp
       POSTGRES_USER: olp
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-olp}
+      POSTGRES_PASSWORD_FILE: /run/olp/database/postgres_password
     healthcheck:
       test: ["CMD-SHELL", "pg_isready --host=127.0.0.1 --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
       interval: 2s
@@ -78,6 +85,10 @@ services:
       # PostgreSQL 18 stores clusters below a major-version directory. Mounting
       # the parent is required for durable data and link-mode major upgrades.
       - postgres-data:/var/lib/postgresql
+      - olp-database-secret:/run/olp/database:ro
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -125,6 +136,8 @@ services:
     environment:
       <<: *database-environment
       OLP_VALKEY_URL: ${OLP_VALKEY_URL:-redis://valkey:6379}
+    volumes:
+      - olp-secrets:/run/olp/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -144,6 +157,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
+    volumes:
+      - olp-secrets:/run/olp/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,18 +166,11 @@ services:
         condition: service_completed_successfully
       valkey:
         condition: service_healthy
-    secrets:
-      - olp_master_key
-      - olp_auth_hmac_key
     restart: unless-stopped
     stop_grace_period: 5m
 
-secrets:
-  olp_master_key:
-    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_master_key"
-  olp_auth_hmac_key:
-    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_auth_hmac_key"
-
 volumes:
+  olp-secrets:
+  olp-database-secret:
   postgres-data:
   valkey-data:

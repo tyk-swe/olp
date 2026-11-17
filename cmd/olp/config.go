@@ -230,13 +230,9 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	if c.ValkeyURL, err = secretURL(c.ValkeyURL, valkeyFile, "OLP_VALKEY_URL"); err != nil {
 		return c, err
 	}
-	for name, path := range map[string]string{"OLP_AUTH_HMAC_KEY": c.AuthHMACKeyFile, "OLP_BOOTSTRAP_TOKEN": c.BootstrapTokenFile, "OLP_MASTER_KEY": c.MasterKeyFile} {
+	for name, path := range map[string]string{"OLP_AUTH_HMAC_KEY": c.AuthHMACKeyFile, "OLP_MASTER_KEY": c.MasterKeyFile} {
 		if path != "" {
 			if _, err := secretURL("", path, name); err != nil {
-				// The installation owns whether a retired bootstrap token may be absent.
-				if name == "OLP_BOOTSTRAP_TOKEN" && errors.Is(err, os.ErrNotExist) {
-					continue
-				}
 				return c, err
 			}
 		}

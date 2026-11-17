@@ -13086,13 +13086,18 @@
         "type": "object"
       },
       "SetupStatus": {
-        "description": "Unauthenticated first-run probe. It deliberately carries nothing but the\nboolean: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
+        "description": "Unauthenticated first-run probe. It deliberately carries nothing but\nbooleans: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
         "properties": {
+          "bootstrap_token_configured": {
+            "description": "Whether the server can read a bootstrap token, without revealing it",
+            "type": "boolean"
+          },
           "setup_required": {
             "type": "boolean"
           }
         },
         "required": [
+          "bootstrap_token_configured",
           "setup_required"
         ],
         "type": "object"
@@ -45889,6 +45894,16 @@
               }
             },
             "description": "Owner and session created"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bootstrap token missing, unreadable, or wrong"
           },
           "409": {
             "content": {
