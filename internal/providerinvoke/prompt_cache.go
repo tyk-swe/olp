@@ -1,7 +1,9 @@
 package providerinvoke
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/cache"
@@ -16,10 +18,11 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 	if policy == nil {
 		return inv, nil
 	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(inv.Prepared.Document().Bytes(), &root); err != nil {
-		return inv, err
+	source := inv.Prepared.Document()
+	if source.Root().Kind() != oif.Object {
+		return inv, errors.New("prompt cache requires a JSON object request")
 	}
+	root := source.Fields()
 	changed := false
 	if (inv.Wire == wire.Chat || inv.Wire == wire.Responses) && (config.Kind == "openai" || config.Kind == "azure_openai") {
 		if _, exists := root["prompt_cache_key"]; !exists && key != "" {
@@ -38,8 +41,7 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 		control, _ := json.Marshal(map[string]string{"type": "ephemeral", "ttl": ttl})
 		// Respect caller-owned breakpoints and the provider's four-breakpoint
 		// limit. A caller's top-level automatic policy owns all insertion.
-		if _, exists := root["cache_control"]; !exists && compatibleCacheTTLs(root, ttl) {
-			used := countCacheControls(root)
+		if used, insertable := breakpointBudget(source.Root(), ttl); insertable {
 			if slices.Contains(positions, "tools") && used < 4 {
 				var blocks []map[string]json.RawMessage
 				if json.Unmarshal(root["tools"], &blocks) == nil && markLast(blocks, control) {
@@ -111,41 +113,37 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 // Mixing TTLs requires ordering the long-lived breakpoints before the short
 // ones. Leave a caller's different TTL entirely in charge instead of inserting
 // a breakpoint that could invalidate that ordering.
-func compatibleCacheTTLs(root map[string]json.RawMessage, ttl string) bool {
-	var value any
-	raw, _ := json.Marshal(root)
-	_ = json.Unmarshal(raw, &value)
-	var compatible func(any) bool
-	compatible = func(value any) bool {
-		switch value := value.(type) {
-		case map[string]any:
-			for name, child := range value {
-				if name == "cache_control" {
-					control, ok := child.(map[string]any)
-					if !ok {
-						return false
-					}
-					callerTTL, _ := control["ttl"].(string)
-					if callerTTL == "" {
-						callerTTL = "5m"
-					}
-					if callerTTL != ttl {
-						return false
-					}
-				} else if !compatible(child) {
-					return false
-				}
-			}
-		case []any:
-			for _, child := range value {
-				if !compatible(child) {
-					return false
-				}
-			}
-		}
-		return true
+func breakpointBudget(root oif.Value, ttl string) (int, bool) {
+	if _, automatic := root.Lookup("cache_control"); automatic {
+		return 0, false
 	}
-	return compatible(value)
+	return cacheControls(root, ttl)
+}
+func cacheControls(value oif.Value, ttl string) (int, bool) {
+	count := 0
+	for _, member := range value.Members() {
+		n, ok := memberCacheControls(member, ttl)
+		if !ok {
+			return 0, false
+		}
+		count += n
+	}
+	for _, element := range value.Elements() {
+		n, ok := cacheControls(element, ttl)
+		if !ok {
+			return 0, false
+		}
+		count += n
+	}
+	return count, true
+}
+func memberCacheControls(member oif.Member, ttl string) (int, bool) {
+	if member.Name != "cache_control" {
+		return cacheControls(member.Value, ttl)
+	}
+	callerTTL, _ := member.Value.Lookup("ttl")
+	text, _ := callerTTL.Chars()
+	return 1, member.Value.Kind() == oif.Object && cmp.Or(text, "5m") == ttl
 }
 func markLast(blocks []map[string]json.RawMessage, control json.RawMessage) bool {
 	if len(blocks) == 0 {
@@ -160,29 +158,4 @@ func markLast(blocks []map[string]json.RawMessage, control json.RawMessage) bool
 	}
 	last["cache_control"] = control
 	return true
-}
-func countCacheControls(root map[string]json.RawMessage) int {
-	var value any
-	raw, _ := json.Marshal(root)
-	_ = json.Unmarshal(raw, &value)
-	var walk func(any) int
-	walk = func(v any) int {
-		n := 0
-		switch v := v.(type) {
-		case map[string]any:
-			for k, x := range v {
-				if k == "cache_control" {
-					n++
-				} else {
-					n += walk(x)
-				}
-			}
-		case []any:
-			for _, x := range v {
-				n += walk(x)
-			}
-		}
-		return n
-	}
-	return walk(value)
 }
