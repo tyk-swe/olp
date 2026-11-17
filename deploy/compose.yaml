@@ -46,7 +46,7 @@ x-application-environment: &application-environment
   OLP_LOG_LEVEL: ${OLP_LOG_LEVEL:-info}
 
 x-olp-container: &olp-container
-  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:0.2.0}
+  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:2.3.0}
   read_only: true
   tmpfs:
     - /tmp:size=64m,mode=1777
