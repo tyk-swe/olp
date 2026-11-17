@@ -226,10 +226,14 @@ func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
 	if err := creation.Dispatch(ctx); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := creation.AcceptCreated(ctx, resources.CreationResult{IDs: []string{"first-file", "second-file"}})
+	prepared, err := creation.PrepareCreated(resources.CreationResult{IDs: []string{"first-file", "second-file"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := prepared.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accepted := prepared.Resource()
 	if err := creation.Close(ctx); err != nil {
 		t.Fatal(err)
 	}

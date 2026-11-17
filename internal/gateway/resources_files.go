@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
@@ -193,14 +194,14 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, e)
 		return
 	}
+	var exchange *pinnedExchange
 	var body []byte
 	var upstreamID string
 	var err error
 	if adapter == connectors.BatchGeminiManaged {
 		var failure *attemptFailure
-		body, upstreamID, failure = s.uploadGeminiManagedFile(ctx, x, p, uploadFile)
+		body, upstreamID, exchange, failure = s.uploadGeminiManagedFile(ctx, x, p, uploadFile)
 		if failure != nil {
-			x.dispatched = failure.dispatched
 			s.refuse(x, w, upstreamError(failure))
 			return
 		}
@@ -216,13 +217,13 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, failure := s.uploadMultipart(ctx, x, p, endpoint, uploadPurpose, uploadExtra, uploadFile, fileFirst)
 		if failure != nil {
-			x.dispatched = failure.dispatched
 			s.refuse(x, w, upstreamError(failure))
 			return
 		}
 		defer resp.Body.Close()
-		x.dispatched = true
-		body, err = readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		exchange = resp.exchange
+
+		body, err = resp.readBody(s.cfg.MaxResponseBytes)
 		if err != nil {
 			s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 			return
@@ -240,13 +241,13 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	x.completePinned()
 	provided, state, expires := fileMetadata(body, p.model)
 	metadata, err := uploadedFileMetadata(provided, body, adapter, manifest)
 	if err != nil {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
+	exchange.complete(classSuccess)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindFile
@@ -300,10 +301,10 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
-	s.writeStateJSON(w, x, out)
+	s.writeStateJSON(w, x, out, exchange)
 }
 
-func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*http.Response, *attemptFailure) {
+func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*pinnedResponse, *attemptFailure) {
 	pipeR, pipeW := io.Pipe()
 	form := multipart.NewWriter(pipeW)
 	sendDone := make(chan error, 1)
@@ -316,7 +317,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 		writeFile := func() error {
 			opened, err := s.deps.Staging.Open(file.Handle)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w: %w", errPinnedUploadRead, err)
 			}
 			defer opened.File.Close()
 			name := opened.Filename
@@ -334,7 +335,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(part, opened.File)
+			_, err = io.Copy(part, pinnedUploadSource{opened.File})
 			return err
 		}
 		if purpose != "" && fileFirst {
@@ -377,29 +378,33 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pipeR)
 	if err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
-		return nil, exchange.fail(s, x, classCredential, nil)
+		return nil, exchange.fail(classCredential, nil)
 	}
 	if x.anthropicFilesBeta {
 		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
 	}
-	resp, failure := s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
-	if failure != nil {
-		return nil, failure
-	}
+	resp, failure := s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 	// A provider can respond before consuming the body. Keep its rejection as
 	// authoritative; only successful headers with an incomplete upload are invalid.
 	_ = pipeR.CloseWithError(io.ErrClosedPipe)
 	sendErr := <-sendDone
 	joined = true
+	if failure != nil {
+		if failure.status == 0 && errors.Is(sendErr, errPinnedUploadRead) {
+			exchange.fact().LocalRefusal = true
+		}
+		return nil, failure
+	}
 	if sendErr != nil {
+		exchange.fact().LocalRefusal = errors.Is(sendErr, errPinnedUploadRead)
 		_ = resp.Body.Close()
-		return nil, exchange.fail(s, x, exchange.state.classify(sendErr, false), nil)
+		return nil, exchange.fail(exchange.state.classify(sendErr, false), nil)
 	}
 	return resp, nil
 }
@@ -466,88 +471,96 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *fault.Error {
-		adapter, e := storedAdapter(res)
-		if e != nil {
-			return e
-		}
-		path, e := providerFilePath(res, adapter)
-		if e != nil {
-			return e
-		}
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
-		if err != nil {
-			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
-		}
-		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
-		if failure != nil {
-			if failure.status == http.StatusNotFound {
-				if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
-					return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
-				}
-				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
-			}
-			return upstreamError(failure)
-		}
-		defer resp.Body.Close()
-		x.dispatched = true
-		body, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
-		if err != nil {
-			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
-		}
-		if e := s.verifyProviderFile(res, adapter, body); e != nil {
-			return e
-		}
-		refreshed, err := refreshedFileMetadata(res, body)
-		if err != nil {
-			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored file mapping is malformed.")
-		}
-		var out []byte
-		if res.Kind == resources.KindStrictFile {
-			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
-				return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
-			}
-			x.completeFileControl()
-			_, contract, readErr := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
-			if readErr != nil {
-				return durableError(readErr)
-			}
-			contract.Result = body
-			payload, marshalErr := json.Marshal(contract)
-			if marshalErr != nil {
-				return durableError(marshalErr)
-			}
-			commitCtx, stopCommit := resourceCommitContext(ctx)
-			defer stopCommit()
-			if _, _, commitErr := s.deps.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, refreshed.state, payload); commitErr != nil {
-				return durableError(commitErr)
-			}
-			out, err = durableProjection(body, res.ID, nil)
-		} else {
-			x.completeFileControl()
-			if err := s.deps.Resources.Update(ctx, res.ID, refreshed.state, refreshed.metadata, refreshed.expires); err != nil {
-				return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
-			}
-			if adapter.Managed() {
-				current := *res
-				current.State, current.Metadata, current.ExpiresAt = refreshed.state, refreshed.metadata, refreshed.expires
-				out, err = s.fileObject(ctx, &current)
-			} else {
-				out, err = rewriteID(body, "id", res.ID)
-			}
-		}
-		if err != nil {
-			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
-		}
-		s.writeStateJSON(w, x, out)
-		return nil
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, _ *routing.Route) *fault.Error {
+		return s.getPinnedFile(ctx, w, x, authority, res, p)
 	})
+}
+
+func (s *Server) getPinnedFile(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin) *fault.Error {
+	adapter, e := storedAdapter(res)
+	if e != nil {
+		return e
+	}
+	path, e := providerFilePath(res, adapter)
+	if e != nil {
+		return e
+	}
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
+	if err != nil {
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+	}
+	resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+	if failure != nil {
+		if failure.status == http.StatusNotFound {
+			if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
+				return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
+			}
+			return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
+		}
+		return upstreamError(failure)
+	}
+	defer resp.Body.Close()
+
+	body, err := resp.readBody(s.cfg.MaxResponseBytes)
+	if err != nil {
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
+	}
+	if e := s.verifyProviderFile(res, adapter, body); e != nil {
+		return e
+	}
+	refreshed, err := refreshedFileMetadata(res, body, adapter)
+	if errors.Is(err, errProviderFileMetadata) {
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed file metadata.")
+	}
+	if err != nil {
+		resp.exchange.interrupt(classProtocol, true)
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored file mapping is malformed.")
+	}
+	var out []byte
+	if res.Kind == resources.KindStrictFile {
+		if _, _, err := strictResult(body, res.UpstreamID); err != nil {
+			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
+		}
+		resp.exchange.completeRetainedControl()
+		_, contract, readErr := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
+		if readErr != nil {
+			return durableError(readErr)
+		}
+		contract.Result = body
+		payload, marshalErr := json.Marshal(contract)
+		if marshalErr != nil {
+			return durableError(marshalErr)
+		}
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		defer stopCommit()
+		if _, _, commitErr := s.deps.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, refreshed.state, payload); commitErr != nil {
+			return durableError(commitErr)
+		}
+		out, err = durableProjection(body, res.ID, nil)
+	} else {
+		resp.exchange.completeRetainedControl()
+		if err := s.deps.Resources.Update(ctx, res.ID, refreshed.state, refreshed.metadata, refreshed.expires); err != nil {
+			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
+		}
+		if adapter.Managed() {
+			current := *res
+			current.State, current.Metadata, current.ExpiresAt = refreshed.state, refreshed.metadata, refreshed.expires
+			out, err = s.fileObject(ctx, &current)
+		} else {
+			out, err = rewriteID(body, "id", res.ID)
+		}
+	}
+	if err != nil {
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
+	}
+	s.writeStateJSON(w, x, out, resp.exchange)
+	return nil
 }
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *fault.Error {
-		writeDeleted := func() {
-			s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}))
+		writeDeleted := func(exchanges ...*pinnedExchange) {
+			s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}), exchanges...)
 		}
 		adapter, e := storedAdapter(res)
 		if e != nil {
@@ -588,16 +601,16 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		x.dispatched = true
+
 		// A successful DELETE status is the operation's terminal contract.
-		x.completeFileControl()
+		resp.exchange.completeRetainedControl()
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		defer stopCommit()
 		if err := s.deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
-		writeDeleted()
+		writeDeleted(resp.exchange)
 		return nil
 	})
 }
@@ -623,7 +636,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		x.dispatched = true
+
 		// Stage the bounded upstream body before committing headers. Otherwise
 		// a provider overflow would become a successful but truncated download.
 		contentType := resp.Header.Get("Content-Type")
@@ -632,24 +645,19 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		spool := s.deps.Staging
 		if spool == nil {
+			resp.exchange.interrupt(classProtocol, true)
 			return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 		}
-		artifact, err := spool.Put(ctx, staging.Upload{
-			Filename: "file-content", ContentType: contentType,
-			MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body,
-		})
+		artifact, err := resp.stageBody(ctx, spool, "file-content", contentType, s.cfg.MaxResponseBytes)
 		if err != nil {
-			if len(x.facts) > 0 {
-				fact := &x.facts[len(x.facts)-1]
-				fact.Class = classProtocol
-			}
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The provider file exceeded the configured response bound.")
 			}
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
-		x.completeFileControl()
+
+		resp.exchange.completeRetainedControl()
 		defer spool.Remove(artifact.Handle)
 		opened, err := spool.Open(artifact.Handle)
 		if err != nil {
@@ -668,13 +676,14 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
 			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
-			x.facts[len(x.facts)-1].Class = classCancelled
+			resp.exchange.delivery(deliveryState(written))
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
 		}
 		if written > 0 {
 			x.delivered(s.now())
 		}
+		resp.exchange.delivery(usage.ClientTerminal)
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
 	})

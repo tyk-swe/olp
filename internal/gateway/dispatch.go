@@ -56,6 +56,8 @@ type dispatchHold struct {
 	probed      bool
 	settled     bool
 	budgets     []string
+	estimate    int64
+	pinned      []*pinnedExchange
 }
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
@@ -114,7 +116,7 @@ func (s *Server) settleSession(ctx context.Context, x *call, p *pin) {
 	s.finishSessionDebit(ctx, x, x.failure != nil)
 	settled := sessionSettlement(x)
 	if p != nil {
-		s.settlePinHold(ctx, x, p.hold, settled)
+		s.settleSessionHold(ctx, x, p.hold, settled)
 	}
 	s.settleCaps(ctx, x)
 	s.recordCost(x)
@@ -135,11 +137,7 @@ func sessionSettlement(x *call) *int64 {
 	return new(max(x.estimate, *actual))
 }
 
-// settlePinHold settles a pinned hold that never passed through the attempt
-// loop. When it carries the half-open probe, the attempt's outcome lands on
-// the circuit through record, or the probe is released when nothing reached
-// the upstream, so a pinned call never leaves the circuit wedged half-open.
-func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold, actual *int64) {
+func (s *Server) settleSessionHold(ctx context.Context, x *call, hold *dispatchHold, actual *int64) {
 	if hold == nil {
 		return
 	}
@@ -330,7 +328,7 @@ func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provi
 		reservation.Settle(ctx, false, nil)
 		return gateResult{verdict: gateDenied}
 	}
-	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed}}
+	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed, estimate: estimate}}
 }
 
 // cooldownFailure parks the credential or slot that produced a retryable

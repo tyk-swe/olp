@@ -15,20 +15,20 @@ import (
 // Stored input-item collections use the same documented input positions as a
 // Responses request. Resolve each native reference under the stored response's
 // owner and pin before returning a collection that callers can replay.
-func projectResponseInputReferences(source oif.Document, resolve func(string, string) (string, error)) (oif.Document, error) {
+func responseInputReferences(source oif.Document) ([]generationReference, error) {
 	items, present := source.Root().Lookup("data")
 	if source.Root().Kind() != oif.Object || !present || items.Kind() != oif.Array {
-		return oif.Document{}, resources.ErrContract
+		return nil, resources.ErrContract
 	}
 	payload := []byte(`{"input":` + items.Raw() + `}`)
 	request, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(payload)})
 	if err != nil {
-		return oif.Document{}, err
+		return nil, err
 	}
-	refs, err := generationReferences(request, wire.Responses)
-	if err != nil {
-		return oif.Document{}, err
-	}
+	return generationReferences(request, wire.Responses)
+}
+
+func projectResponseInputReferences(source oif.Document, refs []generationReference, resolve func(string, string) (string, error)) (oif.Document, error) {
 	var changes []oif.Change
 	for _, ref := range refs {
 		local, err := resolve(ref.kind, ref.id)

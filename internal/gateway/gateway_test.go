@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
+	batchupstream "github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -44,9 +45,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 const (
@@ -863,6 +867,55 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			}
 		})
 	}
+	t.Run("terminal frame could not be delivered", func(t *testing.T) {
+		h := newHarness(t, Config{})
+		var source bytes.Buffer
+		for _, frame := range []*eventstream.Message{
+			bedrockMetadata(`{"usage":{"inputTokens":2,"outputTokens":3,"totalTokens":5}}`),
+			bedrockEvent(t, "messageStop", map[string]string{"stopReason": "end_turn"}),
+		} {
+			if err := eventstream.NewEncoder().Encode(&source, *frame); err != nil {
+				t.Fatal(err)
+			}
+		}
+		h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+			_, _ = w.Write(source.Bytes())
+		})
+		p := testPinnedTarget(h, 0)
+		x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Bedrock, keyID: h.keyID}
+		resp, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodPost, p.provider.Endpoint, nil, "")
+		if failure != nil {
+			t.Fatalf("provider stream: %+v", failure)
+		}
+		defer resp.Body.Close()
+		writer := &bedrockFrameWriter{ResponseRecorder: httptest.NewRecorder()}
+		h.gateway.relayBedrockStream(t.Context(), writer, x, p, resp)
+		h.sink.mu.Lock()
+		defer h.sink.mu.Unlock()
+		if len(h.sink.envs) != 1 {
+			t.Fatalf("terminal envelopes=%d, want 1", len(h.sink.envs))
+		}
+		env := h.sink.envs[0]
+		if env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || !env.Committed || len(env.Attempts) != 1 {
+			t.Fatalf("terminal envelope=%+v", env)
+		}
+		attempt := env.Attempts[0]
+		if attempt.Class != classSuccess || !attempt.UsageComplete || attempt.Usage == nil || attempt.Usage.InputTokens != 2 || attempt.Usage.OutputTokens != 3 {
+			t.Fatalf("validated provider result was lost: %+v", attempt)
+		}
+	})
+}
+
+type bedrockFrameWriter struct {
+	*httptest.ResponseRecorder
+}
+
+func (w *bedrockFrameWriter) Write(body []byte) (int, error) {
+	if bytes.Contains(body, []byte("messageStop")) {
+		return 0, io.ErrClosedPipe
+	}
+	return w.ResponseRecorder.Write(body)
 }
 
 func TestModerationRejectsIncompleteDecisions(t *testing.T) {
@@ -1203,13 +1256,378 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 			} else if failure == nil || failure.Code != code || failure.Status != status || x.facts[0].Class != class {
 				t.Fatalf("failure=%+v class=%s; want%d %s %s", failure, x.facts[0].Class, status, code, class)
 			}
-			if !x.exchange.state.accepted || x.exchange.state.settled {
-				t.Fatal("incomplete accepted stream lost its unresolved upstream evidence")
-			}
+
 			if tc.timeout && ctx.Err() != context.DeadlineExceeded {
 				t.Fatalf("route deadline did not expire: %v", ctx.Err())
 			}
 		})
+	}
+}
+
+func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, object, class string
+	}{
+		{"valid terminal result", `"response"`, classSuccess},
+		{"invalid terminal result", `7`, classProtocol},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool.Close()
+			h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"native-response\",\"object\":%s,\"status\":\"completed\",\"output\":[]}}\n\n", tc.object)
+			})
+			p := testPinnedTarget(h, 0)
+			p.provider.VendorID = "openai"
+			probed, granted := openTestProbe(t, h, p.provider.ID)
+			if !probed || !granted {
+				t.Fatal("could not claim half-open probe")
+			}
+			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x.route = &routing.Route{Slug: routeSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
+			res := &resources.Resource{ID: resources.LocalID(resources.KindStrictResponse, uuid.New()), Kind: resources.KindStrictResponse, UpstreamID: "native-response", RouteSlug: routeSlug}
+			recorder := httptest.NewRecorder()
+			failure := h.gateway.streamStoredResponse(t.Context(), recorder, x, res, p, nil)
+			if failure == nil || failure.Code != "response_stream_incomplete" {
+				t.Fatalf("unexpected stream result: %+v", failure)
+			}
+			h.gateway.refuse(x, recorder, failure)
+			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			env := h.sink.last(t)
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class {
+				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
+			}
+			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != (tc.class == classSuccess) {
+				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
+			}
+		})
+	}
+}
+
+func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, nestedName, rootInput string
+		valid                       bool
+	}{
+		{"matching references", "batches/native", "files/native-input", true},
+		{"mismatched nested name", "batches/unrelated", "files/native-input", false},
+		{"conflicting input alias", "batches/native", "files/unrelated", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `{"name":"batches/native","metadata":{"name":%q,"state":"BATCH_STATE_RUNNING","inputConfig":{"fileName":"files/native-input"}},"input_config":{"file_name":%q}}`, tc.nestedName, tc.rootInput)
+			})
+			p := testPinnedTarget(h, 0)
+			probed, granted := openTestProbe(t, h, p.provider.ID)
+			if !probed || !granted {
+				t.Fatal("could not claim half-open probe")
+			}
+			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
+			response, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodGet, p.provider.Endpoint+"/batches/native", nil, "")
+			if failure != nil {
+				t.Fatal(failure.toError())
+			}
+			defer response.Body.Close()
+			body, err := response.readBody(h.gateway.cfg.MaxResponseBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch, err := batchupstream.DecodeGeminiBatch(body)
+			if err != nil {
+				t.Fatalf("could not decode native fixture: %v", err)
+			}
+			object, _, err := settleGeminiBatchResult(response.exchange, body, batch, p.model, geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
+			if (err == nil) != tc.valid {
+				t.Fatalf("unexpected batch validation: %v", err)
+			}
+			if tc.valid {
+				projected, err := object.project("local", routeSlug, nil)
+				if err != nil || bytes.Contains(projected, []byte("native-input")) || bytes.Count(projected, []byte("files/local-input")) != 2 {
+					t.Fatalf("projected references: %s, %v", projected, err)
+				}
+			}
+			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != tc.valid {
+				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
+			}
+		})
+	}
+}
+
+func TestGeminiManagedFileRejectsOversizedProviderLine(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, Config{MaxResponseBytes: 4 << 20})
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	h.gateway.deps.Staging = spool
+	h.mock.set("download", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"key":"huge","error":{"message":"`+strings.Repeat("a", managedBatchLineLimit+2)+`"}}`+"\n")
+	})
+	p := testPinnedTarget(h, 0)
+	probed, granted := openTestProbe(t, h, p.provider.ID)
+	if !probed || !granted {
+		t.Fatal("could not claim half-open probe")
+	}
+	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+	res := &resources.Resource{UpstreamID: "files/result", RouteSlug: routeSlug, Metadata: json.RawMessage(`{"role":"error"}`)}
+	recorder := httptest.NewRecorder()
+	failure := h.gateway.geminiManagedFileContent(t.Context(), recorder, x, res, p)
+	if failure == nil || failure.Code != "fidelity_protocol_violation" {
+		t.Fatalf("unexpected download result: %+v", failure)
+	}
+	h.gateway.refuse(x, recorder, failure)
+	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted {
+		t.Fatalf("oversized native line left circuit available, probe=%v granted=%v", probed, granted)
+	}
+}
+
+type failedFlushWriter struct{ *httptest.ResponseRecorder }
+
+func (w failedFlushWriter) FlushError() error { return io.ErrClosedPipe }
+
+func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, Config{})
+	h.mock.set("a", status(http.StatusNoContent, ""))
+	p := testPinnedTarget(h, 0)
+	route := routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
+	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiInteractions, actor: "api_key_resource", keyID: h.keyID}
+	x.route = &route
+	response, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodDelete, p.provider.Endpoint+"/interactions/native", nil, "")
+	if failure != nil {
+		t.Fatal(failure.toError())
+	}
+	w := failedFlushWriter{httptest.NewRecorder()}
+	if failure := h.gateway.finishGeminiInteractionDeletion(t.Context(), w, x, response, func(context.Context) error { return nil }); failure != nil {
+		t.Fatal(failure)
+	}
+	env := h.sink.last(t)
+	if w.Code != http.StatusOK || env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || len(env.Attempts) != 1 ||
+		env.Attempts[0].Class != classSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
+		t.Fatalf("unexpected delete acknowledgement evidence, status=%d envelope=%+v attempts=%+v", w.Code, env, env.Attempts)
+	}
+}
+
+func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
+	t.Parallel()
+	store := retainedapi.Family{Operation: "vector_store", Kind: "vector_store", Identity: "id"}
+	item := retainedapi.Family{Operation: "conversation", Kind: "conversation_item", Identity: "id"}
+	for _, tc := range []struct {
+		name, body, class string
+		available         bool
+		charge            string
+		family            retainedapi.Family
+	}{
+		{"accepted deletion", `{"id":"resource-native","deleted":true}`, classSuccess, true, "0.25", store},
+		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, classProtocol, false, "0", store},
+		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, classProtocol, false, "0", store},
+		{"conversation item returns parent identity", `{"id":"conversation-native"}`, classSuccess, true, "0.25", item},
+		{"conversation item returns child identity", `{"id":"resource-native"}`, classProtocol, false, "0", item},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool.Close()
+			h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, tc.body)
+			})
+			p := testPinnedTarget(h, 0)
+			probed, granted := openTestProbe(t, h, p.provider.ID)
+			if !granted || !probed {
+				t.Fatal("could not claim half-open probe")
+			}
+			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+			p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
+			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			id := uuid.New()
+			resource := &resources.Resource{UUID: id, ID: resources.LocalID(tc.family.Kind, id), Kind: tc.family.Kind, UpstreamID: "resource-native"}
+			var parent *resources.Resource
+			if tc.family.Kind == "conversation_item" {
+				id := uuid.New()
+				parent = &resources.Resource{UUID: id, ID: resources.LocalID("conversation", id), Kind: "conversation", UpstreamID: "conversation-native"}
+				resource.ParentID = &parent.UUID
+			}
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/v1/resources/"+resource.ID, nil)
+			w := httptest.NewRecorder()
+			endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/resources/resource-native"
+			status := h.gateway.retainedDispatch(w, r, x, p, retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, resource, parent, endpoint, nil, "", nil, func(e *fault.Error) {
+				h.gateway.refuse(x, w, e)
+			})
+			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			env := h.sink.last(t)
+			if status != http.StatusServiceUnavailable || w.Code != status || env.Outcome != "failure" || env.ErrorClass != "provider_state_unavailable" {
+				t.Fatalf("local deletion failure changed, status=%d body=%s outcome=%s error=%s", status, w.Body.String(), env.Outcome, env.ErrorClass)
+			}
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class || h.gateway.settledCharge(x).String() != tc.charge {
+				t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
+			}
+			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != tc.available {
+				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
+			}
+		})
+	}
+}
+
+func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, storedMetadata, providerBody string
+		local                              bool
+	}{
+		{"provider byte count", `{"adapter":"mistral"}`, `{"id":"file-native","bytes":-1}`, false},
+		{"stored byte count", `{"adapter":"mistral","provider_file":{"bytes":-1}}`, `{"id":"file-native","bytes":10}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, tc.providerBody)
+			})
+			p := testPinnedTarget(h, 0)
+			probed, granted := openTestProbe(t, h, p.provider.ID)
+			if !granted || !probed {
+				t.Fatal("could not claim half-open probe")
+			}
+			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			id := uuid.New()
+			res := &resources.Resource{UUID: id, ID: resources.LocalID(resources.KindFile, id), Kind: resources.KindFile, UpstreamID: "file-native", Metadata: json.RawMessage(tc.storedMetadata)}
+			w := httptest.NewRecorder()
+			failure := h.gateway.getPinnedFile(t.Context(), w, x, keyauthority.Authority{ID: h.keyID}, res, p)
+			if failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "fidelity_protocol_violation" {
+				t.Fatalf("unexpected file refresh failure: %+v", failure)
+			}
+			h.gateway.refuse(x, w, failure)
+			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			env := h.sink.last(t)
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].LocalRefusal != tc.local {
+				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
+			}
+			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed != tc.local || granted != tc.local {
+				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
+			}
+		})
+	}
+}
+
+func testPinnedTarget(h *harness, index int) *pin {
+	snapshot := h.rt.release.Snapshot().Clone()
+	target := snapshot.Routes[routeSlug].Targets[index]
+	provider := snapshot.Providers[target.ProviderID]
+	return &pin{provider: provider, target: target, model: target.ProviderModel, slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: target.ProviderModel}}
+}
+
+func openTestProbe(t *testing.T, h *harness, provider string) (bool, bool) {
+	t.Helper()
+	now := time.Now()
+	h.gateway.health = health.NewTracker(func() time.Time { return now })
+	for range 30 {
+		_, ready := h.gateway.health.Claim(provider)
+		if !ready {
+			now = now.Add(health.CircuitOpenFor + time.Millisecond)
+			return h.gateway.health.Claim(provider)
+		}
+		h.gateway.health.Record(provider, events.AttemptFact{Class: classProtocol}, false)
+	}
+	t.Fatal("circuit stayed closed after consecutive provider failures")
+	return false, false
+}
+
+type pinnedLimitCounter struct {
+	unreachableValkey
+	used map[string]bool
+}
+
+func (c pinnedLimitCounter) Do(_ context.Context, args ...string) (any, error) {
+	switch len(args) {
+	case 12:
+		if c.used[args[3]] {
+			return []any{int64(2), int64(0), "rpm", int64(30000), int64(42), int64(0)}, nil
+		}
+		c.used[args[3]] = true
+		return []any{int64(2), int64(1), "ok", int64(0), int64(42), int64(0)}, nil
+	case 9:
+		delete(c.used, args[3])
+		return int64(1), nil
+	default:
+		return nil, fmt.Errorf("unexpected rate command with %d arguments", len(args))
+	}
+}
+
+func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
+	t.Parallel()
+	runner, err := scripts.NewRunner(pinnedLimitCounter{used: make(map[string]bool)}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := quota.NewAdmission(limitadmission.NewDurable(runner, nil), nil, nil, slog.New(slog.DiscardHandler))
+	h := newHarness(t, Config{}, Dependencies{Admission: admission})
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{}`)
+	})
+	sent, unsent := testPinnedTarget(h, 0), testPinnedTarget(h, 1)
+	for _, p := range []*pin{sent, unsent} {
+		p.provider.Limits = &routing.Limits{RequestsPerMinute: new(int64(1))}
+	}
+	probed, granted := openTestProbe(t, h, unsent.provider.ID)
+	if !probed || !granted {
+		t.Fatal("could not claim half-open probe")
+	}
+	h.gateway.health.ReleaseProbe(unsent.provider.ID)
+	reserve := func(p *pin) gateResult {
+		return acquireDispatchHold(t.Context(), h.gateway, &p.provider, &p.slot, 1, time.Minute, "")
+	}
+	first := reserve(sent)
+	if first.verdict != gateAdmitted {
+		t.Fatalf("first admission: %+v", first)
+	}
+	sent.hold = first.hold
+	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+	response, failure := h.gateway.pinnedDo(t.Context(), x, sent, http.MethodGet, sent.provider.Endpoint, nil, "")
+	if failure != nil {
+		t.Fatalf("first exchange: %+v", failure)
+	}
+	_, err = response.readBody(1024)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.exchange.complete(classSuccess)
+	h.gateway.settlePinnedHold(t.Context(), sent.hold)
+
+	second := reserve(unsent)
+	if second.verdict != gateAdmitted {
+		t.Fatalf("second admission: %+v", second)
+	}
+	unsent.hold = second.hold
+	if _, failure := h.gateway.pinnedDo(t.Context(), x, unsent, http.MethodGet, "://invalid", nil, ""); failure == nil {
+		t.Fatal("invalid endpoint dispatched")
+	}
+	h.gateway.settlePinnedHold(t.Context(), unsent.hold)
+	if after := reserve(unsent); after.verdict != gateAdmitted {
+		t.Fatalf("second provider remained blocked by a quota or probe: %+v", after)
+	} else {
+		h.gateway.releaseHold(t.Context(), after.hold)
+	}
+	if after := reserve(sent); after.verdict != gateRejected {
+		t.Fatalf("first provider's dispatched request did not consume its allowance: %+v", after)
 	}
 }
 

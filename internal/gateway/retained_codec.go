@@ -612,15 +612,7 @@ func retainedDiscoveredChild(parent *resources.Resource, kind, id string, item o
 
 // Project only declared identities. Primary children observed under an
 // authorized parent may be discovered; unrelated references must already exist.
-func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources.Resource, e retainedapi.Endpoint, body []byte) ([]byte, error) {
-	if len(body) == 0 {
-		return body, nil
-	}
-	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
-	if err != nil {
-		return nil, err
-	}
-	refs := retainedResponseRefs(e, source)
+func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources.Resource, e retainedapi.Endpoint, source oif.Document, rewrite retainedapi.PreparedRewrite) ([]byte, error) {
 	nativeItems := map[string]oif.Value{}
 	if e.Action == "list" {
 		items, _ := source.Root().Lookup(e.Collection)
@@ -641,7 +633,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			}
 		}
 	}
-	projected, err := retainedapi.Rewrite(source, refs, func(kind, id string) (string, error) {
+	projected, err := rewrite.Bind(func(kind, id string) (string, error) {
 		if resource == nil {
 			return "", resources.ErrNotFound
 		}

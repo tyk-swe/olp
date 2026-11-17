@@ -426,16 +426,13 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 	return bound.Bytes(), nil
 }
 
-func (s *Server) retainedNativeResult(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, source oif.Document, persist bool) error {
+func (s *Server) persistRetainedResult(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) error {
 	if r == nil || e.Action == "list" || e.Action == "delete" {
 		return nil
 	}
-	if err := resources.EnrichRetained(r, e, source, s.now()); err != nil {
-		return err
-	}
 	// Create results were already committed with their submission identities.
 	// Empty item creations intentionally leave a deleted placeholder.
-	if persist && e.Action != "create" {
+	if e.Action != "create" {
 		save := s.deps.Resources.SaveRetainedResult
 		if e.Metered && (e.Action == "update" || e.Action == "patch") {
 			save = s.deps.Resources.SaveRetainedMutationResult

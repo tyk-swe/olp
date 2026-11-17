@@ -65,14 +65,6 @@ func retainedEvalPricingSupported(price *rates.RoutingPrice, card *rates.Routing
 	return explicit == nil || len(explicit.Tiers) == 0
 }
 
-func (s *Server) observeRetainedSettlement(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, parsed oif.Document) error {
-	observation, err := resources.ObserveRetained(r, e, parsed, s.now())
-	if err != nil {
-		return err
-	}
-	return s.deps.Resources.RecordRetainedObservation(ctx, r, observation, nil)
-}
-
 func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
 		return nil, nil

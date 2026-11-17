@@ -20,7 +20,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 	x.once.Do(func() {
 		s.storeCache(x, out, status)
 		completedAt := s.now()
-		x.finalizePinned(out, completedAt)
+		x.finalizePinned()
 		env := events.Envelope{
 			RequestID:            x.request.id,
 			AccountingID:         x.request.accountingID(),

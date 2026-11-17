@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
@@ -218,6 +219,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an invalid resumable upload URL."))
 		return
 	}
+	resp.exchange.complete(classSuccess)
 	now := s.now()
 	expires := now.Add(time.Hour)
 	durableBound := now.Add(resources.DurableLifetime)
@@ -244,19 +246,18 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The upload session could not be stored."))
 		return
 	}
-	x.dispatched = true
-	x.completePinned()
+
 	x.responseHeaders(w.Header(), false)
 	w.Header().Set("X-Goog-Upload-Status", "active")
 	w.Header().Set("X-Goog-Upload-URL", s.gatewayOrigin(r)+"/gemini/upload/"+url.PathEscape(resource.ID))
 	w.WriteHeader(http.StatusOK)
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	s.finishGeminiUploadAck(w, x, resp.exchange)
 }
 
-func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, part *staging.Part) ([]byte, string, *attemptFailure) {
+func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, part *staging.Part) ([]byte, string, *pinnedExchange, *attemptFailure) {
 	endpoint, err := geminiUploadOrigin(p.provider.Connector(), p.model, s.egress)
 	if err != nil {
-		return nil, "", geminiManagedUploadFailure(x, classConnect, false)
+		return nil, "", nil, geminiManagedUploadFailure(classConnect, false)
 	}
 	startHeaders := http.Header{
 		"X-Goog-Upload-Protocol":              {"resumable"},
@@ -267,38 +268,38 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, p
 	displayName, _ := json.Marshal(map[string]any{"file": map[string]string{"display_name": part.Filename}})
 	start, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(displayName), int64(len(displayName)), "application/json", "application/json", startHeaders)
 	if failure != nil {
-		return nil, "", failure
+		return nil, "", nil, failure
 	}
 	uploadURL := start.Header.Get("X-Goog-Upload-URL")
 	generationURL, _ := p.provider.Connector().URL(wire.Gemini, p.model, false)
 	if len(start.Header.Values("X-Goog-Upload-URL")) != 1 ||
 		validateGeminiUploadURL(uploadURL, generationURL, s.egress) != nil {
 		_ = start.Body.Close()
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
 	_ = start.Body.Close()
-	x.completePinned()
+	start.exchange.complete(classSuccess)
 	opened, err := s.deps.Staging.Open(part.Handle)
 	if err != nil {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
 	defer opened.File.Close()
 	chunkHeaders := http.Header{
 		"X-Goog-Upload-Command": {"upload, finalize"},
 		"X-Goog-Upload-Offset":  {"0"},
 	}
-	final, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, opened.File, part.Size,
+	final, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, pinnedUploadSource{opened.File}, part.Size,
 		"application/jsonl", "application/json", chunkHeaders)
 	if failure != nil {
-		return nil, "", failure
+		return nil, "", nil, failure
 	}
 	defer final.Body.Close()
 	if final.Header.Get("X-Goog-Upload-Status") != "final" {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
-	body, err := readBounded(final.Body, s.cfg.MaxResponseBytes)
+	body, err := final.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
 	var result struct {
 		File json.RawMessage `json:"file"`
@@ -306,39 +307,36 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, p
 	var fileObject map[string]json.RawMessage
 	if json.Unmarshal(body, &result) != nil || len(result.File) == 0 ||
 		json.Unmarshal(result.File, &fileObject) != nil {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
 	var name string
 	if json.Unmarshal(fileObject["name"], &name) != nil {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
 	if _, err := geminiFileID(name); err != nil {
-		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
 	}
-	return body, name, nil
+	return body, name, final.exchange, nil
 }
 
-func geminiManagedUploadFailure(x *call, class string, dispatched bool) *attemptFailure {
-	if x != nil {
-		x.dispatched = x.dispatched || dispatched
-	}
+func geminiManagedUploadFailure(class string, dispatched bool) *attemptFailure {
 	return &attemptFailure{class: class, status: http.StatusBadGateway, dispatched: dispatched}
 }
 
-func (s *Server) geminiPinnedRequest(ctx context.Context, x *call, p *pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*http.Response, *attemptFailure) {
+func (s *Server) geminiPinnedRequest(ctx context.Context, x *call, p *pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*pinnedResponse, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.User != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	validationURL := *parsed
 	validationURL.RawQuery, validationURL.ForceQuery = "", false
 	if _, err := s.egress.ValidateEndpoint(validationURL.String()); err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
 	if err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	if accept != "" {
@@ -352,9 +350,9 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *call, p *pin, metho
 	}
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
-			return nil, exchange.fail(s, x, classCancelled, nil)
+			return nil, exchange.fail(classCancelled, nil)
 		}
-		return nil, exchange.fail(s, x, classCredential, nil)
+		return nil, exchange.fail(classCredential, nil)
 	}
 	for name, values := range headers {
 		req.Header.Del(name)
@@ -362,7 +360,7 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *call, p *pin, metho
 			req.Header.Add(name, value)
 		}
 	}
-	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
+	return s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 }
 
 type geminiCommand struct {
@@ -486,7 +484,6 @@ func projectGeminiFile(body []byte, localID, origin string) ([]byte, error) {
 }
 
 func writeGeminiUploadAck(w http.ResponseWriter, x *call, offset int64, state string) {
-	x.completePinned()
 	x.responseHeaders(w.Header(), false)
 	w.Header().Set("X-Goog-Upload-Status", state)
 	w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(offset, 10))
@@ -617,7 +614,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		chunk, chunkLength = opened.File, artifact.ContentLength
+		chunk, chunkLength = pinnedUploadSource{opened.File}, artifact.ContentLength
 	}
 	uploadURL, err := s.deps.Resources.ReadGeminiUploadURL(ctx, session.UUID)
 	generationURL, generationErr := p.provider.Connector().URL(wire.Gemini, p.model, false)
@@ -635,7 +632,6 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, chunk, chunkLength, contentType, "application/json", headers)
 	if failure != nil {
-		x.dispatched = failure.dispatched
 		if failure.acceptance.Unresolved() || failure.status == http.StatusNotFound || failure.status == http.StatusGone {
 			s.markGeminiUploadFailed(r.Context(), session)
 		}
@@ -643,7 +639,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
+
 	newOffset := offset + chunkLength
 	if received := resp.Header.Get("X-Goog-Upload-Size-Received"); received != "" {
 		reported, parseErr := strconv.ParseInt(received, 10, 64)
@@ -655,7 +651,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		newOffset = reported
 	}
 	if command.finalize {
-		body, readErr := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		body, readErr := resp.readBody(s.cfg.MaxResponseBytes)
 		if readErr != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
 			s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The finalized Gemini file response could not be read."))
@@ -694,6 +690,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			fields["batch_manifest"] = mustJSON(batchInput)
 			fileMetadata = mustJSON(fields)
 		}
+		resp.exchange.complete(classSuccess)
 		file := &resources.Resource{
 			Kind: resources.KindGeminiFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
 			ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID,
@@ -713,12 +710,12 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected."))
 			return
 		}
-		x.completePinned()
 		w.Header().Set("X-Goog-Upload-Status", "final")
 		w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(newOffset, 10))
-		s.writeStateJSON(w, x, mustJSON(map[string]json.RawMessage{"file": projected}))
+		s.writeStateJSON(w, x, mustJSON(map[string]json.RawMessage{"file": projected}), resp.exchange)
 		return
 	}
+	resp.exchange.complete(classSuccess)
 	newMetadata, _ := json.Marshal(map[string]int64{"offset": newOffset})
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	updateErr := s.deps.Resources.Update(commitCtx, session.ID, "active", newMetadata, nil)
@@ -729,6 +726,19 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeGeminiUploadAck(w, x, newOffset, "active")
+	s.finishGeminiUploadAck(w, x, resp.exchange)
+}
+
+func (s *Server) finishGeminiUploadAck(w http.ResponseWriter, x *call, exchange *pinnedExchange) {
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
+	if err := controller.Flush(); err != nil {
+		exchange.delivery(usage.ClientUnobserved)
+		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The upload acknowledgement could not be delivered.")
+		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+		return
+	}
+	exchange.delivery(usage.ClientTerminal)
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
@@ -789,7 +799,7 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		body, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		body, err := resp.readBody(s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file response could not be read.")
 		}
@@ -806,6 +816,7 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if idErr != nil || upstreamID != res.UpstreamID {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned a mismatched Gemini file name.")
 		}
+		resp.exchange.complete(classSuccess)
 		var previous, fields map[string]json.RawMessage
 		_ = json.Unmarshal(res.Metadata, &previous)
 		_ = json.Unmarshal(metadata, &fields)
@@ -820,8 +831,7 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected.")
 		}
-		x.completePinned()
-		s.writeStateJSON(w, x, projected)
+		s.writeStateJSON(w, x, projected, resp.exchange)
 		return nil
 	})
 }
@@ -845,12 +855,12 @@ func (s *Server) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
 			}
 			return upstreamError(failure)
 		}
+		resp.exchange.complete(classSuccess)
 		_ = resp.Body.Close()
 		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file could not be tombstoned.")
 		}
-		x.completePinned()
-		s.writeStateJSON(w, x, []byte(`{}`))
+		s.writeStateJSON(w, x, []byte(`{}`), resp.exchange)
 		return nil
 	})
 }
@@ -943,12 +953,11 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{
-			Filename: "gemini-file", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body,
-		})
+		artifact, err := resp.stageBody(ctx, s.deps.Staging, "gemini-file", contentType, s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini download exceeded the configured response limit.")
 		}
+		resp.exchange.complete(classSuccess)
 		defer s.deps.Staging.Remove(artifact.Handle)
 		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
@@ -962,11 +971,8 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
-		x.completePinned()
 		if copyErr != nil || written != artifact.ContentLength {
-			if len(x.facts) > 0 {
-				x.facts[len(x.facts)-1].Class = classCancelled
-			}
+			resp.exchange.delivery(deliveryState(written))
 			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini download ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
@@ -974,6 +980,7 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		if written > 0 {
 			x.delivered(s.now())
 		}
+		resp.exchange.delivery(usage.ClientTerminal)
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
 	})

@@ -385,8 +385,8 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 		return upstreamError(failure)
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
-	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+
+	result, err := resp.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
@@ -420,7 +420,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid completed response output.")
 		}
 	}
-	x.completePinned()
+	resp.exchange.complete(classSuccess)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	if e := s.applyResponseObservation(commitCtx, res.ID, observation); e != nil {
@@ -466,7 +466,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 			out, _ = json.Marshal(map[string]string{"id": res.ID, "object": "response", "status": nativeStatus})
 		}
 	}
-	s.writeStateJSON(w, x, out)
+	s.writeStateJSON(w, x, out, resp.exchange)
 	return nil
 }
 
@@ -506,9 +506,9 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		x.dispatched = true
-		result, _ := readBounded(resp.Body, s.cfg.MaxResponseBytes)
-		x.completePinned()
+
+		result, _ := resp.readBody(s.cfg.MaxResponseBytes)
+		resp.exchange.complete(classSuccess)
 		// The provider already deleted the response: the mapping must follow
 		// even when the client has gone.
 		commitCtx, stopCommit := resourceCommitContext(ctx)
@@ -523,7 +523,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 				"id": encoded, "object": json.RawMessage(`"response"`), "deleted": json.RawMessage(`true`),
 			})
 		}
-		s.writeStateJSON(w, x, out)
+		s.writeStateJSON(w, x, out, resp.exchange)
 		return nil
 	})
 }
@@ -548,8 +548,8 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		x.dispatched = true
-		result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+
+		result, err := resp.readBody(s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
@@ -557,12 +557,16 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
 		}
-		projected, err := projectResponseInputReferences(document, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		refs, err := responseInputReferences(document)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
-		x.completePinned()
-		s.writeStateJSON(w, x, projected.Bytes())
+		resp.exchange.complete(classSuccess)
+		projected, err := projectResponseInputReferences(document, refs, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		if err != nil {
+			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
+		}
+		s.writeStateJSON(w, x, projected.Bytes(), resp.exchange)
 		return nil
 	})
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -342,7 +343,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			return
 		}
 		defer s.settleFence(r.Context(), lifecycle.Close)
-		status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, lifecycle, fail)
+		status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, parent, endpoint, body, contentType, lifecycle, fail)
 		return
 	}
 
@@ -448,11 +449,11 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		return
 	}
 	defer s.settleFence(ctx, mutation.Close)
-	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, mutation, fail)
+	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, parent, endpoint, body, contentType, mutation, fail)
 }
 
 // retainedDispatch performs the pinned call and projects identities.
-func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
+func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
 	isCreate := e.Action == "create"
 	deletion := e.Action == "delete" && resource.Kind == "context_cache"
 	if deletion {
@@ -490,14 +491,35 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		return public.Status
 	}
 	defer native.Body.Close()
-	response, readErr := readBounded(native.Body, s.retainedResponseLimit())
+	response, readErr := native.readBody(s.retainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return 502
 	}
 	commitCtx, commitCancel := resourceCommitContext(r.Context())
 	defer commitCancel()
+	var parsed oif.Document
+	var parseErr error
+	var rewrite retainedapi.PreparedRewrite
+	var referenceErr error
+	if e.Action != "content" {
+		document := response
+		if e.Action == "delete" && native.StatusCode == http.StatusNoContent {
+			document = []byte(`{}`)
+		}
+		parsed, parseErr = oif.ParseJSON(document, oif.Limits{MaxBytes: retainedBodyLimit})
+		if parseErr == nil && parsed.Root().Kind() == oif.Object {
+			rewrite, referenceErr = retainedapi.PrepareRewrite(parsed, retainedResponseRefs(e, parsed))
+		}
+	}
 	if e.Action == "delete" {
+		if !retainedDeleteIdentityMatches(e, parsed, resource, parent) {
+			referenceErr = resources.ErrContract
+		}
+		if parseErr == nil && parsed.Root().Kind() == oif.Object && referenceErr == nil {
+			_ = observeRetainedUsage(native.exchange, parsed, false)
+			native.exchange.complete(classSuccess)
+		}
 		if putErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
 			fail(fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return 503
@@ -509,20 +531,18 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			}
 		}
 		if native.StatusCode == http.StatusNoContent {
-			deleted, _ := oif.ParseJSON([]byte(`{}`), oif.Limits{})
-			if err := s.observeRetainedSettlement(commitCtx, resource, e, deleted); err != nil {
+			observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.now())
+			if observeErr != nil || s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
 				fail(fault.ServerError(503, "provider_state_unavailable", "Deletion evidence could not be committed."))
 				return 503
 			}
-			_ = observeRetainedUsage(x, oif.Document{}, false)
-			x.completePinned()
-			s.writeStateJSONStatus(w, x, nil, native.StatusCode)
+			s.writeStateJSONStatus(w, x, nil, native.StatusCode, native.exchange)
 			return native.StatusCode
 		}
 	}
 	if e.Action == "content" {
-		_ = observeRetainedUsage(x, oif.Document{}, false)
-		x.completePinned()
+		_ = observeRetainedUsage(native.exchange, oif.Document{}, false)
+		native.exchange.complete(classSuccess)
 		// Binary delivery finalizes like the JSON path: a successful
 		// write commits the envelope, a failed one cancels it.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
@@ -535,19 +555,17 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		}
 		if writeErr != nil || n != len(response) {
 			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
-			if len(x.facts) > 0 {
-				x.facts[len(x.facts)-1].Class = classCancelled
-			}
+			native.exchange.delivery(deliveryState(n))
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
 			return native.StatusCode
 		}
 		if n > 0 {
 			x.delivered(s.now())
 		}
+		native.exchange.delivery(usage.ClientTerminal)
 		s.finish(x, &outcome{committed: true}, native.StatusCode)
 		return native.StatusCode
 	}
-	parsed, parseErr := oif.ParseJSON(response, oif.Limits{MaxBytes: retainedBodyLimit})
 	if parseErr != nil || parsed.Root().Kind() != oif.Object {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource object."))
 		return 502
@@ -559,35 +577,57 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			return 502
 		}
 	}
+	var creation *resources.PreparedCreation
 	if isCreate {
 		ids, idErr := retainedCreateIDs(e, response)
 		if idErr != nil {
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity."))
 			return 502
 		}
-		accepted, putErr := lifecycle.AcceptCreated(commitCtx, resources.CreationResult{
+		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{
 			IDs: ids, Observation: &resources.CreationObservation{Endpoint: e, Document: parsed, At: s.now()},
 		})
-		if errors.Is(putErr, resources.ErrRetainedMetadata) {
+		if errors.Is(prepareErr, resources.ErrRetainedMetadata) {
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid resource billing metadata."))
 			return 502
 		}
-		if putErr != nil {
+		if prepareErr != nil {
+			native.exchange.interrupt(classProtocol, true)
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
 		}
-		resource = accepted
+		creation, resource = prepared, prepared.Resource()
+	} else if e.Action != "list" && e.Action != "delete" {
+		if err := resources.EnrichRetained(resource, e, parsed, s.now()); err != nil {
+			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
+			return 503
+		}
 	}
-	if err := s.retainedNativeResult(commitCtx, resource, e, parsed, true); err != nil {
+	observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.now())
+	if referenceErr == nil && observeErr == nil {
+		_ = observeRetainedUsage(native.exchange, parsed, false)
+		native.exchange.complete(classSuccess)
+	}
+	if creation != nil {
+		if err := creation.Commit(commitCtx); err != nil {
+			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
+			return 503
+		}
+	}
+	if err := s.persistRetainedResult(commitCtx, resource, e, parsed); err != nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 		return 503
 	}
-	projected, projectErr := s.projectRetainedGeneric(r.Context(), resource, e, response)
+	if referenceErr != nil {
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
+		return 502
+	}
+	projected, projectErr := s.projectRetainedGeneric(r.Context(), resource, e, parsed, rewrite)
 	if projectErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
 		return 502
 	}
-	if err := s.observeRetainedSettlement(commitCtx, resource, e, parsed); err != nil {
+	if observeErr != nil || s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed."))
 		return 503
 	}
@@ -597,10 +637,21 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			return 503
 		}
 	}
-	_ = observeRetainedUsage(x, parsed, false)
-	x.completePinned()
-	s.writeStateJSONStatus(w, x, projected, native.StatusCode)
+	s.writeStateJSONStatus(w, x, projected, native.StatusCode, native.exchange)
 	return native.StatusCode
+}
+
+func retainedDeleteIdentityMatches(e retainedapi.Endpoint, document oif.Document, resource, parent *resources.Resource) bool {
+	identity, present := document.Root().Lookup(e.Identity)
+	if !present {
+		return true
+	}
+	expected := resource
+	if e.Kind == "conversation_item" {
+		expected = parent
+	}
+	id, valid := identity.Text()
+	return valid && expected != nil && id == expected.UpstreamID
 }
 
 func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
@@ -778,6 +829,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return gateErr.Status
 		}
 	}
+	var delivered []*pinnedExchange
 	responseBytes := 256
 	readIdx := 0
 	var lastItem *resources.Resource
@@ -835,13 +887,13 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		}
 		endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, retainedUpstreamPath(retainedapi.Endpoint{Family: e.Family, Action: "get", Method: "GET", Pattern: e.Path + "/{id}"}, map[string]string{"id": resource.UpstreamID}), nil)
 		if urlErr != nil {
-			s.settlePinHold(ctx, x, p.hold, nil)
+			s.settlePinnedHold(ctx, p.hold)
 			fail(pinUnavailable())
 			return 409
 		}
 		native, callErr := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if callErr != nil {
-			s.settlePinHold(ctx, x, p.hold, nil)
+			s.settlePinnedHold(ctx, p.hold)
 			if callErr.status == http.StatusNotFound {
 				commitCtx, commitCancel := resourceCommitContext(ctx)
 				removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID)
@@ -859,7 +911,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		routeDispatched[route.Slug] = true
 		routeActual[route.Slug] = routeActual[route.Slug].Add(bound)
 		routeActualCharge[route.Slug] = routeActualCharge[route.Slug].Add(charge)
-		body, readErr := readBounded(native.Body, s.retainedResponseLimit())
+		body, readErr := native.readBody(s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {
 			objectEndpoint := e
@@ -869,35 +921,52 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 				readErr = resources.ErrContract
 			}
 		}
-		var projected []byte
-		if readErr == nil {
-			projected, readErr = s.projectRetainedGeneric(ctx, resource, retainedapi.Endpoint{Family: e.Family, Action: "get"}, body)
-		}
-		if readErr == nil {
-			source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
-			if parseErr == nil {
-				objectEndpoint := retainedapi.Endpoint{Family: e.Family, Action: "get"}
-				commitCtx, commitCancel := resourceCommitContext(ctx)
-				persistErr := s.retainedNativeResult(commitCtx, resource, objectEndpoint, source, true)
-				if persistErr == nil {
-					persistErr = s.observeRetainedSettlement(commitCtx, resource, objectEndpoint, source)
-				}
-				commitCancel()
-				if persistErr != nil {
-					s.settlePinHold(ctx, x, p.hold, nil)
-					fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
-					return 503
-				}
-				_ = observeRetainedUsage(x, source, false)
-			}
-			x.completePinned()
-			x.finalizePinned(nil, s.now())
-		}
-		zero := int64(0)
-		s.settlePinHold(ctx, x, p.hold, &zero)
 		if readErr != nil {
+			s.settlePinnedHold(ctx, p.hold)
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
+		}
+		objectEndpoint := retainedapi.Endpoint{Family: e.Family, Action: "get"}
+		source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
+		if parseErr != nil {
+			s.settlePinnedHold(ctx, p.hold)
+			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
+			return 502
+		}
+		if err := resources.EnrichRetained(resource, objectEndpoint, source, s.now()); err != nil {
+			s.settlePinnedHold(ctx, p.hold)
+			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
+			return 503
+		}
+		observation, observeErr := resources.ObserveRetained(resource, objectEndpoint, source, s.now())
+		if observeErr != nil {
+			s.settlePinnedHold(ctx, p.hold)
+			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
+			return 503
+		}
+		rewrite, referenceErr := retainedapi.PrepareRewrite(source, retainedResponseRefs(objectEndpoint, source))
+		if referenceErr != nil {
+			s.settlePinnedHold(ctx, p.hold)
+			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
+			return 502
+		}
+		_ = observeRetainedUsage(native.exchange, source, false)
+		native.exchange.complete(classSuccess)
+		s.settlePinnedHold(ctx, p.hold)
+		projected, projectErr := s.projectRetainedGeneric(ctx, resource, objectEndpoint, source, rewrite)
+		if projectErr != nil {
+			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
+			return 502
+		}
+		commitCtx, commitCancel := resourceCommitContext(ctx)
+		persistErr := s.persistRetainedResult(commitCtx, resource, objectEndpoint, source)
+		if persistErr == nil {
+			persistErr = s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil)
+		}
+		commitCancel()
+		if persistErr != nil {
+			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
+			return 503
 		}
 		responseBytes += len(projected) + 1
 		if responseBytes > retainedBodyLimit {
@@ -905,6 +974,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return 502
 		}
 		items = append(items, projected)
+		delivered = append(delivered, native.exchange)
 		lastItem = resource
 	}
 	hasMore := readIdx < len(ready) || !exhausted
@@ -941,7 +1011,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		fail(encodeErr)
 		return encodeErr.Status
 	}
-	s.writeStateJSONStatus(w, x, body, http.StatusOK)
+	s.writeStateJSONStatus(w, x, body, http.StatusOK, delivered...)
 	return 200
 }
 
@@ -1121,7 +1191,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 	defer native.Body.Close()
-	response, readErr := readBounded(native.Body, s.retainedResponseLimit())
+	response, readErr := native.readBody(s.retainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return
@@ -1131,25 +1201,30 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid response."))
 		return
 	}
-	if usageErr := observeRetainedUsage(x, responseSource, storeKind == ""); usageErr != nil {
+	if usageErr := observeRetainedUsage(native.exchange, responseSource, storeKind == ""); usageErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid usage."))
 		return
 	}
+	rewrite, referenceErr := retainedapi.PrepareRewrite(responseSource, retainedResponseRefs(codec, responseSource))
+	if referenceErr != nil {
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource reference."))
+		return
+	}
+	native.exchange.complete(classSuccess)
 	// Compaction has no parent resource; project its returned
 	// references against the serving pin's owner-scoped identity.
 	projectAs := resource
 	if projectAs == nil && p != nil && route != nil {
 		projectAs = &resources.Resource{APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID}
 	}
-	projected, projectErr := s.projectRetainedGeneric(ctx, projectAs, codec, response)
+	projected, projectErr := s.projectRetainedGeneric(ctx, projectAs, codec, responseSource, rewrite)
 	if projectErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource reference."))
 		return
 	}
 	response = projected
 	status = native.StatusCode
-	x.completePinned()
-	s.writeStateJSONStatus(w, x, response, status)
+	s.writeStateJSONStatus(w, x, response, status, native.exchange)
 }
 
 func retainedRejectedWithoutWork(failure *attemptFailure) bool {

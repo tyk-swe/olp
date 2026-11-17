@@ -229,7 +229,7 @@ slots:
 		if x.dispatched && hold != nil {
 			x.spendCaps(hold.budgets, attempt)
 		}
-		s.settlePinHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
+		s.settleSessionHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
 	}()
 	if e := s.reserveSessionCost(ctx, x, x.authority, attempt, time.Until(deadline)); e != nil {
 		fail(e)

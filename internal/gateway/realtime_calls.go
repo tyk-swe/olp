@@ -423,7 +423,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	releasePin := func() {
-		s.settlePinHold(r.Context(), x, p.hold, nil)
+		s.settleSessionHold(r.Context(), x, p.hold, nil)
 		s.settleCaps(r.Context(), x)
 	}
 	template, ok := snapshot.WebRTCTemplate(route.Slug, p.target.ID)

@@ -226,23 +226,22 @@ func (s *Server) abandonBatch(ctx context.Context, resourceID uuid.UUID) {
 	}
 }
 
-func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *fault.Error) {
+func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
-		x.dispatched = failure.dispatched
 		if failure.acceptance.Unresolved() {
-			return nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider may have accepted this batch, but its outcome is unknown.")
+			return nil, nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider may have accepted this batch, but its outcome is unknown.")
 		}
 		s.abandonBatch(ctx, resourceID)
-		return nil, upstreamError(failure)
+		return nil, nil, upstreamError(failure)
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
-	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+
+	result, err := resp.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
-		return nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider response could not be read. The batch may have been accepted.")
+		return nil, nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider response could not be read. The batch may have been accepted.")
 	}
-	return result, nil
+	return result, resp.exchange, nil
 }
 
 func (s *Server) activateBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, *fault.Error) {

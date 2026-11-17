@@ -85,7 +85,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, e)
 		return
 	}
-	resource, e := s.submitBatch(ctx, x, authority, p, request, plan)
+	resource, exchange, e := s.submitBatch(ctx, x, authority, p, request, plan)
 	if e != nil {
 		s.refuse(x, w, e)
 		return
@@ -95,7 +95,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."))
 		return
 	}
-	s.writeStateJSON(w, x, out)
+	s.writeStateJSON(w, x, out, exchange)
 }
 
 func (s *Server) batchCreateRequest(w http.ResponseWriter, r *http.Request) (batchCreateRequest, *fault.Error) {
@@ -322,25 +322,26 @@ func openAIBatchBody(source oif.Document, upstreamFile string, p *pin, window ba
 	return effective.Bytes(), nil
 }
 
-func (s *Server) submitBatch(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *fault.Error) {
+func (s *Server) submitBatch(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *pinnedExchange, *fault.Error) {
 	submission, e := s.beginBatch(ctx, x, authority.ID, p, batchIntent{
 		resourceID: plan.id, kind: plan.kind, adapter: plan.adapter, surface: batches.SurfaceOpenAI,
 		operation: request.operation, window: plan.window.length, expected: plan.expected, submission: plan.submission,
 		source: request.source, canonical: request.source.Bytes(), effective: plan.body, serving: plan.serving,
 	})
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	result, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
+	result, exchange, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	accepted, e := s.acceptFilesBatch(ctx, p, request, plan, result)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	x.completePinned()
-	return s.activateBatch(ctx, submission, accepted)
+	exchange.complete(classSuccess)
+	resource, activationErr := s.activateBatch(ctx, submission, accepted)
+	return resource, exchange, activationErr
 }
 
 func (s *Server) acceptFilesBatch(ctx context.Context, p *pin, request batchCreateRequest, plan batchPlan, result []byte) (acceptedBatch, *fault.Error) {
@@ -538,8 +539,8 @@ func (s *Server) cancelGeminiManagedBatch(ctx context.Context, x *call, res *res
 		return upstreamError(failure)
 	}
 	_ = response.Body.Close()
-	x.dispatched = true
-	x.completePinned()
+
+	response.exchange.complete(classSuccess)
 	return nil
 }
 
@@ -549,7 +550,7 @@ type refreshedBatch struct {
 }
 
 func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resource, p *pin, adapter connectors.BatchAdapter, method, path string, body []byte, w http.ResponseWriter) *fault.Error {
-	result, e := s.fetchBatch(ctx, x, p, method, path, body)
+	result, exchange, e := s.fetchBatch(ctx, x, p, method, path, body)
 	if e != nil {
 		return e
 	}
@@ -564,11 +565,11 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	defer stopCommit()
 	current := *res
 	if res.Kind == resources.KindStrictBatch {
-		if e := s.commitStrictBatchRefresh(ctx, commitCtx, x, res, refreshed.state, result); e != nil {
+		if e := s.commitStrictBatchRefresh(ctx, commitCtx, exchange, res, refreshed.state, result); e != nil {
 			return e
 		}
 	} else {
-		x.completePinned()
+		exchange.complete(classSuccess)
 		if err := s.deps.Resources.Update(commitCtx, res.ID, refreshed.state, refreshed.metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}
@@ -578,29 +579,29 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
 	}
-	s.writeStateJSON(w, x, out)
+	s.writeStateJSON(w, x, out, exchange)
 	return nil
 }
 
-func (s *Server) fetchBatch(ctx context.Context, x *call, p *pin, method, path string, body []byte) ([]byte, *fault.Error) {
+func (s *Server) fetchBatch(ctx context.Context, x *call, p *pin, method, path string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
 	if err != nil {
-		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+		return nil, nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
 	resp, failure := s.pinnedDo(ctx, x, p, method, endpoint, body, "application/json")
 	if failure != nil {
 		if failure.status == http.StatusNotFound {
-			return nil, fault.NotFoundError("not_found", "No batch with this identifier exists for this key.")
+			return nil, nil, fault.NotFoundError("not_found", "No batch with this identifier exists for this key.")
 		}
-		return nil, upstreamError(failure)
+		return nil, nil, upstreamError(failure)
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
-	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+
+	result, err := resp.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
-		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
+		return nil, nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	return result, nil
+	return result, resp.exchange, nil
 }
 
 func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapter, result []byte, maxBytes int64) (refreshedBatch, *fault.Error) {
@@ -656,19 +657,20 @@ func refreshGeminiManagedBatch(res *resources.Resource, result []byte) (refreshe
 	return refreshedBatch{state: managed.status, metadata: managed.metadata}, nil
 }
 
-func (s *Server) commitStrictBatchRefresh(ctx, commitCtx context.Context, x *call, res *resources.Resource, state string, result []byte) *fault.Error {
+func (s *Server) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchange *pinnedExchange, res *resources.Resource, state string, result []byte) *fault.Error {
 	validated, _, err := strictBatchResult(result, res.UpstreamID)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result.")
 	}
 	_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
 	if err != nil {
+		exchange.interrupt(classProtocol, true)
 		return durableError(err)
 	}
 	if !strictBatchInputMatches(validated, contract.Effective) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider changed the batch input file identity.")
 	}
-	x.completePinned()
+	exchange.complete(classSuccess)
 	contract.Result = result
 	payload, err := json.Marshal(contract)
 	if err != nil {
