@@ -41,8 +41,7 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 		control, _ := json.Marshal(map[string]string{"type": "ephemeral", "ttl": ttl})
 		// Respect caller-owned breakpoints and the provider's four-breakpoint
 		// limit. A caller's top-level automatic policy owns all insertion.
-		used, compatible := cacheControls(source.Root(), ttl)
-		if _, exists := root["cache_control"]; !exists && compatible {
+		if used, insertable := breakpointBudget(source.Root(), ttl); insertable {
 			if slices.Contains(positions, "tools") && used < 4 {
 				var blocks []map[string]json.RawMessage
 				if json.Unmarshal(root["tools"], &blocks) == nil && markLast(blocks, control) {
@@ -114,6 +113,12 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 // Mixing TTLs requires ordering the long-lived breakpoints before the short
 // ones. Leave a caller's different TTL entirely in charge instead of inserting
 // a breakpoint that could invalidate that ordering.
+func breakpointBudget(root oif.Value, ttl string) (int, bool) {
+	if _, automatic := root.Lookup("cache_control"); automatic {
+		return 0, false
+	}
+	return cacheControls(root, ttl)
+}
 func cacheControls(value oif.Value, ttl string) (int, bool) {
 	count := 0
 	for _, member := range value.Members() {
