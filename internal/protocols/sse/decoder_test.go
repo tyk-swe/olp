@@ -1,13 +1,12 @@
-package sse_test
+package sse
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
 // This checks framing only. The provider codec tests own the canonical
@@ -34,8 +33,8 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 			wire := tc.wire + withoutBOM
 			for width := 1; width <= len(wire); width++ {
 				for _, limit := range []int{len(withoutBOM) - 1, len(withoutBOM), len(withoutBOM) + 1} {
-					var frames []sse.Frame
-					err := sse.Decode(Fragmented([]byte(wire), width), limit, func(frame sse.Frame) error {
+					var frames []Frame
+					err := Decode(fragmented([]byte(wire), width), limit, func(frame Frame) error {
 						frames = append(frames, frame)
 						return nil
 					})
@@ -43,7 +42,7 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 						if err == nil || len(frames) != 0 {
 							t.Fatalf("width=%d limit=%d: frames=%+v error=%v; want rejection before dispatch", width, limit, frames, err)
 						}
-					} else if want := []sse.Frame{{Data: tc.data}, {Data: tc.data}}; err != nil || !reflect.DeepEqual(frames, want) {
+					} else if want := []Frame{{Data: tc.data}, {Data: tc.data}}; err != nil || !reflect.DeepEqual(frames, want) {
 						t.Fatalf("width=%d limit=%d: frames=%+v error=%v; want %+v", width, limit, frames, err, want)
 					}
 				}
@@ -52,10 +51,61 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 	}
 }
 
+func TestFragmentedLineSearchWorkIsBounded(t *testing.T) {
+	line := "data: " + strings.Repeat("x", 8<<10)
+	wire := line + "\r\n\r\n"
+	scanner := bufio.NewScanner(fragmented([]byte(wire), 1))
+	examined := 0
+	scanner.Split(lines(len(wire), func(data []byte, delimiters string) int {
+		examined += len(data)
+		return bytes.IndexAny(data, delimiters)
+	}))
+	if !scanner.Scan() || scanner.Text() != line || !scanner.Scan() || len(scanner.Bytes()) != 0 {
+		t.Fatalf("failed to read fragmented event: %v", scanner.Err())
+	}
+	if budget := 2 * len(wire); examined > budget {
+		t.Fatalf("line ending search examined %d bytes for %d wire bytes, want at most %d", examined, len(wire), budget)
+	}
+}
+
+func TestDecoderRetainsFragmentedFrameValues(t *testing.T) {
+	const keepalive = ": keepalive"
+	firstData := strings.Repeat("héllo ", 1024)
+	secondData := strings.Repeat("goodbye", 1024)
+	firstWire := keepalive + "\r\nevent: delta\r\nid: first\r\nretry: 0010\r\ndata: " + firstData + "\r\n\r"
+	wire := []byte("\ufeff" + firstWire + "data: " + secondData + "\n\n")
+	event, id, retry := "delta", "first", uint64(10)
+	wantFirst := Frame{Event: &event, ID: &id, RetryMS: &retry, Data: firstData}
+	wantSecond := Frame{Data: secondData}
+	for _, width := range []int{1, 4096} {
+		decoder := NewDecoder(fragmented(wire, width), len(firstWire))
+		var comment string
+		decoder.OnComment = func(line string) error {
+			comment = line
+			return nil
+		}
+		first, err := decoder.NextFrame()
+		if err != nil {
+			t.Fatalf("width %d: first frame: %v", width, err)
+		}
+		second, err := decoder.NextFrame()
+		if err != nil || !reflect.DeepEqual(second, wantSecond) {
+			t.Fatalf("width %d: unexpected second frame, error %v", width, err)
+		}
+		if !reflect.DeepEqual(first, wantFirst) || comment != keepalive {
+			t.Fatalf("width %d: first frame or comment changed after reading the second frame", width)
+		}
+	}
+	oversized := NewDecoder(fragmented(wire, 1), len(firstWire)-1)
+	if _, err := oversized.NextFrame(); err != ErrEventTooLarge {
+		t.Fatalf("limit one byte below the wire size: got %v, want %v", err, ErrEventTooLarge)
+	}
+}
+
 func TestRawFramesPreserveLiteralFramingAndDataRanges(t *testing.T) {
 	wire := "\xef\xbb\xbf: before\r\nid: one\r\nretry: 0010\r\nx-vendor: yes\r\ndata: {\r\n: middle\r\ndata:\t\"model\" : \"native\"}\r\n\r\n: after\n"
 	for _, width := range []int{1, 2, 7, len(wire)} {
-		decoder := sse.NewRawDecoder(Fragmented([]byte(wire), width), 4096)
+		decoder := NewRawDecoder(fragmented([]byte(wire), width), 4096)
 		var output strings.Builder
 		for {
 			frame, err := decoder.Next()
@@ -101,7 +151,7 @@ func TestRawFrameReplacementKeepsDataLineBoundaries(t *testing.T) {
 		{"after data", "", 7, 11},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			decoder := sse.NewRawDecoder(strings.NewReader(wire), len(wire))
+			decoder := NewRawDecoder(strings.NewReader(wire), len(wire))
 			control, controlErr := decoder.Next()
 			frame, frameErr := decoder.Next()
 			if controlErr != nil || frameErr != nil || control.HasData || string(control.Bytes) != "id: event\r\n" || !frame.HasData || string(frame.Data) != "first\nlast" {

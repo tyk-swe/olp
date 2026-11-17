@@ -67,7 +67,7 @@ func NewDecoder(r io.Reader, maxEventBytes int) *Decoder {
 	scanner := bufio.NewScanner(r)
 	// Allow a leading BOM and one byte of lookahead at the event limit.
 	scanner.Buffer(make([]byte, min(4096, maxEventBytes+4)), maxEventBytes+4)
-	scanner.Split(lines(maxEventBytes))
+	scanner.Split(lines(maxEventBytes, bytes.IndexAny))
 	return &Decoder{scanner: scanner}
 }
 
@@ -98,46 +98,48 @@ func (d *Decoder) NextFrame() (Frame, error) {
 	var retry *uint64
 	var data []string
 	for d.scanner.Scan() {
-		line := d.scanner.Text()
-		if !utf8.ValidString(line) {
+		line := d.scanner.Bytes()
+		if !utf8.Valid(line) {
 			d.err = &DecodeError{Detail: "invalid UTF-8 in SSE stream"}
 			return Frame{}, d.err
 		}
-		if line == "" {
+		if len(line) == 0 {
 			if len(data) > 0 || event != nil || id != nil || retry != nil {
 				return Frame{Event: event, Data: strings.Join(data, "\n"), ID: id, RetryMS: retry, Control: len(data) == 0}, nil
 			}
 			event, retry = nil, nil
 			continue
 		}
-		if strings.HasPrefix(line, ":") {
+		if line[0] == ':' {
 			if d.OnComment != nil {
-				if err := d.OnComment(line); err != nil {
+				if err := d.OnComment(string(line)); err != nil {
 					d.err = err
 					return Frame{}, err
 				}
 			}
 			continue
 		}
-		name, value, _ := strings.Cut(line, ":")
-		value = strings.TrimPrefix(value, " ")
-		switch name {
+		name, field, _ := bytes.Cut(line, []byte(":"))
+		value := bytes.TrimPrefix(field, []byte(" "))
+		switch string(name) {
 		case "data":
-			data = append(data, value)
+			data = append(data, string(value))
 		case "event":
-			if value != "" {
-				event = &value
+			if len(value) > 0 {
+				eventName := string(value)
+				event = &eventName
 			} else {
 				event = nil
 			}
 		case "id":
-			if !strings.ContainsRune(value, '\x00') {
-				id = &value
+			if bytes.IndexByte(value, '\x00') < 0 {
+				eventID := string(value)
+				id = &eventID
 				d.id = id
 			}
 		case "retry":
-			if value != "" && strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
-				if n, err := strconv.ParseUint(value, 10, 64); err == nil {
+			if len(value) > 0 && bytes.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
+				if n, err := strconv.ParseUint(string(value), 10, 64); err == nil {
 					retry = &n
 				}
 			}
@@ -186,8 +188,8 @@ func (f Frame) Encode() []byte {
 }
 
 // The splitter owns wire-byte accounting, including blank lines and CRLF.
-func lines(maxEventBytes int) bufio.SplitFunc {
-	size := 0
+func lines(maxEventBytes int, search func([]byte, string) int) bufio.SplitFunc {
+	var progress struct{ eventBytes, scanned int }
 	first := true
 	skipLF := false
 	provisionalLF := false
@@ -200,7 +202,7 @@ func lines(maxEventBytes int) bufio.SplitFunc {
 			if len(data) > 0 && data[0] == '\n' {
 				advance++
 			} else if provisionalLF {
-				size--
+				progress.eventBytes--
 			}
 			skipLF, provisionalLF = false, false
 		}
@@ -216,37 +218,42 @@ func lines(maxEventBytes int) bufio.SplitFunc {
 			}
 			first = false
 		}
-		if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if offset := search(data[progress.scanned:], "\r\n"); offset >= 0 {
+			i := progress.scanned + offset
 			n := i + 1
 			trailingCR := data[i] == '\r' && n == len(data) && !eof
 			if data[i] == '\r' && n < len(data) && data[n] == '\n' {
 				n++
 			}
-			if n > maxEventBytes-size {
+			if n > maxEventBytes-progress.eventBytes {
 				return 0, nil, ErrEventTooLarge
 			}
 			if trailingCR {
 				// Dispatch now if a possible LF also fits. Only the exact
 				// limit needs another byte or EOF to distinguish CR from CRLF.
-				if n == maxEventBytes-size {
+				if n == maxEventBytes-progress.eventBytes {
+					progress.scanned = i
 					return advance, nil, nil
 				}
-				size++
+				progress.eventBytes++
 				skipLF = true
 				provisionalLF = i != 0
 			}
-			size += n
+			progress.eventBytes += n
 			if i == 0 {
-				size = 0
+				progress.eventBytes = 0
 			}
+			progress.scanned = 0
 			return advance + n, data[:i], nil
 		}
-		if len(data) > maxEventBytes-size {
+		if len(data) > maxEventBytes-progress.eventBytes {
 			return 0, nil, ErrEventTooLarge
 		}
 		if eof && len(data) > 0 {
+			progress.scanned = 0
 			return advance + len(data), data, nil
 		}
+		progress.scanned = len(data)
 		return advance, nil, nil
 	}
 }

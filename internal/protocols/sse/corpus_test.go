@@ -1,4 +1,4 @@
-package sse_test
+package sse
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ type fragments struct {
 }
 
 func (f fragments) Read(p []byte) (int, error) { return f.reader.Read(p[:min(len(p), f.size)]) }
-func Fragmented(data []byte, size int) io.Reader {
+func fragmented(data []byte, size int) io.Reader {
 	if size < 1 {
 		panic("fragment size must be positive")
 	}

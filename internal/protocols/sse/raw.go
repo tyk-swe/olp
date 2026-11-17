@@ -36,7 +36,7 @@ type RawDecoder struct {
 func NewRawDecoder(reader io.Reader, limit int) *RawDecoder {
 	decoder := &RawDecoder{scanner: bufio.NewScanner(reader)}
 	decoder.scanner.Buffer(make([]byte, min(4096, max(1, limit)+4)), max(1, limit)+4)
-	split := lines(max(1, limit))
+	split := lines(max(1, limit), bytes.IndexAny)
 	decoder.scanner.Split(func(data []byte, eof bool) (int, []byte, error) {
 		advance, token, err := split(data, eof)
 		decoder.wire = append(decoder.wire, data[:advance]...)
