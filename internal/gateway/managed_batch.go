@@ -87,6 +87,8 @@ func resourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, err
 	return connectors.ParseBatchAdapter(metadata.Adapter)
 }
 
+var errProviderFileMetadata = errors.New("invalid provider file metadata")
+
 func managedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest batchManifest, role string) (json.RawMessage, error) {
 	record, err := decodeManagedFileRecord(prior)
 	if err != nil {
@@ -94,7 +96,7 @@ func managedFileMetadata(prior json.RawMessage, response []byte, adapter connect
 	}
 	file, err := decodeManagedProviderFile(adapter, response)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errProviderFileMetadata, err)
 	}
 	if manifest.Adapter != "" {
 		return json.Marshal(managedFileRecord{batchManifest: manifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file})

@@ -226,7 +226,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, e)
 		return
 	}
-	result, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
+	result, exchange, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
 	if e != nil {
 		s.cloudBatchFail(x, w, e)
 		return
@@ -245,13 +245,13 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		Dialect: dialect, RouteModel: slug, UpstreamModel: p.model,
 		InputURI: input.InputURI, OutputURIPrefix: input.OutputURIPrefix, ProviderJob: accepted,
 	}
+	exchange.complete(classSuccess)
 	stored, e := s.activateBatch(ctx, submission, acceptedBatch{upstreamID: job.ID, state: string(job.Status), metadata: mustJSON(record)})
 	if e != nil {
 		s.cloudBatchFail(x, w, e)
 		return
 	}
-	x.completePinned()
-	s.writeStateJSON(w, x, projectCloudBatchJob(job, stored.ID, record))
+	s.writeStateJSON(w, x, projectCloudBatchJob(job, stored.ID, record), exchange)
 }
 
 type cloudBatchPlan struct {
@@ -437,7 +437,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 			return
 		}
 		_ = response.Body.Close()
-		x.completePinned()
+		response.exchange.complete(classSuccess)
 	}
 	endpoint, urlErr := cloudBatchControlURL(cfg, adapter, res.UpstreamID, "")
 	if urlErr != nil {
@@ -450,7 +450,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		return
 	}
 	defer response.Body.Close()
-	body, err := readBounded(response.Body, s.cfg.MaxResponseBytes)
+	body, err := response.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
 		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The cloud job response could not be read."))
 		return
@@ -464,6 +464,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
 		return
 	}
+	response.exchange.complete(classSuccess)
 	refreshed := record.WithJob(body)
 	commit, release := resourceCommitContext(ctx)
 	defer release()
@@ -471,8 +472,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
 		return
 	}
-	x.completePinned()
-	s.writeStateJSON(w, x, projectCloudBatchJob(job, res.ID, refreshed))
+	s.writeStateJSON(w, x, projectCloudBatchJob(job, res.ID, refreshed), response.exchange)
 }
 
 func cloudBatchCancelAction(adapter connectors.BatchAdapter) string {

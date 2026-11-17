@@ -291,7 +291,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		return
 	}
 	defer native.Body.Close()
-	response, readErr := readBounded(native.Body, s.retainedResponseLimit())
+	response, readErr := native.readBody(s.retainedResponseLimit())
 	if readErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response exceeded the supported resource contract."))
 		return
@@ -303,18 +303,18 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	commitCtx, commitCancel := resourceCommitContext(ctx)
 	defer commitCancel()
 	if e.Action == "delete" {
+		native.exchange.completeRetainedControl()
 		if putErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
 			fail(fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return
 		}
 		// Gemini's native delete result is an empty JSON message.
 		status = native.StatusCode
-		x.completePinned()
 		body := []byte(`{}`)
 		if status == http.StatusNoContent {
 			body = nil
 		}
-		s.writeStateJSONStatus(w, x, body, status)
+		s.writeStateJSONStatus(w, x, body, status, native.exchange)
 		return
 	}
 	nativeID, validID := nativeResourceID(response, retainedBodyLimit)
@@ -322,25 +322,33 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity."))
 		return
 	}
-	if e.Action == "create" {
-		accepted, putErr := lifecycle.AcceptCreated(commitCtx, resources.CreationResult{IDs: []string{nativeID}})
-		if putErr != nil {
-			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
-			return
-		}
-		resource = accepted
-	} else if nativeID != resource.UpstreamID {
+	if e.Action != "create" && nativeID != resource.UpstreamID {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned a mismatched resource identity."))
 		return
 	}
-	projected, projectErr := s.projectRetainedAgent(ctx, x, resource, response)
+	rewrite, referenceErr := prepareRetainedAgent(response)
+	if referenceErr == nil {
+		native.exchange.completeRetainedControl()
+	}
+	if e.Action == "create" {
+		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{IDs: []string{nativeID}})
+		if prepareErr != nil || prepared.Commit(commitCtx) != nil {
+			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
+			return
+		}
+		resource = prepared.Resource()
+	}
+	if referenceErr != nil {
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
+		return
+	}
+	projected, projectErr := s.projectRetainedAgent(ctx, resource, rewrite)
 	if projectErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
 		return
 	}
 	status = native.StatusCode
-	x.completePinned()
-	s.writeStateJSONStatus(w, x, projected, status)
+	s.writeStateJSONStatus(w, x, projected, status, native.exchange)
 }
 
 func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug string, body []byte) ([]byte, *fault.Error) {
@@ -394,19 +402,23 @@ func retainedAgentInput(source oif.Document) *fault.Error {
 	return nil
 }
 
-func (s *Server) projectRetainedAgent(ctx context.Context, x *call, resource *resources.Resource, body []byte) ([]byte, error) {
+func prepareRetainedAgent(body []byte) (retainedapi.PreparedRewrite, error) {
 	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
 	if err != nil {
-		return nil, err
+		return retainedapi.PreparedRewrite{}, err
 	}
 	if contractErr := retainedAgentEnvironment(source); contractErr != nil {
-		return nil, resources.ErrContract
+		return retainedapi.PreparedRewrite{}, resources.ErrContract
 	}
 	source, err = normalizeRetainedAgent(source)
 	if err != nil {
-		return nil, err
+		return retainedapi.PreparedRewrite{}, err
 	}
-	projected, err := retainedapi.Rewrite(source, map[string]string{"/id": "agent_resource", "base_agent": "agent_resource"}, func(kind, id string) (string, error) {
+	return retainedapi.PrepareRewrite(source, map[string]string{"/id": "agent_resource", "base_agent": "agent_resource"})
+}
+
+func (s *Server) projectRetainedAgent(ctx context.Context, resource *resources.Resource, rewrite retainedapi.PreparedRewrite) ([]byte, error) {
+	projected, err := rewrite.Bind(func(kind, id string) (string, error) {
 		if id == resource.UpstreamID {
 			return resource.ID, nil
 		}
@@ -528,6 +540,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			admitted[entry.route.Slug] = true
 		}
 	}
+	var delivered []*pinnedExchange
 	responseBytes := 256
 	for _, entry := range ready {
 		resource, p, route := entry.resource, entry.pin, entry.route
@@ -537,13 +550,13 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		}
 		endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, "agents/"+url.PathEscape(resource.UpstreamID), nil)
 		if urlErr != nil {
-			s.settlePinHold(ctx, x, p.hold, nil)
+			s.settlePinnedHold(ctx, p.hold)
 			fail(pinUnavailable())
 			return 409
 		}
 		native, callErr := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if callErr != nil {
-			s.settlePinHold(ctx, x, p.hold, nil)
+			s.settlePinnedHold(ctx, p.hold)
 			if callErr.status == http.StatusNotFound {
 				commitCtx, commitCancel := resourceCommitContext(ctx)
 				removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID)
@@ -558,7 +571,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			fail(public)
 			return public.Status
 		}
-		body, readErr := readBounded(native.Body, s.retainedResponseLimit())
+		body, readErr := native.readBody(s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {
 			var id string
@@ -570,12 +583,15 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		}
 		var projected []byte
 		if readErr == nil {
-			projected, readErr = s.projectRetainedAgent(ctx, x, resource, body)
+			rewrite, referenceErr := prepareRetainedAgent(body)
+			if referenceErr == nil {
+				native.exchange.completeRetainedControl()
+				projected, readErr = s.projectRetainedAgent(ctx, resource, rewrite)
+			} else {
+				readErr = referenceErr
+			}
 		}
-		if readErr == nil {
-			x.completePinned()
-		}
-		s.settlePinHold(ctx, x, p.hold, nil)
+		s.settlePinnedHold(ctx, p.hold)
 		if readErr != nil {
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
@@ -586,6 +602,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			return 502
 		}
 		items = append(items, projected)
+		delivered = append(delivered, native.exchange)
 	}
 	response := map[string]any{e.Collection: items}
 	if hasMore && len(rows) > 0 {
@@ -596,7 +613,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		fail(encodeErr)
 		return encodeErr.Status
 	}
-	s.writeStateJSONStatus(w, x, body, http.StatusOK)
+	s.writeStateJSONStatus(w, x, body, http.StatusOK, delivered...)
 	return 200
 }
 

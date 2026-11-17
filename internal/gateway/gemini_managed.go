@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 var errGeminiManagedBatchState = errors.New("Gemini managed batch state is unknown")
@@ -227,6 +229,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	defer response.Body.Close()
 	spool := s.deps.Staging
 	if spool == nil {
+		response.exchange.interrupt(classProtocol, true)
 		return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 	}
 	contentType := response.Header.Get("Content-Type")
@@ -234,9 +237,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		contentType = "application/jsonl"
 	}
 	limit := min(s.cfg.MaxResponseBytes, batches.MaxBatchBytes)
-	raw, err := spool.Put(ctx, staging.Upload{
-		Filename: "gemini-managed-results", ContentType: contentType, MaximumLength: limit, Body: response.Body,
-	})
+	raw, err := response.stageBody(ctx, spool, "gemini-managed-results", contentType, limit)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
 	}
@@ -245,6 +246,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if record.Role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
+			response.exchange.interrupt(classProtocol, !errors.Is(err, errGeminiBatchFidelity))
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
@@ -254,6 +256,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		defer spool.Remove(part.Handle)
 		contentType = "application/jsonl"
 	}
+	response.exchange.complete(classSuccess)
 	opened, err := spool.Open(part.Handle)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
@@ -266,11 +269,8 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	written, err := copyResourceContent(w, opened.File, part.Size)
-	x.completePinned()
 	if err != nil || written != part.Size {
-		if len(x.facts) > 0 {
-			x.facts[len(x.facts)-1].Class = classCancelled
-		}
+		response.exchange.delivery(deliveryState(written))
 		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 		return nil
@@ -278,6 +278,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if written > 0 {
 		x.delivered(s.now())
 	}
+	response.exchange.delivery(usage.ClientTerminal)
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 	return nil
 }
@@ -384,8 +385,9 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			done <- err
-			_ = writer.CloseWithError(err)
+			failure := geminiResultScanError(err)
+			done <- failure
+			_ = writer.CloseWithError(failure)
 			return
 		}
 		done <- nil
@@ -406,4 +408,11 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		return nil, translateErr
 	}
 	return &staging.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
+}
+
+func geminiResultScanError(err error) error {
+	if errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("%w: %w", errGeminiBatchFidelity, err)
+	}
+	return err
 }

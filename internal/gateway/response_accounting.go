@@ -47,9 +47,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metad
 	if fact.Interaction != nil {
 		interaction := *fact.Interaction
 		interaction.ClientState = usage.ClientUnobserved
-		if x.exchange != nil {
-			interaction.UpstreamState = x.exchange.state.evidence().Acceptance()
-		} else if interaction.UpstreamState == upstream.NotSent {
+		if interaction.UpstreamState == upstream.NotSent {
 			// The operation only creates this template after validating native
 			// creation. Stream finish may not yet have copied its acceptance.
 			interaction.UpstreamState = upstream.Accepted

@@ -189,16 +189,13 @@ func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retai
 
 func (s *Server) retainedSettle(ctx context.Context, x *call, p *pin) {
 	if p != nil {
-		s.settlePinHold(ctx, x, p.hold, x.settledTokens())
+		s.settlePinnedHold(ctx, p.hold)
 	}
 	s.settleAdmission(ctx, x)
 }
 
-func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
-	if x.exchange == nil {
-		return nil
-	}
-	fact := &x.facts[x.exchange.index]
+func observeRetainedUsage(exchange *pinnedExchange, source oif.Document, generation bool) error {
+	fact := exchange.fact()
 	if !generation {
 		// A completed control/search request has no generated tokens. Its
 		// per-request price still applies through observed request usage.

@@ -258,10 +258,10 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	return nil, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
 }
 
-func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
+func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*pinnedResponse, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	if err := exchange.bound.validateEndpoint(endpoint); err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	var reader io.Reader
 	if body != nil {
@@ -269,7 +269,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	req, err := exchange.bound.request(ctx, method, endpoint, reader, make(http.Header))
 	if err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -285,9 +285,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	if err := exchange.bound.authenticate(ctx, req, body); err != nil {
 		if ctx.Err() != nil {
-			return nil, exchange.fail(s, x, classCancelled, nil)
+			return nil, exchange.fail(classCancelled, nil)
 		}
-		return nil, exchange.fail(s, x, classCredential, nil)
+		return nil, exchange.fail(classCredential, nil)
 	}
 	if x.anthropicFilesBeta {
 		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
@@ -296,7 +296,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	// versions, latest_version_id). The dated beta header would opt
 	// into legacy response shapes with incompatible identities, so
 	// it is deliberately not sent.
-	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
+	return s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 }
 
 func upstreamError(f *attemptFailure) *fault.Error {
@@ -386,7 +386,7 @@ func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority key
 
 func (s *Server) resourceSettle(ctx context.Context, x *call, p *pin) {
 	if p != nil {
-		s.settlePinHold(ctx, x, p.hold, nil)
+		s.settlePinnedHold(ctx, p.hold)
 	}
 	s.settleCaps(ctx, x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.log)
@@ -734,11 +734,11 @@ func gateError(gate gateResult) *fault.Error {
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
 }
 
-func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
-	s.writeStateJSONStatus(w, x, body, http.StatusOK)
+func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte, exchanges ...*pinnedExchange) {
+	s.writeStateJSONStatus(w, x, body, http.StatusOK, exchanges...)
 }
 
-func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int) {
+func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int, exchanges ...*pinnedExchange) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if body != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -751,12 +751,8 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 	}
 	if err != nil || n != len(body) {
 		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
-		if len(x.facts) > 0 {
-			fact := &x.facts[len(x.facts)-1]
-			fact.Class = classCancelled
-			if fact.Interaction != nil && n > 0 {
-				fact.Interaction.ClientState = usage.ClientPartial
-			}
+		for _, exchange := range exchanges {
+			exchange.delivery(deliveryState(n))
 		}
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
 		return
@@ -764,10 +760,8 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 	if n > 0 {
 		x.delivered(s.now())
 	}
-	if len(x.facts) > 0 {
-		if evidence := x.facts[len(x.facts)-1].Interaction; evidence != nil {
-			evidence.ClientState = usage.ClientTerminal
-		}
+	for _, exchange := range exchanges {
+		exchange.delivery(usage.ClientTerminal)
 	}
 	s.finish(x, &outcome{committed: true}, status)
 }
@@ -833,14 +827,10 @@ type refreshedFile struct {
 	expires  *time.Time
 }
 
-func refreshedFileMetadata(res *resources.Resource, body []byte) (refreshedFile, error) {
+func refreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (refreshedFile, error) {
 	metadata, state, expires := fileMetadata(body, resourceModel(res))
 	if res.Kind == resources.KindStrictFile {
 		return refreshedFile{metadata: metadata, state: state, expires: expires}, nil
-	}
-	adapter, err := resourceAdapter(res)
-	if err != nil {
-		return refreshedFile{}, err
 	}
 	refreshed, err := refreshedProviderMetadata(res, body, metadata, adapter)
 	if err != nil {
@@ -876,9 +866,9 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	return json.Marshal(fields)
 }
 
-func (x *call) completeFileControl() {
-	if x.retainedAdmission != nil {
-		_ = observeRetainedUsage(x, oif.Document{}, false)
+func (e *pinnedExchange) completeRetainedControl() {
+	if e.request.retainedAdmission != nil {
+		_ = observeRetainedUsage(e, oif.Document{}, false)
 	}
-	x.completePinned()
+	e.complete(classSuccess)
 }

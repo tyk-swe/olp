@@ -19,7 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const anthropicFilesBeta = "files-api-2025-04-14"
@@ -111,8 +111,8 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
-	body, readErr := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+
+	body, readErr := resp.readBody(s.cfg.MaxResponseBytes)
 	if readErr != nil {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
@@ -123,6 +123,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata, state, expires := anthropicFileMetadata(body, p.model)
+	resp.exchange.complete(classSuccess)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	res, putErr := s.deps.Resources.Put(commitCtx, &resources.Resource{
@@ -135,9 +136,8 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."))
 		return
 	}
-	x.completePinned()
 	out, _ := rewriteID(body, "id", res.ID)
-	s.writeStateJSON(w, x, out)
+	s.writeStateJSON(w, x, out, resp.exchange)
 }
 
 func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, *resources.Resource, *pin) *fault.Error) {
@@ -193,7 +193,7 @@ func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		body, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		body, err := resp.readBody(s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
@@ -202,17 +202,17 @@ func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched file identity.")
 		}
 		metadata, state, expires := anthropicFileMetadata(body, p.model)
+		resp.exchange.complete(classSuccess)
 		if err := s.deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file refresh could not be committed.")
 		}
 		res.Metadata = metadata
-		x.dispatched = true
-		x.completePinned()
+
 		out, err := rewriteID(body, "id", res.ID)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
 		}
-		s.writeStateJSON(w, x, out)
+		s.writeStateJSON(w, x, out, resp.exchange)
 		return nil
 	})
 }
@@ -233,12 +233,12 @@ func (s *Server) anthropicDeleteFile(w http.ResponseWriter, r *http.Request) {
 			return upstreamError(failure)
 		}
 		_ = resp.Body.Close()
+		resp.exchange.complete(classSuccess)
 		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file mapping could not be deleted.")
 		}
-		x.dispatched = true
-		x.completePinned()
-		s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "type": "file_deleted"}))
+
+		s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "type": "file_deleted"}), resp.exchange)
 		return nil
 	})
 }
@@ -260,10 +260,11 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{Filename: "file-content", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
+		artifact, err := resp.stageBody(ctx, s.deps.Staging, "file-content", contentType, s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
+		resp.exchange.complete(classSuccess)
 		defer s.deps.Staging.Remove(artifact.Handle)
 		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
@@ -277,11 +278,9 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
-		x.completePinned()
+
 		if copyErr != nil || written != artifact.ContentLength {
-			if len(x.facts) > 0 {
-				x.facts[len(x.facts)-1].Class = classCancelled
-			}
+			resp.exchange.delivery(deliveryState(written))
 			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
@@ -289,6 +288,7 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 		if written > 0 {
 			x.delivered(s.now())
 		}
+		resp.exchange.delivery(usage.ClientTerminal)
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
 	})

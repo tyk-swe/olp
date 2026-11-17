@@ -212,7 +212,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		s.finish(x, out, status)
 		settled := sessionSettlement(x)
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
-		s.settlePinHold(settleCtx, x, sess.p.hold, settled)
+		s.settleSessionHold(settleCtx, x, sess.p.hold, settled)
 		s.recordCost(x)
 		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
 		s.settleCaps(settleCtx, x)

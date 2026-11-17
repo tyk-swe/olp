@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func bedrockQualified(p *routing.Provider, model, operation, mode string) bool {
@@ -129,7 +130,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	}
 	defer func() {
 		actual := x.settledTokens()
-		s.settlePinHold(r.Context(), x, p.hold, actual)
+		s.settlePinnedHold(r.Context(), p.hold)
 		s.recordCost(x)
 		quota.SettleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
 	}()
@@ -151,26 +152,25 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	}
 	resp, failure := s.bedrockCall(ctx, x, p, endpoint, body, mode == "streaming")
 	if failure != nil {
-		x.dispatched = failure.dispatched
 		fail(upstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
-	x.dispatched = true
+
 	if mode == "streaming" {
 		s.relayBedrockStream(ctx, w, x, p, resp)
 		return
 	}
-	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+	result, err := resp.readBody(s.cfg.MaxResponseBytes)
 	if err != nil {
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
 	}
-	if e := s.validateBedrockResult(x, p, upstreamOp, result, w); e != nil {
+	if e := s.validateBedrockResult(resp.exchange, p, upstreamOp, result); e != nil {
 		fail(e)
 		return
 	}
-	x.completePinned()
+	resp.exchange.complete(classSuccess)
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
@@ -186,19 +186,20 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	}
 	if writeErr != nil || n != len(result) {
 		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The native result could not be delivered.")
-		x.facts[len(x.facts)-1].Class = classCancelled
+		resp.exchange.delivery(deliveryState(n))
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
 		return
 	}
 	x.delivered(s.now())
+	resp.exchange.delivery(usage.ClientTerminal)
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
-func (s *Server) bedrockCall(ctx context.Context, x *call, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
+func (s *Server) bedrockCall(ctx context.Context, x *call, p *pin, endpoint string, body []byte, stream bool) (*pinnedResponse, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
+		return nil, exchange.fail(classConnect, nil)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -208,11 +209,11 @@ func (s *Server) bedrockCall(ctx context.Context, x *call, p *pin, endpoint stri
 	req.Header.Set("User-Agent", "olp/gateway")
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
-			return nil, exchange.fail(s, x, classCancelled, nil)
+			return nil, exchange.fail(classCancelled, nil)
 		}
-		return nil, exchange.fail(s, x, classCredential, nil)
+		return nil, exchange.fail(classCredential, nil)
 	}
-	return s.doPinnedRequest(ctx, x, p, exchange, req, bedrockErrorBody)
+	return s.doPinnedRequest(ctx, p, exchange, req, bedrockErrorBody)
 }
 
 func bedrockErrorBody(body []byte) *wire.UpstreamError {
@@ -230,7 +231,7 @@ func bedrockErrorBody(body []byte) *wire.UpstreamError {
 	return &wire.UpstreamError{Type: "upstream_error", Code: code, Message: encodedWire.Message}
 }
 
-func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body []byte, w http.ResponseWriter) *fault.Error {
+func (s *Server) validateBedrockResult(exchange *pinnedExchange, p *pin, upstreamOp string, body []byte) *fault.Error {
 	model := p.provider.Connector().Model(p.model)
 	switch upstreamOp {
 	case "converse":
@@ -238,39 +239,33 @@ func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body 
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Converse response.")
 		}
-		s.recordBedrockUsage(x, completion.Usage)
+		exchange.fact().ObserveUsage(completion.Usage, completion.Usage != nil)
 		return nil
 	case "invoke":
-		return s.validateBedrockInvoke(x, model, body)
+		return s.validateBedrockInvoke(exchange, model, body)
 	}
 	return nil
 }
 
-func (s *Server) validateBedrockInvoke(x *call, model string, body []byte) *fault.Error {
+func (s *Server) validateBedrockInvoke(exchange *pinnedExchange, model string, body []byte) *fault.Error {
 	switch {
 	case strings.Contains(model, "anthropic.claude"):
 		completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, body, model, "")
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Claude response.")
 		}
-		s.recordBedrockUsage(x, completion.Usage)
+		exchange.fact().ObserveUsage(completion.Usage, completion.Usage != nil)
 		return nil
 	case strings.HasPrefix(model, "amazon.titan-embed-text-"):
 		completion, err := protocols.Decode(wire.BedrockEmbeddings, wire.BedrockEmbeddings, body, model, "")
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan embeddings response.")
 		}
-		s.recordBedrockUsage(x, completion.Usage)
+		exchange.fact().ObserveUsage(completion.Usage, completion.Usage != nil)
 		return nil
 	case strings.HasPrefix(model, "amazon.titan-image-generator-"):
 		if err := validateTitanImage(body); err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan image response.")
-		}
-		// Titan image responses report no token usage, so the invoke keeps
-		// its request-sized reservation instead of settling at zero.
-		if len(x.facts) > 0 {
-			fact := &x.facts[len(x.facts)-1]
-			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = false, false, true
 		}
 		return nil
 	}
@@ -300,15 +295,6 @@ func validateTitanImage(body []byte) error {
 	return nil
 }
 
-func (s *Server) recordBedrockUsage(x *call, usage *wire.Usage) {
-	if usage == nil || len(x.facts) == 0 {
-		return
-	}
-	fact := &x.facts[len(x.facts)-1]
-	fact.ObserveUsage(usage, true)
-	fact.RecordEvidence(false)
-}
-
 func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled):
@@ -319,7 +305,7 @@ func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
 	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), classProtocol
 }
 
-func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *call, p *pin, resp *http.Response) {
+func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *call, p *pin, resp *pinnedResponse) {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/vnd.amazon.eventstream"
@@ -327,13 +313,14 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	w.Header().Set("Content-Type", contentType)
 	x.responseHeaders(w.Header(), true)
 	w.WriteHeader(http.StatusOK)
+	resp.exchange.delivery(usage.ClientUnobserved)
 	rc := http.NewResponseController(w)
 	encoder := eventstream.NewEncoder()
 	limit := int(s.cfg.MaxEventBytes)
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	var usage *wire.Usage
+	var observedUsage *wire.Usage
 	var failure *fault.Error
 	class := classProtocol
 	terminal, authoritativeUsage, initialUsage, finalUsage := false, false, false, false
@@ -347,26 +334,32 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		}
 		if err != nil {
 			failure, class = bedrockReadFailure(ctx)
+			if class == classProtocol {
+				resp.exchange.invalidNative()
+			}
 			break
 		}
 		observation, err := protocols.ObserveBedrockEvent(&message, limit)
 		if err != nil {
+			resp.exchange.invalidNative()
 			failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream contained an invalid event.")
 			break
 		}
 		if observed := observation.Usage; observed.Value != nil {
-			merged, err := observed.Merge(usage)
+			merged, err := observed.Merge(observedUsage)
 			if err != nil {
+				resp.exchange.invalidNative()
 				failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream contained invalid usage counts.")
 				break
 			}
-			usage = merged
+			observedUsage = merged
 			authoritativeUsage = authoritativeUsage || observed.Authoritative
 			initialUsage = initialUsage || observation.Kind == "message_start" && observed.InputPresent
 			finalUsage = finalUsage || observation.Kind == "message_delta" && observed.OutputPresent
 		}
 		terminal = terminal || observation.Terminal
 		if observation.Failed {
+			resp.exchange.complete(classUpstreamServer)
 			if err := x.redactBedrockFailure(&message, observation); err != nil {
 				failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native error could not be safely delivered.")
 				break
@@ -375,8 +368,8 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 			class = classUpstreamServer
 		}
 		// Observe completion and usage before a downstream write can fail.
-		if terminal && !observation.Failed {
-			x.completePinned()
+		if observation.Terminal && !observation.Failed {
+			resp.exchange.complete(classSuccess)
 		}
 		_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		if err := encoder.Encode(w, message); err != nil {
@@ -385,22 +378,28 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 			break
 		}
 		if err := rc.Flush(); err != nil {
+			resp.exchange.delivery(usage.ClientPartial)
 			failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
 			class = classCancelled
 			break
 		}
 		x.delivered(s.now())
+		if terminal {
+			resp.exchange.delivery(usage.ClientTerminal)
+		} else {
+			resp.exchange.delivery(usage.ClientPartial)
+		}
 		if observation.Failed {
 			break
 		}
 	}
 	completeUsage := terminal && (authoritativeUsage || initialUsage && finalUsage)
-	fact := &x.facts[len(x.facts)-1]
-	fact.ObserveUsage(usage, completeUsage)
-	fact.RecordEvidence(!completeUsage)
+	fact := resp.exchange.fact()
+	fact.ObserveUsage(observedUsage, completeUsage)
+	resp.exchange.recordEvidence()
 	if failure != nil {
 		x.failure = failure
-		x.facts[len(x.facts)-1].Class = class
+		resp.exchange.interrupt(class, class == classCancelled)
 	}
 	s.finish(x, &outcome{committed: true, err: failure, cancelled: class == classCancelled}, http.StatusOK)
 }

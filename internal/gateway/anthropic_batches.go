@@ -22,7 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 var anthropicCustomID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -127,7 +127,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := submission.resource.UUID
-	result, e := s.sendBatch(ctx, x, p, id, endpoint, translated)
+	result, exchange, e := s.sendBatch(ctx, x, p, id, endpoint, translated)
 	if e != nil {
 		s.refuse(x, w, e)
 		return
@@ -137,12 +137,12 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, s.batchSubmissionUnknown(ctx, id, "The provider returned a malformed batch object. The batch may have been accepted."))
 		return
 	}
+	exchange.complete(classSuccess)
 	if _, e = s.activateBatch(ctx, submission, acceptedBatch{upstreamID: view.upstreamID, state: view.state, metadata: view.metadata}); e != nil {
 		s.refuse(x, w, e)
 		return
 	}
-	x.completePinned()
-	s.writeStateJSON(w, x, view.body)
+	s.writeStateJSON(w, x, view.body, exchange)
 }
 
 func anthropicCommonModel(body []byte) (string, bool) {
@@ -272,7 +272,7 @@ func (s *Server) anthropicBatchRequest(w http.ResponseWriter, r *http.Request, u
 			return upstreamError(failure)
 		}
 		defer resp.Body.Close()
-		body, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		body, err := resp.readBody(s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
@@ -283,12 +283,12 @@ func (s *Server) anthropicBatchRequest(w http.ResponseWriter, r *http.Request, u
 		if view.upstreamID != res.UpstreamID {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched batch identity.")
 		}
+		resp.exchange.complete(classSuccess)
 		if err := s.deps.Resources.Update(ctx, res.ID, view.state, view.metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch refresh could not be committed.")
 		}
-		x.dispatched = true
-		x.completePinned()
-		s.writeStateJSON(w, x, view.body)
+
+		s.writeStateJSON(w, x, view.body, resp.exchange)
 		return nil
 	})
 }
@@ -318,22 +318,22 @@ func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 			}
 			return upstreamError(failure)
 		}
-		body, readErr := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		body, readErr := resp.readBody(s.cfg.MaxResponseBytes)
 		_ = resp.Body.Close()
 		if readErr != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
+		resp.exchange.complete(classSuccess)
 		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch mapping could not be deleted.")
 		}
-		x.dispatched = true
-		x.completePinned()
+
 		view, projectErr := projectAnthropicBatch(body, res.ID, s.gatewayOrigin(r), resourceModel(res))
 		if projectErr != nil {
-			s.writeStateJSON(w, x, mustJSON(map[string]string{"id": res.ID, "type": "message_batch_deleted"}))
+			s.writeStateJSON(w, x, mustJSON(map[string]string{"id": res.ID, "type": "message_batch_deleted"}), resp.exchange)
 			return nil
 		}
-		s.writeStateJSON(w, x, view.body)
+		s.writeStateJSON(w, x, view.body, resp.exchange)
 		return nil
 	})
 }
@@ -353,10 +353,11 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/jsonl"
 		}
-		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{Filename: "batch-results", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
+		artifact, err := resp.stageBody(ctx, s.deps.Staging, "batch-results", contentType, s.cfg.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The results exceeded the configured response bound.")
 		}
+		resp.exchange.complete(classSuccess)
 		defer s.deps.Staging.Remove(artifact.Handle)
 		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
@@ -367,14 +368,12 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The results response could not be bounded.")
 		}
-		x.completePinned()
+
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
-			if len(x.facts) > 0 {
-				x.facts[len(x.facts)-1].Class = classCancelled
-			}
+			resp.exchange.delivery(deliveryState(written))
 			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
 			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
@@ -382,6 +381,7 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 		if written > 0 {
 			x.delivered(s.now())
 		}
+		resp.exchange.delivery(usage.ClientTerminal)
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
 	})
