@@ -1,10 +1,10 @@
 <script lang="ts">
   import Fields from '../limit-templates/TemplateFields.svelte';
   import {
-    templateError,
-    templateForm,
-    templateInput
-  } from '../limit-templates/policy';
+    namedLimitsError,
+    namedLimitForm,
+    namedLimitsInput
+  } from '../budgets/namedLimits';
   import {
     getProjectLimitTemplates,
     putProjectLimitTemplates,
@@ -26,9 +26,9 @@
   queryKey={projectKeys.limitTemplates(projectId)}
   fetch={(signal) => getProjectLimitTemplates(projectId, signal)}
   save={(etag, input) => putProjectLimitTemplates(projectId, etag, input)}
-  toForm={(doc?: ProjectLimitTemplates) => templateForm(doc?.templates)}
-  toInput={templateInput}
-  validate={templateError}
+  toForm={(doc?: ProjectLimitTemplates) => namedLimitForm(doc?.templates)}
+  toInput={namedLimitsInput}
+  validate={(form) => namedLimitsError(form, 'template')}
   fields={Fields}
   prefix={`project-${projectId}-templates`}
   {editable}

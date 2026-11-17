@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { limitForm } from '#lib/features/access/budgets/limitForm.js';
+import {
+  namedLimitRow,
+  namedLimitsError
+} from '#lib/features/access/budgets/namedLimits.js';
 import {
   policyError,
   policyForm
 } from '#lib/features/access/end-users/policy.js';
-import { templateError } from '#lib/features/access/limit-templates/policy.js';
 import { groupError } from '#lib/features/access/route-groups/policy.js';
-import { routeLimitsError } from '#lib/features/access/route-limits/policy.js';
 
 import {
   buildCreateRouteDraftInput,
@@ -187,12 +188,7 @@ describe('route validation and serialization', () => {
     expect(
       groupError([{ id: 'row', name: slug, routes: 'route' }]) === ''
     ).toBe(valid);
-    expect(
-      templateError([{ id: 'row', name: slug, limits: limitForm() }]) === ''
-    ).toBe(valid);
-    expect(
-      routeLimitsError([{ id: 'row', route: slug, limits: limitForm() }]) === ''
-    ).toBe(valid);
+    expect(namedLimitsError([namedLimitRow(slug)], 'route') === '').toBe(valid);
     if (slug)
       expect(
         policyError({ ...policyForm(), enabled: true, limitTemplate: slug }) ===
@@ -205,10 +201,10 @@ describe('route validation and serialization', () => {
       groupError([{ id: 'group', name: 'group', routes: 'valid, Bad/route' }])
     ).not.toBe('');
     expect(
-      templateError([
-        { id: 'first', name: 'valid', limits: limitForm() },
-        { id: 'second', name: 'Bad/template', limits: limitForm() }
-      ])
+      namedLimitsError(
+        [namedLimitRow('valid'), namedLimitRow('Bad/template')],
+        'template'
+      )
     ).not.toBe('');
     expect(
       policyError({ ...policyForm(), enabled: true, limitTemplate: ' valid ' })
@@ -232,6 +228,28 @@ describe('route validation and serialization', () => {
       })
     ).not.toBeNull();
   });
+
+  it.each([
+    ['route', 100],
+    ['template', 64]
+  ] as const)(
+    'enforces the %s row cap and rejects duplicate trimmed names',
+    (kind, cap) => {
+      const rows = Array.from({ length: cap }, (_, index) =>
+        namedLimitRow(`entry-${index}`)
+      );
+      expect(namedLimitsError(rows, kind)).toBe('');
+      expect(
+        namedLimitsError([...rows, namedLimitRow('extra')], kind)
+      ).not.toBe('');
+      expect(
+        namedLimitsError(
+          [namedLimitRow('shared'), namedLimitRow(' shared ')],
+          kind
+        )
+      ).not.toBe('');
+    }
+  );
 
   it('accepts a bounded serving route and refuses invalid basic inputs', () => {
     expect(validateRouteEditor(route)).toBeNull();
