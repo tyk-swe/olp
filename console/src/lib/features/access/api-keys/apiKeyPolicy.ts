@@ -1,10 +1,10 @@
 import { validRouteSlug } from '#lib/routeIdentity.js';
 import {
-  routeLimitForm,
-  routeLimitsInput,
-  routeLimitsError,
-  type RouteLimitForm
-} from '../route-limits/policy';
+  namedLimitForm,
+  namedLimitsInput,
+  namedLimitsError,
+  type NamedLimitRow
+} from '../budgets/namedLimits';
 import { groupNames, groupNamesError } from '../route-groups/policy';
 import {
   attributionForm,
@@ -55,7 +55,7 @@ export type ApiKeyFormState = {
   forbidResponseCache: boolean;
   endUserSource: '' | 'header' | 'native';
   endUserPolicy: PolicyForm;
-  routeLimits: RouteLimitForm;
+  routeLimits: NamedLimitRow[];
   limitTemplate: string;
   allowedAttributionKeys: string[];
   attributionPolicy: AttributionForm;
@@ -98,7 +98,7 @@ export function createApiKeyFormState(
     forbidResponseCache: editing?.forbid_response_cache ?? false,
     endUserSource: editing?.end_user_source ?? '',
     endUserPolicy: policyForm(editing?.end_user_policy),
-    routeLimits: routeLimitForm(editing?.route_limits),
+    routeLimits: namedLimitForm(editing?.route_limits),
     limitTemplate: editing?.limit_template ?? '',
     attributionPolicy: attributionForm(
       editing
@@ -172,7 +172,7 @@ export function buildApiKeyPolicyInput(
     forbid_response_cache: state.forbidResponseCache,
     end_user_source: state.endUserSource || null,
     end_user_policy: policyInput(state.endUserPolicy),
-    route_limits: routeLimitsInput(state.routeLimits),
+    route_limits: namedLimitsInput(state.routeLimits),
     limit_template: state.limitTemplate.trim() || null,
     allowed_attribution_keys: state.allowedAttributionKeys,
     required_attribution_keys:
@@ -247,7 +247,7 @@ export function compileApiKeyPolicy(
         ? 'Choose a project and a valid limit template name.'
         : form.endUserPolicy.enabled && !form.endUserSource
           ? 'Choose an identifier source before enabling end-user limits.'
-          : routeLimitsError(form.routeLimits) ||
+          : namedLimitsError(form.routeLimits, 'route') ||
             policyError(form.endUserPolicy) ||
             attributionError(form.attributionPolicy) ||
             groupNamesError(groupNames(form.allowedRouteGroups)) ||

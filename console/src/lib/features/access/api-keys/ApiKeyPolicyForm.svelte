@@ -3,7 +3,7 @@
   import PageHeader from '#lib/components/PageHeader.svelte';
   import RunLimits from '#lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
-  import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
+  import NamedLimitFields from '../budgets/NamedLimitFields.svelte';
   import AttributionFields from '../attribution/AttributionFields.svelte';
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
@@ -456,7 +456,8 @@
             inline limit applies. Manage templates in Project policies.</small
           >
         </div>
-        <RouteLimitFields
+        <NamedLimitFields
+          kind="route"
           bind:form={form.routeLimits}
           disabled={!canManage || Boolean(busy) || publicationBlocked}
         />

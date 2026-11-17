@@ -156,6 +156,17 @@ it('preserves configured key permissions, spending limits and expiry when editin
     required_attribution_keys: ['department'],
     attribution_defaults: { department: 'research' },
     run_limits: { max_iterations: 4, max_tool_calls: 6, max_run_cost: '1' },
+    route_limits: {
+      'route-a': {
+        requests_per_minute: 25,
+        tokens_per_minute: null,
+        max_concurrency: 2,
+        daily_cost_limit: '0.25',
+        weekly_cost_limit: null,
+        monthly_cost_limit: null,
+        cost_basis: 'charge'
+      }
+    },
     budget: {
       daily: window,
       monthly: window,
@@ -169,6 +180,7 @@ it('preserves configured key permissions, spending limits and expiry when editin
   };
   const state = createApiKeyFormState(key);
   const saved = buildApiKeyPolicyInput(state, key);
+  expect(saved.route_limits).toEqual(key.route_limits);
   expect(saved).toMatchObject({
     name: key.name,
     budget_group_id: key.budget_group_id,
