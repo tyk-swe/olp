@@ -103,6 +103,9 @@ func (c Config) ValidateProfile() error {
 }
 
 func (c Config) validateProfileEndpoint(u *url.URL) error {
+	if c.ProfileID == "gemini-decisions" && !strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1beta") {
+		return errors.New("Gemini Decisions endpoint must end at /v1beta")
+	}
 	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2" || c.ProfileID == "cohere-v2") &&
 		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")

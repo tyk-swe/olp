@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/management/test/transport.js';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
+import { runNativeOperation } from './nativeOperation';
 import {
   inspectRouting,
   runPlayground,
@@ -21,6 +23,39 @@ afterEach(() => {
 });
 
 describe('playground requests', () => {
+  it('sends a Gemini decision to the public endpoint for the chosen route', async () => {
+    const body = {
+      model: '',
+      input: 'The customer asks for a refund.',
+      questions: {
+        refund: { type: 'noul', instructions: 'Is a refund requested?' }
+      }
+    };
+    const response = {
+      answers: { refund: { type: 'noul', noul: 0.9, confidence: 0.9 } }
+    };
+    const fetch = vi.fn(async (path: string, init: RequestInit) => {
+      expect(path).toBe('/gemini/v1beta/decisions');
+      expect(init.method).toBe('POST');
+      expect(new Headers(init.headers).get('Authorization')).toBe(
+        'Bearer olp_fixture'
+      );
+      expect(init.body).toBe(JSON.stringify({ ...body, model: 'route-a' }));
+      return json(response);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const result = await runNativeOperation(
+      'decision',
+      'gemini-decisions',
+      'route-a',
+      'olp_fixture',
+      JSON.stringify(body)
+    );
+    expect(stringifyNativeJSON(result.response)).toBe(JSON.stringify(response));
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it('disables caching and returns the playground response', async () => {
     const response = {
       id: 'result',

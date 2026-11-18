@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -37,6 +38,7 @@ type Server struct {
 	WorkflowTools     func() mcp.WorkflowResolver
 	WorkflowRelease   func() *release.Release
 	WorkflowAvailable func() bool
+	inlineMedia       protocols.InlineMediaLimits
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.
 	Catalog *catalog.Signed
@@ -52,7 +54,9 @@ type Server struct {
 }
 
 // New prepares the route surface.
-func New(a *access.Server) *Server { return &Server{Access: a} }
+func New(a *access.Server, inlineMedia protocols.InlineMediaLimits) *Server {
+	return &Server{Access: a, inlineMedia: inlineMedia}
+}
 
 const (
 	maxTargets      = 64

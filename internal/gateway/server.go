@@ -1034,6 +1034,13 @@ func (s *Server) WorkflowResolver() WorkflowToolRunner {
 	return s.deps.WorkflowTools
 }
 
+func (s *Server) InlineMediaLimits() protocols.InlineMediaLimits {
+	if s == nil {
+		return normalizedInlineMedia(protocols.InlineMediaLimits{})
+	}
+	return s.cfg.InlineMedia
+}
+
 func (s *Server) LimiterCounts() (failOpen, daily, weekly, monthly int64) {
 	admission := s.deps.Admission
 	if admission == nil {

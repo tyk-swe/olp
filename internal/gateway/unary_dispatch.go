@@ -20,7 +20,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if x.guardrailEngine != nil {
 		x.guardrailCtx = ctx
 	}
-	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
+	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true, Declared: provider.Connector().Classification()}}
 	var parallel *parallelGuardrail
 	attemptCtx, trace := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
 	finish := func() {

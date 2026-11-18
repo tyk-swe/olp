@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import PlaygroundPage from './PlaygroundPage.svelte';
 import {
   PlaygroundState,
   resolvePlaygroundPlan
@@ -36,6 +37,43 @@ function submitEvent(): SubmitEvent {
 }
 
 describe('playground composer', () => {
+  it('shows the surface of the selected Decisions dialect', () => {
+    serve(() => json({}));
+    const target = document.createElement('div');
+    document.body.append(target);
+    const setup = vi.fn(() =>
+      mount(PlaygroundPage, { target, context: getAllContexts() })
+    );
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+      target.remove();
+    });
+    const control = (name: string) =>
+      Array.from(target.querySelectorAll('label')).find(
+        (label) => label.textContent?.trim() === name
+      )?.control;
+    const select = (label: string, value: string) => {
+      const element = control(label);
+      if (!(element instanceof HTMLSelectElement))
+        throw new Error(`Missing ${label} select`);
+      element.value = value;
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+    };
+    flushSync();
+    control('Advanced')?.click();
+    flushSync();
+    select('Operation', 'decision');
+    const surface = control('Client surface');
+    expect(surface).toHaveProperty('value', 'openai');
+    select('Registered native dialect', 'gemini-decisions');
+    expect(surface).toHaveProperty('value', 'gemini');
+    select('Registered native dialect', 'systemone');
+    expect(surface).toHaveProperty('value', 'openai');
+  });
+
   it('applies a selected example to its operation, dialect and request', () => {
     const state = playground();
     const template = playgroundTemplates.find((item) => item.nativeDialect);
@@ -215,6 +253,24 @@ describe('playground execution plans', () => {
       }
     });
     expect(plan.submissionError).toBeTruthy();
+  });
+
+  it('inspects Gemini Decisions on the surface used by its public client', () => {
+    expect(
+      resolvePlaygroundPlan({
+        ...input,
+        operation: 'decision',
+        nativeDialect: 'gemini-decisions'
+      })
+    ).toMatchObject({
+      kind: 'native',
+      dialect: 'gemini-decisions',
+      inspection: {
+        mode: 'unary',
+        surface: 'gemini',
+        dialect: 'gemini-decisions'
+      }
+    });
   });
 
   it('uses the basic generation composer after leaving a dedicated advanced operation', () => {

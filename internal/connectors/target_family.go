@@ -19,10 +19,14 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 	}
 	switch operation {
 	case "decision":
-		if p.OperationDialect(operation) == "systemone" {
+		switch p.OperationDialect(operation) {
+		case "systemone":
 			return wire.SystemOne, nil
+		case "gemini-decisions":
+			return wire.GeminiDecisions, nil
+		case "openai-decisions":
+			return wire.Decisions, nil
 		}
-		return wire.Decisions, nil
 	case "generation":
 		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
 			return family, nil

@@ -67,6 +67,7 @@ var bedrockInvokePath = upstreamPath{unary: "/model/{model}/invoke", streaming: 
 
 var wirePaths = map[wire.Format]upstreamPath{
 	wire.Decisions:             {unary: "/decisions"},
+	wire.GeminiDecisions:       {unary: "/decisions"},
 	wire.SystemOne:             {unary: "/systemone"},
 	wire.Completions:           {unary: "/completions"},
 	wire.Responses:             {unary: "/responses"},

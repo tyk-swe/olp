@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"unicode"
@@ -55,6 +56,15 @@ func (c Config) Classification() []upstream.Rule {
 	}
 	for _, rule := range vendors.ErrorClassesFor(c.VendorID) {
 		rules = append(rules, upstream.Rule{Status: rule.Status, Type: rule.Type, Class: upstream.Class(rule.Class)})
+	}
+	if c.ProfileID == "gemini-decisions" {
+		return append(rules,
+			upstream.Rule{Status: http.StatusBadRequest, Code: "safety", Class: upstream.ContentFilter},
+			upstream.Rule{Status: http.StatusBadRequest, Code: "prohibited_content", Class: upstream.ContentFilter},
+			upstream.Rule{Status: http.StatusBadRequest, Code: "blocklist", Class: upstream.ContentFilter},
+			upstream.Rule{Status: http.StatusBadRequest, Code: "image_safety", Class: upstream.ContentFilter},
+			upstream.Rule{Status: http.StatusBadRequest, Code: "content_blocked", Class: upstream.ContentFilter},
+		)
 	}
 	return rules
 }

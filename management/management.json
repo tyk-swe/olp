@@ -15309,6 +15309,7 @@
           "openai-completions",
           "openai-decisions",
           "systemone",
+          "gemini-decisions",
           "mistral-ocr",
           "azure-document-intelligence-ocr",
           "vertex-document-processing-ocr",

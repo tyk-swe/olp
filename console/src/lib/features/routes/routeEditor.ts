@@ -258,6 +258,7 @@ export function surfacesFor(operation: string): string[] {
   if (operation === 'passthrough') return ['native'];
   if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
+  if (operation === 'decision') return ['openai', 'gemini'];
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];
   if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];

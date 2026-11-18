@@ -20,15 +20,26 @@ type InlineMediaLimits struct {
 // It reads the request's parsed document, so the prompt text it passes over is
 // not scanned again, and the media it decodes is read where it lies.
 func ValidateInlineMedia(request *wire.Request, limits InlineMediaLimits) error {
-	if request.Family.Operation() != wire.OperationGeneration && request.Family.Operation() != "token_count" {
+	return validateInlineMediaDocument(request.OIF().Document(), request.Family, limits)
+}
+
+func ValidateOperationInlineMedia(document oif.Document, dialect oif.Identity, limits InlineMediaLimits) error {
+	if dialect.ID != wire.Dialect(wire.GeminiDecisions) {
 		return nil
 	}
-	doc := request.OIF().Document().Root()
+	return validateInlineMediaDocument(document, wire.GeminiDecisions, limits)
+}
+
+func validateInlineMediaDocument(document oif.Document, family wire.Format, limits InlineMediaLimits) error {
+	if family.Operation() != wire.OperationGeneration && family.Operation() != "token_count" && family != wire.GeminiDecisions {
+		return nil
+	}
+	doc := document.Root()
 	messages, partKey := member(doc, "messages").Elements(), "content"
-	if request.Family == wire.Responses || request.Family == wire.InputTokens {
+	if family == wire.Responses || family == wire.InputTokens {
 		messages = member(doc, "input").Elements()
 	}
-	switch request.Family {
+	switch family {
 	case wire.Gemini, wire.GeminiStream, wire.GeminiCount:
 		content := doc
 		if nested := member(doc, "generateContentRequest"); nested.Kind() == oif.Object {
@@ -53,7 +64,7 @@ func ValidateInlineMedia(request *wire.Request, limits InlineMediaLimits) error 
 					return err
 				}
 			}
-			encoded, dataURL := inlineMediaData(p)
+			encoded, dataURL := inlineMediaData(p, family)
 			if dataURL {
 				if !strings.HasPrefix(encoded, "data:") {
 					continue
@@ -82,6 +93,13 @@ func ValidateInlineMedia(request *wire.Request, limits InlineMediaLimits) error 
 		}
 		return nil
 	}
+	if family == wire.GeminiDecisions {
+		input := member(doc, "input")
+		if input.Kind() == oif.Object {
+			return visit([]oif.Value{input}, 0)
+		}
+		return visit(input.Elements(), 0)
+	}
 	for _, message := range messages {
 		if err := visit(member(message, partKey).Elements(), 0); err != nil {
 			return err
@@ -103,7 +121,10 @@ func chars(v oif.Value) string {
 	return text
 }
 
-func inlineMediaData(p oif.Value) (string, bool) {
+func inlineMediaData(p oif.Value, family wire.Format) (string, bool) {
+	if family == wire.GeminiDecisions {
+		return chars(member(p, "data")), false
+	}
 	nested := func(v oif.Value, key string) string { return chars(member(v, key)) }
 	switch chars(member(p, "type")) {
 	case "image_url":

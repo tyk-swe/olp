@@ -131,11 +131,14 @@ export function resolvePlaygroundPlan(
     activeOperation: operation,
     submissionError,
     inspection: {
-      surface: publicNativeOperations.has(operation)
-        ? 'openai'
-        : registeredNative
-          ? 'native'
-          : input.surface,
+      surface:
+        dialect === 'gemini-decisions'
+          ? 'gemini'
+          : publicNativeOperations.has(operation)
+            ? 'openai'
+            : registeredNative
+              ? 'native'
+              : input.surface,
       mode:
         operation === 'realtime'
           ? 'realtime'

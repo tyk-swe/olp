@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -57,7 +58,7 @@ func (x *call) clientSurface() string {
 func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel, routeHeader string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
-		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.OCR: "mistral-ocr", wire.Search: "perplexity-search", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.BedrockCount: "bedrock-count-tokens"}
+		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.GeminiDecisions: wire.Dialect(wire.GeminiDecisions), wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.OCR: "mistral-ocr", wire.Search: "perplexity-search", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.BedrockCount: "bedrock-count-tokens"}
 		dialect = ids[family]
 		if dialect == "" {
 			return false, nil
@@ -108,6 +109,9 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	x.mode = "unary"
 	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {
+		return true, err
+	}
+	if err := protocols.ValidateOperationInlineMedia(source.Document(), codec.Identity, s.cfg.InlineMedia); err != nil {
 		return true, err
 	}
 	x.unary.source = source

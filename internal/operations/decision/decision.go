@@ -1,10 +1,9 @@
-// Package decision owns the frozen, text-only Decisions and System One
-// contracts. It never invokes a chat model to synthesize probabilities.
 package decision
 
 import (
 	"math"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,11 +27,7 @@ func known(v oif.Value, names string) error {
 	}
 	allowed := strings.Fields(names)
 	for _, m := range v.Members() {
-		found := false
-		for _, n := range allowed {
-			found = found || n == m.Name
-		}
-		if !found {
+		if !slices.Contains(allowed, m.Name) {
 			return invalid(m.Name)
 		}
 	}
@@ -83,7 +78,7 @@ func Definitions() []operations.Dialect {
 		}
 		out = append(out, d)
 	}
-	return out
+	return append(out, geminiDefinition())
 }
 func bindModel(d oif.Document, model string) ([]oif.Change, error) {
 	return []oif.Change{{Pointer: "/model", Value: string(operations.Raw(model)), Origin: oif.IdentityBinding, Reason: "published model binding"}}, nil

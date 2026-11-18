@@ -336,11 +336,12 @@ uses its largest prompt. When a connector's generation target is a native text
 completion profile, [active health probes](provider-routing.md#credential-pools-and-limits)
 send a short text completion instead of a chat request.
 
-`decision` is a separate operation with native `openai-decisions` and `systemone`
-profiles. The text-only contracts accept predicate/noul, choice and score
-questions, preserving names, order, typed choice values, native probabilities,
-score scales and OpenAI refusals. Images, box questions, streaming and unmodeled
-fields are excluded. The OpenAI shape is pinned to `openai-go/v3` 3.78.0;
+`decision` is a separate operation. On the OpenAI surface, the native
+`openai-decisions` and `systemone` profiles accept text input with
+predicate/noul, choice and score questions, preserving names, order, typed
+choice values, native probabilities, score scales and OpenAI refusals.
+Images, box questions, streaming and unmodeled fields are excluded.
+The OpenAI shape is pinned to `openai-go/v3` 3.78.0.
 System One is pinned to TypeSafe OpenAPI 0.2.0. Exact tuple certification is
 required before publishing either profile.
 
@@ -625,8 +626,8 @@ the profile does not declare. See
 
 ### Gemini surface
 
-Gemini endpoints are served under both `/gemini/v1` and `/gemini/v1beta`.
-Replace `{version}` below with `v1` or `v1beta`.
+Replace `{version}` on the Gemini model endpoints with `v1` or `v1beta`.
+Decisions uses `v1beta`.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -637,6 +638,38 @@ Replace `{version}` below with `v1` or `v1beta`.
 | `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | refused |
 | `POST /gemini/{version}/models/{model}:embedContent` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
 | `POST /gemini/{version}/models/{model}:batchEmbedContents` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
+| `POST /gemini/v1beta/decisions` | decision | refused | refused | qualified | refused | refused | refused | refused |
+
+To publish a Decisions route, use the Google Gemini provider with the
+`gemini-decisions` profile and a Gemini API key. Certify `gemini-decision-1`
+for the `decision` operation on the `gemini` surface in `unary` mode. Use the
+published route slug as `model` in the request and authenticate with your
+OLP inference key.
+
+```sh
+curl "$OLP_URL/gemini/v1beta/decisions" \
+  -H "X-Goog-Api-Key: $OLP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "support-decisions",
+    "input": "The customer cannot sign in.",
+    "questions": {
+      "account_access": {
+        "type": "noul",
+        "instructions": "Is the customer reporting a sign-in problem?"
+      }
+    }
+  }'
+```
+
+The profile accepts Gemini's keyed `noul`, `choice`, and `score` questions
+with text, image, audio, video, or PDF input. Inline media is subject to the
+gateway's media limits. Enable `provider_fetched_documents` on the route for
+HTTPS inputs, including Gemini Files API URIs. The native response preserves
+answer keys, probabilities, score legends, safety feedback, and provider usage.
+Gemini Decisions uses its own wire format and follows the same budget
+admission and usage accounting as other `decision` operations.
+[Gemini API reference](https://aistudio.google.com/api-reference/decisions/create-decision).
 
 The two Gemini embedding endpoints are served only on
 [strict routes](provider-routing.md#route-fidelity) whose targets hold the

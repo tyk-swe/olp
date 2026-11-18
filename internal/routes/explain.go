@@ -139,7 +139,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, cmp.Or(m.named, slug), route.Fidelity.Strict())
+	parsed, unary, mediaRequest, err := s.inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, cmp.Or(m.named, slug), route.Fidelity.Strict())
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}

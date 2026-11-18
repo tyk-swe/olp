@@ -130,7 +130,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
-	routeServer := routes.New(m.Access)
+	routeServer := routes.New(m.Access, m.Gateway.InlineMediaLimits())
 	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
 		if m.Gateway == nil {
 			return nil
