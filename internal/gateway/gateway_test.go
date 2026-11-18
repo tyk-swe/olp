@@ -1563,24 +1563,30 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
-	const output = `{"count":9007199254740993}`
+	const exact = `{"count":9007199254740993}`
 	playground := Playground{Gateway: &Server{now: time.Now}}
 	x := &call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{route: &routing.Route{Slug: routeSlug}}}
-	out := &outcome{completion: &wire.Completion{OutputText: output}}
 	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
-	body, err := json.Marshal(playground.response(x, out, in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var response struct {
-		Text       string          `json:"output_text"`
-		Structured json.RawMessage `json:"structured_output"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Text != output || string(response.Structured) != output {
-		t.Fatalf("structured output changed the integer: %s", body)
+	for _, test := range []struct{ text, structured string }{
+		{exact, exact},
+		{`{"count":0,"count":9007199254740993}`, exact},
+		{exact + ` {"extra":true}`, ""},
+	} {
+		out := &outcome{completion: &wire.Completion{OutputText: test.text}}
+		body, err := json.Marshal(playground.response(x, out, in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			Text       string          `json:"output_text"`
+			Structured json.RawMessage `json:"structured_output"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Text != test.text || string(response.Structured) != test.structured {
+			t.Fatalf("unexpected Playground result for %q: %s", test.text, body)
+		}
 	}
 }
 

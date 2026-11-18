@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -437,8 +438,10 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 		res["usage"] = c.Usage
 	}
 	if in.ResponseFormat != nil && in.ResponseFormat.Type != "text" && c.OutputText != "" {
-		structured := json.RawMessage(c.OutputText)
-		if json.Valid(structured) {
+		decoder := json.NewDecoder(strings.NewReader(c.OutputText))
+		decoder.UseNumber()
+		var structured any
+		if decoder.Decode(&structured) == nil && decoder.Decode(new(any)) == io.EOF {
 			res["structured_output"] = structured
 		}
 	}
