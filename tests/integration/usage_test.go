@@ -117,18 +117,30 @@ func testClosedRetainedReconciliation(t *testing.T, fixture usageFixture, resour
 	}
 	const origin = "https://test.example"
 	mux := http.NewServeMux()
-	management := resources.Management{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: origin, Auth: auth, Keys: keys}), Pool: pool}
+	management := resources.Management{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: origin, Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), Pool: pool}
 	management.Register(mux)
-	r := httptest.NewRequestWithContext(ctx, http.MethodPost, origin+"/api/v1/provider-resources/"+resource.ID+"/reconcile", strings.NewReader(`{"upstream_id":"test-hint"}`))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/v1/provider-resources/"+resource.ID+"/reconcile", strings.NewReader(`{"upstream_id":"test-hint"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", origin)
 	r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
 	r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, r)
+	response, err := server.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var problem struct{ Type string }
-	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil || response.Code != http.StatusConflict || !strings.HasSuffix(problem.Type, "/settlement_closed") {
-		t.Fatalf("reconcile closed settlement = %d %s, want 409 settlement_closed", response.Code, response.Body.String())
+	if err := json.Unmarshal(body, &problem); err != nil || response.StatusCode != http.StatusConflict || !strings.HasSuffix(problem.Type, "/settlement_closed") {
+		t.Fatalf("reconcile closed settlement = %d %s, want 409 settlement_closed", response.StatusCode, body)
 	}
 }
 
@@ -1703,6 +1715,9 @@ func TestPersonalDeviceEnrollmentRetriesClientSetup(t *testing.T) {
 	}
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	store := personal.NewStore(pool, installation, auth, keys, policy)
 	handoff, err := store.Start(ctx, binding, &fixture.ownerID)
