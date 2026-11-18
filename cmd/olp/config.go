@@ -293,12 +293,16 @@ func applyDatabasePassword(rawURL, path string) (string, error) {
 	if databaseURL.Query().Has("user") {
 		return rawURL, errors.New("OLP_DATABASE_PASSWORD_FILE requires a PostgreSQL username in the URL authority")
 	}
-	data, err := os.ReadFile(path)
+	data, err := secrets.ReadRawFile(path)
 	if err != nil {
-		return "", errors.New("cannot read OLP_DATABASE_PASSWORD_FILE")
+		return "", fmt.Errorf("OLP_DATABASE_PASSWORD_FILE: %w", err)
 	}
 	defer clear(data)
-	databaseURL.User = url.UserPassword(databaseURL.User.Username(), strings.TrimRight(string(data), "\n"))
+	password := strings.TrimRight(string(data), "\n")
+	if password == "" {
+		return "", errors.New("OLP_DATABASE_PASSWORD_FILE must contain a password")
+	}
+	databaseURL.User = url.UserPassword(databaseURL.User.Username(), password)
 	return databaseURL.String(), nil
 }
 

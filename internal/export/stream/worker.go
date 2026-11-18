@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -183,13 +184,20 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 	if err != nil {
 		return idle, claim{}, err
 	}
-	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts, deliverySettings, format)
+	c.record.Stream = p.stream
+	c.record.ObjectKey = p.stream + "/" + c.record.At.UTC().Format(time.DateOnly) + "/" + c.record.ID + ".jsonl"
+	recordErr := destination.ValidateRecord(spec, c.record)
+	target, loadErr := destination.Load(p.sink, url, spec, credential)
+	c.target, c.loadErr = target, cmp.Or(loadErr, recordErr)
+	var freezeSettings json.RawMessage
+	if c.loadErr == nil && (format == "cloudevents" || format == "stripe") {
+		freezeSettings = deliverySettings
+	}
+	resetUnmapped := destination.DeliveryErrorCode(recordErr) == "unmapped"
+	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts, freezeSettings, resetUnmapped)
 	if err != nil || tag.RowsAffected() != 1 {
 		return idle, claim{}, err
 	}
-	c.record.Stream = p.stream
-	c.record.ObjectKey = p.stream + "/" + c.record.At.UTC().Format(time.DateOnly) + "/" + c.record.ID + ".jsonl"
-	c.target, c.loadErr = destination.Load(p.sink, url, spec, credential)
 	return claimed, c, tx.Commit(claimCtx)
 }
 

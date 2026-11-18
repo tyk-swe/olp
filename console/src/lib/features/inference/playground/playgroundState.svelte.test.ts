@@ -65,7 +65,7 @@ function listPublishedRoutes() {
 }
 
 describe('playground composer', () => {
-  it('offers only serving routes for new requests, resources and estimates', async () => {
+  it('offers retired routes for retained lists and only serving routes for new requests and estimates', async () => {
     listPublishedRoutes();
     serve(
       (request) => {
@@ -85,6 +85,16 @@ describe('playground composer', () => {
                 kind: 'vector_store',
                 action: 'create',
                 method: 'POST',
+                pattern: '/v1/vector_stores',
+                ancestors: [],
+                metered: true
+              },
+              {
+                operation: 'vector_store',
+                surface: 'openai',
+                kind: 'vector_store',
+                action: 'list',
+                method: 'GET',
                 pattern: '/v1/vector_stores',
                 ancestors: [],
                 metered: true
@@ -127,6 +137,30 @@ describe('playground composer', () => {
         'route-a'
       );
     });
+
+    const action = target.querySelector<HTMLSelectElement>(
+      'section[aria-labelledby="native-resources-title"] select:has(option[value="GET /v1/vector_stores"])'
+    );
+    if (!action) throw new Error('Missing native resource action');
+    const choose = (select: HTMLSelectElement, value: string) => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+    };
+    choose(action, 'GET /v1/vector_stores');
+    const nativeRoutes =
+      'section[aria-labelledby="native-resources-title"] select:has(option[value="route-a"])';
+    expect(values(`${nativeRoutes} option`)).toEqual([
+      '',
+      'old-route',
+      'route-a'
+    ]);
+    const route = target.querySelector<HTMLSelectElement>(nativeRoutes);
+    if (!route) throw new Error('Missing native resource route');
+    choose(route, 'old-route');
+    choose(action, 'POST /v1/vector_stores');
+    expect(values(`${nativeRoutes} option`)).toEqual(['', 'route-a']);
+    expect(target.querySelector(nativeRoutes)).toHaveProperty('value', '');
   });
 
   it('shows the surface of the selected Decisions dialect', () => {

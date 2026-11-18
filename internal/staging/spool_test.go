@@ -200,7 +200,7 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 	if !retrying.tryReserve(10) {
 		t.Fatal("could not reserve bytes for a cleanup job")
 	}
-	retrying.enqueueCleanup(&cleanupJob{path: stuck, bytes: 10})
+	retrying.enqueueCleanup(cleanupJob{path: stuck, bytes: 10})
 	deadline := time.Now().Add(3 * time.Second)
 	for retrying.UsedBytes() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -223,7 +223,7 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 		if !spool.tryReserve(10) {
 			t.Fatal("could not reserve bytes for a cleanup job")
 		}
-		spool.enqueueCleanup(&cleanupJob{path: path, bytes: 10})
+		spool.enqueueCleanup(cleanupJob{path: path, bytes: 10})
 	}
 	growth := 0
 	until := time.Now().Add(200 * time.Millisecond)
@@ -249,35 +249,55 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 	}
 }
 
-func TestSaturatedSpoolCleanupRetriesTheLastArtifact(t *testing.T) {
+func TestSaturatedSpoolCleanupReturnsBeforeRetryingArtifacts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		spool := newSpool(t)
-		outside := t.TempDir()
-		path := unremovablePath(t, outside, "blocked")
-		for range cleanupQueueCapacity + cleanupConcurrency {
-			if !spool.tryReserve(1) {
-				t.Fatal("could not reserve bytes")
+		const failedRemovals = 40
+		artifacts := make([]Handle, failedRemovals)
+		for i := range artifacts {
+			artifact, err := stage(t, spool, strings.NewReader("x"), 1)
+			if err != nil {
+				t.Fatal(err)
 			}
-			spool.enqueueCleanup(&cleanupJob{path: path, bytes: 1})
+			if err := os.Remove(filepath.Join(spool.root, string(artifact.Handle))); err != nil {
+				t.Fatal(err)
+			}
+			unremovablePath(t, spool.root, string(artifact.Handle))
+			artifacts[i] = artifact.Handle
 		}
-		target := filepath.Join(outside, "removable")
-		if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if !spool.tryReserve(1) {
-			t.Fatal("could not reserve bytes for the last artifact")
-		}
-		go spool.enqueueCleanup(&cleanupJob{path: target, bytes: 1})
+		removed := make(chan error, failedRemovals)
+		go func() {
+			for _, handle := range artifacts {
+				removed <- spool.Remove(handle)
+			}
+			close(removed)
+		}()
 		synctest.Wait()
-		if _, err := os.Stat(target); err == nil && spool.UsedBytes() != cleanupQueueCapacity+cleanupConcurrency+1 {
-			t.Error("spool released a reservation while its artifact still existed")
+		if len(removed) != failedRemovals {
+			t.Error("Remove waited for cleanup retries")
 		}
-		if err := os.Remove(filepath.Join(path, "kept")); err != nil {
-			t.Fatal(err)
+		if spool.UsedBytes() != failedRemovals {
+			t.Error("spool released a reservation while artifacts still existed")
+		}
+		for _, handle := range artifacts {
+			if err := os.Remove(filepath.Join(spool.root, string(handle), "kept")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for err := range removed {
+			if !errors.Is(err, ErrUnavailable) {
+				t.Errorf("Remove returned %v for an artifact it could not remove", err)
+			}
 		}
 		time.Sleep(time.Second)
-		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) || spool.UsedBytes() != 0 {
-			t.Errorf("cleanup left the last artifact or its reservation: %v, %d bytes", err, spool.UsedBytes())
+		synctest.Wait()
+		if spool.UsedBytes() != 0 {
+			t.Errorf("cleanup left %d bytes reserved", spool.UsedBytes())
+		}
+		for _, handle := range artifacts {
+			if _, err := os.Stat(filepath.Join(spool.root, string(handle))); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("cleanup left an artifact behind: %v", err)
+			}
 		}
 	})
 }

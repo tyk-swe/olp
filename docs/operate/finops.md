@@ -61,8 +61,8 @@ credential's custom headers when set, and `X-OLP-Signature` when the credential
 provides `signing_secret`. A redelivery resends byte-identical payloads, so a
 consumer deduplicates on `id`. OpenMeter is the reference consumer.
 
-The first delivery claim freezes payload settings for that pending event before
-sending it. Settings edits apply to events not yet claimed. Destination and
+The first claim that prepares an event for delivery freezes its payload
+settings before sending it. Settings edits apply until that point. Destination and
 credential changes still apply to retries so operators can repair transport
 configuration. After an upgrade, the first claim of a legacy pending event
 freezes the current settings. It cannot reconstruct settings used by earlier
@@ -88,8 +88,9 @@ server validates the key prefix and rejects `signing_secret`, `region`,
 Each event sends the deterministic identifier `olp-<sink id>-<attempt id>` and
 repeats it as the `Idempotency-Key`, so a
 redelivery is the same event to Stripe. A `duplicate_meter_event` response
-counts as delivered. The first delivery claim fixes the meter settings for
-all retries of that event. Destination and credential edits apply to retries.
+counts as delivered. The first claim that prepares a reportable meter event
+with a mapped customer fixes its meter settings for all retries. Destination
+and credential edits apply to retries.
 Stripe enforces identifier uniqueness for at least 24
 hours while OLP retries within minutes, and accepts event timestamps up to
 35 days old; the default 30-day request retention stays inside that window.
@@ -99,6 +100,8 @@ An attempt with no mapped project, or a null or non-positive value, never
 queues for the sink. Adding a project to `customers` does not backfill
 attempts that were already priced; the mapping must exist when the attempt
 settles.
+If a settings edit makes a queued event unmapped before delivery, it can
+resume on retry after the mapping or reportable value is restored.
 
 ## FOCUS 1.4 datasets
 

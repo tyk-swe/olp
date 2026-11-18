@@ -1827,6 +1827,32 @@ func TestExportRetryPreservesSettings(t *testing.T) {
 					time.Sleep(10 * time.Millisecond)
 				}
 			}
+			armRetry := func() {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sink); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if change == "stripe" {
+				otherProject := uuid.NewString()
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'another project',$1,$2)`, otherProject, f.ownerID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_sinks SET settings=jsonb_set(settings,'{customers}',jsonb_build_object($2::text,'cus_other')) WHERE id=$1`, sink, otherProject); err != nil {
+					t.Fatal(err)
+				}
+				run()
+				var code *string
+				if err := pool.QueryRow(t.Context(), `SELECT last_error_code FROM olp.export_pending WHERE sink_id=$1`, sink).Scan(&code); err != nil {
+					t.Fatal(err)
+				}
+				if len(bodies) != 0 || code == nil || *code != "unmapped" {
+					t.Fatal("the queued event was not deferred while its project was unmapped")
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_sinks SET settings=$2 WHERE id=$1`, sink, settings); err != nil {
+					t.Fatal(err)
+				}
+				armRetry()
+			}
 			run()
 			{
 				token := "export-fixture-session"
@@ -1864,9 +1890,7 @@ func TestExportRetryPreservesSettings(t *testing.T) {
 				if delivered || code == nil || *code != "status" {
 					t.Fatalf("failed HTTP attempt evidence: delivered=%t code=%v", delivered, code)
 				}
-				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sink); err != nil {
-					t.Fatal(err)
-				}
+				armRetry()
 				run()
 			}
 			if len(bodies) != 2 {

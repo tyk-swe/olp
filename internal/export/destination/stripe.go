@@ -131,29 +131,43 @@ func checkStripeKey(key string) error {
 	return nil
 }
 
-func (m stripeMeter) send(ctx context.Context, s *Sender, target Target, endpoint *url.URL, record Record) error {
+type meterReading struct {
+	envelope envelope
+	customer string
+	value    decimal.Decimal
+}
+
+func (m StripeMeter) reading(record Record) (meterReading, error) {
 	envelope, err := readEnvelope(record)
 	if err != nil {
-		return sendError("endpoint", err)
+		return meterReading{}, sendError("endpoint", err)
 	}
 	if envelope.ProjectID == nil {
-		return sendError("unmapped", errors.New("the metering record has no consumer project"))
+		return meterReading{}, sendError("unmapped", errors.New("the metering record has no consumer project"))
 	}
-	customer, mapped := m.spec.Customers[*envelope.ProjectID]
+	customer, mapped := m.Customers[*envelope.ProjectID]
 	if !mapped {
-		return sendError("unmapped", errors.New("the consumer project is not mapped to a Stripe customer"))
+		return meterReading{}, sendError("unmapped", errors.New("the consumer project is not mapped to a Stripe customer"))
 	}
-	value, ok := meteringValue(m.spec.Value, envelope.Data)
+	value, ok := meteringValue(m.Value, envelope.Data)
 	if !ok || !value.IsPositive() {
-		return sendError("unmapped", errors.New("the metering record has no reportable value"))
+		return meterReading{}, sendError("unmapped", errors.New("the metering record has no reportable value"))
 	}
-	identifier := "olp-" + strings.ReplaceAll(target.sinkID, "-", "") + "-" + strings.ReplaceAll(envelope.SourceID, "-", "")
+	return meterReading{envelope, customer, value}, nil
+}
+
+func (m stripeMeter) send(ctx context.Context, s *Sender, target Target, endpoint *url.URL, record Record) error {
+	reading, err := m.spec.reading(record)
+	if err != nil {
+		return err
+	}
+	identifier := "olp-" + strings.ReplaceAll(target.sinkID, "-", "") + "-" + strings.ReplaceAll(reading.envelope.SourceID, "-", "")
 	form := url.Values{
 		"event_name":                          {m.spec.EventName},
 		"identifier":                          {identifier},
-		"timestamp":                           {strconv.FormatInt(envelope.OccurredAt.Unix(), 10)},
-		"payload[" + m.spec.CustomerKey + "]": {customer},
-		"payload[" + m.spec.ValueKey + "]":    {plainDecimal(value)},
+		"timestamp":                           {strconv.FormatInt(reading.envelope.OccurredAt.Unix(), 10)},
+		"payload[" + m.spec.CustomerKey + "]": {reading.customer},
+		"payload[" + m.spec.ValueKey + "]":    {plainDecimal(reading.value)},
 	}
 	meter := *endpoint
 	meter.Path = strings.TrimRight(endpoint.Path, "/") + "/v1/billing/meter_events"

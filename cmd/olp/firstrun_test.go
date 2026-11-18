@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/sys/unix"
 )
 
 func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testing.T) {
@@ -114,7 +116,77 @@ func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testi
 		if err := initSecrets([]string{"--dir", dir, "--database-dir", databaseDir}, io.Discard); err == nil {
 			t.Fatal("initializer accepted a directory in place of the bootstrap token")
 		}
+		t.Setenv("OLP_BOOTSTRAP_TOKEN_FILE", tokenPath)
+		if err := setupToken(os.Getenv, io.Discard); err == nil {
+			t.Fatal("setup-token accepted a directory in place of the bootstrap token")
+		}
 	})
+
+	t.Run("reads a projected bootstrap token", func(t *testing.T) {
+		dir := t.TempDir()
+		const revision = "..revision"
+		if err := os.Mkdir(filepath.Join(dir, revision), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, revision, "olp_bootstrap_token"), []byte(token+"\n"), 0o440); err != nil {
+			t.Fatal(err)
+		}
+		projectedFile := filepath.Join(dir, "olp_bootstrap_token")
+		if err := os.Symlink(revision, filepath.Join(dir, "..data")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("..data/olp_bootstrap_token", projectedFile); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("OLP_BOOTSTRAP_TOKEN_FILE", projectedFile)
+		var printed bytes.Buffer
+		if err := setupToken(os.Getenv, &printed); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(printed.String(), token) {
+			t.Fatal("setup-token did not print the mounted token")
+		}
+	})
+}
+
+func TestMountedDatabasePasswordRejectsInvalidFiles(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		create func(string) error
+	}{
+		{"world readable", func(path string) error {
+			if err := os.WriteFile(path, []byte("fixture\n"), 0o600); err != nil {
+				return err
+			}
+			return os.Chmod(path, 0o644)
+		}},
+		{"oversized", func(path string) error { return os.WriteFile(path, bytes.Repeat([]byte("x"), 65537), 0o600) }},
+		{"named pipe", func(path string) error { return unix.Mkfifo(path, 0o600) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "postgres_password")
+			if err := test.create(path); err != nil {
+				t.Fatal(err)
+			}
+			env := map[string]string{
+				"OLP_DATABASE_URL":           "postgres://olp@postgres:5432/olp",
+				"OLP_DATABASE_PASSWORD_FILE": path,
+			}
+			result := make(chan error, 1)
+			go func() {
+				_, err := Parse([]string{"all"}, func(name string) string { return env[name] }, io.Discard)
+				result <- err
+			}()
+			select {
+			case err := <-result:
+				if err == nil || !strings.Contains(err.Error(), "OLP_DATABASE_PASSWORD_FILE") {
+					t.Fatalf("expected a mounted password error, got %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("reading the mounted password blocked startup")
+			}
+		})
+	}
 }
 
 func read(t *testing.T, path string) string {

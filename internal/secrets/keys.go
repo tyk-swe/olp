@@ -17,18 +17,25 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/secretstore"
 	"golang.org/x/sys/unix"
 )
 
 func ReadFile(path string) ([]byte, error) {
-	return readFile(path, os.O_RDONLY)
+	data, err := ReadRawFile(path)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, errors.New("secret file must contain 1–65536 bytes")
+	}
+	return trimmed, nil
 }
 
-func readFile(path string, flags int) ([]byte, error) {
-	f, err := os.OpenFile(path, flags, 0)
+func ReadRawFile(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("cannot read secret file: %w", os.ErrNotExist)
@@ -41,14 +48,14 @@ func readFile(path string, flags int) ([]byte, error) {
 		return nil, errors.New("secret file must be regular with mode 0400, 0440, 0600, or 0640")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 65537))
-	if err != nil || len(data) > 65536 || len(strings.TrimSpace(string(data))) == 0 {
+	if err != nil || len(data) == 0 || len(data) > 65536 {
 		return nil, errors.New("secret file must contain 1–65536 bytes")
 	}
-	return []byte(strings.TrimSpace(string(data))), nil
+	return data, nil
 }
 
 func ReadBootstrapToken(path string) (string, bool) {
-	data, err := readFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK)
+	data, err := ReadFile(path)
 	if err != nil || len(data) < 32 || len(data) > 256 {
 		return "", false
 	}
