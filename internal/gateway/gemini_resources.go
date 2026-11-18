@@ -876,8 +876,8 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, cursorErr)
 		return
 	}
-	rows, continuation, listErr := s.listedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.deps.Resources.ListKinds(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor)
+	rows, continuation, listErr := s.listedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor, false)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
 			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini file owned by this key.", &param)

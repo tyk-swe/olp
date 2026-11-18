@@ -65,10 +65,10 @@ func (s *Server) retainedListCursorCipher(owner string) (cipher.AEAD, error) {
 	return cipher.NewGCMWithRandomNonce(block)
 }
 
-func (s *Server) listedResourcePage(owner, param string, limit int, token string, fetch func(string, int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, string, *fault.Error) {
-	anchor := token
+func (s *Server) listedResourcePage(owner, param string, limit int, token string, fetch func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, string, *fault.Error) {
+	anchor := resources.ListCursor{ID: token}
 	if encoded, ok := strings.CutPrefix(token, retainedListCursorPrefix); ok {
-		if len(encoded) > 128 {
+		if len(encoded) > 160 {
 			return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
 		}
 		codec, err := s.retainedListCursorCipher(owner)
@@ -83,43 +83,54 @@ func (s *Server) listedResourcePage(owner, param string, limit int, token string
 		if err != nil {
 			return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
 		}
-		anchor = string(decoded)
+		stamp, id, ok := strings.Cut(string(decoded), "|")
+		if !ok {
+			anchor = resources.ListCursor{ID: stamp}
+		} else {
+			createdAt, err := time.Parse(time.RFC3339Nano, stamp)
+			if err != nil || id == "" {
+				return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
+			}
+			anchor = resources.ListCursor{ID: id, CreatedAt: &createdAt}
+		}
 	}
 	page, next, pageErr := listedResourcePage(limit, anchor, fetch, authorize)
-	if pageErr != nil || next == "" || len(page) > 0 && page[len(page)-1].ID == next {
-		return page, next, pageErr
+	if pageErr != nil || next.ID == "" || len(page) > 0 && page[len(page)-1].ID == next.ID {
+		return page, next.ID, pageErr
 	}
 	codec, err := s.retainedListCursorCipher(owner)
 	if err != nil {
 		return nil, "", fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The continuation cursor is unavailable.")
 	}
-	return page, retainedListCursorPrefix + base64.RawURLEncoding.EncodeToString(codec.Seal(nil, nil, []byte(next), nil)), nil
+	payload := next.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + next.ID
+	return page, retainedListCursorPrefix + base64.RawURLEncoding.EncodeToString(codec.Seal(nil, nil, []byte(payload), nil)), nil
 }
 
-func listedResourcePage(limit int, anchor string, fetch func(cursor string, count int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, string, *fault.Error) {
+func listedResourcePage(limit int, anchor resources.ListCursor, fetch func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, resources.ListCursor, *fault.Error) {
 	page := make([]*resources.Resource, 0, limit)
 	cursor := anchor
 	for remaining := limit + 400; remaining > 0; {
 		count := min(remaining, max(limit+1-len(page), 101))
 		rows, fetchErr := fetch(cursor, count+1)
 		if fetchErr != nil {
-			return nil, "", fetchErr
+			return nil, resources.ListCursor{}, fetchErr
 		}
 		for _, row := range rows[:min(len(rows), count)] {
-			cursor = row.ID
+			cursor = resources.ListCursor{ID: row.ID, CreatedAt: &row.CreatedAt}
 			if authErr := authorize(row); authErr != nil {
 				if authErr.Status != http.StatusNotFound && authErr.Status != http.StatusConflict {
-					return nil, "", authErr
+					return nil, resources.ListCursor{}, authErr
 				}
 				continue
 			}
 			if len(page) == limit {
-				return page, page[len(page)-1].ID, nil
+				last := page[len(page)-1]
+				return page, resources.ListCursor{ID: last.ID, CreatedAt: &last.CreatedAt}, nil
 			}
 			page = append(page, row)
 		}
 		if len(rows) <= count {
-			return page, "", nil
+			return page, resources.ListCursor{}, nil
 		}
 		remaining -= count
 	}

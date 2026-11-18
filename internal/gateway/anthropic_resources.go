@@ -340,18 +340,17 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	var continuation string
 	var listErr *fault.Error
 	if before != "" {
-		rows, continuation, listErr = s.listedResourcePage(authority.ID, "before_id", limit, before, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
-			batch, err := s.deps.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, count, cursor)
+		rows, continuation, listErr = s.listedResourcePage(authority.ID, "before_id", limit, before, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+			batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{kind}, authority.ID, count, cursor, true)
 			if err != nil {
 				return nil, listFailure(err)
 			}
-			slices.Reverse(batch)
 			return batch, nil
 		}, authorize)
 		slices.Reverse(rows)
 	} else {
-		rows, continuation, listErr = s.listedResourcePage(authority.ID, "after_id", limit, cursor, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
-			batch, err := s.deps.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, count, cursor)
+		rows, continuation, listErr = s.listedResourcePage(authority.ID, "after_id", limit, cursor, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+			batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{kind}, authority.ID, count, cursor, false)
 			if err != nil {
 				return nil, listFailure(err)
 			}

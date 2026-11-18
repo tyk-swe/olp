@@ -475,15 +475,18 @@ func TestPreparedChatStreamRequiresEveryDispatchedChoice(t *testing.T) {
 	usage := "data: " + `{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}` + "\n\n"
 	done := "data: [DONE]\n\n"
 	for _, test := range []struct {
-		name, choices string
-		complete      bool
+		name, frames            string
+		complete, usageComplete bool
 	}{
-		{"missing choice", first, false},
-		{"all choices", first + second, true},
+		{"missing choice", first + usage + done, false, false},
+		{"all choices", first + second + usage + done, true, true},
+		{"missing terminator", first + second + usage, false, true},
+		{"missing choice and terminator", first + usage, false, false},
+		{"usage precedes the last finish without a terminator", first + usage + second, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			result, err := codec.Stream(strings.NewReader(test.choices+usage+done), 8192, func(frame []byte) error {
+			result, err := codec.Stream(strings.NewReader(test.frames), 8192, func(frame []byte) error {
 				_, err := output.Write(frame)
 				return err
 			}, nil)
@@ -497,7 +500,7 @@ func TestPreparedChatStreamRequiresEveryDispatchedChoice(t *testing.T) {
 				}
 			}
 			if result == nil || result.Usage == nil || result.Usage.TotalTokens != 3 ||
-				result.UsageComplete != test.complete || strings.Contains(output.String(), done) != test.complete {
+				result.UsageComplete != test.usageComplete || strings.Contains(output.String(), done) != test.complete {
 				t.Fatalf("completion = %+v, stream = %q", result, output.String())
 			}
 		})

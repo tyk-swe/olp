@@ -506,7 +506,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
-	filtered, continuation, listErr := s.listedResourcePage(authority.ID, "after", limit, after, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+	filtered, continuation, listErr := s.listedResourcePage(authority.ID+"/"+dialect, "after", limit, after, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
 		batch, err := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, count, cursor)
 		if errors.Is(err, resources.ErrNotFound) {
 			return nil, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after"))

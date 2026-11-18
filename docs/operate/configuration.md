@@ -21,6 +21,7 @@ configuration before binding any listener.
 | --- | --- | --- |
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
 | `OLP_DATABASE_PASSWORD_FILE` | unset | Mounted PostgreSQL password for a URL with a username and no password. Compose sets this for its bundled database. |
+| `OLP_DATABASE_PASSWORD_FILE_URL` | unset | Apply `OLP_DATABASE_PASSWORD_FILE` only when the database URL exactly matches this value. |
 | `OLP_DATABASE_READ_URL` | unset | Optional regional PostgreSQL replica for runtime release and key/credential authority reads. Writes and historical secret reads use the primary. Replica delay consumes the 60-second authority-age budget; see [regional deployment](deployment.md#regional-read-replicas). |
 | `OLP_DATABASE_READ_URL_FILE` | unset | Mounted read-replica URL, mutually exclusive with `OLP_DATABASE_READ_URL`. |
 | `OLP_REGION` | unset | Deployment region for key rate/concurrency overrides, regional cost-reconciliation leadership and provider locality. Set the same name on gateways and workers sharing a Valkey. See [regional fleets](deployment.md#regional-fleets). |
@@ -177,9 +178,10 @@ URLs also accept `_FILE` settings, mutually exclusive with their inline values.
 Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
 the quick start, and `OLP_HOST_PORT`, which also sets the default
 `OLP_PUBLIC_ORIGIN`. These settings configure the wrapper rather than the
-binary. Compose passes the generated database password to the binary through
-`PGPASSFILE`, so a custom `OLP_DATABASE_URL` may omit its password when it
-points at the bundled PostgreSQL. The tracing overlay
+binary. Compose supplies the generated password for the default database URL.
+A custom `OLP_DATABASE_URL` supplies its own credentials, for example through
+a `passfile` query parameter pointing to a mounted PostgreSQL password file.
+The tracing overlay
 `deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
 `OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from `.env`;
 leave them empty to keep the binary defaults.

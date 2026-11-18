@@ -139,15 +139,23 @@ func cacheControls(blocks []oif.Value, ttl string) (int, bool) {
 	count := 0
 	for _, block := range blocks {
 		control, exists := block.Lookup("cache_control")
-		if !exists {
-			continue
+		if exists {
+			callerTTL, _ := control.Lookup("ttl")
+			text, _ := callerTTL.Chars()
+			if control.Kind() != oif.Object || cmp.Or(text, "5m") != ttl {
+				return 0, false
+			}
+			count++
 		}
-		callerTTL, _ := control.Lookup("ttl")
-		text, _ := callerTTL.Chars()
-		if control.Kind() != oif.Object || cmp.Or(text, "5m") != ttl {
-			return 0, false
+		kind, _ := block.Lookup("type")
+		if text, _ := kind.Chars(); text == "tool_result" {
+			content, _ := block.Lookup("content")
+			nested, ok := cacheControls(content.Elements(), ttl)
+			if !ok {
+				return 0, false
+			}
+			count += nested
 		}
-		count++
 	}
 	return count, true
 }

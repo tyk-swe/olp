@@ -1208,6 +1208,11 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid response."))
 		return
 	}
+	generation := storeKind == ""
+	if generation && observeRetainedUsage(native.exchange, responseSource, true) != nil {
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid usage."))
+		return
+	}
 	rewrite, referenceErr := retainedapi.PrepareRewrite(responseSource, retainedResponseRefs(codec, responseSource))
 	if referenceErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource reference."))
@@ -1224,9 +1229,8 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(retainedProjectionError(native.exchange, projectErr))
 		return
 	}
-	if usageErr := observeRetainedUsage(native.exchange, responseSource, storeKind == ""); usageErr != nil {
-		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid usage."))
-		return
+	if !generation {
+		_ = observeRetainedUsage(native.exchange, responseSource, false)
 	}
 	native.exchange.complete(classSuccess)
 	response = projected

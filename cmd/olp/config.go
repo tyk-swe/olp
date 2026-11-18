@@ -118,10 +118,11 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	c.Hostname = getenv("HOSTNAME")
 	f := flag.NewFlagSet("olp "+args[0], flag.ContinueOnError)
 	f.SetOutput(output)
-	var databaseFile, databasePasswordFile, databaseReadFile, valkeyFile, cacheValkeyFile, level string
+	var databaseFile, databasePasswordFile, databasePasswordFileURL, databaseReadFile, valkeyFile, cacheValkeyFile, level string
 	f.StringVar(&c.DatabaseURL, "database-url", "", "PostgreSQL URL (OLP_DATABASE_URL)")
 	f.StringVar(&databaseFile, "database-url-file", "", "file containing PostgreSQL URL")
 	f.StringVar(&databasePasswordFile, "database-password-file", "", "mounted PostgreSQL password when the URL provides none")
+	f.StringVar(&databasePasswordFileURL, "database-password-file-url", "", "apply the mounted PostgreSQL password only to this URL")
 	f.StringVar(&c.DatabaseReadURL, "database-read-url", "", "optional PostgreSQL replica for runtime release and authority reads")
 	f.StringVar(&c.Region, "region", "", "deployment region for regional limits and local provider preference")
 	f.StringVar(&databaseReadFile, "database-read-url-file", "", "file containing optional PostgreSQL read-replica URL")
@@ -222,7 +223,7 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	if c.DatabaseURL, err = secretURL(c.DatabaseURL, databaseFile, "OLP_DATABASE_URL"); err != nil {
 		return c, err
 	}
-	if databasePasswordFile != "" && getenv("PGPASSWORD") == "" {
+	if databasePasswordFile != "" && getenv("PGPASSWORD") == "" && (databasePasswordFileURL == "" || c.DatabaseURL == databasePasswordFileURL) {
 		if c.DatabaseURL, err = applyDatabasePassword(c.DatabaseURL, databasePasswordFile); err != nil {
 			return c, err
 		}

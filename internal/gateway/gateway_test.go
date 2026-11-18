@@ -1561,6 +1561,42 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	}
 }
 
+func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused:unused@localhost/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.reissue(func(provider *routing.Provider) { provider.Kind = "openai" }, nil)
+	h.rt.inputs = &routinginputs.Inputs{RefreshedAt: time.Now()}
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowProviderState = true
+	h.rt.keys[fullKey] = authority
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"object":"response.compaction","id":"cmp-native","output":[{"type":"compaction","id":"item-native","file_id":"file-native"}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses/compact", fullKey, []byte(`{"input":"compact this"}`), map[string]string{stateRouteHeader: routeSlug})
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := h.sink.last(t)
+	if response.StatusCode != http.StatusServiceUnavailable || env.ErrorClass != "provider_state_unavailable" || env.Outcome != "failure" {
+		t.Fatalf("compaction binding failure = %d %s, outcome = %s", response.StatusCode, body, env.Outcome)
+	}
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %+v", env.Attempts)
+	}
+	attempt := env.Attempts[0]
+	if attempt.Class != classProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
+		attempt.Usage == nil || attempt.Usage.InputTokens != 10 || attempt.Usage.OutputTokens != 5 || attempt.Usage.TotalTokens != 15 {
+		t.Fatalf("compaction accounting after binding failure = %+v, usage = %+v", attempt, attempt.Usage)
+	}
+}
+
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
 	const exact = `{"count":9007199254740993}`
@@ -1829,13 +1865,13 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 	all := []*resources.Resource{
 		{ID: "stale-1"}, {ID: "hidden-1"}, {ID: "valid-1"}, {ID: "valid-2"}, {ID: "stale-2"}, {ID: "valid-3"},
 	}
-	fetchFrom := func(rows []*resources.Resource) func(string, int) ([]*resources.Resource, *fault.Error) {
-		return func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+	fetchFrom := func(rows []*resources.Resource) func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error) {
+		return func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
 			start := 0
-			if cursor != "" {
+			if cursor.ID != "" {
 				start = len(rows)
 				for i, row := range rows {
-					if row.ID == cursor {
+					if row.ID == cursor.ID {
 						start = i + 1
 						break
 					}
@@ -1866,45 +1902,45 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 		return got
 	}
 
-	page, continuation, err := listedResourcePage(10, "", fetchFrom(all), authorize)
+	page, continuation, err := listedResourcePage(10, resources.ListCursor{}, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("mixed page error: %v", err)
 	}
-	if continuation != "" || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
-		t.Fatalf("mixed page = %v continuation=%q, want only the valid rows and no continuation", ids(page), continuation)
+	if continuation.ID != "" || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
+		t.Fatalf("mixed page = %v continuation=%q, want only the valid rows and no continuation", ids(page), continuation.ID)
 	}
 
-	page, continuation, err = listedResourcePage(2, "", fetchFrom(all), authorize)
+	page, continuation, err = listedResourcePage(2, resources.ListCursor{}, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("refilled page error: %v", err)
 	}
-	if continuation != "valid-2" || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
-		t.Fatalf("refilled page = %v continuation=%q, want [valid-1 valid-2] with a continuation", ids(page), continuation)
+	if continuation.ID != "valid-2" || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
+		t.Fatalf("refilled page = %v continuation=%q, want [valid-1 valid-2] with a continuation", ids(page), continuation.ID)
 	}
 	page, continuation, err = listedResourcePage(2, continuation, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("following page error: %v", err)
 	}
-	if continuation != "" || !slices.Equal(ids(page), []string{"valid-3"}) {
-		t.Fatalf("following page = %v continuation=%q, want [valid-3] and no continuation", ids(page), continuation)
+	if continuation.ID != "" || !slices.Equal(ids(page), []string{"valid-3"}) {
+		t.Fatalf("following page = %v continuation=%q, want [valid-3] and no continuation", ids(page), continuation.ID)
 	}
 
 	staleOnly := []*resources.Resource{{ID: "stale-1"}, {ID: "stale-2"}, {ID: "stale-3"}}
-	page, continuation, err = listedResourcePage(2, "", fetchFrom(staleOnly), authorize)
+	page, continuation, err = listedResourcePage(2, resources.ListCursor{}, fetchFrom(staleOnly), authorize)
 	if err != nil {
 		t.Fatalf("all-stale page error: %v", err)
 	}
-	if continuation != "" || len(page) != 0 {
-		t.Fatalf("all-stale page = %v continuation=%q, want empty with no continuation", ids(page), continuation)
+	if continuation.ID != "" || len(page) != 0 {
+		t.Fatalf("all-stale page = %v continuation=%q, want empty with no continuation", ids(page), continuation.ID)
 	}
 
 	broken := []*resources.Resource{{ID: "valid-1"}, {ID: "broken-1"}}
-	if _, _, err := listedResourcePage(2, "", fetchFrom(broken), authorize); err == nil || err.Status != http.StatusInternalServerError {
+	if _, _, err := listedResourcePage(2, resources.ListCursor{}, fetchFrom(broken), authorize); err == nil || err.Status != http.StatusInternalServerError {
 		t.Fatalf("broken row error = %v, want the request to fail with 500", err)
 	}
 	fetchErr := fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
-	failingFetch := func(string, int) ([]*resources.Resource, *fault.Error) { return nil, fetchErr }
-	if _, _, err := listedResourcePage(2, "", failingFetch, authorize); err != fetchErr {
+	failingFetch := func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error) { return nil, fetchErr }
+	if _, _, err := listedResourcePage(2, resources.ListCursor{}, failingFetch, authorize); err != fetchErr {
 		t.Fatalf("fetch error = %v, want %v", err, fetchErr)
 	}
 

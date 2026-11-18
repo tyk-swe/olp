@@ -1,9 +1,9 @@
 name: openllmproxy
 
 x-database-environment: &database-environment
-  OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp@postgres:5432/olp}
-  PGPASSFILE: /run/olp/secrets/pgpass
+  OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp@postgres:5432/olp?passfile=/run/olp/secrets/pgpass}
   OLP_DATABASE_PASSWORD_FILE: /run/olp/secrets/postgres_password
+  OLP_DATABASE_PASSWORD_FILE_URL: postgres://olp@postgres:5432/olp?passfile=/run/olp/secrets/pgpass
   OLP_DATABASE_MAX_CONNECTIONS: ${OLP_DATABASE_MAX_CONNECTIONS:-20}
 
 x-application-environment: &application-environment

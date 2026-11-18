@@ -11,9 +11,12 @@ import {
   newRuleConfiguration,
   parseRuleConfiguration
 } from './ruleDraft';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { getAllContexts, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
-import { canChangeNotification } from './presentation';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import NotificationsPanel from './NotificationsPanel.svelte';
 import {
   createNotificationDestination,
   createNotificationRule,
@@ -87,18 +90,101 @@ const delivery: NotificationDelivery = {
   window_id: null
 };
 
+describe.each([
+  { view: 'destinations', deletion: 'Delete destination' },
+  { view: 'rules', deletion: 'Delete rule' }
+] as const)('notification $view actions', ({ view, deletion }) => {
+  it.each(['assigned', 'global'] as const)(
+    'honors %s access',
+    async (scope) => {
+      const installation = scope === 'global';
+      const projectDestination: NotificationDestination = {
+        ...destination,
+        id: 'project-destination',
+        name: 'Project alerts',
+        project_id: 'project-id',
+        project_name: 'Project'
+      };
+      const projectRule: NotificationRule = {
+        ...rule,
+        id: 'project-rule',
+        name: 'Project monitor',
+        event: 'key.expiring',
+        destination_id: projectDestination.id,
+        destination_name: projectDestination.name,
+        project_id: projectDestination.project_id,
+        project_name: projectDestination.project_name
+      };
+      authLifecycle.establishSession({
+        user: {
+          id: 'user-id',
+          email: 'user@example.test',
+          display_name: 'User',
+          role: installation ? 'owner' : 'developer',
+          access_scope: scope,
+          operations: installation
+            ? ['read', 'keys', 'settings']
+            : ['read', 'keys']
+        },
+        csrf_token: 'fixture-csrf'
+      });
+      vi.stubGlobal('fetch', (request: Request) => {
+        switch (new URL(request.url).pathname) {
+          case '/api/v1/auth/capabilities':
+            return json({ notifications_active: true });
+          case '/api/v1/notifications/destinations':
+            return json({ items: [destination, projectDestination] });
+          case '/api/v1/notifications/rules':
+            return json({ items: [rule, projectRule] });
+          default:
+            return json({ items: [] });
+        }
+      });
+      const target = document.createElement('div');
+      document.body.append(target);
+      const setup = vi.fn(() =>
+        mount(NotificationsPanel, {
+          target,
+          props: { view },
+          context: getAllContexts()
+        })
+      );
+      const harness = mount(StateHarness, { target, props: { setup } });
+      onTestFinished(async () => {
+        await unmount(setup.mock.results[0].value);
+        await unmount(harness);
+        target.remove();
+        vi.unstubAllGlobals();
+      });
+      const rowActions = (name: string) => {
+        const row = [...target.querySelectorAll('tr')].find((row) =>
+          row.textContent?.includes(name)
+        );
+        expect(row).toBeDefined();
+        return [...(row?.querySelectorAll('button') ?? [])].map((button) =>
+          button.textContent?.trim()
+        );
+      };
+      const actions = ['Edit', 'Disable', deletion];
+      const [globalRow, projectRow] =
+        view === 'destinations'
+          ? [destination, projectDestination]
+          : [rule, projectRule];
+
+      await vi.waitFor(() => {
+        expect(rowActions(projectRow.name)).toEqual(
+          expect.arrayContaining(actions)
+        );
+        const globalActions = rowActions(globalRow.name);
+        expect(
+          actions.filter((action) => globalActions.includes(action))
+        ).toEqual(installation ? actions : []);
+      });
+    }
+  );
+});
+
 describe('notification API', () => {
-  it('requires settings access for installation notification actions', () => {
-    const developer = { project: true, installation: false };
-    const operator = { project: true, installation: true };
-
-    expect(canChangeNotification(destination.project_id, developer)).toBe(
-      false
-    );
-    expect(canChangeNotification(rule.project_id, operator)).toBe(true);
-    expect(canChangeNotification('project-id', developer)).toBe(true);
-  });
-
   it.each([
     {
       path: 'destinations',

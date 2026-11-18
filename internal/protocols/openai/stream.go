@@ -141,22 +141,10 @@ type chatStream struct {
 
 func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Data == "[DONE]" {
-		if int64(len(s.finished)) < s.expected {
-			return &wire.ProtocolError{Detail: "[DONE] arrived before all requested choices", Truncated: true}
+		if err := s.checkFinishedChoices(); err != nil {
+			return err
 		}
-		for index := range s.expected {
-			if !s.finished[index] {
-				return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
-			}
-		}
-		if !s.finished[0] {
-			return &wire.ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
-		}
-		for index, finished := range s.finished {
-			if !finished {
-				return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
-			}
-		}
+		s.c.UsageComplete = s.c.Usage != nil
 		s.done = true
 		if err := s.emit([]byte("data: [DONE]\n\n")); err != nil {
 			return err
@@ -200,7 +188,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	}
 	if usage != nil {
 		s.c.Usage = usage
-		s.c.UsageComplete = true
+		s.c.UsageComplete = s.expected <= 1 || s.checkFinishedChoices() == nil
 	}
 	if !s.includeUsage {
 		if usage != nil && len(choices) == 0 {
@@ -296,6 +284,26 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 	return nil
 }
 
+func (s *chatStream) checkFinishedChoices() error {
+	if int64(len(s.finished)) < s.expected {
+		return &wire.ProtocolError{Detail: "[DONE] arrived before all requested choices", Truncated: true}
+	}
+	for index := range s.expected {
+		if !s.finished[index] {
+			return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
+		}
+	}
+	if !s.finished[0] {
+		return &wire.ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
+	}
+	for index, finished := range s.finished {
+		if !finished {
+			return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
+		}
+	}
+	return nil
+}
+
 func (s *chatStream) finish() (*wire.Completion, error) {
 	s.c.OutputText = s.text.String()
 	s.c.Refusal = s.refusal.String()
@@ -304,7 +312,7 @@ func (s *chatStream) finish() (*wire.Completion, error) {
 		s.c.ToolCalls = append(s.c.ToolCalls, wire.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments.String()})
 	}
 	if !s.done {
-		if s.expected > 1 {
+		if s.expected > 1 && s.c.UsageComplete && s.checkFinishedChoices() != nil {
 			s.c.UsageComplete = false
 		}
 		return &s.c, &wire.ProtocolError{Detail: "stream ended before [DONE]", Truncated: true}

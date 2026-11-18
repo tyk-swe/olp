@@ -399,6 +399,7 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Getenv:    func(string) string { return "" },
+		Digester:  secrets.NewAuthKey(make([]byte, 32), "listed-resources"),
 		Resources: store,
 		Resolver:  resources.NewResolver(pool),
 		Staging:   spool,
@@ -535,6 +536,31 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		sameStrings(t, "listed files", geminiNames(t, body))
 		if _, ok := body["nextPageToken"]; ok {
 			t.Fatalf("nextPageToken = %s, want none", body["nextPageToken"])
+		}
+	})
+
+	t.Run("continues after the hidden anchor expires", func(t *testing.T) {
+		keyID := newKey(t, "expired-anchor")
+		oldest := valid(t, keyID, resources.KindGeminiFile, "oldest")
+		anchor := stale(t, keyID, resources.KindGeminiFile, "expired")
+		for range 399 {
+			stale(t, keyID, resources.KindGeminiFile, uuid.NewString())
+		}
+		newest := valid(t, keyID, resources.KindGeminiFile, "newest")
+		const path = "/gemini/v1beta/files?pageSize=1"
+		first := get(t, "expired-anchor", path)
+		sameStrings(t, "first page", geminiNames(t, first), "files/"+newest.ID)
+		var token string
+		if err := json.Unmarshal(first["nextPageToken"], &token); err != nil || token == "" || token == newest.ID || strings.Contains(token, anchor.ID) {
+			t.Fatalf("nextPageToken = %s, want an opaque continuation", first["nextPageToken"])
+		}
+		if err := store.Update(ctx, anchor.ID, "", nil, new(time.Now().Add(-time.Minute))); err != nil {
+			t.Fatal(err)
+		}
+		second := get(t, "expired-anchor", path+"&pageToken="+token)
+		sameStrings(t, "page after expiry", geminiNames(t, second), "files/"+oldest.ID)
+		if _, ok := second["nextPageToken"]; ok {
+			t.Fatalf("nextPageToken = %s, want none", second["nextPageToken"])
 		}
 	})
 
