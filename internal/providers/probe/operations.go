@@ -77,6 +77,12 @@ func DefaultTuple(transport connectors.Config) connection.Capability {
 	if transport.ProfileID == "" || Probeable(transport, tuple) {
 		return tuple
 	}
+	if codec, ok := configuredOperation(transport, "decision"); ok {
+		decision := connection.Capability{Operation: codec.Operation.ID, Surface: codec.Surface, Mode: "unary"}
+		if Probeable(transport, decision) {
+			return decision
+		}
+	}
 	profile, err := transport.Profile()
 	if err != nil {
 		return tuple

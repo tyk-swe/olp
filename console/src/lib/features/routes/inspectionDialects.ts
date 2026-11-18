@@ -50,6 +50,8 @@ export function inspectionDialects(
   }
   if (operation === 'decision' && surface === 'openai')
     return ['openai-decisions', 'systemone'];
+  if (operation === 'decision' && surface === 'gemini')
+    return ['gemini-decisions'];
   if (operation === 'ocr' && surface === 'openai') return ['mistral-ocr'];
   if (operation === 'search' && surface === 'openai')
     return ['perplexity-search'];

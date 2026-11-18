@@ -6764,6 +6764,7 @@ const (
 	SimulationDialectExaSearch                    SimulationDialect = "exa-search"
 	SimulationDialectGeminiBatchEmbeddings        SimulationDialect = "gemini-batch-embeddings"
 	SimulationDialectGeminiCountTokens            SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiDecisions              SimulationDialect = "gemini-decisions"
 	SimulationDialectGeminiEmbeddings             SimulationDialect = "gemini-embeddings"
 	SimulationDialectGeminiGenerateContent        SimulationDialect = "gemini-generate-content"
 	SimulationDialectMistralOcr                   SimulationDialect = "mistral-ocr"
@@ -6816,6 +6817,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectGeminiBatchEmbeddings:
 		return true
 	case SimulationDialectGeminiCountTokens:
+		return true
+	case SimulationDialectGeminiDecisions:
 		return true
 	case SimulationDialectGeminiEmbeddings:
 		return true

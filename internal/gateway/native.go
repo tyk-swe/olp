@@ -28,6 +28,7 @@ func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
 	mux.HandleFunc("OPTIONS /native/", s.preflight)
 	mux.HandleFunc("POST /v1/completions", s.inference(wire.Completions))
 	mux.HandleFunc("POST /v1/decisions", s.inference(wire.Decisions))
+	mux.HandleFunc("POST /gemini/v1beta/decisions", s.inference(wire.GeminiDecisions))
 	mux.HandleFunc("POST /v1/ocr", s.inference(wire.OCR))
 	mux.HandleFunc("POST /v1/search", s.inference(wire.Search))
 	mux.HandleFunc("POST /v1/systemone", s.inference(wire.SystemOne))

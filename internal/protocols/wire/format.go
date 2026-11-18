@@ -26,6 +26,7 @@ const (
 	Chat               Format = "chat"
 	Completions        Format = "completions"
 	Decisions          Format = "decisions"
+	GeminiDecisions    Format = "gemini_decisions"
 	SystemOne          Format = "systemone"
 	Responses          Format = "responses"
 	InputTokens        Format = "input_tokens"
@@ -85,7 +86,7 @@ const (
 
 func (f Format) Operation() string {
 	switch f {
-	case Decisions, SystemOne:
+	case Decisions, GeminiDecisions, SystemOne:
 		return "decision"
 	case InputTokens, AnthropicCount, GeminiCount, BedrockCount:
 		return "token_count"
@@ -120,7 +121,7 @@ func (f Format) Surface() string {
 		return "anthropic"
 	case AnthropicFile, AnthropicBatch:
 		return "anthropic"
-	case Gemini, GeminiStream, GeminiCount, GeminiInteractions, GeminiLive:
+	case Gemini, GeminiStream, GeminiCount, GeminiInteractions, GeminiLive, GeminiDecisions:
 		return "gemini"
 	case GeminiFile, GeminiBatch:
 		return "gemini"

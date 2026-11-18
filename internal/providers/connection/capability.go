@@ -32,7 +32,7 @@ var vocabulary = []Capability{
 	{"realtime", "openai", "realtime"}, {"realtime", "openai", "webrtc"}, {"realtime", "gemini", "realtime"}, {"realtime", "native", "realtime"},
 	{"generation", "bedrock", "unary"}, {"generation", "bedrock", "streaming"}, {"bedrock_invoke", "bedrock", "unary"}, {"bedrock_invoke", "bedrock", "streaming"},
 	{"generation", "native", "unary"}, {"generation", "native", "streaming"}, {"batch", "native", "unary"},
-	{"decision", "native", "unary"},
+	{"decision", "gemini", "unary"}, {"decision", "native", "unary"},
 	{"agent_resource", "gemini", "unary"},
 	{"vector_store", "openai", "unary"}, {"conversation", "openai", "unary"}, {"container", "openai", "unary"}, {"eval", "openai", "unary"}, {"retrieval", "openai", "unary"},
 	{"fine_tuning", "openai", "unary"}, {"fine_tuning", "native", "unary"}, {"skill", "anthropic", "unary"}, {"context_cache", "gemini", "unary"},

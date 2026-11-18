@@ -245,6 +245,7 @@ var dialectVendors = map[string]reviewedVendor{
 	"vertex-realtime":                 {id: "google-vertex", family: "native duplex"},
 	"bedrock-realtime":                {id: "amazon-bedrock", family: "native duplex"},
 	"openai-decisions":                {id: "openai", family: "decision"},
+	"gemini-decisions":                {id: "google", family: "decision"},
 	"systemone":                       {id: "typesafe-jev", family: "decision"},
 	"mistral-ocr":                     {id: "mistral", family: "operation"},
 	"azure-document-intelligence-ocr": {id: "azure-document-intelligence", family: "operation"},
@@ -275,6 +276,8 @@ func operationProfile(d operations.Dialect) Profile {
 		p.Kind, p.Hosting = KindOpenAI, "direct-openai"
 	case p.ID == "gemini-batch-embeddings":
 		p.Kind, p.Hosting = KindGemini, "direct-gemini"
+	case p.ID == "gemini-decisions":
+		p.Kind, p.Hosting, p.Authentication, p.DialectRevision = KindGemini, "direct-gemini", keyOnly, "v1beta"
 	case slices.Contains(cohereDialects, p.ID):
 		p.Authentication, p.DialectRevision = keyOnly, "v2"
 	case slices.Contains(keyOnlyDialects, p.ID):

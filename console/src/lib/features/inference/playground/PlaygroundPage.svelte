@@ -16,6 +16,18 @@
   import { PlaygroundState } from './playgroundState.svelte';
 
   const playground = new PlaygroundState();
+  const surfaceLocked = $derived(
+    playground.composer === 'advanced' &&
+      playground.operation !== 'generation' &&
+      playground.operation !== 'token_count'
+  );
+  const inspectionSurface = $derived(playground.plan.inspection.surface);
+  const clientSurface = $derived(
+    playground.activeOperation === 'decision' &&
+      (inspectionSurface === 'openai' || inspectionSurface === 'gemini')
+      ? inspectionSurface
+      : playground.surface
+  );
   const operations = [
     { value: 'generation', label: 'Generation' },
     { value: 'decision', label: 'Decisions' },
@@ -184,20 +196,20 @@
       <div class="form-field">
         <label for="playground-surface">Client surface</label><select
           id="playground-surface"
-          bind:value={playground.surface}
-          disabled={playground.composer === 'advanced' &&
-            playground.operation !== 'generation' &&
-            playground.operation !== 'token_count'}
+          bind:value={
+            () => clientSurface,
+            (surface: PlaygroundState['surface']) => {
+              playground.surface = surface;
+            }
+          }
+          disabled={surfaceLocked}
           ><option value="openai">OpenAI</option><option value="anthropic"
             >Anthropic</option
           ><option value="gemini">Gemini</option></select
-        ><small
-          >{playground.composer === 'advanced' &&
-          playground.operation !== 'generation' &&
-          playground.operation !== 'token_count'
-            ? 'This operation is served on the OpenAI surface.'
-            : 'Capability filtering uses this originating protocol.'}</small
         >
+        {#if !surfaceLocked}
+          <small>Capability filtering uses this originating protocol.</small>
+        {/if}
       </div>
     </div>
     {#if playground.composer === 'basic'}
