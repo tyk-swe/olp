@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -24,6 +25,24 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+var errRetainedBindingUnavailable = errors.New("retained resource binding unavailable")
+
+func retainedBindingStoreError(err error) error {
+	if errors.Is(err, resources.ErrNotFound) || errors.Is(err, resources.ErrContract) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errRetainedBindingUnavailable, err)
+}
+
+func retainedProjectionError(exchange *pinnedExchange, err error) *fault.Error {
+	if errors.Is(err, errRetainedBindingUnavailable) {
+		exchange.interrupt(classProtocol, true)
+		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Resource identity bindings are unavailable.")
+	}
+	exchange.invalidNative()
+	return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider response contained an unbound resource identity.")
+}
 
 // Decoding follows the endpoint contract, not just its HTTP verb. Multipart
 // bodies remain byte-for-byte intact (including boundaries and file content).
@@ -656,7 +675,10 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 		} else if resource.ParentID != nil && len(e.Ancestors) > 0 && kind == e.Ancestors[len(e.Ancestors)-1] {
 			// The parent's own parent may not be nil (eval runs, for example).
 			parent, findErr := s.deps.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
-			if findErr != nil || parent.Kind != kind || parent.UpstreamID != id {
+			if findErr != nil {
+				return "", retainedBindingStoreError(findErr)
+			}
+			if parent.Kind != kind || parent.UpstreamID != id {
 				return "", resources.ErrNotFound
 			}
 			return parent.ID, nil
@@ -694,7 +716,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			bound, findErr = s.deps.Resources.BindDiscovered(ctx, child, submission...)
 		}
 		if findErr != nil {
-			return "", findErr
+			return "", retainedBindingStoreError(findErr)
 		}
 		if kind == "fine_tuning_checkpoint" && nativeItems[id].Kind() == oif.Object {
 			checkpoint, err := oif.ParseJSON([]byte(nativeItems[id].Raw()), oif.Limits{MaxBytes: retainedBodyLimit})
@@ -702,7 +724,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 				return "", err
 			}
 			if err := s.deps.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
-				return "", err
+				return "", retainedBindingStoreError(err)
 			}
 		}
 		return bound.ID, nil

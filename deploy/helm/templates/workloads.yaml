@@ -218,7 +218,7 @@ spec:
             {{- end }}
             {{- if eq $componentName "control" }}
             - name: OLP_BOOTSTRAP_TOKEN_FILE
-              value: /run/secrets/bootstrap-token/token
+              value: /run/secrets/bootstrap-token/..data/token
             {{- end }}
             {{- with $root.Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

@@ -49,18 +49,26 @@ type mediaFile struct {
 }
 
 type mediaCase struct {
-	name      string
-	model     string
-	provider  func(*routing.Provider)
-	route     func(*routing.Route)
-	operation media.Operation
-	mode      string
-	path      string
-	json      string
-	fields    [][2]string
-	files     []mediaFile
-	replies   []mediaReply
+	name              string
+	model             string
+	provider          func(*routing.Provider)
+	route             func(*routing.Route)
+	operation         media.Operation
+	mode              string
+	path              string
+	json              string
+	fields            [][2]string
+	files             []mediaFile
+	replies           []mediaReply
+	fallbackReplies   []mediaReply
+	failWriteDeadline bool
 }
+
+type mediaDeadlineFailure struct{ http.ResponseWriter }
+
+func (w mediaDeadlineFailure) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (mediaDeadlineFailure) SetWriteDeadline(time.Time) error { return io.ErrClosedPipe }
 
 type recordedPart struct {
 	Name        string `json:"name"`
@@ -215,7 +223,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	if mode == "" {
 		mode = "unary"
 	}
-	h.republish(func(snapshot *routing.Snapshot, a, _ routing.Provider) {
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		model := a.Capabilities[0].Model
 		if tc.model != "" {
 			model = tc.model
@@ -227,6 +235,17 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		snapshot.Providers[a.ID] = a
 		route := snapshot.Routes[routeSlug]
 		route.Operations = []string{string(tc.operation)}
+		if len(tc.fallbackReplies) > 0 {
+			b.Capabilities = []routing.Capability{{Model: modelB, Operation: string(tc.operation), Surface: "openai", Mode: mode}}
+			snapshot.Providers[b.ID] = b
+			fallback := routing.Route{
+				ID: b.ID, RoutingID: b.ID, Slug: "backup-media", Operations: route.Operations,
+				Targets: route.Targets[1:], MaxAttempts: 1, OverallTimeout: route.OverallTimeout,
+				Fidelity: route.Fidelity,
+			}
+			snapshot.Routes[fallback.Slug] = fallback
+			route.Fallbacks = []routing.Fallback{{Route: fallback.Slug, On: []string{routing.FallbackContentFilter}}}
+		}
 		route.Targets = route.Targets[:1]
 		route.Targets[0].ProviderModel = model
 		if tc.route != nil {
@@ -236,9 +255,17 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	})
 	handler, seen := scripted(t, tc.replies, func() string { return h.upstream.URL })
 	h.mock.set("a", handler)
+	fallback, fallbackSeen := scripted(t, tc.fallbackReplies, func() string { return h.upstream.URL })
+	h.mock.set("b", fallback)
 	mux := http.NewServeMux()
 	h.gateway.Register(mux)
-	server := httptest.NewServer(mux)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tc.failWriteDeadline {
+			mux.ServeHTTP(mediaDeadlineFailure{w}, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(server.Close)
 
 	var body bytes.Buffer
@@ -310,7 +337,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		record.Body = digest(raw)
 	}
 	envelope := h.sink.last(t)
-	record.Upstream, record.Operation = seen(), envelope.Operation
+	record.Upstream, record.Operation = slices.Concat(seen(), fallbackSeen()), envelope.Operation
 	if envelope.Usage != nil {
 		record.Usage = envelope.Usage
 	}
@@ -501,6 +528,58 @@ func TestMediaUpstreamGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %d cases: %v", len(got), slices.Sorted(maps.Keys(got)))
+}
+
+func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
+	t.Parallel()
+	got := runMediaCase(t, mediaCase{
+		operation: media.OpSpeech, path: "/v1/audio/speech",
+		json:              `{"model":"{route}","input":"hello","voice":"alloy","response_format":"mp3"}`,
+		replies:           reply("audio/mpeg", "ID3-fake-mp3"),
+		failWriteDeadline: true,
+	})
+	if got.Status != http.StatusInternalServerError || len(got.Attempts) != 1 {
+		t.Fatalf("expected a delivery failure after one upstream attempt: %+v", got)
+	}
+	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != classSuccess || attempt.Committed {
+		t.Fatalf("unexpected attempt evidence: %+v", attempt)
+	}
+}
+
+func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
+	t.Parallel()
+	for _, fallback := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fallback), func(t *testing.T) {
+			t.Parallel()
+			tc := mediaCase{
+				model: "flux-pro-1.1", operation: media.OpImageGeneration, path: "/v1/images/generations",
+				provider: vendor("openai_compatible", "bfl"),
+				json:     `{"model":"{route}","prompt":"a red fox","size":"1024x768","output_format":"png","response_format":"b64_json"}`,
+				replies: []mediaReply{
+					{http.StatusOK, "application/json", `{"id":"job-1","polling_url":"{upstream}/a/poll/job-1"}`},
+					{http.StatusOK, "application/json", `{"status":"Request Moderated"}`},
+				},
+			}
+			if fallback {
+				pixel := base64.StdEncoding.EncodeToString(onePixelPNG(t))
+				tc.fallbackReplies = reply("application/json", `{"created":1,"data":[{"b64_json":"`+pixel+`"}]}`)
+			}
+			got := runMediaCase(t, tc)
+			if len(got.Attempts) == 0 || got.Attempts[0].Class != classContentFilter || got.Attempts[0].Committed {
+				t.Fatalf("moderation did not produce an uncommitted content filter attempt: %+v", got)
+			}
+			if fallback {
+				if got.Status != http.StatusOK || len(got.Upstream) != 3 || len(got.Attempts) != 2 || got.Attempts[1].Class != classSuccess {
+					t.Fatalf("content filter fallback did not serve the image: %+v", got)
+				}
+				return
+			}
+			body, ok := got.Body.(json.RawMessage)
+			if got.Status != http.StatusBadRequest || !ok || !bytes.Contains(body, []byte(`"code":"content_filter"`)) {
+				t.Fatalf("moderation did not produce the public content filter error: %+v", got)
+			}
+		})
+	}
 }
 
 func jsonEqual(a, b []byte) bool {

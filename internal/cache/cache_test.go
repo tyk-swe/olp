@@ -153,6 +153,7 @@ func TestPromptPolicyValidateRequiresASessionLabelForSessionKeys(t *testing.T) {
 type fakeCommander struct {
 	values map[string]string
 	hashes map[string]map[string]string
+	resp3  bool
 }
 
 func (f *fakeCommander) Do(_ context.Context, a ...string) (any, error) {
@@ -186,6 +187,13 @@ func (f *fakeCommander) Do(_ context.Context, a ...string) (any, error) {
 			}
 		}
 		slices.Sort(keys)
+		if f.resp3 {
+			results := make([]any, 0, len(keys))
+			for _, key := range keys {
+				results = append(results, map[string]any{"id": key, "extra_attributes": map[string]any{"__vector_score": "0"}})
+			}
+			return map[string]any{"total_results": int64(len(results)), "results": results}, nil
+		}
 		reply := []any{int64(len(keys))}
 		for _, key := range keys {
 			reply = append(reply, key, []any{"__vector_score", "0"})
@@ -254,8 +262,9 @@ func TestNearestMissesWhenPurgeFollowsTicketResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client := &fakeCommander{values: map[string]string{}, hashes: map[string]map[string]string{}}
 	store := &Store{
-		Client:       &fakeCommander{values: map[string]string{}, hashes: map[string]map[string]string{}},
+		Client:       client,
 		Keys:         ring,
 		Auth:         secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), "installation"),
 		Installation: "installation",
@@ -276,9 +285,12 @@ func TestNearestMissesWhenPurgeFollowsTicketResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket.VectorSpace = "embed"
-	entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
-	if err != nil || entry == nil || string(entry.Body) != "answer" {
-		t.Fatalf("got entry %v and %v before any purge, want the stored answer", entry, err)
+	for _, resp3 := range []bool{false, true} {
+		client.resp3 = resp3
+		entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
+		if err != nil || entry == nil || string(entry.Body) != "answer" {
+			t.Fatalf("got entry %v and %v before any purge (RESP3=%v), want the stored answer", entry, err, resp3)
+		}
 	}
 	bare := Ticket{Key: ticket.Key, Bucket: ticket.Bucket, VectorSpace: ticket.VectorSpace}
 	if entry, _, err := store.Nearest(t.Context(), bare, vector, policy, Controls{}); err != nil || entry != nil {
@@ -287,7 +299,7 @@ func TestNearestMissesWhenPurgeFollowsTicketResolution(t *testing.T) {
 	if err := store.Purge(t.Context(), "project", space.Project); err != nil {
 		t.Fatal(err)
 	}
-	entry, _, err = store.Nearest(t.Context(), ticket, vector, policy, Controls{})
+	entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
 	if err != nil || entry != nil {
 		t.Fatalf("got entry %v and %v after purging the project, want a miss", entry, err)
 	}

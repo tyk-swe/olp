@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '#lib/features/routes/api.js';
+  import { listRoutes, selectActiveRoutes } from '#lib/features/routes/api.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -15,7 +15,8 @@
 
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
+    queryFn: ({ signal }) => listRoutes(signal),
+    select: selectActiveRoutes
   }));
   const eligible = $derived(
     (routes.data ?? []).filter((route) =>
@@ -36,6 +37,9 @@
   let submittedDefinition = '';
   let controller: AbortController | undefined;
   let destroyed = false;
+  $effect(() => {
+    if (route && !eligible.some((item) => item.slug === route)) route = '';
+  });
   onDestroy(() => {
     destroyed = true;
     controller?.abort();

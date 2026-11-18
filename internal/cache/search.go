@@ -117,14 +117,7 @@ func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, po
 	return nil, 0, nil
 }
 
-// searchCandidates parses an FT.SEARCH reply, which arrives either as a flat
-// [count, key, fields, ...] list or as a list of key→fields maps, into
-// similarity-thresholded candidates ordered best first.
 func (s *Store) searchCandidates(value any, p Policy) ([]candidate, error) {
-	list, ok := value.([]any)
-	if !ok || len(list) < 1 {
-		return nil, ErrUnavailable
-	}
 	candidates := []candidate{}
 	appendCandidate := func(key string, value any) error {
 		if !strings.HasPrefix(key, s.prefix()+"entry:") {
@@ -140,23 +133,8 @@ func (s *Store) searchCandidates(value any, p Policy) ([]candidate, error) {
 		}
 		return nil
 	}
-	for i := 1; i < len(list); i++ {
-		if results, ok := list[i].(map[string]any); ok {
-			for key, value := range results {
-				if err := appendCandidate(key, value); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		key, ok := list[i].(string)
-		if !ok || i+1 >= len(list) {
-			return nil, ErrUnavailable
-		}
-		i++
-		if err := appendCandidate(key, list[i]); err != nil {
-			return nil, err
-		}
+	if err := visitSearchResults(value, appendCandidate); err != nil {
+		return nil, err
 	}
 	slices.SortStableFunc(candidates, func(a, b candidate) int {
 		if a.score != b.score {
@@ -165,4 +143,47 @@ func (s *Store) searchCandidates(value any, p Policy) ([]candidate, error) {
 		return strings.Compare(a.key, b.key)
 	})
 	return candidates, nil
+}
+
+func visitSearchResults(value any, visit func(string, any) error) error {
+	if response, ok := value.(map[string]any); ok {
+		results, ok := response["results"].([]any)
+		if !ok {
+			return ErrUnavailable
+		}
+		for _, item := range results {
+			result, _ := item.(map[string]any)
+			key, ok := result["id"].(string)
+			if !ok {
+				return ErrUnavailable
+			}
+			if err := visit(key, result["extra_attributes"]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return ErrUnavailable
+	}
+	for i := 1; i < len(list); i++ {
+		if results, ok := list[i].(map[string]any); ok {
+			for key, value := range results {
+				if err := visit(key, value); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		key, ok := list[i].(string)
+		if !ok || i+1 >= len(list) {
+			return ErrUnavailable
+		}
+		i++
+		if err := visit(key, list[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

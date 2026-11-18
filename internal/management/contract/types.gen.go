@@ -14904,7 +14904,7 @@ type ReconciliationReport struct {
 		}] `json:"import"`
 		IncompleteAttempts int `json:"incomplete_attempts"`
 
-		// InvoicedCost Exact decimal; null outside the imported range.
+		// InvoicedCost Exact decimal when covered, or null for mixed invoice currencies or no coverage.
 		InvoicedCost     nullable.Nullable[string] `json:"invoiced_cost"`
 		InvoicedCurrency nullable.Nullable[string] `json:"invoiced_currency"`
 		PricedAttempts   int                       `json:"priced_attempts"`
@@ -14925,9 +14925,11 @@ type ReconciliationReport struct {
 		AttributedCostCovered        string                    `json:"attributed_cost_covered"`
 		CaptureRate                  nullable.Nullable[string] `json:"capture_rate"`
 		CaptureRateUnavailableReason nullable.Nullable[string] `json:"capture_rate_unavailable_reason"`
-		InvoicedCost                 nullable.Nullable[string] `json:"invoiced_cost"`
-		ProviderId                   openapi_types.UUID        `json:"provider_id"`
-		UnpricedShare                nullable.Nullable[string] `json:"unpriced_share"`
+
+		// InvoicedCost Exact decimal in the report currency, or null when there is no coverage or the invoices include a different currency.
+		InvoicedCost  nullable.Nullable[string] `json:"invoiced_cost"`
+		ProviderId    openapi_types.UUID        `json:"provider_id"`
+		UnpricedShare nullable.Nullable[string] `json:"unpriced_share"`
 	} `json:"totals"`
 }
 

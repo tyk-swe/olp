@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
+import AgentResources from '#lib/features/resources/AgentResources.svelte';
+import NativeResources from '#lib/features/resources/NativeResources.svelte';
+import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
 import PlaygroundPage from './PlaygroundPage.svelte';
 import {
   PlaygroundState,
@@ -9,7 +13,8 @@ import {
 } from './playgroundState.svelte';
 import { playgroundTemplates } from './templates';
 
-vi.mock('#lib/features/routes/api.js', () => ({
+vi.mock(import('#lib/features/routes/api.js'), async (importOriginal) => ({
+  ...(await importOriginal()),
   listRoutes: vi.fn().mockResolvedValue([]),
   simulateRouting: vi.fn().mockResolvedValue([])
 }));
@@ -19,6 +24,8 @@ vi.mock('#lib/features/access/api-keys/api.js', () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.mocked(listRoutes).mockResolvedValue([]);
+  vi.mocked(simulateRouting).mockResolvedValue([]);
 });
 
 function playground(): PlaygroundState {
@@ -36,7 +43,92 @@ function submitEvent(): SubmitEvent {
   return new SubmitEvent('submit', { cancelable: true });
 }
 
+const publishedRoute = {
+  id: 'active-id',
+  slug: 'route-a',
+  state: 'active' as const,
+  latest_revision: {
+    operations: ['generation', 'vector_store', 'agent_resource']
+  }
+};
+
+function listPublishedRoutes() {
+  vi.mocked(listRoutes, { partial: true, deep: true }).mockResolvedValue([
+    {
+      ...publishedRoute,
+      id: 'retired-id',
+      slug: 'old-route',
+      state: 'retired'
+    },
+    publishedRoute
+  ]);
+}
+
 describe('playground composer', () => {
+  it('offers only serving routes for new requests, resources and estimates', async () => {
+    listPublishedRoutes();
+    serve(
+      (request) => {
+        const path = new URL(request.url).pathname;
+        if (path === '/api/v1/auth/capabilities')
+          return json({
+            local_login_enabled: false,
+            oidc_login_enabled: true,
+            gateway_available: true
+          });
+        if (path === '/api/v1/provider-resource-contracts')
+          return json({
+            endpoints: [
+              {
+                operation: 'vector_store',
+                surface: 'openai',
+                kind: 'vector_store',
+                action: 'create',
+                method: 'POST',
+                pattern: '/v1/vector_stores',
+                ancestors: [],
+                metered: true
+              }
+            ]
+          });
+        return json({ items: [] });
+      },
+      ['read']
+    );
+    const target = document.createElement('div');
+    const setup = vi.fn(() => {
+      const options = { target, context: getAllContexts() };
+      return [
+        mount(PlaygroundPage, options),
+        mount(AgentResources, options),
+        mount(NativeResources, options),
+        mount(CostCalculator, options)
+      ];
+    });
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await Promise.all(setup.mock.results[0].value.map(unmount));
+      await unmount(harness);
+    });
+    const values = (selector: string) =>
+      Array.from(
+        target.querySelectorAll<HTMLOptionElement>(selector),
+        (option) => option.value
+      );
+
+    await vi.waitFor(() => {
+      expect(values('#playground-routes option')).toEqual(['route-a']);
+      expect(
+        values('select option').filter((value) => value === 'route-a')
+      ).toHaveLength(3);
+      expect(values('select option')).not.toContain('old-route');
+      expect(target.querySelector('#calc-route')).toHaveProperty(
+        'value',
+        'route-a'
+      );
+    });
+  });
+
   it('shows the surface of the selected Decisions dialect', () => {
     serve(() => json({}));
     const target = document.createElement('div');
@@ -222,6 +314,51 @@ describe('playground composer', () => {
     state.toggleStream(false);
     expect(state.streamCheck).toBe('idle');
     expect(state.streamCheckMessage).toBe('');
+  });
+
+  it('blocks and re-enables streaming as routing preferences change', async () => {
+    listPublishedRoutes();
+    vi.mocked(simulateRouting).mockImplementation(async ({ preferences }) => [
+      {
+        eligible: !preferences?.ignore?.includes('provider-a'),
+        priority: 1,
+        provider_id: 'provider-a',
+        strategy: 'weighted',
+        target_id: 'target-a',
+        upstream_model: 'model-a'
+      }
+    ]);
+    const handler = vi.fn(async (request: Request) => {
+      route(request, 'POST', '/api/v1/playground/stream');
+      expect(await request.json()).toMatchObject({
+        model: 'route-a',
+        stream: true,
+        routing: { ignore: [] }
+      });
+      return new Response('event: done\ndata: {}\n\n', {
+        headers: { 'Content-Type': 'text/event-stream' }
+      });
+    });
+    serve(handler);
+    const state = playground();
+    state.model = publishedRoute.slug;
+    state.input = 'Hello';
+    await vi.waitFor(() =>
+      expect(state.selectedRoute?.slug).toBe(publishedRoute.slug)
+    );
+    flushSync();
+    state.toggleStream(true);
+    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+
+    state.routing = '{"ignore":["provider-a"]}';
+    await state.submit(submitEvent());
+    expect(handler).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(state.streamCheck).toBe('unsupported'));
+
+    state.routing = '{"ignore":[]}';
+    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+    await state.submit(submitEvent());
+    expect(handler).toHaveBeenCalledOnce();
   });
 });
 

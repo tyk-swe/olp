@@ -327,9 +327,6 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		return
 	}
 	rewrite, referenceErr := prepareRetainedAgent(response)
-	if referenceErr == nil {
-		native.exchange.completeRetainedControl()
-	}
 	if e.Action == "create" {
 		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{IDs: []string{nativeID}})
 		if prepareErr != nil || prepared.Commit(commitCtx) != nil {
@@ -344,9 +341,10 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	projected, projectErr := s.projectRetainedAgent(ctx, resource, rewrite)
 	if projectErr != nil {
-		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
+		fail(retainedProjectionError(native.exchange, projectErr))
 		return
 	}
+	native.exchange.completeRetainedControl()
 	status = native.StatusCode
 	s.writeStateJSONStatus(w, x, projected, status, native.exchange)
 }
@@ -427,7 +425,7 @@ func (s *Server) projectRetainedAgent(ctx context.Context, resource *resources.R
 		identity.UpstreamID = id
 		bound, findErr := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if findErr != nil {
-			return "", findErr
+			return "", retainedBindingStoreError(findErr)
 		}
 		return bound.ID, nil
 	})
@@ -585,8 +583,15 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		if readErr == nil {
 			rewrite, referenceErr := prepareRetainedAgent(body)
 			if referenceErr == nil {
+				result, projectErr := s.projectRetainedAgent(ctx, resource, rewrite)
+				if projectErr != nil {
+					public := retainedProjectionError(native.exchange, projectErr)
+					s.settlePinnedHold(ctx, p.hold)
+					fail(public)
+					return public.Status
+				}
 				native.exchange.completeRetainedControl()
-				projected, readErr = s.projectRetainedAgent(ctx, resource, rewrite)
+				projected = result
 			} else {
 				readErr = referenceErr
 			}

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/priority"
 )
@@ -102,10 +103,19 @@ func (p *Preferences) Validate(field string) error {
 		return invalid("The maximum cost must be a non-negative decimal string")
 	}
 	if len(p.MaxPrice) > 0 && string(p.MaxPrice) != "null" {
+		document, err := oif.ParseJSON(p.MaxPrice, oif.Limits{})
+		if err != nil || document.Root().Kind() != oif.Object {
+			return invalid("Invalid price ceiling")
+		}
+		for _, member := range document.Root().Members() {
+			switch member.Name {
+			case "input_per_million", "output_per_million", "unit_price":
+			default:
+				return invalid("Invalid price ceiling")
+			}
+		}
 		var c PriceCeiling
-		d := json.NewDecoder(bytes.NewReader(p.MaxPrice))
-		d.DisallowUnknownFields()
-		if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF {
+		if json.Unmarshal(p.MaxPrice, &c) != nil {
 			return invalid("Invalid price ceiling")
 		}
 		for _, amount := range []*string{c.Input, c.Output, c.Unit} {

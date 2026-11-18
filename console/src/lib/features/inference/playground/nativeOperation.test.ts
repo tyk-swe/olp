@@ -58,6 +58,23 @@ it('binds a completions request to the selected route and preserves its result',
   expect(stringifyNativeJSON(result.response)).toBe(raw);
 });
 
+it('preserves a valid native result larger than four MiB', async () => {
+  const text = 'x'.repeat(5 * 1024 * 1024);
+  const raw = JSON.stringify({ text });
+  vi.mocked(gatewayFetch).mockResolvedValue(new Response(raw));
+
+  const result = await runNativeOperation(
+    'ocr',
+    'mistral-ocr',
+    'chosen-route',
+    'olp_test',
+    '{}'
+  );
+
+  expect(result.response).toEqual({ text });
+  expect(result.raw).toBe(raw);
+});
+
 it('sends URL-bound embeddings with the raw-vector contract', async () => {
   vi.mocked(gatewayFetch).mockResolvedValue(new Response('{}'));
   await runNativeOperation(

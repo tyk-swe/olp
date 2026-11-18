@@ -58,6 +58,7 @@ export const publicNativeOperations: ReadonlySet<string> = new Set([
 ]);
 
 export type NativeOperation = keyof typeof nativeOperationDialects;
+const maxResultBytes = 8 * 1024 * 1024;
 const bodyModelDialects = new Set([
   'openai-completions',
   'openai-decisions',
@@ -178,11 +179,11 @@ export async function runNativeOperation(
       `The public operation was not admitted (${response.status}). Check the route, key and native dialect.`
     );
   const raw = await response.text();
-  if (new TextEncoder().encode(raw).byteLength > 8 << 20)
+  if (new TextEncoder().encode(raw).byteLength > maxResultBytes)
     throw new Error('The native operation result exceeds the browser limit.');
   let document: NativeValue;
   try {
-    document = parseNativeJSON(raw);
+    document = parseNativeJSON(raw, maxResultBytes);
   } catch {
     throw new Error('The provider returned an invalid native JSON result.');
   }

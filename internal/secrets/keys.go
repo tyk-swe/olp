@@ -20,10 +20,15 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/secretstore"
+	"golang.org/x/sys/unix"
 )
 
 func ReadFile(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	return readFile(path, os.O_RDONLY)
+}
+
+func readFile(path string, flags int) ([]byte, error) {
+	f, err := os.OpenFile(path, flags, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("cannot read secret file: %w", os.ErrNotExist)
@@ -43,7 +48,7 @@ func ReadFile(path string) ([]byte, error) {
 }
 
 func ReadBootstrapToken(path string) (string, bool) {
-	data, err := ReadFile(path)
+	data, err := readFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK)
 	if err != nil || len(data) < 32 || len(data) > 256 {
 		return "", false
 	}

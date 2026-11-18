@@ -13,6 +13,7 @@ import {
 } from './ruleDraft';
 import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/management/test/transport.js';
+import { canChangeNotification } from './presentation';
 import {
   createNotificationDestination,
   createNotificationRule,
@@ -87,6 +88,17 @@ const delivery: NotificationDelivery = {
 };
 
 describe('notification API', () => {
+  it('requires settings access for installation notification actions', () => {
+    const developer = { project: true, installation: false };
+    const operator = { project: true, installation: true };
+
+    expect(canChangeNotification(destination.project_id, developer)).toBe(
+      false
+    );
+    expect(canChangeNotification(rule.project_id, operator)).toBe(true);
+    expect(canChangeNotification('project-id', developer)).toBe(true);
+  });
+
   it.each([
     {
       path: 'destinations',

@@ -76,6 +76,32 @@ describe('playground requests', () => {
     await expect(runPlayground(request)).resolves.toEqual(response);
   });
 
+  it('decodes a native result alongside its original JSON', async () => {
+    const text = 'x'.repeat(3 * 1024 * 1024);
+    const raw = JSON.stringify({ text });
+    serve(() => json({ response: { text }, response_raw: raw }));
+
+    const result = await runPlayground(request);
+    expect(result.response).toEqual({ text });
+    expect(result.response_raw).toBe(raw);
+  });
+
+  it('preserves exact digits in structured output', async () => {
+    const raw = '{"count":9007199254740993}';
+    serve(
+      () =>
+        new Response(
+          `{"output_text":${JSON.stringify(raw)},"structured_output":${raw},"latency_ms":1}`,
+          { headers: { 'Content-Type': 'application/json' } }
+        )
+    );
+
+    const result = await runPlayground(request);
+    expect(result.output_text).toBe(raw);
+    expect(JSON.stringify(result.structured_output)).toBe(raw);
+    expect(result.latency_ms).toBe(1);
+  });
+
   it('decodes fragmented streamed frames, completion and error events', async () => {
     const payload = new TextEncoder().encode(
       'event: frame\ndata: {"data":"héllo"}\n\n' +

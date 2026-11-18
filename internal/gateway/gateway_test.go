@@ -49,6 +49,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -240,6 +241,30 @@ type harness struct {
 	slotA    string
 	credA    string
 	upstream *httptest.Server
+}
+
+func TestBrowserDelegationPreflightAllowsConsent(t *testing.T) {
+	const origin = "https://client.example"
+	h := newHarness(t, Config{CORSAllowedOrigins: []string{origin}})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, h.server.URL+"/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "x-olp-delegation-consent")
+	resp, err := h.server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	allowed := strings.Split(resp.Header.Get("Access-Control-Allow-Headers"), ",")
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("Access-Control-Allow-Origin") != origin ||
+		!slices.ContainsFunc(allowed, func(value string) bool {
+			return strings.EqualFold(strings.TrimSpace(value), "X-OLP-Delegation-Consent")
+		}) {
+		t.Fatalf("delegated request cannot pass preflight: %d, %v", resp.StatusCode, resp.Header)
+	}
 }
 
 func newHarness(t *testing.T, cfg Config, extra ...Dependencies) *harness {
@@ -1486,6 +1511,79 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 	}
 }
 
+func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"file-native","vector_store_id":"store-other"}]}`)
+	})
+	p := testPinnedTarget(h, 0)
+	probed, granted := openTestProbe(t, h, p.provider.ID)
+	if !granted || !probed {
+		t.Fatal("could not claim half-open probe")
+	}
+	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
+	x := &call{
+		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
+		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		retainedAdmission: &retainedAdmissionPlan{billing: retainedPriced},
+	}
+	id := uuid.New()
+	parent := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native", TargetID: p.target.ID}
+	e := retainedapi.Endpoint{
+		Family:    retainedapi.Family{Operation: "vector_store", Kind: "vector_store_file", Identity: "id", Collection: "data"},
+		Method:    http.MethodGet,
+		Action:    "list",
+		Ancestors: []string{"vector_store"},
+	}
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+parent.ID+"/files", nil)
+	w := httptest.NewRecorder()
+	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native/files"
+	status := h.gateway.retainedDispatch(w, r, x, p, e, parent, parent, endpoint, nil, "", nil, func(e *fault.Error) {
+		h.gateway.refuse(x, w, e)
+	})
+	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	env := h.sink.last(t)
+	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
+		t.Fatalf("binding store failure was not reported as unavailable: %d, %s", status, w.Body.String())
+	}
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
+		t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
+	}
+	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+		t.Fatalf("a local binding failure changed provider health: probe=%v granted=%v", probed, granted)
+	}
+}
+
+func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
+	t.Parallel()
+	const output = `{"count":9007199254740993}`
+	playground := Playground{Gateway: &Server{now: time.Now}}
+	x := &call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{route: &routing.Route{Slug: routeSlug}}}
+	out := &outcome{completion: &wire.Completion{OutputText: output}}
+	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
+	body, err := json.Marshal(playground.response(x, out, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Text       string          `json:"output_text"`
+		Structured json.RawMessage `json:"structured_output"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Text != output || string(response.Structured) != output {
+		t.Fatalf("structured output changed the integer: %s", body)
+	}
+}
+
 func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -1762,36 +1860,36 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 		return got
 	}
 
-	page, hasMore, err := listedResourcePage(10, "", fetchFrom(all), authorize)
+	page, continuation, err := listedResourcePage(10, "", fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("mixed page error: %v", err)
 	}
-	if hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
-		t.Fatalf("mixed page = %v hasMore=%v, want only the valid rows and no continuation", ids(page), hasMore)
+	if continuation != "" || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
+		t.Fatalf("mixed page = %v continuation=%q, want only the valid rows and no continuation", ids(page), continuation)
 	}
 
-	page, hasMore, err = listedResourcePage(2, "", fetchFrom(all), authorize)
+	page, continuation, err = listedResourcePage(2, "", fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("refilled page error: %v", err)
 	}
-	if !hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
-		t.Fatalf("refilled page = %v hasMore=%v, want [valid-1 valid-2] with a continuation", ids(page), hasMore)
+	if continuation != "valid-2" || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
+		t.Fatalf("refilled page = %v continuation=%q, want [valid-1 valid-2] with a continuation", ids(page), continuation)
 	}
-	page, hasMore, err = listedResourcePage(2, "valid-2", fetchFrom(all), authorize)
+	page, continuation, err = listedResourcePage(2, continuation, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("following page error: %v", err)
 	}
-	if hasMore || !slices.Equal(ids(page), []string{"valid-3"}) {
-		t.Fatalf("following page = %v hasMore=%v, want [valid-3] and no continuation", ids(page), hasMore)
+	if continuation != "" || !slices.Equal(ids(page), []string{"valid-3"}) {
+		t.Fatalf("following page = %v continuation=%q, want [valid-3] and no continuation", ids(page), continuation)
 	}
 
 	staleOnly := []*resources.Resource{{ID: "stale-1"}, {ID: "stale-2"}, {ID: "stale-3"}}
-	page, hasMore, err = listedResourcePage(2, "", fetchFrom(staleOnly), authorize)
+	page, continuation, err = listedResourcePage(2, "", fetchFrom(staleOnly), authorize)
 	if err != nil {
 		t.Fatalf("all-stale page error: %v", err)
 	}
-	if hasMore || len(page) != 0 {
-		t.Fatalf("all-stale page = %v hasMore=%v, want empty with no continuation", ids(page), hasMore)
+	if continuation != "" || len(page) != 0 {
+		t.Fatalf("all-stale page = %v continuation=%q, want empty with no continuation", ids(page), continuation)
 	}
 
 	broken := []*resources.Resource{{ID: "valid-1"}, {ID: "broken-1"}}
@@ -1803,6 +1901,26 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 	if _, _, err := listedResourcePage(2, "", failingFetch, authorize); err != fetchErr {
 		t.Fatalf("fetch error = %v, want %v", err, fetchErr)
 	}
+
+	t.Run("bounded scan can continue without exposing denied IDs", func(t *testing.T) {
+		denied := make([]*resources.Resource, 500)
+		for i := range denied {
+			denied[i] = &resources.Resource{ID: fmt.Sprintf("stale-%d", i)}
+		}
+		fetch := fetchFrom(append(denied, &resources.Resource{ID: "valid-1"}))
+		server := Server{deps: Dependencies{Digester: secrets.NewAuthKey(make([]byte, 32), "test-installation")}}
+		page, cursor, err := server.listedResourcePage("key-a", "pageToken", 2, "", fetch, authorize)
+		if err != nil || len(page) != 0 || cursor == "" || strings.Contains(cursor, "stale-") {
+			t.Fatalf("first page = %v cursor=%q err=%v, want empty page with an opaque continuation", ids(page), cursor, err)
+		}
+		if _, _, err := server.listedResourcePage("key-b", "pageToken", 2, cursor, fetch, authorize); err == nil || err.Status != http.StatusBadRequest {
+			t.Fatalf("another key's continuation error = %v, want 400", err)
+		}
+		page, cursor, err = server.listedResourcePage("key-a", "pageToken", 2, cursor, fetch, authorize)
+		if err != nil || cursor != "" || !slices.Equal(ids(page), []string{"valid-1"}) {
+			t.Fatalf("next page = %v cursor=%q err=%v, want visible row and no continuation", ids(page), cursor, err)
+		}
+	})
 }
 
 func TestFileDownloadHeadersForceAttachmentForHTML(t *testing.T) {

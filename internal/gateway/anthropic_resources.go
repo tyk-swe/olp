@@ -337,10 +337,10 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		return s.authorizeListedResource(r.Context(), authority, row)
 	}
 	var rows []*resources.Resource
-	var hasMore bool
+	var continuation string
 	var listErr *fault.Error
 	if before != "" {
-		rows, hasMore, listErr = listedResourcePage(limit, before, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+		rows, continuation, listErr = s.listedResourcePage(authority.ID, "before_id", limit, before, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
 			batch, err := s.deps.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, count, cursor)
 			if err != nil {
 				return nil, listFailure(err)
@@ -350,7 +350,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		}, authorize)
 		slices.Reverse(rows)
 	} else {
-		rows, hasMore, listErr = listedResourcePage(limit, cursor, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+		rows, continuation, listErr = s.listedResourcePage(authority.ID, "after_id", limit, cursor, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
 			batch, err := s.deps.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, count, cursor)
 			if err != nil {
 				return nil, listFailure(err)
@@ -371,13 +371,20 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		}
 		items, ids = append(items, object), append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, anthropicListBody(items, ids, hasMore))
+	s.writeStateJSON(w, x, anthropicListBody(items, ids, continuation, before != ""))
 }
 
-func anthropicListBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
-	body := map[string]any{"data": items, "has_more": hasMore}
+func anthropicListBody(items []json.RawMessage, ids []string, continuation string, backwards bool) []byte {
+	body := map[string]any{"data": items, "has_more": continuation != ""}
 	if len(ids) > 0 {
 		body["first_id"], body["last_id"] = ids[0], ids[len(ids)-1]
+	}
+	if continuation != "" {
+		if backwards {
+			body["first_id"] = continuation
+		} else {
+			body["last_id"] = continuation
+		}
 	}
 	return mustJSON(body)
 }
@@ -512,7 +519,7 @@ func anthropicListCursor(query url.Values, kind string) (int, string, string, *f
 	if cursor == "" {
 		cursor = after
 	}
-	if cursor != "" && !validAnthropicCursor(kind, cursor) {
+	if cursor != "" && !strings.HasPrefix(cursor, retainedListCursorPrefix) && !validAnthropicCursor(kind, cursor) {
 		param := "after_id"
 		if before != "" {
 			param = "before_id"

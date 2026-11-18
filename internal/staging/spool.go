@@ -385,7 +385,7 @@ func (s *Spool) enqueueCleanup(job *cleanupJob) {
 	}
 	select {
 	case s.janitorQueue <- job:
-	default:
+	case <-s.janitorDone:
 		s.release(job.bytes)
 	}
 }
@@ -441,8 +441,8 @@ func (s *Spool) Close() error {
 	if s.closed.Swap(true) {
 		return nil
 	}
-	s.janitorMu.Lock()
 	close(s.janitorDone)
+	s.janitorMu.Lock()
 	s.janitorMu.Unlock()
 	s.janitors.Wait()
 draining:

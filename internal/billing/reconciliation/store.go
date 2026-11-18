@@ -86,7 +86,7 @@ func coveredDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, w
 }
 
 func invoicedDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, window Range) ([]invoicedDay, error) {
-	rows, err := q.Query(ctx, `SELECT provider_id, day, sum(amount),
+	rows, err := q.Query(ctx, `SELECT provider_id, day, CASE WHEN count(DISTINCT btrim(currency))=1 THEN sum(amount) ELSE 0 END,
 		array_agg(DISTINCT btrim(currency) ORDER BY btrim(currency))
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=ANY($1::uuid[]) AND day>=$2::date AND day<$3::date

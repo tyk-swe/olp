@@ -761,7 +761,7 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, cursorErr)
 		return
 	}
-	rows, hasMore, listErr := listedResourcePage(pageSize, pageToken, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+	rows, continuation, listErr := s.listedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
 		batch, err := s.deps.Resources.ListKinds(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
@@ -788,8 +788,8 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 		operations = append(operations, operation)
 	}
 	response := map[string]any{"operations": operations}
-	if hasMore && len(rows) > 0 {
-		response["nextPageToken"] = rows[len(rows)-1].ID
+	if continuation != "" {
+		response["nextPageToken"] = continuation
 	}
 	s.writeStateJSON(w, x, mustJSON(response))
 }
@@ -912,7 +912,7 @@ func geminiBatchPageCursor(query url.Values) (int, string, *fault.Error) {
 		pageSize = parsed
 	}
 	token := query.Get("pageToken")
-	if token != "" && !validGeminiResourceID(token, resources.KindGeminiBatch) {
+	if token != "" && !strings.HasPrefix(token, retainedListCursorPrefix) && !validGeminiResourceID(token, resources.KindGeminiBatch) {
 		param := "pageToken"
 		return 0, "", fault.InvalidRequest("invalid_value", "pageToken must be a local Gemini batch identifier.", &param)
 	}

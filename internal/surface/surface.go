@@ -60,7 +60,7 @@ func Of(path string) Surface {
 		}
 	}
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(path, prefix.Path) {
+		if path == prefix.Path || strings.HasSuffix(prefix.Path, "/") && strings.HasPrefix(path, prefix.Path) {
 			return prefix.Surface
 		}
 	}

@@ -506,7 +506,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
-	filtered, hasMore, listErr := listedResourcePage(limit, after, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+	filtered, continuation, listErr := s.listedResourcePage(authority.ID, "after", limit, after, func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
 		batch, err := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, count, cursor)
 		if errors.Is(err, resources.ErrNotFound) {
 			return nil, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after"))
@@ -535,7 +535,10 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	if len(filtered) > 0 {
 		first, last = filtered[0].ID, filtered[len(filtered)-1].ID
 	}
-	s.writeStateJSON(w, x, mustJSON(map[string]any{"object": "list", "data": data, "has_more": hasMore, "first_id": first, "last_id": last}))
+	if continuation != "" {
+		last = continuation
+	}
+	s.writeStateJSON(w, x, mustJSON(map[string]any{"object": "list", "data": data, "has_more": continuation != "", "first_id": first, "last_id": last}))
 }
 
 func listedCloudBatch(row *resources.Resource) (json.RawMessage, *fault.Error) {

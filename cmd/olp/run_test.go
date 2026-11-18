@@ -35,6 +35,11 @@ func TestControlNeverAnswersConsumerProtocolPathsWithTheConsole(t *testing.T) {
 			t.Errorf("%s %s answered %d %q, want a reserved 404", request.method, request.path, recorder.Code, recorder.Body.String())
 		}
 	}
+	console := httptest.NewRecorder()
+	Perimeter("https://example.invalid", public).ServeHTTP(console, httptest.NewRequest(http.MethodGet, "/mcp-servers", nil))
+	if console.Body.String() != "console" || console.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatal("MCP Servers did not receive the console page and its perimeter headers")
+	}
 }
 
 func TestReencryptDryRunAcceptsConfigurationFlagsBeforeIt(t *testing.T) {

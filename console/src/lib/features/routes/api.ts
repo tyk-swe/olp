@@ -37,6 +37,10 @@ export async function listRoutes(signal?: AbortSignal): Promise<ActiveRoute[]> {
   return collectCursorPages((cursor) => listRoutePage(cursor, signal));
 }
 
+export function selectActiveRoutes(routes: ActiveRoute[]): ActiveRoute[] {
+  return routes.filter((route) => route.state === 'active');
+}
+
 export async function listRoutePage(
   cursor?: string,
   signal?: AbortSignal

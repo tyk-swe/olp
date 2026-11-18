@@ -25,7 +25,11 @@ func protocol(detail string) *Failure {
 
 func decodeFailure(err *media.Error) *Failure {
 	if err.Status >= 400 && err.Status < 500 {
-		return &Failure{Class: upstream.ClientError, Status: err.Status,
+		class := upstream.ClientError
+		if err.Code == string(upstream.ContentFilter) {
+			class = upstream.ContentFilter
+		}
+		return &Failure{Class: class, Status: err.Status,
 			Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
 	}
 	return protocol(err.Message)

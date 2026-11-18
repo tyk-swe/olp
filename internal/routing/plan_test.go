@@ -53,7 +53,16 @@ func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 	if _, e = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{Preferences: &Preferences{Strategy: ptr("price")}}); e == nil {
 		t.Fatal("expanded strategy permission")
 	}
-	for _, payload := range []string{`{"deadline":9000}`, `{"only":["anything"]}`, `{"max_price":{"input_per_million":"1e9"}}`, `{"allowed_strategies":["price"]}`, `{"strategy":"price"} {}`, `null`} {
+	for _, payload := range []string{
+		`{"deadline":9000}`,
+		`{"only":["anything"]}`,
+		`{"max_price":{"input_per_million":"1e9"}}`,
+		`{"max_price":{"Input_Per_Million":"1.00"}}`,
+		`{"max_price":{"input_per_million":"1.00","input_per_million":"2.00"}}`,
+		`{"allowed_strategies":["price"]}`,
+		`{"strategy":"price"} {}`,
+		`null`,
+	} {
 		if _, e = ParsePreferences([]byte(payload)); e == nil {
 			t.Fatalf("accepted invalid controls %s", payload)
 		}

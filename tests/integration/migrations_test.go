@@ -315,20 +315,77 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	}
 }
 
-func TestMigrationsIgnoreTheSessionStatementTimeout(t *testing.T) {
+func TestMigrationsApplyAFileThatSortsBeforeAnAppliedMigration(t *testing.T) {
 	t.Parallel()
-	_, address := harness.EmptyDatabase(t)
+	pool, _ := harness.EmptyDatabase(t)
+	const skipped, last = "0104_agent_delegation.sql", "0104_code_pool_weights.sql"
+	dir := "../../internal/database/migrations"
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA olp;
+		CREATE TABLE olp.migrations(version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		name := file.Name()
+		if name == skipped || name > last {
+			continue
+		}
+		sql, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
+			t.Fatalf("prepare historical migration %s: %v", name, err)
+		}
+		checksum := sha256.Sum256(sql)
+		if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version, checksum) VALUES($1, $2)", name, checksum[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Installation(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrationsIgnoreSessionStatementAndLockTimeouts(t *testing.T) {
+	t.Parallel()
+	holder, address := harness.EmptyDatabase(t)
 	config, err := database.Configuration(address, 2, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "25"
 	pool, err := database.Open(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if err := database.Migrate(t.Context(), pool); err != nil {
+	tx, err := holder.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- database.Migrate(t.Context(), pool) }()
+	select {
+	case err := <-result:
+		t.Fatalf("migration returned while the advisory lock was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
 }

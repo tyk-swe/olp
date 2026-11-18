@@ -2,7 +2,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { listRoutes } from '#lib/features/routes/api.js';
+  import { listRoutes, selectActiveRoutes } from '#lib/features/routes/api.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
@@ -21,7 +21,8 @@
   }));
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
+    queryFn: ({ signal }) => listRoutes(signal),
+    select: selectActiveRoutes
   }));
   let operation = $state('');
   let endpointKey = $state('');

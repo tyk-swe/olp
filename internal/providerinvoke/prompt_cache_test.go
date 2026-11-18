@@ -49,7 +49,7 @@ func lastBlockControl(t *testing.T, value any) any {
 
 func TestApplyPromptCacheAnthropicBreakpoints(t *testing.T) {
 	ephemeral := map[string]any{"type": "ephemeral", "ttl": "5m"}
-	tools := `"tools":[{"name":"a","input_schema":{"type":"object"}},{"name":"b","input_schema":{"type":"object"}}]`
+	tools := `"tools":[{"name":"a","input_schema":{"type":"object"}},{"name":"b","input_schema":{"type":"object","properties":{"cache_control":{"type":"string"}}}}]`
 	cached := func(ttl string) string { return `,"cache_control":{"type":"ephemeral","ttl":"` + ttl + `"}` }
 	userTurn := func(extra string) string {
 		return `{"role":"user","content":[{"type":"text","text":"first"` + extra + `}]}`

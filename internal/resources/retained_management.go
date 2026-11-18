@@ -63,6 +63,8 @@ func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (htt
 	store := New(m.Pool)
 	if err = store.RequestRetainedReconciliationTx(r.Context(), tx, resource.UUID, input.UpstreamID); errors.Is(err, ErrNotFound) {
 		return httpkit.Reply{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
+	} else if errors.Is(err, ErrSettlementClosed) {
+		return httpkit.Reply{}, httpkit.Fail(409, "settlement_closed", "This resource's retained settlement is already closed.")
 	} else if err != nil {
 		return httpkit.Reply{}, err
 	}

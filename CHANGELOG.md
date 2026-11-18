@@ -279,8 +279,7 @@ Code-mode diagnostics now represent paid API ownership separately. Paid attempts
   consumers on HTTPS sinks and Stripe Billing meter events on `stripe_meter`
   sinks with idempotent identifiers and per-sink project-to-customer maps.
 - Daily FOCUS 1.4 gzip-CSV datasets on object sinks in provider-cost or charge
-  basis, with revisioned restatement and in-repo conformance checking; see
-  [finops](docs/operate/finops.md).
+  basis, with revisioned restatement. See [finops](docs/operate/finops.md).
 - Per-attempt price lines (`cost_lines`, `charge_lines`) recording each
   billed component's quantity, unit and unit prices.
 - OpenAI, Anthropic, Bedrock, Vertex AI and Azure OpenAI billing imports and a

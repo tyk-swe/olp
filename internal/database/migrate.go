@@ -25,7 +25,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = 0"); err != nil {
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
@@ -43,7 +43,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	known := make([]string, 0, len(entries))
-	missingSeen := false
 	for _, entry := range entries {
 		name := entry.Name()
 		known = append(known, name)
@@ -55,9 +54,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		var stored []byte
 		err = tx.QueryRow(ctx, "SELECT checksum FROM olp.migrations WHERE version=$1", name).Scan(&stored)
 		if err == nil {
-			if missingSeen {
-				return errors.New("olp migration history is not a sequential prefix")
-			}
 			if !slices.Equal(stored, checksum[:]) {
 				return fmt.Errorf("migration checksum mismatch: %s", name)
 			}
@@ -66,7 +62,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		missingSeen = true
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
 			return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
 		}

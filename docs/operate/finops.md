@@ -88,7 +88,9 @@ server validates the key prefix and rejects `signing_secret`, `region`,
 Each event sends the deterministic identifier `olp-<sink id>-<attempt id>` and
 repeats it as the `Idempotency-Key`, so a
 redelivery is the same event to Stripe. A `duplicate_meter_event` response
-counts as delivered. Stripe enforces identifier uniqueness for at least 24
+counts as delivered. The first delivery claim fixes the meter settings for
+all retries of that event. Destination and credential edits apply to retries.
+Stripe enforces identifier uniqueness for at least 24
 hours while OLP retries within minutes, and accepts event timestamps up to
 35 days old; the default 30-day request retention stays inside that window.
 No `Stripe-Version` header is sent.
@@ -542,7 +544,7 @@ end-exclusive and at most 93 days.
 | Field | Meaning |
 | --- | --- |
 | `attributed_cost` | `estimated_cost` plus allocated commitment for the day's billable attempts |
-| `invoiced_cost` | imported line-item total for a covered day, else null. A covered day with no costs has value `0` |
+| `invoiced_cost` | imported line-item total for a covered day with one invoice currency, or null when the day has mixed currencies or no coverage. A covered day with no costs has value `0` |
 | `capture_rate` | `attributed / invoiced` to six decimals, or null with `capture_rate_unavailable_reason` (`not_imported`, `zero_invoice`, `currency_mismatch`) |
 | `priced_attempts`, `unpriced_attempts`, `incomplete_attempts` | billable attempt counts; `unpriced_share` is `unpriced/(priced+unpriced)` |
 | `excluded_caller_attempts` | billable attempts excluded for caller-paid or budget-exempt status |
@@ -556,7 +558,9 @@ and a `capture_rate_unavailable_reason` of `not_imported`.
 
 Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`
-uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. Caller-paid and
+uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. The invoice total
+is null when the range has no coverage or includes a currency other than the
+report currency. Caller-paid and
 budget-exempt attempts are excluded from attributed cost; hourly rollup rows
 only approximate priced/incomplete counts and cannot distinguish caller-paid
 usage, so their `budget_exempt` request count is counted as excluded. That

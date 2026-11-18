@@ -257,14 +257,14 @@ func organizationProject(r *http.Request, q access.Queryer, p access.Principal, 
 	if err = p.Organization(id, need); err != nil {
 		return err
 	}
-	if project := r.PathValue("project_id"); project != "" {
-		var matches bool
-		if err = q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id=$1 AND organization_id=$2)", project, id).Scan(&matches); err != nil {
-			return err
-		}
-		if !matches {
-			return httpkit.Fail(404, "not_found", "The resource was not found.")
-		}
+	project := r.PathValue("project_id")
+	var matches bool
+	if err := q.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.organizations o WHERE o.id=$1 AND
+		(NULLIF($2,'')::uuid IS NULL OR EXISTS(SELECT 1 FROM olp.projects p WHERE p.id=NULLIF($2,'')::uuid AND p.organization_id=o.id)))`, id, project).Scan(&matches); err != nil {
+		return err
+	}
+	if !matches {
+		return access.NotFound
 	}
 	return nil
 }

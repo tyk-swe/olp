@@ -3,12 +3,14 @@ package resources
 import (
 	"context"
 	"errors"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 )
+
+var ErrSettlementClosed = errors.New("retained settlement is closed")
 
 type RetainedClaim struct {
 	ResourceID       uuid.UUID
@@ -59,14 +61,19 @@ func (s *Store) RequestRetainedReconciliationTx(ctx context.Context, tx pgx.Tx, 
 	if len(hint) > 512 {
 		return ErrContract
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.retained_settlements SET poll_after=now(),reconciliation_hint=NULLIF($2,''),updated_at=now() WHERE resource_id=$1`, id, hint)
+	var state string
+	err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, id).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() != 1 {
-		return ErrNotFound
+	if state == "closed" {
+		return ErrSettlementClosed
 	}
-	return nil
+	_, updateErr := tx.Exec(ctx, `UPDATE olp.retained_settlements SET poll_after=now(),reconciliation_hint=NULLIF($2,''),updated_at=now() WHERE resource_id=$1`, id, hint)
+	return updateErr
 }
 func (s *Store) CommitRetainedPoll(ctx context.Context, c RetainedClaim, r *Resource, observation RetainedObservation, adopt bool) error {
 	tx, err := s.pool.Begin(ctx)

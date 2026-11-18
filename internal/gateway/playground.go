@@ -437,8 +437,8 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 		res["usage"] = c.Usage
 	}
 	if in.ResponseFormat != nil && in.ResponseFormat.Type != "text" && c.OutputText != "" {
-		var structured any
-		if json.Unmarshal([]byte(c.OutputText), &structured) == nil {
+		structured := json.RawMessage(c.OutputText)
+		if json.Valid(structured) {
 			res["structured_output"] = structured
 		}
 	}

@@ -6,7 +6,11 @@
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import { listProjects } from '#lib/features/access/projects/api.js';
   import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
+  import {
+    listRoutes,
+    selectActiveRoutes,
+    simulateRouting
+  } from '#lib/features/routes/api.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import {
     decisionRows,
@@ -56,7 +60,8 @@
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listRoutes(signal)
+    queryFn: ({ signal }) => listRoutes(signal),
+    select: selectActiveRoutes
   }));
   const providers = createQuery(() => ({
     queryKey: providerKeys.all(),
@@ -70,7 +75,8 @@
   }));
 
   $effect(() => {
-    if (!route && routes.data?.[0]) route = routes.data[0].slug;
+    if (!routes.data?.some((item) => item.slug === route))
+      route = routes.data?.[0]?.slug ?? '';
   });
   $effect(() => {
     if (!providerId && providers.data?.[0]) providerId = providers.data[0].id;

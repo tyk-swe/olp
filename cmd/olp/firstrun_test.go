@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,43 @@ func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testi
 	if after := snapshot(t, dir, databaseDir); after != before || rerun.Len() != 0 {
 		t.Fatalf("rerun changed existing secrets or reported creating files: %q", rerun.String())
 	}
+
+	t.Run("preserves the existing PostgreSQL password", func(t *testing.T) {
+		dir, databaseDir := t.TempDir(), t.TempDir()
+		const password = "  legacy:secret\\\t "
+		if err := os.WriteFile(filepath.Join(databaseDir, "postgres_password"), []byte(password), 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if err := initSecrets([]string{"--dir", dir, "--database-dir", databaseDir}, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		env := map[string]string{
+			"OLP_DATABASE_PASSWORD_FILE": filepath.Join(dir, "postgres_password"),
+			"OLP_DATABASE_URL":           "postgres://olp@postgres:5432/olp",
+		}
+		c, err := parseWithFlags([]string{"all"}, func(key string) string { return env[key] }, io.Discard, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		database, err := pgconn.ParseConfig(c.DatabaseURL)
+		if err != nil {
+			t.Fatal("cannot parse the database URL")
+		}
+		if database.Password != password {
+			t.Fatal("OLP did not use the original password")
+		}
+	})
+
+	t.Run("refuses a nonregular bootstrap token", func(t *testing.T) {
+		dir, databaseDir := t.TempDir(), t.TempDir()
+		tokenPath := filepath.Join(dir, "olp_bootstrap_token")
+		if err := os.Mkdir(tokenPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := initSecrets([]string{"--dir", dir, "--database-dir", databaseDir}, io.Discard); err == nil {
+			t.Fatal("initializer accepted a directory in place of the bootstrap token")
+		}
+	})
 }
 
 func read(t *testing.T, path string) string {

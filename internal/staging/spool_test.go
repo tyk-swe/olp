@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -246,4 +247,37 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 	if got := runtime.NumGoroutine(); got > before+4 {
 		t.Fatalf("got %d goroutines after closing, want the cleanup workers stopped (started from %d)", got, before)
 	}
+}
+
+func TestSaturatedSpoolCleanupRetriesTheLastArtifact(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		spool := newSpool(t)
+		outside := t.TempDir()
+		path := unremovablePath(t, outside, "blocked")
+		for range cleanupQueueCapacity + cleanupConcurrency {
+			if !spool.tryReserve(1) {
+				t.Fatal("could not reserve bytes")
+			}
+			spool.enqueueCleanup(&cleanupJob{path: path, bytes: 1})
+		}
+		target := filepath.Join(outside, "removable")
+		if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !spool.tryReserve(1) {
+			t.Fatal("could not reserve bytes for the last artifact")
+		}
+		go spool.enqueueCleanup(&cleanupJob{path: target, bytes: 1})
+		synctest.Wait()
+		if _, err := os.Stat(target); err == nil && spool.UsedBytes() != cleanupQueueCapacity+cleanupConcurrency+1 {
+			t.Error("spool released a reservation while its artifact still existed")
+		}
+		if err := os.Remove(filepath.Join(path, "kept")); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) || spool.UsedBytes() != 0 {
+			t.Errorf("cleanup left the last artifact or its reservation: %v, %d bytes", err, spool.UsedBytes())
+		}
+	})
 }

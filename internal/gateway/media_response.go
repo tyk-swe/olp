@@ -129,7 +129,6 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 	case transport.Content:
 		s.streamArtifact(w, x, out, payload.Artifact)
 	case transport.Text:
-		out.committed = true
 		format := "text/plain; charset=utf-8"
 		switch x.media.TranscriptFormat() {
 		case "srt":
@@ -142,7 +141,6 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 			return err
 		})
 	case transport.Transcript:
-		out.committed = true
 		if x.strict() && result.Source.Valid() {
 			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
 			return
@@ -186,6 +184,9 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(out.status)
 	out.committed = true
+	if n := len(x.facts); n > 0 {
+		x.facts[n-1].Committed = true
+	}
 	err := write()
 	if err == nil {
 		err = rc.Flush()
