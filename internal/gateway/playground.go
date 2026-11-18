@@ -361,7 +361,11 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (httpki
 		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	s.finish(x, out, http.StatusOK)
-	return httpkit.OK(p.response(x, out, in)), nil
+	return httpkit.Reply{
+		Status:              http.StatusOK,
+		Body:                p.response(x, out, in),
+		DisableHTMLEscaping: in.operation() != "generation",
+	}, nil
 }
 
 func routingEvidence(x *call) []map[string]any {
