@@ -15,6 +15,12 @@ func TestValidateInlineMediaEnforcesDecodedLimits(t *testing.T) {
 			{"type":"input_image","image_url":"data:image/png;base64,YWJj"}
 		]}]
 	}`
+	const geminiBody = `{
+		"contents":[{"role":"user","parts":[
+			{"inlineData":{"mimeType":"image/png","data":"YWI="}},
+			{"inlineData":{"mimeType":"image/png","data":"YWJj"}}
+		]}]
+	}`
 	for _, tc := range []struct {
 		name   string
 		family wire.Format
@@ -36,6 +42,8 @@ func TestValidateInlineMediaEnforcesDecodedLimits(t *testing.T) {
 				{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YWJj"}}
 			]}]}]
 		}`},
+		{"Gemini unary generation", wire.Gemini, geminiBody},
+		{"Gemini streaming generation", wire.GeminiStream, geminiBody},
 		{"Gemini wrapped count and function response", wire.GeminiCount, `{
 			"generateContentRequest":{"contents":[{"role":"user","parts":[
 				{"inlineData":{"mimeType":"image/png","data":"YWI="}},

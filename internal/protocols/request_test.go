@@ -50,6 +50,9 @@ func TestParseNativeRequestEnvelope(t *testing.T) {
 			if request.Family != tc.family || request.Route != tc.route || request.Stream != tc.stream {
 				t.Fatalf("family=%s route=%q stream=%t, want %s %q %t", request.Family, request.Route, request.Stream, tc.family, tc.route, tc.stream)
 			}
+			if body := request.OIF().Document().Raw(); body != tc.body {
+				t.Fatalf("retained request body = %q, want %q", body, tc.body)
+			}
 		})
 	}
 }
