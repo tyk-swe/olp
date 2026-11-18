@@ -30,46 +30,92 @@ function mountPanel(
   return target;
 }
 
-it('saves edited fields against the latest saved etag', async () => {
-  const saves = vi.fn<(ifMatch: string | null, body: unknown) => void>();
-  let stored: unknown = { groups: { chat: ['alpha'] }, etag: 'loaded' };
-  serve(async (request) => {
-    if (request.method === 'PUT') {
-      const body = await request.json();
-      saves(request.headers.get('If-Match'), body);
-      stored = { ...body, etag: `saved-${saves.mock.calls.length}` };
-    }
-    return json(stored);
-  });
+it('keeps a conflicting edit until reload and saves with the refreshed etag', async () => {
+  const initial = { groups: { chat: ['alpha'] }, etag: 'loaded' };
+  const refreshed = { groups: { chat: ['alpha', 'gamma'] }, etag: 'refreshed' };
+  const saved = { groups: { chat: ['alpha', 'gamma', 'beta'] }, etag: 'saved' };
+  const final = { groups: {}, etag: 'final' };
+  const revisions = [initial, refreshed, saved, final];
+  const conflict = 'The saved policy changed. Reload it before saving.';
+  const write = vi
+    .fn<(request: Request) => Response>(() => json(final))
+    .mockReturnValueOnce(
+      json(
+        {
+          type: 'https://openllmproxy.dev/problems/etag_mismatch',
+          title: 'Precondition Failed',
+          status: 412,
+          detail: conflict
+        },
+        412
+      )
+    )
+    .mockReturnValueOnce(json(saved));
+  serve((request) =>
+    request.method === 'PUT'
+      ? write(request)
+      : json(revisions[write.mock.calls.length] ?? final)
+  );
+
   const target = mountPanel(ProjectRouteGroupsPanel);
-  const save = async (count: number) => {
-    target
-      .querySelector('form')
-      ?.dispatchEvent(new Event('submit', { cancelable: true }));
-    await vi.waitFor(() => {
-      expect(saves).toHaveBeenCalledTimes(count);
-      expect(target.querySelector('button[type="submit"]')?.textContent).toBe(
-        'Save route groups'
-      );
+  const memberRoutes = () => {
+    const field = [...target.querySelectorAll('label')].find(
+      (label) => label.textContent.trim() === 'Member routes'
+    )?.control;
+    assert.instanceOf(field, HTMLTextAreaElement);
+    return field;
+  };
+  const findButton = (label: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent.trim() === label
+    );
+  const clickButton = (label: string) => {
+    const button = findButton(label);
+    assert.instanceOf(button, HTMLButtonElement);
+    flushSync(() => button.click());
+  };
+  const saveLabel = 'Save route groups';
+  const alert = () => target.querySelector('[role="alert"]');
+  const waitForSuccessfulSave = () =>
+    vi.waitFor(() => {
+      expect(findButton(saveLabel)?.disabled).toBe(false);
+      expect(alert()).toBeNull();
     });
+  const editAndSave = (routes: string) => {
+    const field = memberRoutes();
+    flushSync(() => {
+      field.value = routes;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    clickButton(saveLabel);
   };
 
-  const remove = await vi.waitFor(() => {
-    const button = [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === 'Remove group chat'
-    );
-    expect(button).toBeDefined();
-    return button as HTMLButtonElement;
-  });
-  remove.click();
-  flushSync();
+  await vi.waitFor(() => expect(memberRoutes().value).toBe('alpha'));
+  editAndSave('beta');
+  await vi.waitFor(() => expect(alert()?.textContent).toBe(conflict));
+  expect(memberRoutes().value).toBe('beta');
 
-  await save(1);
-  await save(2);
+  clickButton('Reload saved policy');
+  await vi.waitFor(() => expect(memberRoutes().value).toBe('alpha, gamma'));
+  expect(alert()).toBeNull();
 
-  expect(saves.mock.calls).toEqual([
-    ['"loaded"', { groups: {} }],
-    ['"saved-1"', { groups: {} }]
+  editAndSave('alpha gamma beta');
+  await waitForSuccessfulSave();
+  expect(memberRoutes().value).toBe('alpha, gamma, beta');
+  clickButton('Remove group chat');
+  clickButton(saveLabel);
+  await waitForSuccessfulSave();
+
+  const submitted = await Promise.all(
+    write.mock.calls.map(async ([request]) => [
+      request.headers.get('If-Match'),
+      await request.json()
+    ])
+  );
+  expect(submitted).toEqual([
+    ['"loaded"', { groups: { chat: ['beta'] } }],
+    ['"refreshed"', { groups: saved.groups }],
+    ['"saved"', { groups: final.groups }]
   ]);
 });
 
