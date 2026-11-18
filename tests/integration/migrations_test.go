@@ -319,31 +319,17 @@ func TestMigrationsApplyAFileThatSortsBeforeAnAppliedMigration(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.EmptyDatabase(t)
 	const skipped, last = "0104_agent_delegation.sql", "0104_code_pool_weights.sql"
-	dir := "../../internal/database/migrations"
-	files, err := os.ReadDir(dir)
+	migrateBefore(t, pool, skipped)
+	sql, err := os.ReadFile(filepath.Join("../../internal/database/migrations", last))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA olp;
-		CREATE TABLE olp.migrations(version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
-		t.Fatal(err)
+	if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
+		t.Fatalf("prepare historical migration %s: %v", last, err)
 	}
-	for _, file := range files {
-		name := file.Name()
-		if name == skipped || name > last {
-			continue
-		}
-		sql, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
-			t.Fatalf("prepare historical migration %s: %v", name, err)
-		}
-		checksum := sha256.Sum256(sql)
-		if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version, checksum) VALUES($1, $2)", name, checksum[:]); err != nil {
-			t.Fatal(err)
-		}
+	checksum := sha256.Sum256(sql)
+	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version, checksum) VALUES($1, $2)", last, checksum[:]); err != nil {
+		t.Fatal(err)
 	}
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
