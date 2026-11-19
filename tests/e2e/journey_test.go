@@ -252,7 +252,14 @@ func TestSinkWritesReplayGuardRetainedHistoryAndAuditOnce(t *testing.T) {
 	if status, raw := s.Do(owner, "PUT", path, sink("lake", nil), harness.Idempotent(harness.ETag(map[string]any{"etag": etag}))); status != http.StatusConflict {
 		t.Fatalf("update of a retired sink: %s", describe(status, raw))
 	}
-	rows, err := s.Pool.Query(t.Context(), `SELECT action COLLATE "C" FROM olp.audit WHERE resource_id::text=$1 ORDER BY 1`, id)
+	if actions, want := auditActions(t, s, id), []string{"sink.create", "sink.retire", "sink.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("audit actions = %v, want %v", actions, want)
+	}
+}
+
+func auditActions(t *testing.T, s *service, resource string) []string {
+	t.Helper()
+	rows, err := s.Pool.Query(t.Context(), `SELECT action COLLATE "C" FROM olp.audit WHERE resource_id::text=$1 ORDER BY 1`, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,9 +267,7 @@ func TestSinkWritesReplayGuardRetainedHistoryAndAuditOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"sink.create", "sink.retire", "sink.update"}; !slices.Equal(actions, want) {
-		t.Fatalf("audit actions = %v, want %v", actions, want)
-	}
+	return actions
 }
 
 func TestCachePurgeRequiresOneScopeAndAgreesWithStatistics(t *testing.T) {
