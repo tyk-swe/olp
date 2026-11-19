@@ -16,7 +16,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
 | Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
@@ -148,9 +148,12 @@ provider completion.
 
 ## Gateway packages
 
-`internal/gateway` is the execution kernel. It owns the `call`, the route leg,
-the attempt loop, settlement and every inference surface that runs through them.
-The packages beneath it hold what the kernel uses and never import it back.
+`internal/gateway/kernel` is the execution kernel. It owns the `Call`, the route
+leg, the attempt loop, settlement and every surface that has not left it yet.
+A package under `internal/gateway/surface/` owns the routes of one surface and
+calls the kernel through its exported API. `internal/gateway` itself is the
+assembly, whose `Register` mounts the kernel and each surface. The other
+packages hold what the kernel uses and never import it back.
 
 | Package | Owns | May import |
 | --- | --- | --- |
@@ -165,11 +168,22 @@ The packages beneath it hold what the kernel uses and never import it back.
 | `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
 | `gateway/guardstream` | streamed output guardrails, with the tool call and text framing of each wire family in its own file | none |
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
+| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
+| `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
-Put new code in the kernel only when it needs a `call`. Code that reads a few
-values from the `call` takes them as a config struct and moves beneath the
+A surface package follows `surface/anthropicstate`. It exports one
+`Register(k *kernel.Server, mux *http.ServeMux)`, keeps its handlers on an
+unexported `surface` type that holds the kernel, and is added to `Register` in
+`internal/gateway/gateway.go`. The kernel never names a surface or a vendor
+flag for one. A surface that needs something from a shared step sets a general
+field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
+kernel's tests register the same assembly, so the refusal matrix in
+`kernel/surfaces_test.go` covers a surface's routes after it moves.
+
+Put new code in the kernel only when every surface needs it. Code that reads a
+few values from the `Call` takes them as a config struct and moves beneath the
 kernel, as `guardstream.Config` does. A handler that can be
 built from its own collaborators belongs in its own package, as
 `codeforward.Forwarder`, `traceingest.Ingester`, `delegation.Handler` and
@@ -178,17 +192,18 @@ delegation handler takes the ingress gate, the key authority and the kernel
 header preamble through its constructor, so it tests without a `Server` while
 its responses keep the request identity and CORS headers every inference
 response carries. Session reauthentication for delegated calls stays in the
-kernel, because it reads the `call` it reauthenticates.
+kernel, because it reads the `Call` it reauthenticates.
 
 ## Where new code goes
 
 Start from the owner in the table at the top of this guide. Feature behavior
 lives in the feature package with its SQL, transactions, validation and audit
 provenance, and the console screen for it lives in the matching feature under
-`console/src/lib/features/`. Gateway work that needs a `call` belongs in the
-kernel, and a gateway handler that can be built from its own collaborators
-belongs in its own package under `internal/gateway/` with its allowed imports
-declared in `scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`,
+`console/src/lib/features/`. A new gateway surface is a package under
+`internal/gateway/surface/`, work every surface shares belongs in the kernel,
+and a gateway handler that can be built from its own collaborators belongs in
+its own package under `internal/gateway/`. Each declares its allowed imports in
+`scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`,
 where each plane is assembled by one constructor and `Run` owns mode
 selection, listeners and shutdown ordering. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
