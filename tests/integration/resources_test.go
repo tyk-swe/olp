@@ -2547,7 +2547,7 @@ func (p *storeProvider) replies(string, int) map[string]string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	replies := map[string]string{"POST /vector_stores": providerStore(p.issues)}
-	for _, n := range []string{"1", "2", "3"} {
+	for _, n := range []string{"1", "2", "3", "4", "5"} {
 		replies["GET "+providerStorePath(n)], replies["POST "+providerStorePath(n)] = providerStore(n), providerStore(n)
 		replies["DELETE "+providerStorePath(n)] = `{"id":"vs_` + providerOwned + n + `","object":"vector_store.deleted","deleted":true}`
 	}
@@ -2696,5 +2696,137 @@ func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCal
 	ask("GET", stores+"/"+gone.ID, "", "", http.StatusNotFound, "not_found", "")
 	if kept(gone.ID) != "deleted" || len(upstream.sent("GET "+providerStorePath("3"))) != 1 {
 		t.Fatalf("a store the provider no longer has is kept as %q after %d provider reads", kept(gone.ID), len(upstream.sent("GET "+providerStorePath("3"))))
+	}
+}
+
+type storePage struct {
+	status      int
+	stores      string
+	more        bool
+	first, last string
+	code        string
+	reads       int
+	attempts    string
+}
+
+func TestAVectorStoreListPagesNewestFirstRefillsPastLostStoresAndRefusesWhatItCannotPage(t *testing.T) {
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "stores", "stores-model"
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price:       rates.Price{ProviderKind: "azure_openai", Model: model, Operation: "vector_store", StoragePerGiBDay: new("0.10"), Currency: "USD"},
+		EffectiveAt: fixture.observedAt,
+	})
+	provider := &storeProvider{issues: "1", scripted: map[string]string{}, statuses: map[string]int{}}
+	upstream := &retainedUpstream{replies: provider.replies, status: provider.status}
+	sink := &terminals{}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch", "vector_store"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream, sink: sink,
+	})
+	g.key(t, "owner")
+	numbered, issued := map[string]string{}, map[string]string{}
+	for _, n := range []string{"1", "2", "3", "4", "5"} {
+		provider.creates(n)
+		_, raw := g.send(t, "POST", "/v1/vector_stores", map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json", "Idempotency-Key": "store-" + n}, `{"name":"notes"}`, http.StatusOK)
+		var store retainedObject
+		if err := json.Unmarshal(raw, &store); err != nil || store.ID == "" {
+			t.Fatalf("create store %s answered %s: %v", n, raw, err)
+		}
+		numbered[store.ID], issued[n] = n, store.ID
+	}
+	reads := func() int {
+		upstream.mu.Lock()
+		defer upstream.mu.Unlock()
+		return len(slices.DeleteFunc(slices.Clone(upstream.calls), func(call upstreamCall) bool { return !strings.HasPrefix(call.request, "GET ") }))
+	}
+	list := func(query, route string, want int) storePage {
+		t.Helper()
+		recorded, read := len(sink.all()), reads()
+		_, raw := g.send(t, "GET", "/v1/vector_stores"+query, map[string]string{"Authorization": "Bearer owner", "X-OLP-Route": route}, "", want)
+		var reply struct {
+			Data    []struct{ ID string }
+			HasMore bool   `json:"has_more"`
+			FirstID string `json:"first_id"`
+			LastID  string `json:"last_id"`
+			Error   struct{ Code string }
+		}
+		if err := json.Unmarshal(raw, &reply); err != nil {
+			t.Fatalf("list %s answered %s: %v", query, raw, err)
+		}
+		page := storePage{status: want, more: reply.HasMore, first: numbered[reply.FirstID], last: numbered[reply.LastID], code: reply.Error.Code, reads: reads() - read}
+		for _, store := range reply.Data {
+			page.stores += numbered[store.ID]
+		}
+		seen := sink.all()
+		if len(seen) != recorded+1 {
+			t.Fatalf("list %s recorded %d requests, want one", query, len(seen)-recorded)
+		}
+		for _, attempt := range seen[recorded].Attempts {
+			page.attempts += fmt.Sprintf("%s:%v ", attempt.Class, attempt.Committed)
+		}
+		return page
+	}
+	delivered := func(n int) string { return strings.Repeat("success:true ", n) }
+	refused := storePage{status: http.StatusBadRequest, code: "invalid_parameter"}
+
+	for _, page := range []struct {
+		name, query string
+		want        storePage
+	}{
+		{"the whole list, newest first", "", storePage{status: 200, stores: "54321", first: "5", last: "1", reads: 5, attempts: delivered(5)}},
+		{"a first page", "?limit=2", storePage{status: 200, stores: "54", more: true, first: "5", last: "4", reads: 2, attempts: delivered(2)}},
+		{"the page after a store", "?limit=2&after=" + issued["4"], storePage{status: 200, stores: "32", more: true, first: "3", last: "2", reads: 2, attempts: delivered(2)}},
+		{"the last page", "?limit=2&after=" + issued["2"], storePage{status: 200, stores: "1", first: "1", last: "1", reads: 1, attempts: delivered(1)}},
+		{"a page that ends with the list", "?limit=5", storePage{status: 200, stores: "54321", first: "5", last: "1", reads: 5, attempts: delivered(5)}},
+		{"oldest first", "?order=asc&limit=3", storePage{status: 200, stores: "123", more: true, first: "1", last: "3", reads: 3, attempts: delivered(3)}},
+		{"an unknown parameter", "?filter=notes", refused},
+		{"a repeated parameter", "?limit=2&limit=3", refused},
+		{"an unknown order", "?order=sideways", refused},
+		{"an empty page", "?limit=0", refused},
+		{"a page over the largest size", "?limit=101", refused},
+		{"a cursor that is no store of this key", "?after=vector_store_00000000000000000000000000000000", refused},
+	} {
+		if got := list(page.query, slug, page.want.status); got != page.want {
+			t.Fatalf("%s is %+v, want %+v", page.name, got, page.want)
+		}
+	}
+	if got, want := list("", "another-route", 200), (storePage{status: 200}); got != want {
+		t.Fatalf("the stores of another route are %+v, want none and no provider read", got)
+	}
+
+	for _, n := range []string{"3", "4"} {
+		provider.answers("GET "+providerStorePath(n), http.StatusNotFound, `{"error":{"message":"No such store.","type":"invalid_request_error"}}`)
+	}
+	lost := storePage{status: 200, stores: "52", more: true, first: "5", last: "2", reads: 4, attempts: "success:true upstream_client:false upstream_client:false success:true "}
+	if got := list("?limit=2", slug, 200); got != lost {
+		t.Fatalf("a page over two stores the provider lost is %+v, want %+v", got, lost)
+	}
+	forgotten := storePage{status: 200, stores: "52", more: true, first: "5", last: "2", reads: 2, attempts: delivered(2)}
+	if got := list("?limit=2", slug, 200); got != forgotten {
+		t.Fatalf("the page after the lost stores were forgotten is %+v, want %+v", got, forgotten)
+	}
+
+	for _, broken := range []struct {
+		name, body string
+		status     int
+		want       storePage
+	}{
+		{"another store", providerStore("1"), 0, storePage{status: http.StatusBadGateway, code: "provider_protocol_error", reads: 2, attempts: "success:false protocol:false "}},
+		{"an outage", `{"error":{"message":"The provider broke.","type":"server_error"}}`, http.StatusInternalServerError, storePage{status: http.StatusInternalServerError, code: "provider_resource_error", reads: 2, attempts: "success:false upstream_server:false "}},
+	} {
+		provider.answers("GET "+providerStorePath("2"), broken.status, broken.body)
+		if got := list("", slug, broken.want.status); got != broken.want {
+			t.Fatalf("a list whose second store is answered with %s is %+v, want %+v", broken.name, got, broken.want)
+		}
+	}
+	provider.recovers("GET " + providerStorePath("2"))
+
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_resources SET state='submission_unknown' WHERE 'vector_store_'||replace(id::text,'-','')=$1`, issued["2"]); err != nil {
+		t.Fatal(err)
+	}
+	unsettled := storePage{status: 200, stores: "51", first: "5", last: "1", reads: 2, attempts: delivered(2)}
+	if got := list("", slug, 200); got != unsettled {
+		t.Fatalf("a list over a store whose creation is unknown is %+v, want %+v", got, unsettled)
 	}
 }
