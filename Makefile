@@ -57,6 +57,7 @@ check-console: ## Prepare console types and check formatting, types, and lint
 	pnpm --dir console api:generate
 	pnpm --dir console format:check
 	pnpm --dir console check
+	./scripts/check-exemptions.sh
 
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh

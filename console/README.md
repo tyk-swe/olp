@@ -42,7 +42,9 @@ repository-wide commands.
 - Every query key comes from the slice's `*Keys.ts` module.
 - The browser reaches the inference gateway only through `gatewayFetch` in
   `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
-- ESLint enforces the `apiClient` and `fetch` restrictions.
+- Writes build their `Idempotency-Key` and `If-Match` headers with
+  `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
+- ESLint enforces the `apiClient`, `fetch` and header restrictions.
 
 ## Feature ownership
 
@@ -50,6 +52,25 @@ repository-wide commands.
 `src/lib/components/` and pages in `src/routes/`. Keep route components thin.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
+
+## Boundaries
+
+ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
+
+- The shared layers (`src/lib/*.ts`, `components/`, `editing/`, `listing/`,
+  `management/` and `shell/`) never import from `src/lib/features/`. When two
+  features need the same thing, move it into a shared layer.
+- A feature imports another feature only through that feature's `index.ts`.
+  Add the export there instead of importing one of its files.
+- A `.svelte` file holds at most 400 lines of code. Split a larger one into
+  parts beside it.
+- The `Idempotency-Key` and `If-Match` header names appear only in
+  `src/lib/management/`.
+
+Files that broke a rule before it existed are listed in `eslint-legacy.json`.
+Those lists only shrink: `scripts/check-exemptions.sh` fails `make check-console`
+when a list is longer than on the default branch. Fix a new violation instead of
+listing the file, and remove a file from its list in the change that fixes it.
 
 ## Page building blocks
 
