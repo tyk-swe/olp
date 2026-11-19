@@ -108,7 +108,6 @@
     "internal/gateway/kernel/retained_lifecycle.go Server.retainedLifecycle",
     "internal/gateway/kernel/retained_native.go retainedInputMetadata",
     "internal/gateway/kernel/retrieval.go Server.queryRetrieval",
-    "internal/gateway/kernel/server.go Server.inferenceOperation",
     "internal/gateway/kernel/tool_loop.go Server.continueToolLoop",
     "internal/gateway/kernel/tool_loop.go Server.executeToolLoop",
     "internal/gateway/kernel/unary_dispatch.go Server.unaryAttempt",
