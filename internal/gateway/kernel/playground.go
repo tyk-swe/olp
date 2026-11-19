@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -20,10 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/publishedprompt"
-	"github.com/tyk-swe/olp/internal/platform/telemetry"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // PlaygroundTimeout bounds one console playground call end to end.
@@ -189,7 +186,7 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Call, principal authz.Principal) (parsedRequest, error) {
+func (in *playgroundRequest) parse(operation, mode string, run *MemberGeneration) (ParsedRequest, error) {
 	if in.Request != nil {
 		family := protocols.WireFamily(in.surface(), "", wire.Chat)
 		if family == wire.Gemini && mode == "streaming" {
@@ -197,8 +194,8 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Cal
 		}
 		doc, err := protocols.ParseSource(family, in.Request)
 		if err != nil {
-			e := requestError(err)
-			return parsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
+			e := RequestError(err)
+			return ParsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
 		}
 		if operation == "generation" {
 			if family == wire.Chat {
@@ -224,16 +221,16 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Cal
 						{Pointer: "/stream", Value: string(stream), Origin: oif.TransportOption, Reason: "playground mode binding"},
 					}
 				}
-				parsed, e := p.Gateway.parsePromptDocument(x, family, doc, in.Model, p.authorize(principal), bindings)
+				parsed, e := run.ExpandPrompt(family, doc, in.Model, bindings)
 				if e != nil {
-					return parsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
+					return ParsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
 				}
 				return parsed, nil
 			}
 		}
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
-			return parsedRequest{}, httpkit.Invalid("request", "request must be a JSON object")
+			return ParsedRequest{}, httpkit.Invalid("request", "request must be a JSON object")
 		}
 		if in.surface() == "gemini" {
 			delete(fields, "model")
@@ -245,17 +242,17 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Cal
 		data, _ := json.Marshal(fields)
 		parsed, err := protocols.SimulationRequest(data, operation, in.surface(), mode, in.Model)
 		if err != nil {
-			return parsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+			return ParsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		}
-		return parsedRequest{request: parsed, decoded: int64(len(data))}, nil
+		return ParsedRequest{Request: parsed, Decoded: int64(len(data))}, nil
 	}
 	body, err := in.chatBody()
 	if err != nil {
-		return parsedRequest{}, httpkit.Invalid("input", "the request could not be encoded")
+		return ParsedRequest{}, httpkit.Invalid("input", "the request could not be encoded")
 	}
 	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
-		return parsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return ParsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
 	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
 		kind := *in.Surface
@@ -267,31 +264,18 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Cal
 		}
 		encoded, encodedWire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
 		if e != nil {
-			return parsedRequest{}, httpkit.Invalid("input", e.Error())
+			return ParsedRequest{}, httpkit.Invalid("input", e.Error())
 		}
 		parsed, e = protocols.Parse(encodedWire, encoded, in.Model)
 		if e != nil {
-			return parsedRequest{}, httpkit.Invalid("input", e.Error())
+			return ParsedRequest{}, httpkit.Invalid("input", e.Error())
 		}
 	}
-	return parsedRequest{request: parsed}, nil
+	return ParsedRequest{Request: parsed}, nil
 }
 
-func (p *Playground) call(r *http.Request, principal authz.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *Call {
-	s := p.Gateway
-	return &Call{
-		request:     request{id: uuidString(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
-		family:      family,
-		preferences: preferences,
-
-		actor:  "playground",
-		origin: usage.OriginPlayground,
-		userID: principal.ID, routeLeg: routeLeg{affinity: []byte(principal.ID)}, generation:
-
-		// authorize admits routes in the member's projects. A route outside them is
-		// answered as missing, exactly like a route that does not exist.
-		generationCall{parsed: parsed},
-	}
+func (p *Playground) member(r *http.Request, principal authz.Principal, in playgroundRequest) *MemberGeneration {
+	return p.Gateway.MemberGeneration(r, Member{UserID: principal.ID, Preferences: in.Routing, Document: in.Request, Admit: p.authorize(principal)})
 }
 
 func (p *Playground) authorize(principal authz.Principal) func(*routing.Route) *fault.Error {
@@ -311,65 +295,27 @@ func (p *Playground) Handle(r *http.Request, principal authz.Principal) (httpkit
 	if err := in.validate(false); err != nil {
 		return httpkit.Reply{}, err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, nil, "", in.Routing)
-	if in.Request != nil {
-		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(in.Request))}
-	}
-	parsed, err := in.parse(in.operation(), "unary", p, x, principal)
+	run := p.member(r, principal, in)
+	parsed, err := in.parse(in.operation(), "unary", run)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
-	if x.request.body != nil {
-		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
+	out := run.Run(r.Context(), parsed, nil)
+	if e := out.Err; e != nil {
+		return httpkit.Reply{}, httpkit.Fail(cmp.Or(e.Status, http.StatusBadGateway), e.Code, e.Message)
 	}
-	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
-		x.Failure = e
-		s.Finish(x, nil, e.Status)
-		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
-	}
-	x.estimate = requestEstimate(x)
-	if !s.Gate.Admit(r.Context()) {
-		x.Failure = fault.Overloaded
-		s.Finish(x, nil, fault.Overloaded.Status)
-		return httpkit.Reply{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
-	}
-	defer s.Gate.Release(r.Context())
-	// Playground calls, streamed or not, are charged to the route's project and
-	// installation, so they hold against those caps as probes and shadows do.
-	defer s.settleAdmission(r.Context(), x)
-	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
-		x.Failure = e
-		s.Finish(x, nil, e.Status)
-		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
-	}
-	out := s.execute(r.Context(), x)
-	if out.Err != nil {
-		s.Finish(x, out, out.Err.Status)
-		status := out.Err.Status
-		if status == 0 {
-			status = http.StatusBadGateway
-		}
-		return httpkit.Reply{}, httpkit.Fail(status, out.Err.Code, out.Err.Message)
-	}
-	if e := s.enforceCompletionOutput(x, out.completion); e != nil {
-		s.Finish(x, out, e.Status)
-		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
-	}
-	s.Finish(x, out, http.StatusOK)
 	return httpkit.Reply{
 		Status:              http.StatusOK,
-		Body:                p.response(x, out, in),
+		Body:                playgroundResponse(run.Trail(), out.Completion, in),
 		DisableHTMLEscaping: in.operation() != "generation",
 	}, nil
 }
 
-func routingEvidence(x *Call) []map[string]any {
+func routingEvidence(trail MemberTrail) []map[string]any {
 	evidenceRows := []map[string]any{}
-	for _, fact := range x.facts {
+	for _, fact := range trail.Facts {
 		var evidence routing.Decision
-		for _, decision := range x.decisions {
+		for _, decision := range trail.Decisions {
 			if decision.TargetID == fact.TargetID && decision.CredentialSlotID != nil && *decision.CredentialSlotID == fact.SlotID {
 				evidence = decision
 				break
@@ -380,7 +326,7 @@ func routingEvidence(x *Call) []map[string]any {
 			"provider_id":    fact.ProviderID,
 			"upstream_model": fact.UpstreamModel,
 			"eligible":       true,
-			"priority":       attemptPriority(x, fact.TargetID),
+			"priority":       attemptPriority(trail, fact.TargetID),
 			"strategy":       fact.Strategy,
 			"price":          fact.Price, "vendor_id": fact.VendorID, "performance": evidence.Performance, "metadata_observed_at": evidence.MetadataObservedAt,
 			"attempt":            fact.Ordinal,
@@ -391,16 +337,15 @@ func routingEvidence(x *Call) []map[string]any {
 	return evidenceRows
 }
 
-func (p *Playground) response(x *Call, out *Outcome, in playgroundRequest) map[string]any {
-	c := out.completion
-	routing := routingEvidence(x)
+func playgroundResponse(trail MemberTrail, c *wire.Completion, in playgroundRequest) map[string]any {
+	routing := routingEvidence(trail)
 	if in.operation() != "generation" {
 		res := map[string]any{
-			"id":          x.request.id,
-			"model":       x.named().Slug,
+			"id":          trail.ID,
+			"model":       trail.Route,
 			"output_text": "",
 			"tool_calls":  []map[string]any{},
-			"latency_ms":  p.Gateway.Now().Sub(x.request.startedAt).Milliseconds(),
+			"latency_ms":  trail.Elapsed.Milliseconds(),
 			"routing":     routing,
 		}
 		if json.Valid(c.Body) {
@@ -419,11 +364,11 @@ func (p *Playground) response(x *Call, out *Outcome, in playgroundRequest) map[s
 		tools = append(tools, map[string]any{"id": call.ID, "name": call.Name, "arguments": call.Arguments})
 	}
 	res := map[string]any{
-		"id":          x.request.id,
-		"model":       x.named().Slug,
+		"id":          trail.ID,
+		"model":       trail.Route,
 		"output_text": c.OutputText,
 		"tool_calls":  tools,
-		"latency_ms":  p.Gateway.Now().Sub(x.request.startedAt).Milliseconds(),
+		"latency_ms":  trail.Elapsed.Milliseconds(),
 		"routing":     routing,
 	}
 	if c.FinishReason != "" {
@@ -449,8 +394,8 @@ func (p *Playground) response(x *Call, out *Outcome, in playgroundRequest) map[s
 	return res
 }
 
-func attemptPriority(x *Call, targetID string) int {
-	for _, a := range x.attempts {
+func attemptPriority(trail MemberTrail, targetID string) int {
+	for _, a := range trail.Attempts {
 		if a.TargetID == targetID {
 			return a.Priority
 		}
@@ -466,52 +411,20 @@ func (p *Playground) Stream(w http.ResponseWriter, r *http.Request, principal au
 	if err := in.validate(true); err != nil {
 		return err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, nil, "", in.Routing)
-	if in.Request != nil {
-		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(in.Request))}
-	}
-	parsed, err := in.parse("generation", "streaming", p, x, principal)
+	run := p.member(r, principal, in)
+	parsed, err := in.parse("generation", "streaming", run)
 	if err != nil {
 		return err
 	}
-	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
-	if x.request.body != nil {
-		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
-	}
-	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
-		x.Failure = e
-		s.Finish(x, nil, e.Status)
-		return httpkit.Fail(e.Status, e.Code, e.Message)
-	}
-	x.estimate = requestEstimate(x)
-	if !s.Gate.Admit(r.Context()) {
-		x.Failure = fault.Overloaded
-		s.Finish(x, nil, fault.Overloaded.Status)
-		return httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
-	}
-	defer s.Gate.Release(r.Context())
-	defer s.settleAdmission(r.Context(), x)
-	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
-		x.Failure = e
-		s.Finish(x, nil, e.Status)
-		return httpkit.Fail(e.Status, e.Code, e.Message)
-	}
-	sw := &playgroundStreamWriter{w: w, maxTotal: s.Config.MaxResponseBytes}
-	x.generation.emit = sw.emit
-	out := s.execute(r.Context(), x)
-	status := http.StatusOK
-	if out.Err != nil && out.Err.Status > 0 {
-		status = out.Err.Status
-	}
-	s.Finish(x, out, status)
+	sw := &playgroundStreamWriter{w: w, maxTotal: p.Gateway.Config.MaxResponseBytes}
+	out := run.Run(r.Context(), parsed, sw.emit)
 	if out.Cancelled {
 		return nil
 	}
 	if out.Err != nil && !sw.committed {
 		return httpkit.Fail(out.Err.Status, out.Err.Code, out.Err.Message)
 	}
-	sw.finish(x, out)
+	sw.finish(run.Trail(), out)
 	return nil
 }
 
@@ -533,7 +446,7 @@ func (sw *playgroundStreamWriter) emit(frame []byte) error {
 func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool) error {
 	chunk := int64(len(event) + len(data) + len("event: \ndata: \n\n"))
 	if limited && sw.total+chunk > sw.maxTotal {
-		return errResponseTooLarge
+		return ErrResponseTooLarge
 	}
 	rc := http.NewResponseController(sw.w)
 	if !sw.committed {
@@ -555,19 +468,19 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 	return nil
 }
 
-func (sw *playgroundStreamWriter) finish(x *Call, out *Outcome) {
+func (sw *playgroundStreamWriter) finish(trail MemberTrail, out *Outcome) {
 	if out.Err != nil {
 		data, _ := json.Marshal(map[string]any{"code": out.Err.Code, "message": out.Err.Message, "status": out.Err.Status})
 		_ = sw.write("error", data, false)
 		return
 	}
 	meta := map[string]any{
-		"id":      x.request.id,
-		"model":   x.named().Slug,
-		"routing": routingEvidence(x),
+		"id":      trail.ID,
+		"model":   trail.Route,
+		"routing": routingEvidence(trail),
 	}
-	if out.completion != nil && out.completion.Usage != nil {
-		meta["usage"] = out.completion.Usage
+	if out.Completion != nil && out.Completion.Usage != nil {
+		meta["usage"] = out.Completion.Usage
 	}
 	data, _ := json.Marshal(meta)
 	_ = sw.write("done", data, false)

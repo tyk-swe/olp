@@ -12,7 +12,6 @@
     "internal/gateway/kernel/gemini_live.go",
     "internal/gateway/kernel/guardrails.go",
     "internal/gateway/kernel/native_duplex.go",
-    "internal/gateway/kernel/playground.go",
     "internal/gateway/quota/limits.go",
     "internal/gateway/kernel/realtime.go",
     "internal/gateway/kernel/realtime_calls.go",

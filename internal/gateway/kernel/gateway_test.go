@@ -1597,16 +1597,13 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
 	const exact = `{"count":9007199254740993}`
-	playground := Playground{Gateway: &Server{Now: time.Now}}
-	x := &Call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{Route: &routing.Route{Slug: routeSlug}}}
 	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
 	for _, test := range []struct{ text, structured string }{
 		{exact, exact},
 		{`{"count":0,"count":9007199254740993}`, exact},
 		{exact + ` {"extra":true}`, ""},
 	} {
-		out := &Outcome{completion: &wire.Completion{OutputText: test.text}}
-		body, err := json.Marshal(playground.response(x, out, in))
+		body, err := json.Marshal(playgroundResponse(MemberTrail{Route: routeSlug}, &wire.Completion{OutputText: test.text}, in))
 		if err != nil {
 			t.Fatal(err)
 		}

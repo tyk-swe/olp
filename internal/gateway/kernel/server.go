@@ -444,7 +444,7 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *fault.Error) {
 	}
 	return p, nil
 }
-func requestError(err error) *fault.Error {
+func RequestError(err error) *fault.Error {
 	var guard guardrails.Failure
 	if errors.As(err, &guard) {
 		return guardrailError(guard)
@@ -590,7 +590,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		rc.SetReadDeadline(time.Time{})
 		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model"), r.Header.Get(StateRouteHeader)); selected || err != nil {
 			if err != nil {
-				e = requestError(err)
+				e = RequestError(err)
 				x.Failure, status = e, e.Status
 				writeError(w, e)
 				return
@@ -601,11 +601,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		var parsed *wire.Request
 		var err error
 		if family == wire.Chat || family == wire.Responses || family == wire.Anthropic || family == wire.Gemini || family == wire.GeminiStream {
-			var prompt parsedRequest
+			var prompt ParsedRequest
 			prompt, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
-			parsed, x.prompt = prompt.request, prompt.reference
+			parsed, x.prompt = prompt.Request, prompt.Reference
 			if x.request.body != nil {
-				x.request.body.Decoded = max(x.request.body.Decoded, prompt.decoded)
+				x.request.body.Decoded = max(x.request.body.Decoded, prompt.Decoded)
 			}
 		} else if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
@@ -613,7 +613,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
 		}
 		if err != nil {
-			e = requestError(err)
+			e = RequestError(err)
 		}
 		if e != nil {
 			x.Failure, status = e, e.Status
@@ -621,7 +621,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		if err := protocols.ValidateInlineMedia(parsed, s.Config.InlineMedia); err != nil {
-			e = requestError(err)
+			e = RequestError(err)
 			x.Failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -803,34 +803,34 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if family == wire.Responses && x.providerState {
-			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
+			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.Completion.Body)
 			if me != nil {
 				out.Err = me
 				status = me.Status
 				writeError(w, me)
 				return
 			}
-			out.completion.Body = mapped
+			out.Completion.Body = mapped
 		}
 		if family == wire.Responses && len(x.facts) > 0 {
 			identity := responseNativeIdentity(x, &x.facts[len(x.facts)-1], "")
-			mapped, err := s.mapGenerationResultReferences(r.Context(), x, identity, out.completion.Body)
+			mapped, err := s.mapGenerationResultReferences(r.Context(), x, identity, out.Completion.Body)
 			if err != nil {
 				out.Err = fault.ServerError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
 				status = out.Err.Status
 				writeError(w, out.Err)
 				return
 			}
-			out.completion.Body = mapped
+			out.Completion.Body = mapped
 		}
-		enforced, pe := s.enforceContentOutput(x, out.completion.Body)
+		enforced, pe := s.enforceContentOutput(x, out.Completion.Body)
 		if pe != nil {
 			out.Err = pe
 			status = pe.Status
 			writeError(w, pe)
 			return
 		}
-		out.completion.Body = enforced
+		out.Completion.Body = enforced
 		status = http.StatusOK
 		x.ResponseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
@@ -839,7 +839,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
 			fact.Interaction.ClientState = usage.ClientPartial
 		}
-		_, err = w.Write(out.completion.Body)
+		_, err = w.Write(out.Completion.Body)
 		if err == nil {
 			// Flush buffered responses before recording successful delivery.
 			err = rc.Flush()

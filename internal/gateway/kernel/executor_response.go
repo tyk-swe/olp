@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-var errResponseTooLarge = providerinvoke.ErrResponseTooLarge
+var ErrResponseTooLarge = providerinvoke.ErrResponseTooLarge
 
 // Finish emits the terminal envelope exactly once.
 func (s *Server) Finish(x *Call, out *Outcome, status int) {
@@ -268,8 +268,8 @@ func credentialHealthKey(slot *routing.Slot, generation int64) string {
 }
 
 func completionBody(out *Outcome) []byte {
-	if out == nil || out.completion == nil || len(out.completion.Body) == 0 {
+	if out == nil || out.Completion == nil || len(out.Completion.Body) == 0 {
 		return nil
 	}
-	return out.completion.Body
+	return out.Completion.Body
 }
