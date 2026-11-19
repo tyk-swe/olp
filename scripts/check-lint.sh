@@ -41,7 +41,7 @@ fi
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
   [fault]="" [events]="" [traceingest]="" [guardstream]=""
-  [realtimeresponses]="ingress"
+  [realtimeresponses]="ingress" [publishedprompt]="fault ingress"
   [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""
@@ -49,7 +49,7 @@ declare -A gateway_imports=(
   [surface/cloudbatches]="fault ingress kernel"
   [surface/geminiinteractions]="fault kernel"
   [surface/geministate]="fault kernel"
-  [kernel]="codeforward delegation events fault guardstream health ingress models quota realtimeresponses traceingest"
+  [kernel]="codeforward delegation events fault guardstream health ingress models publishedprompt quota realtimeresponses traceingest"
 )
 while read -r package imports; do
   [[ $package == "$gateway" ]] && continue
