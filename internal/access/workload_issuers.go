@@ -42,102 +42,100 @@ func (s *Server) workloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Rep
 	e = s.Pool.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+",i.etag::text FROM olp.workload_issuers i WHERE id=$1", id).Scan(&data, &etag)
 	return httpkit.Detail(data, etag), e
 }
-func (s *Server) createWorkloadIssuer(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	return s.writeWorkloadIssuer(r, p, true)
-}
-func (s *Server) putWorkloadIssuer(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	return s.writeWorkloadIssuer(r, p, false)
-}
-func (s *Server) writeWorkloadIssuer(r *http.Request, _ authz.Principal, create bool) (httpkit.Reply, error) {
+func decodeWorkloadIssuer(r *http.Request) (workload.Config, error) {
 	var input workload.Config
-	if e := httpkit.DecodeUnique(r, &input, 65536); e != nil {
-		return httpkit.Reply{}, e
+	if err := httpkit.DecodeUnique(r, &input, 65536); err != nil {
+		return workload.Config{}, err
 	}
-	if err := ValidateWorkloadConfig(input); err != nil {
+	return input, ValidateWorkloadConfig(input)
+}
+
+// fetchWorkloadKeys runs outside the mutation lock, and only for first
+// enablement or a changed endpoint, so a key-ID revocation still works during
+// a JWKS outage.
+func (s *Server) fetchWorkloadKeys(r *http.Request, input workload.Config) error {
+	if _, err := workload.Fetch(r.Context(), s.oidcClient, input.JWKSURL); err != nil {
+		return httpkit.Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
+	}
+	return nil
+}
+
+func (s *Server) createWorkloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	input, err := decodeWorkloadIssuer(r)
+	if err != nil {
 		return httpkit.Reply{}, err
 	}
-
-	id := httpkit.NewID()
-	if !create {
-		var err error
-		id, err = httpkit.IDParam(r, "issuer_id")
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	// A key-ID revocation must work even during a JWKS outage. Fetch only for
-	// first enablement or a changed endpoint, outside the mutation lock.
-	verifyKeys := input.Enabled
-	if create && input.Enabled {
+	if input.Enabled {
 		// A completed creation replay must survive a later JWKS outage. Existing
-		// issuer URLs cannot be created again, so skipping preflight cannot change trust.
+		// issuer URLs cannot be created again, so skipping the fetch cannot change trust.
 		var exists bool
 		if err := s.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.workload_issuers WHERE issuer=$1)", input.Issuer).Scan(&exists); err != nil {
 			return httpkit.Reply{}, err
 		}
-		verifyKeys = !exists
+		if !exists {
+			if err := s.fetchWorkloadKeys(r, input); err != nil {
+				return httpkit.Reply{}, err
+			}
+		}
 	}
-	if !create && input.Enabled {
-		var oldURL string
-		var oldEnabled bool
-		if err := s.Pool.QueryRow(r.Context(), "SELECT document->>'jwks_url',(document->>'enabled')::boolean FROM olp.workload_issuers WHERE id=$1", id).Scan(&oldURL, &oldEnabled); err != nil {
+	id := httpkit.NewID()
+	return Mutate(s, r, input, Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		reply, event, err := s.writeWorkloadIssuer(r, tx, p, id, input, true)
+		if err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		return httpkit.Reply{Status: 201, Body: reply.Body, ETag: reply.ETag, Location: "/api/v1/workload-issuers/" + id}, event, nil
+	})
+}
+
+func (s *Server) putWorkloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	input, err := decodeWorkloadIssuer(r)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	id, err := httpkit.IDParam(r, "issuer_id")
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if input.Enabled {
+		var keysURL string
+		var enabled bool
+		if err := s.Pool.QueryRow(r.Context(), "SELECT document->>'jwks_url',(document->>'enabled')::boolean FROM olp.workload_issuers WHERE id=$1", id).Scan(&keysURL, &enabled); err != nil {
 			return httpkit.Reply{}, err
 		}
-		verifyKeys = !oldEnabled || oldURL != input.JWKSURL
-	}
-	if verifyKeys {
-		if _, err := workload.Fetch(r.Context(), s.oidcClient, input.JWKSURL); err != nil {
-			return httpkit.Reply{}, httpkit.Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
+		if !enabled || keysURL != input.JWKSURL {
+			if err := s.fetchWorkloadKeys(r, input); err != nil {
+				return httpkit.Reply{}, err
+			}
 		}
 	}
-
-	tx, p, e := s.BeginMutation(r)
-	if e != nil {
-		return httpkit.Reply{}, e
-	}
-	defer tx.Rollback(r.Context())
-	var replay ReplayClaim
-	var oldETag, issuer string
-	if create {
-		var old *httpkit.Reply
-		replay, old, e = s.Replay(r, tx, p, input)
-		if e != nil {
-			return httpkit.Reply{}, e
+	return Transact(s, r, func(tx pgx.Tx, _ authz.Principal) (struct{}, error) {
+		var etag, issuer string
+		if err := tx.QueryRow(r.Context(), "SELECT etag::text,issuer FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&etag, &issuer); err != nil {
+			return struct{}{}, err
 		}
-		if old != nil {
-			return *old, tx.Commit(r.Context())
-		}
-	} else {
-		if e = tx.QueryRow(r.Context(), "SELECT etag::text,issuer FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&oldETag, &issuer); e != nil {
-			return httpkit.Reply{}, e
-		}
-		if e = httpkit.Match(r, oldETag); e != nil {
-			return httpkit.Reply{}, e
+		if err := httpkit.Match(r, etag); err != nil {
+			return struct{}{}, err
 		}
 		if issuer != input.Issuer {
-			return httpkit.Reply{}, httpkit.Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
+			return struct{}{}, httpkit.Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
 		}
-	}
-	etag, e := s.StoreWorkloadIssuer(r.Context(), tx, p, id, input, create)
-	if e != nil {
-		return httpkit.Reply{}, e
-	}
-	if e = Audit(r.Context(), tx, r, p.Actor(), "workload_issuer.update", "workload_issuer", id, "success"); e != nil {
-		return httpkit.Reply{}, e
+		return struct{}{}, nil
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		return s.writeWorkloadIssuer(r, tx, p, id, input, false)
+	})
+}
+
+func (s *Server) writeWorkloadIssuer(r *http.Request, tx pgx.Tx, p authz.Principal, id string, input workload.Config, create bool) (httpkit.Reply, Event, error) {
+	etag, err := s.StoreWorkloadIssuer(r.Context(), tx, p, id, input, create)
+	if err != nil {
+		return httpkit.Reply{}, Event{}, err
 	}
 	var output json.RawMessage
-	if e = tx.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id=$1", id).Scan(&output); e != nil {
-		return httpkit.Reply{}, e
+	if err := tx.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id=$1", id).Scan(&output); err != nil {
+		return httpkit.Reply{}, Event{}, err
 	}
-	reply := httpkit.Detail(output, etag)
-	if create {
-		reply.Status = 201
-		reply.Location = "/api/v1/workload-issuers/" + id
-		if e = s.CompleteReplay(r, tx, replay, reply); e != nil {
-			return httpkit.Reply{}, e
-		}
-	}
-	return reply, tx.Commit(r.Context())
+	return httpkit.Detail(output, etag), Event{Action: "workload_issuer.update", Resource: "workload_issuer", ID: id}, nil
 }
 
 func WorkloadKeyPolicy(m workload.Mapping) keyauthority.KeyPolicy {
