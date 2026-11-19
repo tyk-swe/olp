@@ -254,3 +254,100 @@ func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing
 		t.Fatalf("accounting evidence reran the guardrail, evaluations = %d", evaluations)
 	}
 }
+
+func streamedChat(deltas ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, delta := range deltas {
+			frame, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": delta}}}})
+			io.WriteString(w, "data: "+string(frame)+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n")
+	}
+}
+
+func streamedText(t *testing.T, raw []byte) string {
+	t.Helper()
+	var text strings.Builder
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		data, found := strings.CutPrefix(line, "data: ")
+		if !found || data == "[DONE]" {
+			continue
+		}
+		var frame struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &frame); err != nil {
+			t.Fatalf("stream frame %q: %v", data, err)
+		}
+		for _, choice := range frame.Choices {
+			text.WriteString(choice.Delta.Content)
+		}
+	}
+	return text.String()
+}
+
+func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testing.T) {
+	request := func(content string) []byte {
+		return []byte(`{"model":"` + routeSlug + `","stream":true,"messages":[{"role":"user","content":"` + content + `"}]}`)
+	}
+	outcomes := func(h *harness) string {
+		evidence, _ := json.Marshal(h.sink.last(t).GuardrailDecisions)
+		return string(evidence)
+	}
+
+	redacting := newHarness(t, Config{})
+	installTestGuardrail(t, redacting, guardrails.OutputStream, guardrails.Redact, "builtin.keywords", `{"words":["forbidden"]}`)
+	redacting.mock.set("a", streamedChat("this is for", "bidden text", " and more"))
+	resp := redacting.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("hello"), nil)
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	text := streamedText(t, raw)
+	if resp.StatusCode != 200 || strings.Contains(string(raw), "forbidden") || strings.Contains(text, "bidden") ||
+		!strings.HasPrefix(text, "this is ") || !strings.HasSuffix(text, " text and more") || !strings.HasSuffix(string(raw), "data: [DONE]\n\n") {
+		t.Fatalf("redacted stream: %d %s", resp.StatusCode, raw)
+	}
+	if evidence := outcomes(redacting); !strings.Contains(evidence, `"outcome":"redacted"`) || strings.Contains(evidence, "forbidden") {
+		t.Fatalf("redaction evidence: %s", evidence)
+	}
+
+	blocking := newHarness(t, Config{})
+	installTestGuardrail(t, blocking, guardrails.OutputStream, guardrails.Block, "builtin.keywords", `{"words":["forbidden"]}`)
+	blocking.mock.set("a", streamedChat("this is for", "bidden text", " and more"))
+	resp = blocking.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("hello"), nil)
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(raw), "guardrail_blocked") || strings.Contains(string(raw), "bidden") || strings.Contains(string(raw), "[DONE]") {
+		t.Fatalf("blocked stream: %d %s", resp.StatusCode, raw)
+	}
+	if evidence := outcomes(blocking); !strings.Contains(evidence, `"outcome":"blocked"`) {
+		t.Fatalf("block evidence: %s", evidence)
+	}
+
+	masking := newHarness(t, Config{})
+	installTestGuardrail(t, masking, guardrails.Input, guardrails.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
+	masking.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var sent struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil || len(sent.Messages) != 1 || strings.Contains(sent.Messages[0].Content, "alice") {
+			t.Errorf("provider input: %+v %v", sent, err)
+			return
+		}
+		masked := sent.Messages[0].Content
+		streamedChat(masked[:len(masked)-8], masked[len(masked)-8:])(w, r)
+	})
+	resp = masking.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("email alice@example.com"), nil)
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if text := streamedText(t, raw); resp.StatusCode != 200 || text != "email alice@example.com" || strings.Contains(string(raw), "[OLP_") {
+		t.Fatalf("unmasked stream: %d %s", resp.StatusCode, raw)
+	}
+}

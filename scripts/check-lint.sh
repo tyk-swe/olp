@@ -40,7 +40,7 @@ fi
 
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
-  [fault]="" [events]="" [traceingest]=""
+  [fault]="" [events]="" [traceingest]="" [guardstream]=""
   [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""

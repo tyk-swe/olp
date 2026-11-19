@@ -1,4 +1,4 @@
-package gateway
+package guardstream
 
 import (
 	"bytes"
@@ -11,38 +11,62 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-type guardrailStream struct {
-	x            *call
-	calls        map[string]*streamToolCall
+type Config struct {
+	Engine        *guardrails.Engine
+	Masks         *guardrails.Masking
+	Input         []guardrails.Segment
+	RequestID     string
+	Route         string
+	InternalModel bool
+	Family        wire.Format
+	Window        int
+	Strict        bool
+	ToolContext   context.Context
+	Record        func([]guardrails.Evidence)
+}
+
+type Stream struct {
+	config       Config
+	calls        map[string]*toolCall
 	pending      [][]byte
 	pendingBytes int
 	stream       *guardrails.Stream
-	family       wire.Format
 }
 
-func newGuardrailStream(x *call) (*guardrailStream, error) {
-	s, err := guardrails.NewStream(x.guardrailEngine, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, InternalModel: x.internalGuardrail}, x.snapshot().GuardrailWindow())
+func New(config Config) (*Stream, error) {
+	s, err := guardrails.NewStream(config.Engine, config.request(), config.Window)
 	if err != nil {
 		return nil, err
 	}
-	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
-		s.Masking(x.guardrailMasks)
+	if config.Engine.HasAction(guardrails.Input, guardrails.Mask) {
+		s.Masking(config.Masks)
 	}
-	if !x.strict() {
+	if !config.Strict {
 		s.SegmentRewriter(func(frame []byte, texts map[string]string) ([]byte, error) {
-			return rewriteGuardrailFrame(x.family, frame, texts)
+			return rewriteFrame(config.Family, frame, texts)
 		})
 	}
-	return &guardrailStream{stream: s, family: x.family, x: x, calls: map[string]*streamToolCall{}}, nil
+	return &Stream{stream: s, config: config, calls: map[string]*toolCall{}}, nil
 }
-func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, error) {
+
+func (c Config) request() guardrails.Evaluation {
+	return guardrails.Evaluation{RequestID: c.RequestID, Route: c.Route, InternalModel: c.InternalModel}
+}
+
+func (c Config) evaluation(segments []guardrails.Segment) guardrails.Evaluation {
+	return guardrails.Evaluation{RequestID: c.RequestID, Route: c.Route, InternalModel: c.InternalModel, Phase: guardrails.OutputStream, Segments: segments}
+}
+
+func (g *Stream) Decisions() []guardrails.Evidence { return g.stream.Decisions() }
+
+func (g *Stream) Push(ctx context.Context, frame []byte) ([][]byte, error) {
 	touched, err := g.collectTools(frame)
 	if err != nil {
 		return nil, err
 	}
 	if touched || len(g.pending) > 0 {
 		g.pendingBytes += len(frame)
-		if g.pendingBytes > g.x.snapshot().GuardrailWindow() {
+		if g.pendingBytes > g.config.Window {
 			return nil, guardrails.ErrSurface
 		}
 		g.pending = append(g.pending, bytes.Clone(frame))
@@ -59,15 +83,15 @@ func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, err
 				return nil, guardrails.ErrSurface
 			}
 			var data any
-			if err := decodeGuardrailJSON([]byte(call.arguments), &data); err != nil {
+			if err := decodeJSON([]byte(call.arguments), &data); err != nil {
 				return nil, guardrails.ErrSurface
 			}
 			canonical, _ := json.Marshal(data)
-			arguments := g.x.guardrailMasks.Restore(string(canonical))
+			arguments := g.config.Masks.Restore(string(canonical))
 			segments = append(segments, guardrails.Segment{ID: "tool_" + id, Kind: guardrails.ToolCall, ToolName: call.name, Text: arguments, Role: guardrails.Assistant})
 		}
-		result, err := g.x.guardrailEngine.Evaluate(g.x.guardrailCtx, guardrails.Evaluation{RequestID: g.x.request.accountingID(), Route: g.x.route.Slug, Phase: guardrails.OutputStream, Segments: slices.Concat(segments, guardrails.InputProvenance(g.x.guardrailInput)), InternalModel: g.x.internalGuardrail}, g.x.guardrailMasks)
-		g.x.recordGuardrails(result.Decisions)
+		result, err := g.config.Engine.Evaluate(g.config.ToolContext, g.config.evaluation(slices.Concat(segments, guardrails.InputProvenance(g.config.Input))), g.config.Masks)
+		g.config.Record(result.Decisions)
 		if err != nil {
 			return nil, err
 		}
@@ -75,11 +99,11 @@ func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, err
 		for _, segment := range segments {
 			if strings.HasPrefix(segment.ID, "tool_") {
 				original := g.calls[strings.TrimPrefix(segment.ID, "tool_")].arguments
-				restoreChanged = restoreChanged || g.x.guardrailMasks.Restore(original) != original
+				restoreChanged = restoreChanged || g.config.Masks.Restore(original) != original
 			}
 		}
 		if result.Changed || restoreChanged {
-			if g.x.strict() {
+			if g.config.Strict {
 				return nil, guardrails.ErrSurface
 			}
 			for _, segment := range result.Segments {
@@ -104,14 +128,14 @@ func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, err
 		}
 		g.pending = nil
 		g.pendingBytes = 0
-		g.calls = map[string]*streamToolCall{}
+		g.calls = map[string]*toolCall{}
 		return out, nil
 	}
 	return g.pushText(ctx, frame)
 }
 
-func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte, error) {
-	fields, err := guardrailFrameFields(g.family, frame)
+func (g *Stream) pushText(ctx context.Context, frame []byte) ([][]byte, error) {
+	fields, err := frameFields(g.config.Family, frame)
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +152,14 @@ func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte,
 		}
 		if field.snapshot {
 			originals[field.id] = field.text
-			snapshots = append(snapshots, guardrails.Segment{ID: field.id, Role: guardrails.Assistant, Text: g.x.guardrailMasks.Restore(field.text)})
+			snapshots = append(snapshots, guardrails.Segment{ID: field.id, Role: guardrails.Assistant, Text: g.config.Masks.Restore(field.text)})
 		} else {
 			deltas = append(deltas, guardrails.Delta{ID: field.id, Text: field.text})
 		}
 	}
 	if len(snapshots) > 0 {
-		result, err := g.x.guardrailEngine.Evaluate(ctx, guardrails.Evaluation{RequestID: g.x.request.accountingID(), Route: g.x.route.Slug, Phase: guardrails.OutputStream, Segments: snapshots, InternalModel: g.x.internalGuardrail}, nil)
-		g.x.recordGuardrails(result.Decisions)
+		result, err := g.config.Engine.Evaluate(ctx, g.config.evaluation(snapshots), nil)
+		g.config.Record(result.Decisions)
 		if err != nil {
 			return nil, err
 		}
@@ -146,10 +170,10 @@ func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte,
 			}
 		}
 		if len(changes) > 0 {
-			if g.x.strict() {
+			if g.config.Strict {
 				return nil, guardrails.ErrSurface
 			}
-			frame, err = rewriteGuardrailFrame(g.family, frame, changes)
+			frame, err = rewriteFrame(g.config.Family, frame, changes)
 			if err != nil {
 				return nil, err
 			}
@@ -157,14 +181,14 @@ func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte,
 	}
 	return g.stream.PushSegments(ctx, frame, deltas, completed...)
 }
-func (g *guardrailStream) finish(ctx context.Context) ([][]byte, error) {
+func (g *Stream) Finish(ctx context.Context) ([][]byte, error) {
 	if len(g.pending) > 0 {
 		return nil, guardrails.ErrSurface
 	}
 	return g.stream.Finish(ctx)
 }
 
-func terminalGuardrailFrame(family wire.Format, frame []byte) bool {
+func Terminal(family wire.Format, frame []byte) bool {
 	switch family {
 	case wire.Chat, wire.Completions:
 		for line := range bytes.SplitSeq(frame, []byte("\n")) {
