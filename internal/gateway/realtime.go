@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +11,10 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -34,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/realtimeresponses"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -55,517 +53,6 @@ type realtimeCredentialError struct{ eligibility routing.Eligibility }
 
 func (e *realtimeCredentialError) Error() string {
 	return "realtime provider credential " + string(e.eligibility)
-}
-
-// The wire relay does not buffer native frames. This small state machine only
-// records whether a response is still owed when either peer closes normally.
-// A provider-controlled ID set is bounded; an untrackable event conservatively
-// makes a clean socket close incomplete instead of claiming terminal delivery.
-const maxRealtimePendingResponses = 128
-const maxRealtimeTrackedFrameBytes = 1 << 20
-
-type realtimeResponseState struct {
-	requested int
-	active    map[string]struct{}
-	anonymous bool
-	unknown   bool
-}
-
-func (s *realtimeResponseState) pending() bool {
-	return s.requested > 0 || len(s.active) > 0 || s.anonymous || s.unknown
-}
-
-func (s *realtimeResponseState) add(id string, strict bool) {
-	if id == "" || len(id) > 512 {
-		s.unknown = true
-		return
-	}
-	if s.active == nil {
-		s.active = make(map[string]struct{})
-	}
-	if _, found := s.active[id]; found {
-		return
-	}
-	if len(s.active) >= maxRealtimePendingResponses {
-		s.unknown = true
-		return
-	}
-	if strict {
-		// A strict decoder may return a view into the source frame. Keep
-		// only the bounded identifier, never the audio-bearing frame.
-		id = strings.Clone(id)
-	}
-	s.active[id] = struct{}{}
-}
-
-// realtimeObject validates the entire native frame, including unknown nested
-// controls, without materializing a second JSON tree for the few observed
-// response fields. OIF rejects duplicate keys and invalid Unicode throughout.
-func realtimeObject(data []byte) (oif.Value, bool) {
-	doc, err := ingress.ParseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
-	if err != nil || doc.Root().Kind() != oif.Object {
-		return oif.Value{}, false
-	}
-	return doc.Root(), true
-}
-
-// realtimeFlatFrame recognizes the common native audio/event shape without
-// building an index for fields the relay never interprets. It accepts only a
-// flat object with unescaped keys and string values; every other shape falls
-// through to OIF. The fixed key table catches duplicate members, while
-// json.Valid and UTF-8 validation cover the complete flat document. Escapes
-// fall through so OIF still enforces surrogate-pair and decoded-key rules.
-func realtimeFlatFrame(data []byte) (realtimeFrame, bool) {
-	var event realtimeFrame
-	if len(data) > maxRealtimeTrackedFrameBytes || !utf8.Valid(data) {
-		return event, false
-	}
-	data = bytes.TrimSpace(data)
-	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
-		return event, false
-	}
-	var keys [16][]byte
-	count, at := 0, 1
-	space := func() {
-		for at < len(data) && (data[at] == ' ' || data[at] == '\t' || data[at] == '\r' || data[at] == '\n') {
-			at++
-		}
-	}
-	for {
-		space()
-		if at >= len(data) {
-			return realtimeFrame{}, false
-		}
-		if data[at] == '}' {
-			at++
-			break
-		}
-		if data[at] != '"' || count == len(keys) {
-			return realtimeFrame{}, false
-		}
-		at++
-		start := at
-		for at < len(data) && data[at] != '"' {
-			if data[at] == '\\' {
-				return realtimeFrame{}, false
-			}
-			at++
-		}
-		if at >= len(data) {
-			return realtimeFrame{}, false
-		}
-		key := data[start:at]
-		// Case-insensitive observed fields need the full decoder, including
-		// its strict ambiguity checks. Response is structured even if a caller
-		// sends a scalar value.
-		if bytes.EqualFold(key, []byte("response")) ||
-			bytes.EqualFold(key, []byte("type")) && !bytes.Equal(key, []byte("type")) ||
-			bytes.EqualFold(key, []byte("response_id")) && !bytes.Equal(key, []byte("response_id")) {
-			return realtimeFrame{}, false
-		}
-		for _, prior := range keys[:count] {
-			if bytes.Equal(prior, key) {
-				return realtimeFrame{}, false
-			}
-		}
-		keys[count], count = key, count+1
-		at++
-		space()
-		if at >= len(data) || data[at] != ':' {
-			return realtimeFrame{}, false
-		}
-		at++
-		space()
-		if at >= len(data) || data[at] == '{' || data[at] == '[' {
-			return realtimeFrame{}, false
-		}
-		quoted := data[at] == '"'
-		if quoted {
-			at++
-		}
-		start = at
-		if quoted {
-			for at < len(data) && data[at] != '"' {
-				if data[at] == '\\' {
-					return realtimeFrame{}, false
-				}
-				at++
-			}
-		} else {
-			for at < len(data) && data[at] != ',' && data[at] != '}' {
-				at++
-			}
-		}
-		if at >= len(data) {
-			return realtimeFrame{}, false
-		}
-		value := data[start:at]
-		if quoted {
-			at++
-		}
-		switch {
-		case bytes.Equal(key, []byte("type")):
-			if !quoted {
-				return realtimeFrame{}, false
-			}
-			event.Type = string(value)
-		case bytes.Equal(key, []byte("response_id")):
-			if !quoted {
-				return realtimeFrame{}, false
-			}
-			event.ResponseID = string(value)
-		}
-		space()
-		if at >= len(data) {
-			return realtimeFrame{}, false
-		}
-		if data[at] == '}' {
-			at++
-			break
-		}
-		if data[at] != ',' {
-			return realtimeFrame{}, false
-		}
-		at++
-	}
-	if at != len(data) || !json.Valid(data) {
-		return realtimeFrame{}, false
-	}
-	return event, true
-}
-
-func realtimeMember(object oif.Value, name string) (oif.Value, bool) {
-	var value oif.Value
-	found := false
-	for _, member := range object.Members() {
-		if strings.EqualFold(member.Name, name) {
-			if found {
-				// An alias must not hide an earlier malformed accounting field.
-				return oif.Value{}, true
-			}
-			value, found = member.Value, true
-		}
-	}
-	return value, found
-}
-
-func realtimeStringField(object oif.Value, name string) (string, bool) {
-	value, present := realtimeMember(object, name)
-	if !present || value.Kind() == oif.Null {
-		return "", true
-	}
-	if value.Kind() != oif.String {
-		return "", false
-	}
-	raw := value.Raw()
-	if !strings.ContainsRune(raw, '\\') {
-		return raw[1 : len(raw)-1], true
-	}
-	// Escaped strings are uncommon on the hot path. JSON, rather than Go's
-	// Unquote, keeps surrogate-pair interpretation identical to the old decode.
-	var decoded string
-	if json.Unmarshal([]byte(raw), &decoded) != nil {
-		return "", false
-	}
-	return decoded, true
-}
-
-func realtimeIntField(object oif.Value, name string) (int64, bool) {
-	value, present := realtimeMember(object, name)
-	if !present || value.Kind() == oif.Null {
-		return 0, true
-	}
-	if value.Kind() != oif.Number {
-		return 0, false
-	}
-	number, err := strconv.ParseInt(value.Raw(), 10, 64)
-	return number, err == nil
-}
-
-func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []byte) {
-	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
-		s.unknown = true
-		return
-	}
-	eventType := ""
-	if flat, ok := realtimeFlatFrame(data); ok {
-		eventType = flat.Type
-	} else {
-		root, valid := realtimeObject(data)
-		if !valid {
-			s.unknown = true
-			return
-		}
-		eventType, valid = realtimeStringField(root, "type")
-		if !valid {
-			s.unknown = true
-			return
-		}
-	}
-	// Only response.create asks for a model response. Committing the input
-	// audio buffer never creates one, so a manual turn sends both and the
-	// provider answers once.
-	if eventType == "response.create" {
-		if s.requested == maxRealtimePendingResponses {
-			s.unknown = true
-		} else {
-			s.requested++
-		}
-	}
-}
-
-// realtimeUsage is the usage object of a terminal realtime response,
-// including the modality shares a multimodal session reports.
-type realtimeUsage struct {
-	InputTokens  *int64 `json:"input_tokens"`
-	OutputTokens *int64 `json:"output_tokens"`
-	InputDetails *struct {
-		CachedTokens  *int64 `json:"cached_tokens"`
-		AudioTokens   *int64 `json:"audio_tokens"`
-		ImageTokens   *int64 `json:"image_tokens"`
-		CachedDetails *struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		} `json:"cached_tokens_details"`
-	} `json:"input_token_details"`
-	OutputDetails *struct {
-		AudioTokens *int64 `json:"audio_tokens"`
-	} `json:"output_token_details"`
-}
-
-type realtimeFrame struct {
-	Type       string `json:"type"`
-	ResponseID string `json:"response_id"`
-	Response   *struct {
-		ID    string         `json:"id"`
-		Usage *realtimeUsage `json:"usage"`
-	} `json:"response"`
-}
-
-// decodeStrictRealtimeFrame extracts only the fields used by terminal and
-// usage accounting from one duplicate-safe OIF parse. Unknown members remain
-// byte-identical in the forwarded frame and are still fully syntax checked.
-func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
-	if flat, ok := realtimeFlatFrame(data); ok {
-		*event = flat
-		return true
-	}
-	root, valid := realtimeObject(data)
-	if !valid {
-		return false
-	}
-	if event.Type, valid = realtimeStringField(root, "type"); !valid {
-		return false
-	}
-	if event.ResponseID, valid = realtimeStringField(root, "response_id"); !valid {
-		return false
-	}
-	response, present := realtimeMember(root, "response")
-	if !present || response.Kind() == oif.Null {
-		return true
-	}
-	if response.Kind() != oif.Object {
-		return false
-	}
-	event.Response = new(struct {
-		ID    string         `json:"id"`
-		Usage *realtimeUsage `json:"usage"`
-	})
-	if event.Response.ID, valid = realtimeStringField(response, "id"); !valid {
-		return false
-	}
-	usageValue, present := realtimeMember(response, "usage")
-	if !present || usageValue.Kind() == oif.Null {
-		return true
-	}
-	if usageValue.Kind() != oif.Object {
-		return false
-	}
-	event.Response.Usage = new(realtimeUsage)
-	counter := func(name string) (*int64, bool) {
-		value, present := realtimeMember(usageValue, name)
-		if !present || value.Kind() == oif.Null {
-			return nil, true
-		}
-		count, valid := realtimeIntField(usageValue, name)
-		if !valid {
-			return nil, false
-		}
-		return &count, true
-	}
-	if event.Response.Usage.InputTokens, valid = counter("input_tokens"); !valid {
-		return false
-	}
-	if event.Response.Usage.OutputTokens, valid = counter("output_tokens"); !valid {
-		return false
-	}
-	details, present := realtimeMember(usageValue, "input_token_details")
-	if !present || details.Kind() == oif.Null {
-		return true
-	}
-	if details.Kind() != oif.Object {
-		return false
-	}
-	event.Response.Usage.InputDetails = new(struct {
-		CachedTokens  *int64 `json:"cached_tokens"`
-		AudioTokens   *int64 `json:"audio_tokens"`
-		ImageTokens   *int64 `json:"image_tokens"`
-		CachedDetails *struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		} `json:"cached_tokens_details"`
-	})
-	readDetail := func(parent oif.Value, name string) (*int64, bool) {
-		value, present := realtimeMember(parent, name)
-		if !present || value.Kind() == oif.Null {
-			return nil, true
-		}
-		count, valid := realtimeIntField(parent, name)
-		if !valid {
-			return nil, false
-		}
-		return &count, true
-	}
-	var ok bool
-	if event.Response.Usage.InputDetails.CachedTokens, ok = readDetail(details, "cached_tokens"); !ok {
-		return false
-	}
-	if event.Response.Usage.InputDetails.AudioTokens, ok = readDetail(details, "audio_tokens"); !ok {
-		return false
-	}
-	if event.Response.Usage.InputDetails.ImageTokens, ok = readDetail(details, "image_tokens"); !ok {
-		return false
-	}
-	if cachedDetails, present := realtimeMember(details, "cached_tokens_details"); present && cachedDetails.Kind() != oif.Null {
-		if cachedDetails.Kind() != oif.Object {
-			return false
-		}
-		event.Response.Usage.InputDetails.CachedDetails = new(struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		})
-		if event.Response.Usage.InputDetails.CachedDetails.AudioTokens, ok = readDetail(cachedDetails, "audio_tokens"); !ok {
-			return false
-		}
-		if event.Response.Usage.InputDetails.CachedDetails.ImageTokens, ok = readDetail(cachedDetails, "image_tokens"); !ok {
-			return false
-		}
-	}
-	if outputDetails, present := realtimeMember(usageValue, "output_token_details"); present && outputDetails.Kind() != oif.Null {
-		if outputDetails.Kind() != oif.Object {
-			return false
-		}
-		event.Response.Usage.OutputDetails = new(struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-		})
-		if event.Response.Usage.OutputDetails.AudioTokens, ok = readDetail(outputDetails, "audio_tokens"); !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *wire.Usage {
-	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
-		s.unknown = true
-		return nil
-	}
-	if !strict && !bytes.Contains(data, []byte("response.done")) && bytes.IndexByte(data, '\\') < 0 {
-		// Transformed sessions do not promise terminal response tracking. They
-		// observe only response.done usage, and that exact type must appear
-		// literally or contain a JSON escape. Other native frames still pass
-		// through byte-for-byte without decoding or changed failure behavior.
-		return nil
-	}
-	var event realtimeFrame
-	valid := false
-	if strict {
-		valid = decodeStrictRealtimeFrame(data, &event)
-	} else {
-		valid = json.Unmarshal(data, &event) == nil
-	}
-	if !valid {
-		s.unknown = true
-		return nil
-	}
-	id := event.ResponseID
-	if event.Response != nil && event.Response.ID != "" {
-		id = event.Response.ID
-	}
-	switch event.Type {
-	case "response.created":
-		if s.requested > 0 {
-			s.requested--
-		}
-		s.add(id, strict)
-	case "response.done":
-		if s.anonymous && len(s.active) > 0 {
-			// Without a response ID on a preceding fragment, this terminal
-			// cannot prove which concurrent response that fragment belonged to.
-			s.unknown = true
-		}
-		if id != "" {
-			if _, found := s.active[id]; found {
-				delete(s.active, id)
-			} else if s.requested > 0 {
-				s.requested--
-			} else if len(s.active) > 0 {
-				s.unknown = true
-			}
-		} else if len(s.active) > 0 {
-			s.unknown = true
-		} else if s.requested > 0 {
-			s.requested--
-		}
-		// Some native response fragments do not identify their response.
-		// A terminal response closes that observation, while an unparseable or
-		// unmatched event remains uncertain for the rest of the session.
-		s.anonymous = false
-	default:
-		if strings.HasPrefix(event.Type, "response.") {
-			if id != "" {
-				if _, found := s.active[id]; !found && s.requested > 0 {
-					s.requested--
-				}
-				s.add(id, strict)
-			} else {
-				s.anonymous = true
-			}
-		}
-	}
-	if event.Type != "response.done" {
-		return nil
-	}
-	if event.Response == nil || event.Response.Usage == nil {
-		s.unknown = true
-		return nil
-	}
-	u := event.Response.Usage
-	if u.InputTokens == nil || u.OutputTokens == nil || *u.InputTokens < 0 || *u.OutputTokens < 0 {
-		s.unknown = true
-		return nil
-	}
-	out := &wire.Usage{InputTokens: *u.InputTokens, OutputTokens: *u.OutputTokens}
-	if u.InputDetails != nil {
-		if u.InputDetails.CachedTokens != nil {
-			cached := *u.InputDetails.CachedTokens
-			if cached < 0 || cached > *u.InputTokens {
-				s.unknown = true
-				return nil
-			}
-			out.CachedInputTokens = &cached
-		}
-		out.AudioInputTokens = u.InputDetails.AudioTokens
-		out.ImageInputTokens = u.InputDetails.ImageTokens
-		if u.InputDetails.CachedDetails != nil {
-			out.CachedAudioInputTokens = u.InputDetails.CachedDetails.AudioTokens
-			out.CachedImageInputTokens = u.InputDetails.CachedDetails.ImageTokens
-		}
-	}
-	if u.OutputDetails != nil {
-		out.AudioOutputTokens = u.OutputDetails.AudioTokens
-	}
-	return out
 }
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
@@ -1001,7 +488,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 	usage := &wire.Usage{}
 	have := false
 	observed := false
-	var responses realtimeResponseState
+	var responses realtimeresponses.Tracker
 	type relayEnd struct {
 		err            error
 		client         bool
@@ -1019,7 +506,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 				func() {
 					usageMu.Lock()
 					defer usageMu.Unlock()
-					if u := responses.providerFrame(typ, data, x.strict()); u != nil {
+					if u := responses.ProviderFrame(typ, data, x.strict()); u != nil {
 						usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
 						usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
 						addUsageShare(&usage.CachedInputTokens, u.CachedInputTokens)
@@ -1035,7 +522,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 				func() {
 					usageMu.Lock()
 					defer usageMu.Unlock()
-					responses.clientFrame(typ, data)
+					responses.ClientFrame(typ, data)
 				}()
 			}
 			if inspect && typ == websocket.MessageText &&
@@ -1122,7 +609,7 @@ loop:
 		code = websocket.StatusInternalError
 	}
 	usageMu.Lock()
-	pending := x.strict() && responses.pending()
+	pending := x.strict() && responses.Pending()
 	usageMu.Unlock()
 	if !clientClosed && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		// The provider closed a socket while a native response still owed
@@ -1144,7 +631,7 @@ loop:
 	if have {
 		observedUsage = usage
 	}
-	pending = x.strict() && responses.pending()
+	pending = x.strict() && responses.Pending()
 	if clientClosed && (pending || clientDeliveryFailed) {
 		return observedUsage, observed, fmt.Errorf("%w: %v", errRealtimeClientClosed, first)
 	}

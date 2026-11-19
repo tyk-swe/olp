@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/realtimeresponses"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -57,7 +58,7 @@ type webrtcSession struct {
 	usageMu    sync.Mutex
 	usage      wire.Usage
 	haveUsage  bool
-	responses  realtimeResponseState
+	responses  realtimeresponses.Tracker
 }
 
 func (s *Server) registerWebRTCSession(sess *webrtcSession) {

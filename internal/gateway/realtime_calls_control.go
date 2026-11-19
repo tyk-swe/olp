@@ -57,9 +57,9 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 				sess.usageMu.Lock()
 				defer sess.usageMu.Unlock()
 				if typ == websocket.MessageText && bytes.Contains(data, []byte("input_audio_transcription")) {
-					sess.responses.unknown = true
+					sess.responses.Untrackable()
 				}
-				if u := sess.responses.providerFrame(typ, data, true); u != nil {
+				if u := sess.responses.ProviderFrame(typ, data, true); u != nil {
 					sess.accumulateUsage(u)
 				}
 			}()
@@ -121,7 +121,7 @@ func (s *Server) webrtcAuthority(sess *webrtcSession) *fault.Error {
 func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	code := websocket.CloseStatus(readErr)
 	sess.usageMu.Lock()
-	pending := sess.responses.pending()
+	pending := sess.responses.Pending()
 	sess.usageMu.Unlock()
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
@@ -162,7 +162,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 			usageCopy := sess.usage
 			observed = &usageCopy
 		}
-		pending := sess.responses.pending()
+		pending := sess.responses.Pending()
 		sess.usageMu.Unlock()
 		class := classProtocol
 		cancelled := false
