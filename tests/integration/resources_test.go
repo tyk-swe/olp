@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
@@ -332,6 +334,7 @@ type storedPlan struct {
 	tools       kernel.WorkflowToolRunner
 	secure      bool
 	streams     bool
+	fidelity    string
 	probe       *routing.HealthProbe
 	limits      *routing.Limits
 	sink        events.Sink
@@ -420,7 +423,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Routes: map[string]routing.Route{plan.slug: {
 			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
 			RoutingID: routeID, RevisionID: g.routeRevisionID, Revision: 1, PublishedAt: time.Now(), ProjectID: &fixture.projectID,
-			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Fidelity: routing.RouteFidelity{Mode: cmp.Or(plan.fidelity, routing.FidelityTransformed)},
 			Targets:  []routing.Target{{ID: g.targetID, ProviderID: fixture.providerID, ProviderModel: plan.model, Weight: 1, Timeout: 2000, RoutingID: g.modelID}},
 		}},
 	}
@@ -874,8 +877,12 @@ func openAIReplies(_ string, nth int) map[string]string {
 	batch := func(status string) string {
 		return `{"id":"batch_provider-owned","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"file-provider-owned","completion_window":"24h","status":"` + status + `","created_at":1700000000}`
 	}
-	response := func(id string) string {
-		return `{"id":"` + id + `","object":"response","created_at":1700000000,"status":"completed","model":"provider-model","output":[{"id":"msg_2","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
+	response := func(id, previous string) string {
+		return `{"id":"` + id + `","object":"response","created_at":1700000000,"expires_at":4102444800,` + previous + `"status":"completed","model":"provider-model","output":[{"id":"msg_2","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
+	}
+	created := response(fmt.Sprintf("resp_provider-owned-%d", nth), "")
+	if nth == 2 {
+		created = response("resp_provider-owned-2", `"previous_response_id":"resp_provider-owned-1",`)
 	}
 	replies := map[string]string{
 		"POST /files":                                      file,
@@ -885,8 +892,9 @@ func openAIReplies(_ string, nth int) map[string]string {
 		"POST /batches":                                    batch("validating"),
 		"GET /batches/batch_provider-owned":                batch("in_progress"),
 		"POST /batches/batch_provider-owned/cancel":        batch("cancelling"),
-		"POST /responses":                                  response(fmt.Sprintf("resp_provider-owned-%d", nth)),
-		"GET /responses/resp_provider-owned-1":             response("resp_provider-owned-1"),
+		"POST /responses":                                  created,
+		"POST /v1/responses":                               created,
+		"GET /responses/resp_provider-owned-1":             response("resp_provider-owned-1", ""),
 		"GET /responses/resp_provider-owned-1/input_items": `{"object":"list","data":[{"id":"msg_1","type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"first_id":"msg_1","last_id":"msg_1","has_more":false}`,
 		"DELETE /responses/resp_provider-owned-1":          `{"id":"resp_provider-owned-1","object":"response.deleted","deleted":true}`,
 	}
@@ -917,12 +925,13 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 }
 
 type retainedObject struct {
-	ID, Status       string
-	InputFileID      string `json:"input_file_id"`
-	ProcessingStatus string `json:"processing_status"`
-	VectorStoreID    string `json:"vector_store_id"`
-	Deleted          bool
-	Data             []struct{ ID string }
+	ID, Status         string
+	InputFileID        string `json:"input_file_id"`
+	ProcessingStatus   string `json:"processing_status"`
+	VectorStoreID      string `json:"vector_store_id"`
+	PreviousResponseID string `json:"previous_response_id"`
+	Deleted            bool
+	Data               []struct{ ID string }
 }
 
 func (o retainedObject) identifiers() []string {
@@ -1058,6 +1067,10 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if first.ID == "" {
 		t.Fatal("stored response returned no identifier")
 	}
+	providerExpiry := time.Unix(4102444800, 0)
+	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 1 || kept[0] != (storedResponse{"response", "completed", model, providerExpiry}) {
+		t.Fatalf("the gateway kept %+v, want the response with the provider's state, model and expiry", kept)
+	}
 	created := upstream.sent("POST /responses")
 	if len(created) != 1 || created[0].key != "listed-secret" || created[0].authorization != "" || !strings.Contains(created[0].body, `"model":"`+model+`"`) {
 		t.Fatalf("response reached the provider as %+v, want the provider model and credential only", created)
@@ -1079,11 +1092,25 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	}
 
 	second := g.call(t, "owner", "POST", "/v1/responses", json, continuation, 200)
-	if second.ID == "" || second.ID == first.ID {
-		t.Fatalf("continuation returned %q after %q, want a new identifier", second.ID, first.ID)
+	if second.ID == "" || second.ID == first.ID || second.PreviousResponseID != first.ID {
+		t.Fatalf("continuation returned %q after %q naming %q, want a new identifier that names the first by its gateway identifier", second.ID, first.ID, second.PreviousResponseID)
 	}
 	if sent := upstream.sent("POST /responses"); len(sent) != 2 || !strings.Contains(sent[1].body, `"previous_response_id":"resp_provider-owned-1"`) {
 		t.Fatalf("continuation reached the provider as %+v, want the provider's identifier of the first response", sent)
+	}
+	unkept, err := http.NewRequestWithContext(t.Context(), "POST", g.server.URL+"/v1/responses", strings.NewReader(`{"model":"`+slug+`","input":"once more","previous_response_id":"`+first.ID+`","store":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unkept.Header.Set("Authorization", "Bearer owner")
+	unkept.Header.Set("Content-Type", json)
+	answered, err := g.server.Client().Do(unkept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = answered.Body.Close()
+	if kept := storedResponses(t, pool, g, "owner"); answered.StatusCode != 200 || len(kept) != 2 {
+		t.Fatalf("a response the caller asked not to store answered %d and left %d stored, want 200 and the two stored before", answered.StatusCode, len(kept))
 	}
 
 	if got := g.call(t, "owner", "DELETE", "/v1/responses/"+first.ID, "", "", 200); !got.Deleted || got.ID != first.ID {
@@ -1093,6 +1120,44 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
 	}
 	g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 404)
+
+	strict := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "strict-responses", model: model, kind: "azure_openai", profile: "azure-v1-responses", fidelity: routing.FidelityStrict,
+		operations: []string{"generation"}, upstream: &retainedUpstream{replies: openAIReplies},
+	})
+	strict.key(t, "strict-owner")
+	asked := time.Now()
+	bound := strict.call(t, "strict-owner", "POST", "/v1/responses", json, `{"model":"strict-responses","input":"hi","store":true}`, 200)
+	kept := storedResponses(t, pool, strict, "strict-owner")
+	if !strings.HasPrefix(bound.ID, "strict_response_") || len(kept) != 1 || kept[0].kind != "strict_response" || kept[0].state != "completed" || kept[0].model != model {
+		t.Fatalf("a strict route answered %q and kept %+v, want a strict response with the provider's state and model", bound.ID, kept)
+	}
+	if expiry := kept[0].expires; !expiry.After(asked) || expiry.After(asked.Add(resources.ContinuationLifetime)) {
+		t.Fatalf("a strict response expires at %s, want within the gateway's continuation lifetime rather than the provider's %s", expiry, providerExpiry)
+	}
+}
+
+type storedResponse struct {
+	kind, state, model string
+	expires            time.Time
+}
+
+func storedResponses(t *testing.T, pool *pgxpool.Pool, g *storedGateway, key string) []storedResponse {
+	t.Helper()
+	rows, err := pool.Query(t.Context(), `SELECT kind, state, metadata->>'upstream_model', expires_at FROM olp.provider_resources WHERE api_key_id=$1 ORDER BY created_at`, g.runtime.keys[key].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (storedResponse, error) {
+		var r storedResponse
+		err := row.Scan(&r.kind, &r.state, &r.model, &r.expires)
+		r.expires = r.expires.Local()
+		return r, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kept
 }
 
 func TestAnthropicFilesAndBatchesHideProviderIdentifiersIsolateKeysAndKeepUnsettledBatches(t *testing.T) {
