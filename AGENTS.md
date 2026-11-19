@@ -125,7 +125,7 @@ A management endpoint copies `internal/guardrails/credential/api.go`. Reads quer
 
 Lint enforces the structure, so read the failure message and fix the code. Never add a file to a legacy exemption list such as `console/eslint-legacy.json`. Those lists record violations that existed before the rule and they only shrink, which `scripts/check-exemptions.sh` checks against the default branch. When you fix a listed file, remove it from the list in the same change
 
-In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. `console/README.md` has the details
+In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. A component has no `try` block and runs each write through `useAction` or `useMutation`, copying `console/src/lib/features/sinks/SinkEditor.svelte`. `console/README.md` has the details
 
 ## Agent skills
 

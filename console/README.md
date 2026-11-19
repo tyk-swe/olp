@@ -55,7 +55,7 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 
 ## Boundaries
 
-ESLint enforces four structural rules. `eslint.config.mjs` is their source, and
+ESLint enforces five structural rules. `eslint.config.mjs` is their source, and
 `eslint/feature-boundary.mjs` resolves alias and relative imports for the first
 two:
 
@@ -68,12 +68,36 @@ two:
   parts beside it.
 - The `Idempotency-Key` and `If-Match` header names appear only in
   `src/lib/management/`.
+- A `.svelte` file has no `try` block. See "Writes" below.
 
-Components that were over the size limit before it existed are listed in
-`eslint-legacy.json`, and the other three rules have no exemptions. The list
-only shrinks: `scripts/check-exemptions.sh` fails `make check-console` when it has
-an entry the default branch does not. Split a new oversized component instead of
-listing it, and remove a file from the list in the change that splits it.
+Components that broke the size rule or the `try` rule before those rules
+existed are listed in `eslint-legacy.json`, and the other three rules have no
+exemptions. The lists only shrink: `scripts/check-exemptions.sh` fails
+`make check-console` when a list has an entry the default branch does not. Fix
+a new violation instead of listing it, and remove a file from its list in the
+change that fixes it.
+
+## Writes
+
+A component runs every write through `useAction` or `useMutation` from
+`src/lib/editing/action.svelte.ts` and never keeps its own busy flag, error
+string or `try` block. Both give the component `busy` and `error` to render.
+They ignore a second submit while one is running, drop a response that arrives
+after the signed-in user changed, and call the optional refresh callback when
+the server answers that the `If-Match` value is stale.
+
+Use `useMutation` when the request creates something or is otherwise sent with
+an `Idempotency-Key`. Its `submit(input, send, accept)` gives `send` a request
+ID that stays the same when the user retries the same input, so a retry cannot
+create a second resource. Use `useAction` and its `run(send, accept)` for a
+write guarded only by `If-Match`. In both, `send` makes the one API call and
+`accept` does everything that follows a success, such as updating the query
+cache, showing a toast and navigating.
+
+`src/lib/features/sinks/SinkEditor.svelte` is the example to copy for a form
+that creates and updates. Other logic that can fail, such as parsing what the
+user typed, belongs in a `.ts` module that returns the problem as a value, like
+`src/lib/editing/json.ts`.
 
 ## Page building blocks
 
