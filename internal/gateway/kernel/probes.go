@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -10,15 +9,11 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -157,50 +152,27 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 		s.Log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
 		return fleet.ProbeResult{}, false
 	}
-	// The probe plans against the route narrowed to the probed target, with
-	// one attempt, no route behavior beyond its spend cap, and a short
-	// deadline.
 	route := target.route
 	route.Targets = []routing.Target{target.target}
 	route.MaxAttempts = 1
 	route.OverallTimeout = min(route.OverallTimeout, probeDeadline.Milliseconds())
 	route.Behavior = routing.Behavior{Budget: route.Budget}
-	x := &Call{
-		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: release},
-		family:             shape.family,
-		historicalSnapshot: release.Snapshot().WithRoute(route),
-		actor:              "system",
-		mode:               "unary",
-
-		origin:   usage.OriginProbe,
-		priority: routing.PriorityLow, routeLeg: routeLeg{Route: &route}, generation: generationCall{parsed: parsed},
-	}
-	x.bind(canonicalPlanner, nil, true)
-	defer s.settleAdmission(ctx, x)
-	if e := s.planCanonical(ctx, x); e != nil {
+	attempt := s.ProbeGeneration(ctx, release, route, parsed)
+	if e := attempt.Unplanned; e != nil {
 		s.Log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
+	}
+	if !attempt.Reached {
 		return fleet.ProbeResult{}, false
 	}
-	x.budget, x.allowance = 1, 1
-	if e := s.reserveSystemBudgets(ctx, x); e != nil {
-		s.Finish(x, &Outcome{Err: e}, e.Status)
-		return fleet.ProbeResult{}, false
-	}
-	out := s.execute(ctx, x)
-	s.Finish(x, out, cmp.Or(errorStatus(out.Err), 200))
-	if !x.dispatched || len(x.facts) == 0 {
-		return fleet.ProbeResult{}, false
-	}
-	fact := x.facts[len(x.facts)-1]
 	result := fleet.ProbeResult{
 		Status:     fleet.ProbeHealthy,
 		Model:      target.target.ProviderModel,
 		ObservedAt: s.Now().UTC(),
-		LatencyMS:  fact.Duration.Milliseconds(),
+		LatencyMS:  attempt.Latency.Milliseconds(),
 	}
-	if out.Err != nil {
-		result.Class = fact.Class
-		if unhealthyClass(fact.Class) {
+	if attempt.Failed {
+		result.Class = attempt.Class
+		if unhealthyClass(attempt.Class) {
 			result.Status = fleet.ProbeUnhealthy
 		}
 	}
@@ -231,11 +203,4 @@ func unhealthyClass(class string) bool {
 		return true
 	}
 	return false
-}
-
-func errorStatus(e *fault.Error) int {
-	if e == nil {
-		return 0
-	}
-	return e.Status
 }
