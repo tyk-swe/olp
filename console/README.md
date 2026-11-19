@@ -42,7 +42,7 @@ repository-wide commands.
 - Every query key comes from the slice's `*Keys.ts` module.
 - The browser reaches the inference gateway only through `gatewayFetch` in
   `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
-- Writes build their `Idempotency-Key` and `If-Match` headers with
+- Writes build their `Idempotency-Key` and `If-Match` headers with `ifMatch`,
   `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
 - ESLint enforces the `apiClient`, `fetch` and header restrictions.
 
