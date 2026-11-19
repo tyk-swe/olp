@@ -41,6 +41,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -1556,6 +1557,9 @@ func (r *routeTools) Call(_ context.Context, _ keyauthority.Authority, _ *releas
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, toolCall{run: run, arguments: string(arguments)})
+	if strings.Contains(string(arguments), "fail") {
+		return nil, &mcp.WorkflowError{Status: http.StatusBadGateway, Code: "tool_failed", Message: "The tool failed."}
+	}
 	return json.RawMessage(`{"content":[{"type":"text","text":"forty-two"}]}`), nil
 }
 
@@ -2153,5 +2157,153 @@ func TestAProviderOverItsOwnLimitIsRefusedByTheGatewayWithARetryHintAndIsNotCall
 	last := seen[len(seen)-1]
 	if len(seen) != 2 || len(last.Attempts) != 1 || last.Attempts[0].Class != "rate_limit" || last.Attempts[0].Status != 0 {
 		t.Fatalf("recorded %d requests, the refused one with attempts %+v; want one rate limited attempt that got no provider status", len(seen), last.Attempts)
+	}
+}
+
+type toolModel struct {
+	mu    sync.Mutex
+	turns map[string]int
+}
+
+func (m *toolModel) asked(script string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.turns[script]
+}
+
+func (m *toolModel) wants(script string, answered bool) string {
+	m.mu.Lock()
+	m.turns[script]++
+	turn := m.turns[script]
+	m.mu.Unlock()
+	call := func(id, name, arguments string) string {
+		return `{"index":0,"id":"` + id + `","type":"function","function":{"name":"` + name + `","arguments":` + strconv.Quote(arguments) + `}}`
+	}
+	switch {
+	case strings.HasPrefix(script, "keep asking"):
+		return call(fmt.Sprintf("call_%d", turn), "lookup", `{"q":"again"}`)
+	case answered:
+		return ""
+	case script == "unknown tool":
+		return call("call_1", "missing", `{}`)
+	case script == "broken arguments":
+		return call("call_1", "lookup", `{`)
+	case strings.HasPrefix(script, "two at once"):
+		return call("call_1", "lookup", `{"q":"a"}`) + "," + strings.Replace(call("call_2", "lookup", `{"q":"b"}`), `"index":0`, `"index":1`, 1)
+	case script == "failing tool":
+		return call("call_1", "lookup", `{"q":"fail"}`)
+	}
+	return call("call_1", "lookup", `{"q":"answer"}`)
+}
+
+func (m *toolModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var sent struct {
+		Stream   bool `json:"stream"`
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    any    `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&sent); err != nil || len(sent.Messages) == 0 {
+		http.Error(w, "unreadable request", http.StatusBadRequest)
+		return
+	}
+	asked := map[string]bool{}
+	for _, message := range sent.Messages {
+		for _, call := range message.ToolCalls {
+			asked[call.ID] = true
+		}
+		if message.Role == "tool" && !asked[message.ToolCallID] {
+			http.Error(w, "a tool result answers no earlier tool call", http.StatusBadRequest)
+			return
+		}
+	}
+	script, _ := sent.Messages[0].Content.(string)
+	calls := m.wants(script, sent.Messages[len(sent.Messages)-1].Role == "tool")
+	const usage = `"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}`
+	head := `{"id":"turn","created":1,"model":"` + vendor.Model + `",`
+	if !sent.Stream {
+		message, finish := `{"role":"assistant","content":"It is forty-two."}`, "stop"
+		if calls != "" {
+			message, finish = `{"role":"assistant","content":null,"tool_calls":[`+calls+`]}`, "tool_calls"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, head+`"object":"chat.completion","choices":[{"index":0,"message":`+message+`,"finish_reason":"`+finish+`"}],`+usage+`}`)
+		return
+	}
+	chunk := func(delta, finish string) string {
+		return "data: " + head + `"object":"chat.completion.chunk","choices":[{"index":0,"delta":` + delta + `,"finish_reason":` + finish + "}]}\n\n"
+	}
+	frames := chunk(`{"role":"assistant","content":"It is "}`, "null") + chunk(`{"content":"forty-two."}`, "null") + chunk(`{}`, `"stop"`)
+	if calls != "" {
+		frames = chunk(`{"role":"assistant","tool_calls":[`+calls+`]}`, "null") + chunk(`{}`, `"tool_calls"`)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(w, frames+"data: "+head+`"object":"chat.completion.chunk","choices":[],`+usage+"}\n\ndata: [DONE]\n\n")
+}
+
+func TestGatewayToolLoopStreamsOnlyTheFinalAnswerStopsAtItsRunLimitsAndRefusesCallsItCannotRun(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	var pricingID string
+	if err := pool.QueryRow(t.Context(), `SELECT pricing_revision_id::text FROM olp.prices WHERE provider_id=$1`,
+		fixture.providerID).Scan(&pricingID); err != nil {
+		t.Fatal(err)
+	}
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price: rates.Price{ProviderKind: "openai_compatible", Model: vendor.Model, Operation: "generation",
+			InputPerMillion: new("1"), OutputPerMillion: new("2"), Currency: "USD"},
+		RevisionID: pricingID, Revision: 1, EffectiveAt: fixture.observedAt.Add(-time.Hour),
+	})
+	model, tools := &toolModel{turns: map[string]int{}}, &routeTools{}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: "tools", model: vendor.Model, kind: "openai_compatible", operations: []string{"generation"}, streams: true,
+		prices: []rates.RoutingPrice{*price}, upstream: model, toolsets: []string{uuid.NewString()}, tools: tools,
+	})
+	g.key(t, "owner")
+	headers := map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}
+	turns := 0
+	for _, tc := range []struct {
+		script, settings string
+		status           int
+		says             string
+		turns, tools     int
+	}{
+		{script: "streamed", settings: `,"stream":true`, status: 200, says: `"content":"forty-two."`, turns: 2, tools: 1},
+		{script: "two at once", status: 200, says: "It is forty-two.", turns: 2, tools: 2},
+		{script: "keep asking until the iteration limit", settings: `,"olp_run_limits":{"max_iterations":3}`,
+			status: 400, says: "tool_iteration_limit", turns: 3, tools: 2},
+		{script: "keep asking until the call limit", settings: `,"olp_run_limits":{"max_tool_calls":2}`,
+			status: 400, says: "tool_call_limit", turns: 3, tools: 2},
+		{script: "two at once over the call limit", settings: `,"olp_run_limits":{"max_tool_calls":1}`,
+			status: 400, says: "tool_call_limit", turns: 1},
+		{script: "unknown tool", status: 400, says: "invalid_tool_call", turns: 1},
+		{script: "broken arguments", status: 400, says: "invalid_tool_call", turns: 1},
+		{script: "failing tool", status: 502, says: "tool_failed", turns: 1, tools: 1},
+		{script: "unreadable limits", settings: `,"olp_run_limits":{"max_iterations":"many"}`, status: 400, says: "invalid_run_limits"},
+	} {
+		called := len(tools.calls)
+		_, raw := g.send(t, "POST", "/v1/chat/completions", headers,
+			`{"model":"tools","messages":[{"role":"user","content":"`+tc.script+`"}]`+tc.settings+`}`, tc.status)
+		if !strings.Contains(string(raw), tc.says) || strings.Contains(string(raw), "tool_calls") && tc.status == 200 {
+			t.Fatalf("%s: the caller got %s, want %s and no tool call", tc.script, raw, tc.says)
+		}
+		if asked, ran := model.asked(tc.script), len(tools.calls)-called; asked != tc.turns || ran != tc.tools {
+			t.Fatalf("%s: %d model turns and %d tool calls, want %d and %d", tc.script, asked, ran, tc.turns, tc.tools)
+		}
+		turns += tc.turns
+	}
+	var settled int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debits WHERE api_key_id=$1 AND kind='model' AND state='settled'`,
+		g.runtime.keys["owner"].ID).Scan(&settled); err != nil {
+		t.Fatal(err)
+	}
+	if settled != turns {
+		t.Fatalf("%d model debits settled for %d model turns, including the runs that were refused", settled, turns)
 	}
 }
