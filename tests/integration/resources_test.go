@@ -291,12 +291,12 @@ func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
 }
 
 type listedRuntime struct {
-	release *release.Release
+	release atomic.Pointer[release.Release]
 	inputs  *routinginputs.Inputs
 	keys    map[string]keyauthority.Authority
 }
 
-func (r *listedRuntime) Release() *release.Release { return r.release }
+func (r *listedRuntime) Release() *release.Release { return r.release.Load() }
 
 func (r *listedRuntime) RoutingInputs() *routinginputs.Inputs { return r.inputs }
 
@@ -353,6 +353,9 @@ type storedGateway struct {
 	server  *httptest.Server
 	kernel  *kernel.Server
 	fleet   *fleet.State
+
+	snapshot *routing.Snapshot
+	secrets  map[string][]byte
 
 	providerRevisionID, routeRevisionID, slotID, targetID, modelID, credentialID string
 }
@@ -432,15 +435,12 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		route.ToolExecution, route.Toolsets = "gateway", plan.toolsets
 		snapshot.Routes[plan.slug] = route
 	}
-	published, err := release.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{g.credentialID: []byte("listed-secret")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	g.snapshot, g.secrets = snapshot, map[string][]byte{g.credentialID: []byte("listed-secret")}
 	g.runtime = &listedRuntime{
-		release: published,
-		keys:    map[string]keyauthority.Authority{},
-		inputs:  &routinginputs.Inputs{Prices: plan.prices, RefreshedAt: time.Now()},
+		keys:   map[string]keyauthority.Authority{},
+		inputs: &routinginputs.Inputs{Prices: plan.prices, RefreshedAt: time.Now()},
 	}
+	g.republish(t, func(*routing.Route) {})
 	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -505,6 +505,18 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 		g.t.Fatal(err)
 	}
 	return routeID, revisionID
+}
+
+func (g *storedGateway) republish(t *testing.T, edit func(*routing.Route)) {
+	t.Helper()
+	route := g.snapshot.Routes[g.plan.slug]
+	edit(&route)
+	g.snapshot.Routes[g.plan.slug] = route
+	published, err := release.NewRelease(uuid.NewString(), 1, g.snapshot, g.secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.runtime.release.Store(published)
 }
 
 func (g *storedGateway) key(t *testing.T, secret string) string {
@@ -2370,5 +2382,127 @@ func TestGatewayToolLoopStreamsOnlyTheFinalAnswerStopsAtItsRunLimitsAndRefusesCa
 	}
 	if settled != turns {
 		t.Fatalf("%d model debits settled for %d model turns, including the runs that were refused", settled, turns)
+	}
+}
+
+func twoStoreReplies(request string, nth int) map[string]string {
+	replies := map[string]string{
+		"POST /files":         `{"id":"file-` + providerOwned + `","object":"file","bytes":5,"created_at":1,"filename":"a.txt","purpose":"assistants","status":"processed"}`,
+		"POST /vector_stores": `{"id":"vs_` + providerOwned + strconv.Itoa(nth) + `","object":"vector_store","name":"notes","status":"completed","created_at":1,"file_counts":{"total":0}}`,
+	}
+	for _, n := range []string{"1", "2"} {
+		store, path := `{"id":"vs_`+providerOwned+n+`","object":"vector_store","name":"notes","status":"completed","created_at":1,"file_counts":{"total":0}}`, "/vector_stores/vs_"+providerOwned+n
+		file := `{"id":"file-` + providerOwned + `","object":"vector_store.file","vector_store_id":"vs_` + providerOwned + n + `","status":"completed","created_at":1}`
+		replies["GET "+path], replies["POST "+path] = store, store
+		replies["DELETE "+path] = `{"id":"vs_` + providerOwned + n + `","object":"vector_store.deleted","deleted":true}`
+		replies["POST "+path+"/files"], replies["GET "+path+"/files/file-"+providerOwned] = file, file
+	}
+	return replies
+}
+
+func TestVectorStoreRequestsNeedASubmissionKeyStayInsideTheirStoreAndLoseOnlyNewWorkWhenTheRouteDropsTheOperation(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "stores", "stores-model"
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price:       rates.Price{ProviderKind: "azure_openai", Model: model, Operation: "vector_store", StoragePerGiBDay: new("0.10"), Currency: "USD"},
+		EffectiveAt: fixture.observedAt,
+	})
+	upstream := &retainedUpstream{replies: twoStoreReplies}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch", "vector_store"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stateless")
+	g.key(t, "elsewhere")
+	stateless, elsewhere := g.runtime.keys["stateless"], g.runtime.keys["elsewhere"]
+	stateless.Policy.AllowProviderState, elsewhere.Policy.AllowedRoutes = false, []string{"another-route"}
+	g.runtime.keys["stateless"], g.runtime.keys["elsewhere"] = stateless, elsewhere
+
+	const stores, named, paid = "/v1/vector_stores", `{"name":"notes"}`, `{"expires_after":{"anchor":"last_active_at","days":1}}`
+	ask := func(key, method, path, body string, headers map[string]string, want int) (http.Header, retainedObject, string) {
+		t.Helper()
+		sent := map[string]string{"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+		maps.Copy(sent, headers)
+		header, raw := g.send(t, method, path, sent, body, want)
+		var decoded retainedObject
+		var refusal struct{ Error struct{ Code string } }
+		_ = json.Unmarshal(raw, &decoded)
+		_ = json.Unmarshal(raw, &refusal)
+		return header, decoded, refusal.Error.Code
+	}
+	submitted := func() map[string]string { return map[string]string{"Idempotency-Key": uuid.NewString()} }
+	refused := func(situation, key, method, path, body string, headers map[string]string, status int, code string) http.Header {
+		t.Helper()
+		header, _, got := ask(key, method, path, body, headers, status)
+		if got != code {
+			t.Fatalf("%s is refused with %q, want %q", situation, got, code)
+		}
+		return header
+	}
+
+	for situation, attempt := range map[string]struct {
+		key     string
+		headers map[string]string
+		status  int
+		code    string
+	}{
+		"a creation without a submission key":    {"owner", nil, 400, "missing_required_parameter"},
+		"a key that may not keep provider state": {"stateless", submitted(), 403, "provider_state_forbidden"},
+		"a key that may not use the route":       {"elsewhere", submitted(), 403, "route_forbidden"},
+	} {
+		if header := refused(situation, attempt.key, "POST", stores, named, attempt.headers, attempt.status, attempt.code); header.Get("X-Should-Retry") != "false" {
+			t.Fatalf("%s carries retry hint %q, want a creation refusal that says not to retry", situation, header.Get("X-Should-Retry"))
+		}
+	}
+	if created := upstream.sent("POST /vector_stores"); len(created) != 0 {
+		t.Fatalf("refused creations reached the provider %d times", len(created))
+	}
+
+	upload := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	_, file, _ := ask("owner", "POST", "/v1/files", upload, map[string]string{"Content-Type": "multipart/form-data; boundary=b", "Idempotency-Key": uuid.NewString()}, 200)
+	_, first, _ := ask("owner", "POST", stores, named, submitted(), 200)
+	_, second, _ := ask("owner", "POST", stores, named, submitted(), 200)
+	if created := upstream.sent("POST /vector_stores"); len(created) != 2 || !strings.Contains(created[0].body, `"olp_submission_id":"`) {
+		t.Fatalf("the provider saw creations %+v, want two that carry the gateway's submission identifier", created)
+	}
+
+	inFirst, inSecond := stores+"/"+first.ID, stores+"/"+second.ID
+	attachment := submitted()
+	_, attached, _ := ask("owner", "POST", inFirst+"/files", `{"file_id":"`+file.ID+`"}`, attachment, 200)
+	refused("the same submission key in another store", "owner", "POST", inSecond+"/files", `{"file_id":"`+file.ID+`"}`, attachment, 409, "idempotency_conflict")
+	refused("an attachment read through another store", "owner", "GET", inSecond+"/files/"+attached.ID, "", nil, 404, "not_found")
+	if _, other, _ := ask("owner", "POST", inSecond+"/files", `{"file_id":"`+file.ID+`"}`,
+		map[string]string{"X-OLP-Route": "another-route", "Idempotency-Key": uuid.NewString()}, 200); other.VectorStoreID != second.ID {
+		t.Fatalf("an attachment under a foreign route header landed in %q, want its store %q whatever the header says", other.VectorStoreID, second.ID)
+	}
+
+	g.republish(t, func(route *routing.Route) { route.Operations = []string{"generation", "batch"} })
+	if header := refused("a creation on a route without the operation", "owner", "POST", stores, named, submitted(), 422, "operation_unavailable"); header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("a refused creation carries retry hint %q", header.Get("X-Should-Retry"))
+	}
+	refused("paid work on a store whose route dropped the operation", "owner", "POST", inFirst, paid, submitted(), 409, "provider_resource_credential_unavailable")
+	if _, read, _ := ask("owner", "GET", inFirst, "", nil, 200); read.ID != first.ID {
+		t.Fatalf("a store whose route dropped the operation reads as %q, want %q", read.ID, first.ID)
+	}
+	if _, renamed, _ := ask("owner", "POST", inFirst, `{"name":"renamed"}`, nil, 200); renamed.ID != first.ID {
+		t.Fatalf("renaming a store whose route dropped the operation returned %q, want %q", renamed.ID, first.ID)
+	}
+	g.republish(t, func(route *routing.Route) { route.Operations = []string{"generation", "batch", "vector_store"} })
+	refused("paid work without a submission key", "owner", "POST", inFirst, paid, nil, 400, "invalid_idempotency_key")
+	if _, worked, _ := ask("owner", "POST", inFirst, paid, submitted(), 200); worked.ID != first.ID {
+		t.Fatalf("paid work on a store returned %q, want %q", worked.ID, first.ID)
+	}
+
+	before := len(upstream.sent("GET /vector_stores/vs_" + providerOwned + "2"))
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_resources SET state='submission_unknown' WHERE replace(id::text,'-','')=$1`,
+		strings.TrimPrefix(second.ID, "vector_store_")); err != nil {
+		t.Fatal(err)
+	}
+	refused("a store whose creation was never reconciled", "owner", "GET", inSecond, "", nil, 409, "submission_unknown")
+	if after := len(upstream.sent("GET /vector_stores/vs_" + providerOwned + "2")); after != before {
+		t.Fatalf("a refused read reached the provider %d times", after-before)
 	}
 }
