@@ -1,17 +1,14 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import js from '@eslint/js';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import featureBoundary from './eslint/feature-boundary.mjs';
 
 const tsFiles = ['**/*.{ts,tsx}'];
 const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 const sourceFiles = ['src/**/*.{ts,svelte}'];
 const testFiles = ['src/**/*.test.ts', 'src/**/test/**'];
-const sharedLayers = [
-  'src/lib/*.ts',
-  'src/lib/{components,editing,listing,management,session,shell}/**/*.{ts,svelte}'
-];
 const apiModules = [
   'src/lib/management/**',
   'src/lib/features/**/api.ts',
@@ -37,49 +34,6 @@ const apiModules = [
 const legacy = JSON.parse(
   readFileSync(new URL('./eslint-legacy.json', import.meta.url), 'utf8')
 );
-const featureNames = readdirSync(
-  new URL('./src/lib/features', import.meta.url),
-  { withFileTypes: true }
-)
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name);
-
-const apiClientOnly = {
-  name: '#lib/management/client.js',
-  message:
-    'Call the management API from the feature api module, not a component.'
-};
-const noFeatures = {
-  group: ['\\#lib/features/**'],
-  message:
-    'Shared layers must not import a feature. Move the shared part into a shared layer or pass it in.'
-};
-const featureEntryOnly = (feature) => ({
-  group: [
-    '\\#lib/features/*/**',
-    `!\\#lib/features/${feature}/**`,
-    '!\\#lib/features/*/index.js'
-  ],
-  message: 'Import another feature only through its index.ts.'
-});
-const restrictedImports = (paths, patterns) => ({
-  'no-restricted-imports': ['error', { paths, patterns }]
-});
-const inBoth = (left, right) => left.flatMap((a) => right.map((b) => [a, b]));
-// A later block replaces the whole no-restricted-imports option of an earlier
-// one, so each boundary restates the api client restriction it must keep.
-const importBoundary = (files, legacyFiles, pattern) => [
-  {
-    files,
-    ignores: [...apiModules, ...testFiles, ...legacyFiles],
-    rules: restrictedImports([apiClientOnly], [pattern])
-  },
-  {
-    files: inBoth(apiModules, files),
-    ignores: [...testFiles, ...legacyFiles],
-    rules: restrictedImports([], [pattern])
-  }
-];
 // `<script lang="ts">` blocks are held to the same recommended rules as the
 // .ts modules; without this, unused imports and locals in components are
 // invisible to the linter.
@@ -138,7 +92,18 @@ export default [
     files: sourceFiles,
     ignores: [...apiModules, ...testFiles],
     rules: {
-      ...restrictedImports([apiClientOnly], []),
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '#lib/management/client.js',
+              message:
+                'Call the management API from the feature api module, not a component.'
+            }
+          ]
+        }
+      ],
       'no-restricted-globals': [
         'error',
         {
@@ -149,14 +114,12 @@ export default [
       ]
     }
   },
-  ...importBoundary(sharedLayers, [], noFeatures),
-  ...featureNames.flatMap((feature) =>
-    importBoundary(
-      [`src/lib/features/${feature}/**/*.{ts,svelte}`],
-      [],
-      featureEntryOnly(feature)
-    )
-  ),
+  {
+    files: sourceFiles,
+    ignores: testFiles,
+    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
+    rules: { 'console/feature-boundary': 'error' }
+  },
   {
     files: ['src/**/*.svelte'],
     ignores: legacy.componentOverMaxLines,

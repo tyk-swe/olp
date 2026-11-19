@@ -55,7 +55,9 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 
 ## Boundaries
 
-ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
+ESLint enforces four structural rules. `eslint.config.mjs` is their source, and
+`eslint/feature-boundary.mjs` resolves alias and relative imports for the first
+two:
 
 - The shared layers (`src/lib/*.ts`, `components/`, `editing/`, `listing/`,
   `management/`, `session/` and `shell/`) never import from `src/lib/features/`. When two
