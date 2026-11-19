@@ -10,10 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -36,16 +34,13 @@ type Config struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 	Log                  *slog.Logger
 
-	OIDCClient                  *http.Client
-	ClientIP                    func(*http.Request) string
-	LimitsEnforced              bool
-	LocalLoginDisabled          bool
-	ManagementNetworkRestricted bool
-	ResponseCacheConfigured     bool
+	OIDCClient         *http.Client
+	ClientIP           func(*http.Request) string
+	LimitsEnforced     bool
+	LocalLoginDisabled bool
 }
 
 type Server struct {
@@ -54,35 +49,21 @@ type Server struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 
-	log                         *slog.Logger
-	oidcClient                  *http.Client
-	resolveClientIP             func(*http.Request) string
-	limitsEnforced              bool
-	localLoginDisabled          bool
-	managementNetworkRestricted bool
-	responseCacheConfigured     bool
-	passwordSlots               chan struct{}
-	dummyPassword               string
-}
-
-func bootstrapSource(injected func() (string, bool)) func() (string, bool) {
-	if injected != nil {
-		return injected
-	}
-	return func() (string, bool) { return "", false }
+	log                *slog.Logger
+	oidcClient         *http.Client
+	resolveClientIP    func(*http.Request) string
+	limitsEnforced     bool
+	localLoginDisabled bool
 }
 
 func New(cfg Config) *Server {
 	return &Server{
 		RuntimePublisher: cfg.RuntimePublisher, Pool: cfg.Pool, Installation: cfg.Installation,
-		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: bootstrapSource(cfg.Bootstrap),
+		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys,
 		Egress: cfg.Egress, log: cfg.Log, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
 		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
-		managementNetworkRestricted: cfg.ManagementNetworkRestricted, responseCacheConfigured: cfg.ResponseCacheConfigured,
-		passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()),
 	}
 }
 
@@ -281,21 +262,6 @@ func ClearCookie(name string) *http.Cookie {
 	c := NewCookie(name, "", 0, true)
 	c.MaxAge = -1
 	return c
-}
-func email(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	a, err := mail.ParseAddress(value)
-	if err != nil || a.Address != value || len(value) > 254 {
-		return "", httpkit.Invalid("email", "Enter a valid email address.")
-	}
-	return value, nil
-}
-func password(value string) error {
-	n := utf8.RuneCountInString(value)
-	if n < 12 || n > 1024 {
-		return httpkit.Invalid("password", "Use 12–1024 characters.")
-	}
-	return nil
 }
 func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 	tx, err := s.Pool.Begin(r.Context())

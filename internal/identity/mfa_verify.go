@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"crypto/subtle"
@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/hotp"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -61,7 +62,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 		if err != nil {
 			return false, err
 		}
-		secret, err := s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.MFATOTP)
+		secret, err := s.access.Keys.Read(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP)
 		if err != nil {
 			return false, err
 		}
@@ -77,7 +78,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 		if len(code) != 32 {
 			return false, nil
 		}
-		deleted, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1 AND digest=$2", f.UserID, s.Auth.Digest(secrets.MFARecoveryDigest, f.UserID+":"+code))
+		deleted, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1 AND digest=$2", f.UserID, s.access.Auth.Digest(secrets.MFARecoveryDigest, f.UserID+":"+code))
 		return err == nil && deleted.RowsAffected() == 1, err
 	case "webauthn":
 		if f.Data.WebAuthn == nil || len(input.Credential) == 0 {
@@ -104,7 +105,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 			return false, err
 		}
 		raw, _ := json.Marshal(credential)
-		if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
+		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
 			return false, err
 		}
 		_, err = tx.Exec(r.Context(), "UPDATE olp.mfa_factors SET last_used_at=now() WHERE id=$1", id)
@@ -118,7 +119,7 @@ func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Repl
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := tx.Commit(r.Context()); err != nil {
@@ -135,7 +136,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if err := s.admit(r, "mfa_request", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, err := s.access.Begin(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -156,7 +157,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	case "enroll_totp":
 		if input.Method == "totp" && f.SecretID != nil {
 			var secret []byte
-			secret, err = s.Keys.Read(r.Context(), tx, s.Installation, *f.SecretID, secrets.MFATOTP)
+			secret, err = s.access.Keys.Read(r.Context(), tx, s.access.Installation, *f.SecretID, secrets.MFATOTP)
 			if err == nil {
 				counter, valid = totpCounter(string(secret), input.Code, time.Now(), -1)
 				clear(secret)
@@ -213,7 +214,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 		}
 		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: "local", MFA: true})
 	case f.Purpose == "manage" || f.Purpose == "reauth":
-		p, e := s.Authenticate(r, tx)
+		p, e := s.access.Authenticate(r, tx)
 		if e != nil {
 			return httpkit.Reply{}, e
 		}
@@ -242,7 +243,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if codes != nil && f.SessionID == nil {
 		reply.Body = map[string]any{"session": reply.Body, "recovery_codes": codes}
 	}
-	if err = Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
@@ -262,7 +263,7 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 	if credential != nil {
 		credentialID = credential.ID
 		raw, _ := json.Marshal(credential)
-		if err := s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
+		if err := s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
 			return nil, err
 		}
 	} else {
@@ -289,7 +290,7 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 			return nil, err
 		}
 	}
-	if err := Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.enroll", "mfa_factor", id, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.enroll", "mfa_factor", id, "success"); err != nil {
 		return nil, err
 	}
 	if count == 0 {

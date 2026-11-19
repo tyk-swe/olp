@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
@@ -34,8 +35,8 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 	})
 }
 
-func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
-	admit := s.Admit(pattern, MaxBody(scim.MaxBody), AnyOrigin())
+func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h access.Handler) {
+	admit := s.access.Admit(pattern, access.MaxBody(scim.MaxBody), access.AnyOrigin())
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		r, p, cancel, err := admit(w, r)
 		defer cancel()
@@ -78,7 +79,7 @@ type scimFailure struct {
 func (s *Server) writeSCIMError(w http.ResponseWriter, err error) {
 	f, known := scimFailureFor(err)
 	if !known {
-		s.LogFailure("SCIM request failed", err)
+		s.access.LogFailure("SCIM request failed", err)
 	}
 	renderSCIMError(w, f)
 }

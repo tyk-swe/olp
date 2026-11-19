@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"slices"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -15,7 +17,7 @@ import (
 )
 
 type Desired struct {
-	saml     *access.SAMLDefinition
+	saml     *signin.SAMLDefinition
 	groups   []contract.ConfigurationSCIMGroupMapping
 	issuers  []contract.ConfigurationWorkloadIssuer
 	declared map[string]contract.ConfigurationProjectEntry
@@ -29,6 +31,7 @@ type Fragment struct {
 
 type Deps struct {
 	Access   *access.Server
+	SignIn   *signin.Server
 	Identity *http.Client
 }
 

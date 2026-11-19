@@ -5,9 +5,10 @@ import (
 	"context"
 	"slices"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
@@ -76,16 +77,16 @@ func invalidGrant(p grant) bool {
 }
 
 func readSCIM(ctx context.Context, q database.Queryer) ([]group, error) {
-	stored, err := access.ReadSCIMGroupMappings(ctx, q)
+	stored, err := signin.ReadSCIMGroupMappings(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(stored, func(mapping access.SCIMGroupMapping) group {
+	return promotion.Map(stored, func(mapping signin.SCIMGroupMapping) group {
 		return group{
 			Name:        mapping.Name,
 			Role:        promotion.Nullable((*contract.ConfigurationSCIMGroupMappingRole)(mapping.Role)),
 			AccessScope: contract.ConfigurationSCIMGroupMappingAccessScope(mapping.AccessScope),
-			Projects: promotion.Map(mapping.Projects, func(g access.SCIMProjectGrant) grant {
+			Projects: promotion.Map(mapping.Projects, func(g signin.SCIMProjectGrant) grant {
 				return grant{Project: g.Project, Role: contract.ConfigurationSCIMGroupMappingProjectsRole(g.Role)}
 			}),
 		}
@@ -160,7 +161,7 @@ func SCIMApplier(d Desired, deps Deps) promotion.Applier {
 			if err != nil {
 				return err
 			}
-			return deps.Access.StoreSCIMMapping(ctx, tx, p, g.Name, mapping)
+			return deps.SignIn.StoreSCIMMapping(ctx, tx, p, g.Name, mapping)
 		})
 	}
 }

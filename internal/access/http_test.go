@@ -11,13 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
-func TestNewWithoutABootstrapSourceReportsNoTokenConfigured(t *testing.T) {
-	token, configured := New(Config{}).Bootstrap()
-	if token != "" || configured {
-		t.Fatalf("Bootstrap() = %q, %v, want no token configured", token, configured)
-	}
-}
-
 type managementRecorder struct {
 	*httptest.ResponseRecorder
 }

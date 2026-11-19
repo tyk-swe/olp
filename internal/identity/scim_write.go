@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"encoding/json"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
@@ -24,7 +25,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 			return httpkit.Reply{}, err
 		}
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -86,13 +87,13 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 		}
 		return httpkit.Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
+	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "scim."+kind+"."+strings.ToLower(r.Method), kind, id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "scim."+kind+"."+strings.ToLower(r.Method), kind, id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if r.Method == "DELETE" {
@@ -105,9 +106,9 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 	reply := httpkit.Detail(resource, etag)
 	if create {
 		reply.Status = 201
-		reply.Location = s.Origin + "/scim/v2/Users/" + id
+		reply.Location = s.access.Origin + "/scim/v2/Users/" + id
 		if group {
-			reply.Location = s.Origin + "/scim/v2/Groups/" + id
+			reply.Location = s.access.Origin + "/scim/v2/Groups/" + id
 		}
 	}
 	return reply, tx.Commit(r.Context())

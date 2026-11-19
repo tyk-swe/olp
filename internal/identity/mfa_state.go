@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
@@ -46,19 +47,19 @@ func (u mfaUser) WebAuthnName() string                       { return u.Email }
 func (u mfaUser) WebAuthnDisplayName() string                { return u.DisplayName }
 func (u mfaUser) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 func (s *Server) webAuthn() (*webauthn.WebAuthn, error) {
-	origin, err := url.Parse(s.Origin)
+	origin, err := url.Parse(s.access.Origin)
 	if err != nil {
 		return nil, err
 	}
 	if origin.Scheme != "https" && !strings.EqualFold(origin.Hostname(), "localhost") && !strings.HasSuffix(strings.ToLower(origin.Hostname()), ".localhost") {
 		return nil, errors.New("WebAuthn requires a secure DNS origin")
 	}
-	return webauthn.New(&webauthn.Config{RPDisplayName: "OpenLLMProxy", RPID: origin.Hostname(), RPOrigins: []string{s.Origin}, AttestationPreference: protocol.PreferNoAttestation, AuthenticatorSelection: protocol.AuthenticatorSelection{UserVerification: protocol.VerificationRequired}})
+	return webauthn.New(&webauthn.Config{RPDisplayName: "OpenLLMProxy", RPID: origin.Hostname(), RPOrigins: []string{s.access.Origin}, AttestationPreference: protocol.PreferNoAttestation, AuthenticatorSelection: protocol.AuthenticatorSelection{UserVerification: protocol.VerificationRequired}})
 }
 
 func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, error) {
 	var user mfaUser
-	u, err := ScanUser(tx.QueryRow(ctx, "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1 AND active AND oidc_authorized", id))
+	u, err := access.ScanUser(tx.QueryRow(ctx, "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1 AND active AND oidc_authorized", id))
 	if err != nil {
 		return user, err
 	}
@@ -81,7 +82,7 @@ func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, er
 		return user, err
 	}
 	for _, id := range ids {
-		raw, err := s.Keys.Read(ctx, tx, s.Installation, id, secrets.MFAWebAuthn)
+		raw, err := s.access.Keys.Read(ctx, tx, s.access.Installation, id, secrets.MFAWebAuthn)
 		if err != nil {
 			return user, err
 		}
@@ -140,7 +141,7 @@ func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, ti
 	token := secrets.Token()
 	until := time.Now().Add(mfaTTL)
 	data, _ := json.Marshal(f.Data)
-	_, err = tx.Exec(r.Context(), `INSERT INTO olp.mfa_challenges(id,digest,user_id,user_etag,mfa_revision,session_id,purpose,data,secret_id,expires_at) SELECT $1,$2,u.id,u.etag,u.mfa_revision,$4,$5,$6,$7,$8 FROM olp.users u WHERE u.id=$3 AND active AND oidc_authorized`, f.ID, s.Auth.Digest(secrets.MFAChallengeDigest, token), f.UserID, f.SessionID, f.Purpose, data, f.SecretID, until)
+	_, err = tx.Exec(r.Context(), `INSERT INTO olp.mfa_challenges(id,digest,user_id,user_etag,mfa_revision,session_id,purpose,data,secret_id,expires_at) SELECT $1,$2,u.id,u.etag,u.mfa_revision,$4,$5,$6,$7,$8 FROM olp.users u WHERE u.id=$3 AND active AND oidc_authorized`, f.ID, s.access.Auth.Digest(secrets.MFAChallengeDigest, token), f.UserID, f.SessionID, f.Purpose, data, f.SecretID, until)
 	return token, until, err
 }
 
@@ -149,7 +150,7 @@ func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow,
 	if len(token) > 256 {
 		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
-	err := tx.QueryRow(r.Context(), `SELECT c.id::text,c.user_id::text,c.user_etag::text,c.mfa_revision::text,c.session_id::text,c.secret_id::text,c.purpose,c.data FROM olp.mfa_challenges c JOIN olp.users u ON u.id=c.user_id WHERE c.digest=$1 AND c.expires_at>clock_timestamp() AND c.attempts<5 AND u.etag=c.user_etag AND u.mfa_revision=c.mfa_revision AND u.active AND u.oidc_authorized FOR UPDATE OF c`, s.Auth.Digest(secrets.MFAChallengeDigest, token)).Scan(&f.ID, &f.UserID, &f.UserETag, &f.Revision, &f.SessionID, &f.SecretID, &f.Purpose, &f.Data)
+	err := tx.QueryRow(r.Context(), `SELECT c.id::text,c.user_id::text,c.user_etag::text,c.mfa_revision::text,c.session_id::text,c.secret_id::text,c.purpose,c.data FROM olp.mfa_challenges c JOIN olp.users u ON u.id=c.user_id WHERE c.digest=$1 AND c.expires_at>clock_timestamp() AND c.attempts<5 AND u.etag=c.user_etag AND u.mfa_revision=c.mfa_revision AND u.active AND u.oidc_authorized FOR UPDATE OF c`, s.access.Auth.Digest(secrets.MFAChallengeDigest, token)).Scan(&f.ID, &f.UserID, &f.UserETag, &f.Revision, &f.SessionID, &f.SecretID, &f.Purpose, &f.Data)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
@@ -166,7 +167,7 @@ func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow,
 		}
 	}
 	if f.SessionID != nil {
-		p, err := s.Authenticate(r, tx)
+		p, err := s.access.Authenticate(r, tx)
 		if err != nil || p.SessionID != *f.SessionID || p.ID != f.UserID {
 			return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 		}
@@ -242,7 +243,7 @@ func (s *Server) replaceRecoveryCodes(ctx context.Context, tx pgx.Tx, userID str
 		}
 		value := strings.ToUpper(hex.EncodeToString(raw))
 		codes[i] = value[:8] + "-" + value[8:16] + "-" + value[16:24] + "-" + value[24:]
-		if _, err := tx.Exec(ctx, "INSERT INTO olp.mfa_recovery_codes(user_id,digest) VALUES($1,$2)", userID, s.Auth.Digest(secrets.MFARecoveryDigest, userID+":"+value)); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO olp.mfa_recovery_codes(user_id,digest) VALUES($1,$2)", userID, s.access.Auth.Digest(secrets.MFARecoveryDigest, userID+":"+value)); err != nil {
 			return nil, err
 		}
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -46,7 +48,7 @@ func MFAApplier(desired Settings) promotion.Applier {
 		if desired.RequireLocalMFA == nil {
 			return nil
 		}
-		return access.SetLocalMFARequired(ctx, tx, p, *desired.RequireLocalMFA)
+		return identity.SetLocalMFARequired(ctx, tx, p, *desired.RequireLocalMFA)
 	}
 }
 

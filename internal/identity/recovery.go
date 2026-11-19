@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -76,11 +77,11 @@ func RecoverPassword(ctx context.Context, pool *pgxpool.Pool, address, secret st
 		if _, e = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])", secretIDs); e != nil {
 			return nil, e
 		}
-		if e = Audit(ctx, tx, &http.Request{}, authz.System, "user.mfa_recover", "user", id, "success"); e != nil {
+		if e = access.Audit(ctx, tx, &http.Request{}, authz.System, "user.mfa_recover", "user", id, "success"); e != nil {
 			return nil, e
 		}
 	}
-	if err = Audit(ctx, tx, &http.Request{}, authz.System, "user.password_recover", "user", id, "success"); err != nil {
+	if err = access.Audit(ctx, tx, &http.Request{}, authz.System, "user.password_recover", "user", id, "success"); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

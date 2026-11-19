@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
@@ -23,7 +24,7 @@ func samlSignInRole(c samlConfiguration, managed, assigned string, data []byte) 
 	return samlMappedRole(c, f.Email, f.Groups)
 }
 
-func (s *Server) usableSAMLOwner(ctx context.Context, q database.Queryer) (bool, error) {
+func usableSAMLOwner(ctx context.Context, q database.Queryer) (bool, error) {
 	c, err := loadSAML(ctx, q)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -56,7 +57,7 @@ func (s *Server) usableSAMLOwner(ctx context.Context, q database.Queryer) (bool,
 }
 
 func (s *Server) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'issuer',issuer,'subject',subject,'email_at_link',email_at_link,'created_at',created_at,'last_login_at',last_login_at) FROM olp.saml_identities WHERE user_id=$1 ORDER BY created_at,id`, p.ID)
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'issuer',issuer,'subject',subject,'email_at_link',email_at_link,'created_at',created_at,'last_login_at',last_login_at) FROM olp.saml_identities WHERE user_id=$1 ORDER BY created_at,id`, p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -64,11 +65,11 @@ func (s *Server) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	usable, err := usableSAMLIdentities(r, s.Pool, p)
+	usable, err := usableSAMLIdentities(r, s.access.Pool, p)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	c, err := loadSAML(r.Context(), s.Pool)
+	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return httpkit.Reply{}, err
 	}
@@ -80,12 +81,12 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = s.ConsumeRecent(r, tx, p, "saml_unlink", id); err != nil {
+	if err = s.access.ConsumeRecent(r, tx, p, "saml_unlink", id); err != nil {
 		return httpkit.Reply{}, err
 	}
 	result, err := tx.Exec(r.Context(), "DELETE FROM olp.saml_identities WHERE id=$1 AND user_id=$2", id, p.ID)
@@ -96,7 +97,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The linked identity was not found.")
 	}
 	var local bool
-	if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL AND $2 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true) FROM olp.users WHERE id=$1", p.ID, !s.localLoginDisabled).Scan(&local); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL AND $2 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true) FROM olp.users WHERE id=$1", p.ID, !s.access.LocalLoginDisabled()).Scan(&local); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var management string
@@ -144,7 +145,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 			}
 		}
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, httpkit.NewID()); err != nil {
@@ -165,7 +166,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	session.Status = 204
 	session.Body = nil
-	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.unlink", "saml_identity", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "saml.unlink", "saml_identity", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return session, tx.Commit(r.Context())

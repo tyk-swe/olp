@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -68,7 +69,7 @@ func (s *Server) managementTokens(r *http.Request, _ authz.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object("+managementTokenFields+")"+managementTokenFrom+" WHERE t.id<$1 ORDER BY t.id DESC LIMIT $2", p.Before, p.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object("+managementTokenFields+")"+managementTokenFrom+" WHERE t.id<$1 ORDER BY t.id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -83,7 +84,7 @@ func (s *Server) managementToken(r *http.Request, _ authz.Principal) (httpkit.Re
 	}
 	var data []byte
 	var etag string
-	err = s.Pool.QueryRow(r.Context(), "SELECT jsonb_build_object("+managementTokenFields+"),t.etag::text"+managementTokenFrom+" WHERE t.id=$1", id).Scan(&data, &etag)
+	err = s.access.Pool.QueryRow(r.Context(), "SELECT jsonb_build_object("+managementTokenFields+"),t.etag::text"+managementTokenFrom+" WHERE t.id=$1", id).Scan(&data, &etag)
 	return httpkit.Detail(json.RawMessage(data), etag), err
 }
 
@@ -92,12 +93,12 @@ func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (http
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.Replay(r, tx, p, input)
+	claim, replayed, err := s.access.Replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -130,15 +131,15 @@ func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	var createdAt time.Time
-	if err = tx.QueryRow(r.Context(), "INSERT INTO olp.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.Auth.Digest(secrets.ManagementTokenDigest, secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
+	if err = tx.QueryRow(r.Context(), "INSERT INTO olp.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.access.Auth.Digest(secrets.ManagementTokenDigest, secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
 		return httpkit.Reply{}, err
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "name": strings.TrimSpace(input.Name), "scopes": input.Scopes, "all_projects": allProjects, "project_ids": projectIDs, "created_by": p.ID, "created_by_email": p.Email, "etag": etag, "expires_at": input.ExpiresAt, "revoked_at": nil, "created_at": createdAt, "secret": secret}
 	result := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/management-tokens/" + id, Body: body}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "management_token.create", "management_token", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "management_token.create", "management_token", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
@@ -149,12 +150,12 @@ func (s *Server) revokeManagementToken(r *http.Request, _ authz.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.Replay(r, tx, p, nil)
+	claim, replayed, err := s.access.Replay(r, tx, p, nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -177,10 +178,10 @@ func (s *Server) revokeManagementToken(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	result := httpkit.Detail(map[string]any{"id": id, "etag": etag}, etag)
-	if err = Audit(r.Context(), tx, r, p.Actor(), "management_token.revoke", "management_token", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "management_token.revoke", "management_token", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())

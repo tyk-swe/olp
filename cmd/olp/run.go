@@ -13,8 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/agents"
@@ -569,7 +570,7 @@ func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
 	if surface == "management" {
 		problem := httpkit.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
 		if strings.HasPrefix(r.URL.Path, "/scim/") {
-			access.WriteSCIMError(w, problem)
+			identity.WriteSCIMError(w, problem)
 		} else {
 			httpkit.WriteProblem(w, problem)
 		}

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -29,6 +31,7 @@ const maxDocument = 4 << 20
 
 type Deps struct {
 	Access     *access.Server
+	SignIn     *signin.Server
 	Egress     *egress.Policy
 	Unconfined *plugins.Unconfined
 	Identity   *http.Client
@@ -75,7 +78,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 		egress:       deps.Egress,
 		costs:        deps.Costs,
 		normalizer:   deps.Normalizer,
-		identity:     identity.Deps{Access: deps.Access, Identity: deps.Identity},
+		identity:     identity.Deps{Access: deps.Access, SignIn: deps.SignIn, Identity: deps.Identity},
 		providers:    provider.Deps{Egress: deps.Egress, Unconfined: deps.Unconfined, Keys: keys, Installation: installation, Drafts: deps.Drafts},
 		sinks:        sinks.Credentials{Keys: keys, Installation: installation},
 		vault:        guardrail.Vault{Keys: keys, Installation: installation},

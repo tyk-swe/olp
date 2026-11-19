@@ -13,8 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
@@ -89,7 +90,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 		if err != nil {
 			return err
 		}
-		result, err := access.RecoverPassword(ctx, pool, options.AccountEmail, password, options.ResetMFA)
+		result, err := identity.RecoverPassword(ctx, pool, options.AccountEmail, password, options.ResetMFA)
 		if err != nil {
 			return err
 		}
