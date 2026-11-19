@@ -58,17 +58,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"DELETE /api/v1/profile/mfa/factors/{factor_id}": s.mfaRemove,
 		"GET /api/v1/profile":                            s.profile, "PATCH /api/v1/profile": s.updateProfile,
 		"POST /api/v1/profile/password": s.changePassword, "POST /api/v1/profile/password/enroll": s.enrollPassword,
-		"POST /api/v1/profile/reauthenticate":         s.reauthenticate,
-		"POST /api/v1/api-keys/{api_key_id}/end-user": s.lookupEndUser,
-
-		"GET /api/v1/api-keys": s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
-		"GET /api/v1/api-keys/{api_key_id}": s.apiKey, "PATCH /api/v1/api-keys/{api_key_id}": s.updateAPIKey,
-		"POST /api/v1/api-keys/{api_key_id}/revoke": s.revokeAPIKey, "POST /api/v1/api-keys/{api_key_id}/rotate": s.rotateAPIKey,
-		"GET /api/v1/audit":                        s.auditEvents,
-		"GET /api/v1/workload-issuers":             s.workloadIssuers,
-		"POST /api/v1/workload-issuers":            s.createWorkloadIssuer,
-		"GET /api/v1/workload-issuers/{issuer_id}": s.workloadIssuer,
-		"PUT /api/v1/workload-issuers/{issuer_id}": s.putWorkloadIssuer,
+		"POST /api/v1/profile/reauthenticate": s.reauthenticate,
 
 		"GET /api/v1/management-tokens": s.managementTokens, "POST /api/v1/management-tokens": s.createManagementToken,
 		"GET /api/v1/management-tokens/{management_token_id}":         s.managementToken,

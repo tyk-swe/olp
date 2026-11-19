@@ -394,3 +394,131 @@ func TestBudgetGroupAndIncreaseWritesReplayGuardStaleAndAudit(t *testing.T) {
 		t.Fatalf("increase audit = %v, want %v", actions, want)
 	}
 }
+
+func TestAPIKeyWritesReplayGuardStaleRotateRevokeAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "keys"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	expect := func(method, path string, body any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, method, path, body, headers); status != want {
+			t.Fatalf("%s %s: %s", method, path, describe(status, raw))
+		}
+	}
+
+	create := harness.Idempotent()
+	input := map[string]any{"name": "service", "scopes": []string{"inference"}, "project_id": project}
+	key := s.Want(owner, "POST", "/api/v1/api-keys", input, create, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/api-keys", input, create, http.StatusCreated); replayed["id"] != key["id"] || replayed["secret"] != key["secret"] {
+		t.Fatalf("replayed create returned another key")
+	}
+	id := key["id"].(string)
+	path := "/api/v1/api-keys/" + id
+	stored := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+
+	rename := map[string]any{"name": "renamed"}
+	expect("PATCH", path, map[string]any{"secret": "x"}, harness.Idempotent(harness.ETag(stored)), http.StatusUnprocessableEntity)
+	expect("PATCH", path, rename, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	updated := s.Want(owner, "PATCH", path, rename, harness.Idempotent(harness.ETag(stored)), http.StatusOK)
+
+	overlap := map[string]any{"overlap_seconds": 60}
+	expect("POST", path+"/rotate", map[string]any{"name": "x"}, harness.Idempotent(harness.ETag(updated)), http.StatusUnprocessableEntity)
+	expect("POST", path+"/rotate", overlap, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	rotate := harness.Idempotent(harness.ETag(updated))
+	rotated := s.Want(owner, "POST", path+"/rotate", overlap, rotate, http.StatusOK)
+	if rotated["secret"] == key["secret"] || rotated["overlap_expires_at"] == nil {
+		t.Fatalf("rotation = %v", rotated)
+	}
+	if replayed := s.Want(owner, "POST", path+"/rotate", overlap, rotate, http.StatusOK); replayed["secret"] != rotated["secret"] {
+		t.Fatalf("replayed rotation returned another secret")
+	}
+	if current := s.Want(owner, "GET", path, nil, nil, http.StatusOK); current["name"] != "renamed" || current["etag"] != rotated["etag"] {
+		t.Fatalf("stored key = %v", current)
+	}
+
+	expect("POST", path+"/revoke", nil, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	revoke := harness.Idempotent(harness.ETag(rotated))
+	expect("POST", path+"/revoke", nil, revoke, http.StatusOK)
+	expect("POST", path+"/revoke", nil, revoke, http.StatusOK)
+	revoked := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+	expect("POST", path+"/revoke", nil, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+	expect("POST", path+"/rotate", overlap, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+	expect("PATCH", path, rename, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+
+	if actions, want := auditActions(t, s, id), []string{"api_key.create", "api_key.revoke", "api_key.rotate", "api_key.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("key audit = %v, want %v", actions, want)
+	}
+}
+
+func TestWorkloadIssuerWritesReplayGuardStaleKeepIssuerAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "workloads"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	issuer := func(name, url string) map[string]any {
+		return map[string]any{
+			"name": name, "issuer": url, "jwks_url": url + "/keys", "enabled": false,
+			"audiences": []string{"olp"}, "algorithms": []string{"RS256"}, "max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+			"mappings": []map[string]any{{
+				"name": "deploy", "match": map[string]string{"/sub": "repository"}, "project_id": project,
+				"limit_template": "standard", "route_groups": []string{"main"}, "scopes": []string{"inference"},
+			}},
+		}
+	}
+	expect := func(method, path string, body any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, method, path, body, headers); status != want {
+			t.Fatalf("%s %s: %s", method, path, describe(status, raw))
+		}
+	}
+
+	create := harness.Idempotent()
+	input := issuer("pipeline", "https://issuer.example")
+	created := s.Want(owner, "POST", "/api/v1/workload-issuers", input, create, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/workload-issuers", input, create, http.StatusCreated); replayed["id"] != created["id"] {
+		t.Fatalf("replayed create returned another issuer")
+	}
+	expect("POST", "/api/v1/workload-issuers", issuer("", "https://other.example"), harness.Idempotent(), http.StatusUnprocessableEntity)
+	id := created["id"].(string)
+	path := "/api/v1/workload-issuers/" + id
+
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	renamed := issuer("renamed", "https://issuer.example")
+	expect("PUT", path, renamed, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	expect("PUT", path, issuer("renamed", "https://moved.example"), harness.Idempotent(harness.ETag(created)), http.StatusUnprocessableEntity)
+	updated := s.Want(owner, "PUT", path, renamed, harness.Idempotent(harness.ETag(created)), http.StatusOK)
+	if stored := s.Want(owner, "GET", path, nil, nil, http.StatusOK); stored["name"] != "renamed" || stored["etag"] != updated["etag"] || stored["etag"] == created["etag"] {
+		t.Fatalf("stored issuer = %v", stored)
+	}
+
+	if actions, want := auditActions(t, s, id), []string{"workload_issuer.update", "workload_issuer.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("issuer audit = %v, want %v", actions, want)
+	}
+}
+
+func TestAuditLogFiltersByResourceAndRejectsBadFilters(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "audited"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+
+	events := items(s.Want(owner, "GET", "/api/v1/audit?action=project.create&resource_id="+project, nil, nil, http.StatusOK)["items"])
+	if len(events) != 1 || events[0]["resource_type"] != "project" || events[0]["actor_type"] != "user" || events[0]["outcome"] != "success" {
+		t.Fatalf("audit events = %v", events)
+	}
+	if failed := items(s.Want(owner, "GET", "/api/v1/audit?outcome=failure&resource_id="+project, nil, nil, http.StatusOK)["items"]); len(failed) != 0 {
+		t.Fatalf("failure filter returned %v", failed)
+	}
+	for _, query := range []string{
+		"outcome=maybe",
+		"actor_user_id=nobody",
+		"occurred_after=yesterday",
+		"occurred_after=2026-01-02T00:00:00Z&occurred_before=2026-01-01T00:00:00Z",
+	} {
+		if status, raw := s.Do(owner, "GET", "/api/v1/audit?"+query, nil, nil); status != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: %s", query, describe(status, raw))
+		}
+	}
+}

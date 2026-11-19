@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
@@ -14,7 +15,6 @@ import (
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -256,7 +256,7 @@ func resolveKey(ctx context.Context, tx pgx.Tx, directory promotion.Directory, k
 	if err != nil {
 		return nil, err
 	}
-	keys, err := access.ReadKeysNamed(ctx, tx, owner, key.Name)
+	keys, err := apikeys.ReadKeysNamed(ctx, tx, owner, key.Name)
 	if err != nil {
 		return nil, err
 	}

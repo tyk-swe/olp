@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -36,7 +36,7 @@ func exported(ctx context.Context, q database.Queryer, directory promotion.Direc
 		return Binding{}, fmt.Errorf("retrieval binding %s targets an unknown provider", binding.ID)
 	}
 	keys, err := promotion.TryMap(binding.KeyGrants, func(id string) (string, error) {
-		key, found, err := access.ReadAPIKey(ctx, q, id)
+		key, found, err := apikeys.ReadAPIKey(ctx, q, id)
 		if err != nil {
 			return "", err
 		}

@@ -1,10 +1,11 @@
-package access
+package apikeys
 
 import (
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -134,7 +135,7 @@ func TestRequiredAttributionKeysAgreeWithCallerLabels(t *testing.T) {
 				Scopes: []string{"inference"}, AllowedRoutes: []string{}, RequiredAttributionKeys: []string{label},
 			}}
 			valid := attribution.Validate(map[string]string{label: "value"}) == nil
-			if err := ValidateAttributionPolicy(&policy); (err == nil) != valid {
+			if err := access.ValidateAttributionPolicy(&policy); (err == nil) != valid {
 				t.Errorf("project requirement for %q has error %v, caller label valid %t", label, err, valid)
 			}
 			if err := validateAndNormalizeKey(key, false); (err == nil) != valid {

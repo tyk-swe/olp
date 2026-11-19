@@ -1,15 +1,24 @@
-package access
+package auditlog
 
 import (
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
 
-func (s *Server) auditEvents(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+type API struct{ server *access.Server }
+
+func NewAPI(server *access.Server) *API { return &API{server: server} }
+
+func (a *API) Register(mux *http.ServeMux) {
+	a.server.Route(mux, "GET /api/v1/audit", a.list)
+}
+
+func (a *API) list(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var err error
 	page, err := httpkit.Page(r)
 	if err != nil {
@@ -44,7 +53,7 @@ func (s *Server) auditEvents(r *http.Request, p authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, httpkit.Invalid(key, "Invalid audit filter.")
 		}
 	}
-	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',a.id,'actor_user_id',a.actor_user_id,'actor_management_token_id',a.actor_management_token_id,'actor_type',CASE WHEN a.actor_user_id IS NOT NULL THEN 'user' WHEN a.actor_management_token_id IS NOT NULL THEN 'management_token' ELSE 'system' END,'actor_label',COALESCE(u.email,t.name),'actor_email',u.email,'action',a.action,'resource_type',a.resource_type,'resource_id',a.resource_id,'outcome',a.outcome,'source_ip',a.source_ip,'user_agent_family',a.user_agent_family,'occurred_at',a.occurred_at)
+	rows, err := a.server.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',a.id,'actor_user_id',a.actor_user_id,'actor_management_token_id',a.actor_management_token_id,'actor_type',CASE WHEN a.actor_user_id IS NOT NULL THEN 'user' WHEN a.actor_management_token_id IS NOT NULL THEN 'management_token' ELSE 'system' END,'actor_label',COALESCE(u.email,t.name),'actor_email',u.email,'action',a.action,'resource_type',a.resource_type,'resource_id',a.resource_id,'outcome',a.outcome,'source_ip',a.source_ip,'user_agent_family',a.user_agent_family,'occurred_at',a.occurred_at)
         FROM olp.audit a LEFT JOIN olp.users u ON u.id=a.actor_user_id LEFT JOIN olp.management_tokens t ON t.id=a.actor_management_token_id
         WHERE a.id<$1 AND ($2='' OR a.action=$2) AND ($3='' OR a.resource_type=$3) AND ($4='' OR a.resource_id=$4) AND ($5::uuid IS NULL OR a.actor_user_id=$5) AND ($6='' OR a.outcome=$6) AND ($7::timestamptz IS NULL OR a.occurred_at>=$7) AND ($8::timestamptz IS NULL OR a.occurred_at<=$8)
         ORDER BY a.id DESC LIMIT $9`, page.Before, q.Get("action"), q.Get("resource_type"), q.Get("resource_id"), actor, outcome, after, before, page.Limit+1)

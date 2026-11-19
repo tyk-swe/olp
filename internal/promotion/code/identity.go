@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -144,7 +145,7 @@ func key(ctx context.Context, q database.Queryer, ref, project string, owner *st
 	if err != nil {
 		return "", err
 	}
-	allowed, err := access.ProjectKeyUsable(ctx, q, id, project, owner)
+	allowed, err := apikeys.ProjectKeyUsable(ctx, q, id, project, owner)
 	if err != nil {
 		return "", err
 	}

@@ -72,7 +72,7 @@ func (s *Server) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.
 	return httpkit.Detail(c, c.ETag), err
 }
 func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
-	if err := oidcURL(c.DiscoveryURL); err != nil {
+	if err := CheckIdentityURL(c.DiscoveryURL); err != nil {
 		return nil, nil, httpkit.Invalid("discovery_url", err.Error())
 	}
 	request, err := http.NewRequestWithContext(ctx, "GET", c.DiscoveryURL, nil)
@@ -95,7 +95,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 		return nil, nil, httpkit.Invalid("issuer", "The issuer must exactly match discovery.")
 	}
 	for _, endpoint := range []string{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL} {
-		if oidcURL(endpoint) != nil {
+		if CheckIdentityURL(endpoint) != nil {
 			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 		u, _ := url.Parse(endpoint) // Syntax was checked by oidcURL.
