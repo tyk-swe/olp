@@ -78,6 +78,19 @@ func TestARequestedResponseIsOwedUntilItsTerminalEventReportsUsage(t *testing.T)
 	})
 }
 
+func TestOutputDetailsAreReadWhenInputDetailsAreAbsent(t *testing.T) {
+	eachMode(t, func(t *testing.T, strict bool) {
+		var tracker realtimeresponses.Tracker
+		usage := provider(&tracker, strict, done("resp_1", `{"input_tokens":4,"output_tokens":9,"output_token_details":{"audio_tokens":7}}`))
+		if usage == nil || usage.AudioOutputTokens == nil || *usage.AudioOutputTokens != 7 {
+			t.Fatalf("usage = %+v, want 7 audio output tokens", usage)
+		}
+		if broken := provider(&tracker, strict, done("resp_2", `{"input_tokens":4,"output_tokens":9,"output_token_details":"7"}`)); broken != nil {
+			t.Fatalf("malformed output details reported usage %+v", broken)
+		}
+	})
+}
+
 func TestATerminalEventWithoutTrustworthyUsageLeavesTheSessionIncomplete(t *testing.T) {
 	cases := map[string]string{
 		"no usage":                  `{"type":"response.done","response":{"id":"resp_1"}}`,

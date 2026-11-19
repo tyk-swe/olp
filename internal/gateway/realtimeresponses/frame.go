@@ -280,6 +280,29 @@ func decodeStrict(data []byte, event *frame) bool {
 	if event.Response.Usage.OutputTokens, valid = counter("output_tokens"); !valid {
 		return false
 	}
+	readDetail := func(parent oif.Value, name string) (*int64, bool) {
+		value, present := member(parent, name)
+		if !present || value.Kind() == oif.Null {
+			return nil, true
+		}
+		count, valid := intField(parent, name)
+		if !valid {
+			return nil, false
+		}
+		return &count, true
+	}
+	var ok bool
+	if outputDetails, present := member(usageValue, "output_token_details"); present && outputDetails.Kind() != oif.Null {
+		if outputDetails.Kind() != oif.Object {
+			return false
+		}
+		event.Response.Usage.OutputDetails = new(struct {
+			AudioTokens *int64 `json:"audio_tokens"`
+		})
+		if event.Response.Usage.OutputDetails.AudioTokens, ok = readDetail(outputDetails, "audio_tokens"); !ok {
+			return false
+		}
+	}
 	details, present := member(usageValue, "input_token_details")
 	if !present || details.Kind() == oif.Null {
 		return true
@@ -296,18 +319,6 @@ func decodeStrict(data []byte, event *frame) bool {
 			ImageTokens *int64 `json:"image_tokens"`
 		} `json:"cached_tokens_details"`
 	})
-	readDetail := func(parent oif.Value, name string) (*int64, bool) {
-		value, present := member(parent, name)
-		if !present || value.Kind() == oif.Null {
-			return nil, true
-		}
-		count, valid := intField(parent, name)
-		if !valid {
-			return nil, false
-		}
-		return &count, true
-	}
-	var ok bool
 	if event.Response.Usage.InputDetails.CachedTokens, ok = readDetail(details, "cached_tokens"); !ok {
 		return false
 	}
@@ -329,17 +340,6 @@ func decodeStrict(data []byte, event *frame) bool {
 			return false
 		}
 		if event.Response.Usage.InputDetails.CachedDetails.ImageTokens, ok = readDetail(cachedDetails, "image_tokens"); !ok {
-			return false
-		}
-	}
-	if outputDetails, present := member(usageValue, "output_token_details"); present && outputDetails.Kind() != oif.Null {
-		if outputDetails.Kind() != oif.Object {
-			return false
-		}
-		event.Response.Usage.OutputDetails = new(struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-		})
-		if event.Response.Usage.OutputDetails.AudioTokens, ok = readDetail(outputDetails, "audio_tokens"); !ok {
 			return false
 		}
 	}
