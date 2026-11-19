@@ -201,7 +201,6 @@
     "internal/usage/routinginputs/inputs.go loadRoutingRateCards"
   ],
   "gatewayImportsManagement": [
-    "internal/gateway/cache_management.go",
     "internal/gateway/playground.go"
   ],
   "handRolledTransaction": [
