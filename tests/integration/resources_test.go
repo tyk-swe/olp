@@ -811,7 +811,7 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 
 type upstreamCall struct {
 	request, query, key, authorization, body string
-	beta, accept                             string
+	beta, accept, upload                     string
 }
 
 type retainedUpstream struct {
@@ -833,6 +833,7 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		request: request, key: cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")),
 		authorization: r.Header.Get("Authorization"), body: string(body), query: r.URL.RawQuery,
 		beta: r.Header.Get("Anthropic-Beta"), accept: r.Header.Get("Accept"),
+		upload: r.Header.Get("X-Goog-Upload-Command") + "@" + r.Header.Get("X-Goog-Upload-Offset"),
 	})
 	nth := 0
 	for _, call := range u.calls {
@@ -1291,6 +1292,68 @@ func TestGeminiFilesUploadThroughAGatewaySessionHideProviderIdentifiersAndIsolat
 	if sent := upstream.sent("DELETE /files/" + providerOwned); len(sent) != 1 || sent[0].key != "listed-secret" {
 		t.Fatalf("the provider saw deletes %+v, want one under the provider credential", sent)
 	}
+}
+
+func TestGeminiUploadsResumeInChunksFromTheStoredOffsetAndFailTheSessionOnAProviderMismatch(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	upstream := &retainedUpstream{replies: geminiReplies, headers: func(r *http.Request) map[string]string {
+		if r.Header.Get("X-Goog-Upload-Command") == "upload" && r.ContentLength == 3 {
+			return map[string]string{"X-Goog-Upload-Size-Received": "9"}
+		}
+		return geminiUploadHeaders(r)
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "gemini-chunks", model: "gemini-model", kind: "gemini", surface: "gemini", version: "/v1beta", secure: true,
+		operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	start := func() string {
+		t.Helper()
+		started, _ := g.send(t, "POST", "/gemini/upload/v1beta/files", geminiKey("owner", map[string]string{
+			"Content-Type": "application/json", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+			"X-Goog-Upload-Header-Content-Length": "10", "X-Goog-Upload-Header-Content-Type": "text/plain",
+		}), `{"file":{"display_name":"notes"}}`, 200)
+		session, _ := strings.CutPrefix(started.Get("X-Goog-Upload-URL"), g.server.URL)
+		return session
+	}
+	command := func(session, command, offset, body string, want int) http.Header {
+		t.Helper()
+		reply, _ := g.send(t, "POST", session, geminiKey("owner", map[string]string{"X-Goog-Upload-Command": command, "X-Goog-Upload-Offset": offset}), body, want)
+		return reply
+	}
+	received := func(session, want, status string) {
+		t.Helper()
+		reply := command(session, "query", "", "", 200)
+		if got := reply.Get("X-Goog-Upload-Size-Received"); got != want || reply.Get("X-Goog-Upload-Status") != status {
+			t.Fatalf("session reports %q bytes with status %q, want %q and %q", got, reply.Get("X-Goog-Upload-Status"), want, status)
+		}
+	}
+
+	session := start()
+	received(session, "0", "active")
+	command(session, "append", "0", "hello", 400)
+	command(session, "query", "", "hello", 400)
+	if reply := command(session, "upload", "0", "hello", 200); reply.Get("X-Goog-Upload-Size-Received") != "5" || reply.Get("X-Goog-Upload-Status") != "active" {
+		t.Fatalf("first chunk acknowledged as %v, want five bytes on an active session", reply)
+	}
+	received(session, "5", "active")
+	command(session, "upload", "0", "hello", 400)
+	command(session, "upload", "5", "far too long", 400)
+	command(session, "upload, finalize", "5", "wor", 400)
+	received(session, "5", "active")
+	if reply := command(session, "upload, finalize", "5", "world", 200); reply.Get("X-Goog-Upload-Size-Received") != "10" || reply.Get("X-Goog-Upload-Status") != "final" {
+		t.Fatalf("last chunk acknowledged as %v, want ten bytes on a final session", reply)
+	}
+	sent := upstream.sent("POST /upload/session-" + providerOwned)
+	if len(sent) != 2 || sent[0].body != "hello" || sent[0].upload != "upload@0" || sent[1].body != "world" || sent[1].upload != "upload, finalize@5" {
+		t.Fatalf("the provider session received %+v, want the two accepted chunks at offsets 0 and 5", sent)
+	}
+
+	broken := start()
+	command(broken, "upload", "0", "abc", 502)
+	command(broken, "query", "", "", 409)
+	command(broken, "upload", "0", "hello", 409)
 }
 
 func TestGeminiInteractionsHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
