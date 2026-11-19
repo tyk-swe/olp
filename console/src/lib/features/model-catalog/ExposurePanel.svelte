@@ -1,6 +1,7 @@
 <script lang="ts">
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getExposure, putExposure } from './api';
@@ -14,8 +15,7 @@
   }));
   let exposed = $state(false);
   let etag = $state('');
-  let busy = $state(false);
-  let error = $state('');
+  const action = useAction();
   $effect(() => {
     if (exposure.data && !etag) {
       exposed = exposure.data.expose_upstream_models;
@@ -27,27 +27,20 @@
     if (result.data) {
       exposed = result.data.expose_upstream_models;
       etag = result.data.etag;
-      error = '';
+      action.error = '';
     }
   }
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    busy = true;
-    error = '';
-    try {
-      const result = await putExposure(routeId, {
-        expose_upstream_models: exposed,
-        etag
-      });
-      client.setQueryData(catalogKeys.exposure(routeId), result);
-      await client.invalidateQueries({ queryKey: catalogKeys.root });
-      etag = result.etag;
-      notify('Catalog disclosure saved.');
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    await action.run(
+      () => putExposure(routeId, { expose_upstream_models: exposed, etag }),
+      async (result) => {
+        client.setQueryData(catalogKeys.exposure(routeId), result);
+        await client.invalidateQueries({ queryKey: catalogKeys.root });
+        etag = result.etag;
+        notify('Catalog disclosure saved.');
+      }
+    );
   }
 </script>
 
@@ -60,14 +53,16 @@
   {#if exposure.isError}<p role="alert" class="inline-problem">
       {errorMessage(exposure.error)}
     </p>{/if}
-  {#if error}<p role="alert" class="inline-problem">{error}</p>{/if}
+  {#if action.error}<p role="alert" class="inline-problem">
+      {action.error}
+    </p>{/if}
 
   <form onsubmit={save}>
     <label
       ><input
         type="checkbox"
         bind:checked={exposed}
-        disabled={busy ||
+        disabled={action.busy ||
           !etag ||
           !access.allows('PUT /api/v1/routes/{route_id}/catalog')}
       /> Disclose upstream model names in authenticated and published catalogs</label
@@ -75,14 +70,14 @@
     <div class="actions">
       <button
         class="button button-primary"
-        disabled={busy ||
+        disabled={action.busy ||
           !etag ||
           !access.allows('PUT /api/v1/routes/{route_id}/catalog')}
         >Save disclosure</button
       ><button
         class="button button-secondary"
         type="button"
-        disabled={busy || exposure.isFetching}
+        disabled={action.busy || exposure.isFetching}
         onclick={reload}>Reload disclosure</button
       >
     </div>
