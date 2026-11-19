@@ -3,7 +3,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { resolve } from '$app/paths';
@@ -26,7 +26,7 @@
   import { formatInteger, stateLabel } from '#lib/format.js';
   import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
   import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));

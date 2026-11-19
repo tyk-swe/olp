@@ -1,8 +1,5 @@
 import { resolve } from '$app/paths';
-import {
-  allows,
-  type Grant
-} from '#lib/features/access/session/authorization.js';
+import { allows, type Grant } from '#lib/session/authorization.js';
 import type { ManagementRoute } from '#lib/management/requirements.js';
 import type { IconName } from '#lib/shell/icons.js';
 

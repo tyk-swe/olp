@@ -3,11 +3,13 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { SvelteMap } from 'svelte/reactivity';
   import { formatCost } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { getReconciliation } from '#lib/features/usage/reconciliation.js';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import {
+    listProviders,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import type {
     ReconciliationItem,
     ReconciliationTotals

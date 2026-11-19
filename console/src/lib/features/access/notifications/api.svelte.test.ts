@@ -14,7 +14,7 @@ import {
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getAllContexts, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import NotificationsPanel from './NotificationsPanel.svelte';
 import {

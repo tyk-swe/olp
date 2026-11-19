@@ -1,7 +1,7 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import {
     nativeObject,

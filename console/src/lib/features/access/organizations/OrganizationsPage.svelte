@@ -5,11 +5,12 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { personOptions } from '#lib/features/access/entityOptions.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
-  import { useRole } from '../session/useRole.svelte';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { projectKeys } from '../projects/projectKeys';
   import { organizationKeys } from './organizationKeys';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
@@ -252,7 +253,7 @@
         <label class="form-field"
           >Person<EntityPicker
             id="organization-member"
-            kind="person"
+            source={personOptions}
             required
             bind:value={userId}
             emptyLabel="Choose someone"
@@ -388,7 +389,7 @@
           <label class="form-field"
             >Person<EntityPicker
               id="organization-project-member"
-              kind="person"
+              source={personOptions}
               required
               bind:value={projectUser}
               emptyLabel="Choose someone"

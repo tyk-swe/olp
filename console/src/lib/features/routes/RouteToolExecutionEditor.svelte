@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorMessage } from '#lib/management/http.js';
-  import RunLimits from '#lib/features/workflows/RunLimits.svelte';
+  import { RunLimits } from '#lib/features/workflows/index.js';
   import type { RouteDraftEditorState } from './routeDraftEditor.svelte';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();

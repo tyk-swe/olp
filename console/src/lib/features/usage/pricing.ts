@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, createHeaders } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 
@@ -25,7 +25,7 @@ export async function createPricingRevision(
   const { data, error, response } = await apiClient.POST(
     '/api/v1/pricing/revisions',
     {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: { effective_at: effectiveAt, prices }
     }
   );

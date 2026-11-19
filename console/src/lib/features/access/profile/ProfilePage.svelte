@@ -8,7 +8,7 @@
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
 
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';

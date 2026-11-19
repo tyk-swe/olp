@@ -16,7 +16,7 @@
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { errorMessage as providerDetailError } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import ProviderConfigurationSection from './ProviderConfigurationSection.svelte';
   import ProviderCredentialsSection from './ProviderCredentialsSection.svelte';
   import BillingImportSection from './BillingImportSection.svelte';

@@ -125,6 +125,10 @@ A management endpoint copies `internal/guardrails/credential/api.go`. Reads quer
 
 Go lint enforces four structural rules. Nothing under `internal/gateway` imports `internal/access` and nothing under `internal/access` imports the gateway, because only `cmd/olp` wires the serving and management planes together. A function stays under 100 lines and a file under 500 lines of code, outside tests and generated files. `.golangci-legacy.json` lists the code that broke a rule before it existed. The lint gate fails on any violation that is not listed and on any listed entry that no longer violates, so the lists only shrink
 
+Lint enforces the structure, so read the failure message and fix the code. Never add a file to a legacy exemption list such as `console/eslint-legacy.json`. Those lists record violations that existed before the rule and they only shrink, which `scripts/check-exemptions.sh` checks against the default branch. When you fix a listed file, remove it from the list in the same change
+
+In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. `console/README.md` has the details
+
 ## Agent skills
 
 Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update lockfile skills with `npx skills@latest update`. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness

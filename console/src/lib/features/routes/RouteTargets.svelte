@@ -14,7 +14,7 @@
     targetUnavailable
   } from '#lib/features/routes/routeEditor.js';
   import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
-  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import { lifecycleNotice } from '#lib/features/providers/index.js';
   import type { EditableTarget } from '#lib/features/routes/routeEditor.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 

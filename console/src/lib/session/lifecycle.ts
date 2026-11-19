@@ -3,20 +3,20 @@ import {
   clearCsrfToken,
   getCsrfToken,
   setCsrfToken
-} from '#lib/features/access/session/csrf.js';
-import { QueryPartition } from '#lib/features/access/session/queryPartition.js';
+} from '#lib/session/csrf.js';
+import { QueryPartition } from '#lib/session/queryPartition.js';
 import {
   isAuthenticationEndpoint,
   isMFAEndpoint,
   isCurrentSessionDeletion,
   isMutationRequest,
   isSessionValidationEndpoint
-} from '#lib/features/access/session/requestPolicy.js';
+} from '#lib/session/requestPolicy.js';
 import { ApiProblem, abortError, errorMessage } from '#lib/management/http.js';
 import {
   sessionIsFresh,
   unauthorizedError
-} from '#lib/features/access/session/sessionFreshness.js';
+} from '#lib/session/sessionFreshness.js';
 import {
   anonymousAuthenticationSnapshot,
   reduceAuthentication,
@@ -25,7 +25,7 @@ import {
   type AuthenticationAction,
   type AuthenticationSnapshot,
   type PrincipalAbsentSnapshot
-} from '#lib/features/access/session/state.js';
+} from '#lib/session/state.js';
 
 type Boundary = {
   loadSession(signal: AbortSignal): Promise<AuthenticatedSession>;

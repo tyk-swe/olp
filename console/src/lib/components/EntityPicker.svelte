@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { entityOptions, type EntityKind } from './entityOptions.svelte.js';
+  import type { EntitySource } from './entityOptions.js';
 
   let {
     id,
-    kind,
+    source,
     value = $bindable(''),
     emptyLabel,
     disabled = false,
@@ -11,7 +11,7 @@
     onchange
   }: {
     id: string;
-    kind: EntityKind;
+    source: EntitySource;
     value?: string;
     emptyLabel: string;
     disabled?: boolean;
@@ -19,8 +19,8 @@
     onchange?: (value: string) => void;
   } = $props();
 
-  // svelte-ignore state_referenced_locally (an entity picker never changes kind after mount)
-  const options = entityOptions(kind);
+  // svelte-ignore state_referenced_locally (an entity picker never changes source after mount)
+  const options = source();
   const known = $derived(
     options.data?.some((option) => option.value === value) ?? false
   );

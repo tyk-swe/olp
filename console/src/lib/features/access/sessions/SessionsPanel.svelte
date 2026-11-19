@@ -6,14 +6,14 @@
   import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '#lib/features/access/session/api.js';
+  import { logout } from '#lib/session/api.js';
   import {
     listSessionPage,
     revokeSession
   } from '#lib/features/access/sessions/api.js';
   import { listUsers } from '#lib/features/access/users/api.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,

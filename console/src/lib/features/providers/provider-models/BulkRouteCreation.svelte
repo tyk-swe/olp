@@ -1,18 +1,18 @@
 <script lang="ts">
   import { useMutationIntents } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import {
     createRouteDraft,
     activateRoute,
-    type RouteDraftValidation
-  } from '#lib/features/routes/api.js';
-  import {
-    fidelityOptions,
-    type FidelityMode
-  } from '#lib/features/routes/routeFidelity.js';
+    fidelityOptions
+  } from '#lib/features/routes/index.js';
+  import type {
+    RouteDraftValidation,
+    FidelityMode
+  } from '#lib/features/routes/index.js';
   import type { ProviderModelInventory } from '../models';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 

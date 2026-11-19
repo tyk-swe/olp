@@ -1,4 +1,8 @@
-import type { MFAChallenge, MFAEnrollment, MFAVerification } from './api';
+import type {
+  MFAChallenge,
+  MFAEnrollment,
+  MFAVerification
+} from './mfaChallenge';
 export type MFARequest =
   | { kind: 'challenge'; challenge: MFAChallenge }
   | { kind: 'enrollment'; enrollment: MFAEnrollment };

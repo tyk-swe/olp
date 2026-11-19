@@ -16,7 +16,7 @@
     recoveryMFA,
     type MFAFactor
   } from './api';
-  import { confirmMFA } from './prompt.svelte';
+  import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
   let {
     hasLocalPassword = false,
     hasLinkedIdentity = false

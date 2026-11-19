@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, createHeaders } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
@@ -28,7 +28,7 @@ export async function createInvitation(
 ): Promise<InvitationSecret> {
   return unwrap(
     await apiClient.POST('/api/v1/invitations', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       // Omitting the field lets the API apply its seven-day default; it caps
       // the lifetime at thirty days (720 hours).
       body: {
@@ -48,7 +48,7 @@ export async function revokeInvitation(
     await apiClient.DELETE('/api/v1/invitations/{invitation_id}', {
       params: {
         path: { invitation_id: id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     })
   );

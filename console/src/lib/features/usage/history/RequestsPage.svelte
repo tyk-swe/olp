@@ -10,7 +10,7 @@
   import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '#lib/features/usage/history/api.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
 
   import {
     requestFilters,

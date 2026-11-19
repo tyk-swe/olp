@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
 import { useServiceCapabilities } from './serviceCapabilities.svelte';
 
 function capabilities() {

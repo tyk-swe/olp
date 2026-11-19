@@ -1,6 +1,12 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { type CursorPage, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  type CursorPage,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
 type Schemas = components['schemas'];
@@ -39,7 +45,7 @@ export async function createPricingSource(
   requestId: string
 ): Promise<PricingSource> {
   const response = await apiClient.POST('/api/v1/pricing/sources', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -54,7 +60,7 @@ export async function updatePricingSource(
     {
       params: {
         path: { pricing_source_id: source.id },
-        header: { 'If-Match': source.etag }
+        header: ifMatch(source.etag)
       },
       body: input
     }
@@ -101,7 +107,7 @@ export async function publishPricingSnapshot(
     {
       params: {
         path: { pricing_source_snapshot_id: snapshot.id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       },
       body: input
     }
