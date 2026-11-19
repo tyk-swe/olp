@@ -107,7 +107,6 @@
     "internal/gateway/kernel/retrieval.go Server.queryRetrieval",
     "internal/gateway/kernel/tool_loop.go Server.continueToolLoop",
     "internal/gateway/kernel/tool_loop.go Server.executeToolLoop",
-    "internal/gateway/kernel/unary_dispatch.go Server.unaryAttempt",
     "internal/gateway/kernel/workflow_approval.go workflowPauseFrames",
     "internal/gateway/kernel/workflow_pruning.go Server.typeSafeRelevance",
     "internal/guardrails/engine.go Engine.Evaluate",
