@@ -245,9 +245,9 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		}
 		switch {
 		case nativeTerminalFailure:
-			exchange.Complete(classUpstreamServer)
+			exchange.Complete(ClassUpstreamServer)
 		case nativeIncomplete && res.Kind == resources.KindStrictResponse:
-			exchange.Complete(classProtocol)
+			exchange.Complete(ClassProtocol)
 		case wire.ResponseStatusFinished(status):
 			exchange.Complete(ClassSuccess)
 		}
@@ -309,14 +309,14 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		p.Provider.Connector().StreamPayload(resp.Body, limit), limit, x.Route.Slug, true, emit, observe)
 	if streamErr != nil && (errors.Is(streamErr, fault.ErrClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
 		// The client left; the provider is not at fault.
-		x.Failure = (&attemptFailure{class: classCancelled}).toError()
-		exchange.interrupt(classCancelled, true)
+		x.Failure = (&AttemptFailure{class: ClassCancelled}).Fault()
+		exchange.Interrupt(ClassCancelled, true)
 		s.Finish(x, &Outcome{Err: x.Failure, Committed: committed, Cancelled: true}, 0)
 		return nil
 	}
 	if streamErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		x.Failure = (&attemptFailure{class: classTimeout}).toError()
-		exchange.interrupt(classTimeout, false)
+		x.Failure = (&AttemptFailure{class: ClassTimeout}).Fault()
+		exchange.Interrupt(ClassTimeout, false)
 		if !committed {
 			return x.Failure
 		}
@@ -330,7 +330,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		} else {
 			x.Failure = fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
 			_, local := errors.AsType[*responseLocalRefusal](streamErr)
-			exchange.interrupt(classProtocol, local)
+			exchange.Interrupt(ClassProtocol, local)
 		}
 		if !committed {
 			return x.Failure

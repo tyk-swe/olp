@@ -195,7 +195,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *Call, out *mediaOutcome,
 		err = rc.Flush()
 	}
 	if err != nil {
-		out.err = (&attemptFailure{class: classCancelled}).toError()
+		out.err = (&AttemptFailure{class: ClassCancelled}).Fault()
 		out.cancelled, out.status = true, 0
 		if attempt != nil && attempt.Interaction != nil {
 			attempt.Interaction.ClientState = usage.ClientPartial
@@ -298,7 +298,7 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *Call, out *mediaOutcom
 	})
 }
 
-func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *Call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
+func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *Call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *AttemptFailure) {
 	defer events.Close()
 	sw := &fault.StreamWriter{W: w, Family: x.family, Headers: streamedHeaders{x}}
 	var usage *wire.Usage
@@ -388,12 +388,12 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 	if errors.Is(decodeErr, terminal) {
 		return usage, sw.Committed, nil
 	}
-	class := classProtocol
+	class := ClassProtocol
 	switch {
 	case errors.Is(decodeErr, fault.ErrClientWrite), errors.Is(ctx.Err(), context.Canceled):
-		class = classCancelled
+		class = ClassCancelled
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		class = classTimeout
+		class = ClassTimeout
 	}
-	return usage, sw.Committed, &attemptFailure{class: class, committed: sw.Committed, dispatched: true}
+	return usage, sw.Committed, &AttemptFailure{class: class, committed: sw.Committed, dispatched: true}
 }

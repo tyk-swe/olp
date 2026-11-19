@@ -60,7 +60,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 			out = &Outcome{Err: e}
 			return nil, "", e
 		}
-		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 		out = &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}

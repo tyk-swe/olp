@@ -371,7 +371,7 @@ func (s *Server) expandPrompt(x *Call, family wire.Format, doc oif.Document, pat
 	if e := authorize(&route); e != nil {
 		return oif.Document{}, nil, e
 	}
-	if e := x.checkBody(&route); e != nil {
+	if e := x.CheckBody(&route); e != nil {
 		return oif.Document{}, nil, e
 	}
 	if route.Fidelity.Strict() {

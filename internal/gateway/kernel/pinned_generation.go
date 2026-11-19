@@ -95,12 +95,12 @@ func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 }
 
 func ClassFailure(class string) *fault.Error {
-	return (&attemptFailure{class: class}).toError()
+	return (&AttemptFailure{class: class}).Fault()
 }
 
 func (x *Call) Sensitive() egress.Sensitive { return x.sensitive }
 
-func (e *pinnedExchange) AcceptUnfinished() {
+func (e *PinnedExchange) AcceptUnfinished() {
 	fact := e.fact()
 	fact.Class = ClassSuccess
 	fact.ObserveUsage(fact.Usage, false)

@@ -163,7 +163,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *Call) *fault.Error {
 	p.Provider.Slots = []routing.Slot{p.Slot}
 	retained, err := current.Historical(p.Provider, *historical)
 	if err != nil {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	x.historicalSnapshot = retained
 	route := retained.Route(historical.Slug)

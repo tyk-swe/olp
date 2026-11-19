@@ -27,7 +27,7 @@ import (
 
 func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, resourceCall bool) (*Call, keyauthority.Authority, bool) {
 	return s.Enter(w, r, wire.GeminiInteractions, resourceCall, func(r *http.Request) (keyauthority.Authority, *fault.Error) {
-		if _, e := geminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
+		if _, e := GeminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
 			return keyauthority.Authority{}, e
 		}
 		return s.Gate.Authenticate(r, "inference")
@@ -96,7 +96,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(e)
 		return
 	}
-	if e := x.checkBody(&route); e != nil {
+	if e := x.CheckBody(&route); e != nil {
 		fail(e)
 		return
 	}
@@ -115,7 +115,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if input.Background {
-		if e := unboundedWorkLimits(x.AdmissionAuthority(authority), nil, nil, &route); e != nil {
+		if e := UnboundedWorkLimits(x.AdmissionAuthority(authority), nil, nil, &route); e != nil {
 			fail(e)
 			return
 		}
@@ -141,7 +141,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		var retainedRoute *routing.Route
 		p, retainedRoute, e = s.ResolveResource(ctx, x, authority, parent, "generation", RetainedNewWork)
 		if e != nil || retainedRoute == nil || retainedRoute.Slug != route.Slug || p.Provider.ProfileID != "gemini-interactions" || !p.Provider.Supports(p.Model, "generation", "gemini", x.Mode()) {
-			fail(pinUnavailable())
+			fail(PinUnavailable())
 			return
 		}
 		if e = s.GatePinnedGeneration(ctx, x, p, "generation"); e != nil {
@@ -158,14 +158,14 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if input.Background {
-		if e := unboundedWorkLimits(x.AdmissionAuthority(x.Authority()), &p.Provider, &p.Slot, &route); e != nil {
+		if e := UnboundedWorkLimits(x.AdmissionAuthority(x.Authority()), &p.Provider, &p.Slot, &route); e != nil {
 			fail(e)
 			return
 		}
 	}
 	// Admission ran before the target was known, so the cost hold follows the
 	// target's selection, before anything is dispatched.
-	if e = s.reserveFallbackCost(ctx, x); e != nil {
+	if e = s.ReserveFallbackCost(ctx, x); e != nil {
 		fail(e)
 		return
 	}
@@ -181,7 +181,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}
 	response, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, bound, "application/json")
 	if failure != nil {
-		fail(failure.toError())
+		fail(failure.Fault())
 		return
 	}
 
@@ -196,7 +196,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		committed, streamErr = s.streamGeminiInteraction(ctx, w, x, p, response, authority, input.Store, parent, nil, "", false)
 		if streamErr != nil {
 			if errors.Is(streamErr, fault.ErrClientWrite) || r.Context().Err() != nil {
-				x.Failure = ClassFailure(classCancelled)
+				x.Failure = ClassFailure(ClassCancelled)
 				x.Failure.NoRetry = true
 				status, out = 0, &Outcome{Err: x.Failure, Committed: committed, Cancelled: true}
 				return
@@ -228,10 +228,10 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}
 	terminal := geminilifecycle.InteractionTurnFinished(result.Status)
 	nativeFailure := result.Status == "failed"
-	recordGeminiInteractionUsage(response.Exchange, result.Source.Root())
+	RecordInteractionUsage(response.Exchange, result.Source.Root())
 	switch {
 	case nativeFailure:
-		response.Exchange.Complete(classUpstreamServer)
+		response.Exchange.Complete(ClassUpstreamServer)
 		x.Failure = geminiGenerationFailure()
 	case terminal:
 		response.Exchange.Complete(ClassSuccess)
@@ -240,7 +240,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}
 	localID := result.ID
 	if input.Store {
-		stored, storeErr := s.storeGeminiInteraction(ctx, response.Exchange, p, authority.ID, result.ID, result.Status, parent, !terminal)
+		stored, storeErr := s.StoreInteraction(ctx, response.Exchange, p, authority.ID, result.ID, result.Status, parent, !terminal)
 		if storeErr != nil {
 			fail(fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction mapping could not be committed."))
 			return
@@ -412,7 +412,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	}
 	p, retained, e = s.ResolveResource(ctx, x, authority, res, "generation", use)
 	if e != nil || retained == nil || retained.Slug != current.Slug || p.Provider.ProfileID != "gemini-interactions" || !p.Provider.Supports(p.Model, "generation", "gemini", x.Mode()) {
-		fail(pinUnavailable())
+		fail(PinUnavailable())
 		return
 	}
 	if e = s.GatePinnedRetrieval(ctx, x, p); e != nil {
@@ -429,7 +429,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	}
 	endpoint, err := p.Provider.Connector().InteractionsURL(upstreamID, action)
 	if err != nil {
-		fail(pinUnavailable())
+		fail(PinUnavailable())
 		return
 	}
 	if method == http.MethodGet {
@@ -457,7 +457,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if failure != nil {
-		fail(failure.toError())
+		fail(failure.Fault())
 		return
 	}
 
@@ -470,7 +470,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		committed, streamErr := s.streamGeminiInteraction(ctx, w, x, p, response, authority, true, nil, res, upstreamID, len(query["last_event_id"]) > 0)
 		if streamErr != nil {
 			if errors.Is(streamErr, fault.ErrClientWrite) || r.Context().Err() != nil {
-				x.Failure = ClassFailure(classCancelled)
+				x.Failure = ClassFailure(ClassCancelled)
 				status, out = 0, &Outcome{Err: x.Failure, Committed: committed, Cancelled: true}
 				return
 			}
@@ -503,7 +503,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	// its owner-scoped projection cannot be delivered.
 	response.Exchange.Complete(ClassSuccess)
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
-	_, err = s.observeGeminiInteraction(commitCtx, authority.ID, localID, result.Status, result.Source.Root())
+	_, err = s.ObserveInteraction(commitCtx, authority.ID, localID, result.Status, result.Source.Root())
 	stopCommit()
 	if err != nil {
 		fail(fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction state could not be updated."))
@@ -553,7 +553,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	status, out = response.StatusCode, &Outcome{Committed: true}
 }
 
-func (s *Server) finishGeminiInteractionDeletion(ctx context.Context, w http.ResponseWriter, x *Call, response *pinnedResponse, tombstone func(context.Context) error) *fault.Error {
+func (s *Server) finishGeminiInteractionDeletion(ctx context.Context, w http.ResponseWriter, x *Call, response *PinnedResponse, tombstone func(context.Context) error) *fault.Error {
 	if response != nil {
 		defer response.Body.Close()
 		response.Exchange.Complete(ClassSuccess)
@@ -565,14 +565,14 @@ func (s *Server) finishGeminiInteractionDeletion(ctx context.Context, w http.Res
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The deleted Interaction could not be tombstoned.")
 	}
 	if response == nil {
-		s.writeStateJSONStatus(w, x, nil, http.StatusOK)
+		s.WriteStateJSONStatus(w, x, nil, http.StatusOK)
 		return nil
 	}
-	s.writeStateJSONStatus(w, x, nil, http.StatusOK, response.Exchange)
+	s.WriteStateJSONStatus(w, x, nil, http.StatusOK, response.Exchange)
 	return nil
 }
 
-func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWriter, x *Call, p *Pin, response *pinnedResponse, authority keyauthority.Authority, store bool, parent, existing *resources.Resource, expectedID string, resumed bool) (bool, error) {
+func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWriter, x *Call, p *Pin, response *PinnedResponse, authority keyauthority.Authority, store bool, parent, existing *resources.Resource, expectedID string, resumed bool) (bool, error) {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return false, errors.New("provider did not return Interaction SSE")
@@ -598,26 +598,26 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 	err = sse.Decode(response.Body, limit, func(frame sse.Frame) error {
 		event, err := geminilifecycle.ParseInteractionEvent([]byte(frame.Data), limit)
 		if err != nil {
-			exchange.invalidNative()
+			exchange.InvalidNative()
 			return err
 		}
 		if err := state.Accept(event); err != nil {
-			exchange.invalidNative()
+			exchange.InvalidNative()
 			return err
 		}
 		if expectedID != "" && state.ID != expectedID {
-			exchange.invalidNative()
+			exchange.InvalidNative()
 			return errors.New("provider changed Interaction resource identity")
 		}
 		if !store && local == nil {
 			localID = state.ID
 		}
 		if object, ok := event.Source.Root().Lookup("interaction"); ok {
-			recordGeminiInteractionUsage(exchange, object)
+			RecordInteractionUsage(exchange, object)
 		}
 		if state.Done {
 			if !x.ResourceCall() && (event.Type == "error" || event.Status == "failed") {
-				exchange.Complete(classUpstreamServer)
+				exchange.Complete(ClassUpstreamServer)
 				x.Failure = geminiGenerationFailure()
 			} else {
 				exchange.Complete(ClassSuccess)
@@ -628,7 +628,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			if initial == "" {
 				initial = "created"
 			}
-			local, err = s.storeGeminiInteraction(ctx, response.Exchange, p, authority.ID, state.ID, initial, parent, !state.Done)
+			local, err = s.StoreInteraction(ctx, response.Exchange, p, authority.ID, state.ID, initial, parent, !state.Done)
 			if err != nil {
 				return &localRefusal{cause: err}
 			}
@@ -641,7 +641,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		if local != nil && observedStatus != "" {
 			object, _ := event.Source.Root().Lookup("interaction")
 			commitCtx, stopCommit := ResourceCommitContext(ctx)
-			_, err := s.observeGeminiInteraction(commitCtx, authority.ID, local.ID, observedStatus, object)
+			_, err := s.ObserveInteraction(commitCtx, authority.ID, local.ID, observedStatus, object)
 			stopCommit()
 			if err != nil {
 				return &localRefusal{cause: err}
@@ -722,11 +722,11 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		_, local := errors.AsType[*localRefusal](err)
 		switch {
 		case errors.Is(err, fault.ErrClientWrite), errors.Is(ctx.Err(), context.Canceled):
-			exchange.interrupt(classCancelled, true)
+			exchange.Interrupt(ClassCancelled, true)
 		case errors.Is(ctx.Err(), context.DeadlineExceeded) && !local:
-			exchange.interrupt(classTimeout, false)
+			exchange.Interrupt(ClassTimeout, false)
 		default:
-			exchange.interrupt(classProtocol, local)
+			exchange.Interrupt(ClassProtocol, local)
 		}
 		if err == nil {
 			err = errors.New("Interaction SSE ended before terminal event")

@@ -17,7 +17,7 @@ import (
 
 // Terminal observations belong to the original generation. The resource owner
 // serializes competing GETs, cancellations and resumed streams across replicas.
-func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, status string, object oif.Value) (ingest.Persisted, error) {
+func (s *Server) ObserveInteraction(ctx context.Context, owner, localID, status string, object oif.Value) (ingest.Persisted, error) {
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observed := geminiInteractionUsage(object); observed != nil {
 		evidence = events.ObservedUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
@@ -32,7 +32,7 @@ func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, s
 	return result, nil
 }
 
-func (s *Server) storeGeminiInteraction(ctx context.Context, exchange *pinnedExchange, p *Pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
+func (s *Server) StoreInteraction(ctx context.Context, exchange *PinnedExchange, p *Pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
 	x := exchange.request
 	version := resources.InteractionContract
 	expiry := s.Now().Add(resources.ContinuationLifetime - time.Minute)
@@ -65,7 +65,7 @@ func (s *Server) storeGeminiInteraction(ctx context.Context, exchange *pinnedExc
 	return stored, err
 }
 
-func recordGeminiInteractionUsage(exchange *pinnedExchange, object oif.Value) {
+func RecordInteractionUsage(exchange *PinnedExchange, object oif.Value) {
 	if exchange.request.actor == "api_key_resource" {
 		return
 	}

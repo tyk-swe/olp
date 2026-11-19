@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -31,9 +31,9 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 			trace.Finish(fact.Class, fact.Status)
 		}
 	}
-	fail := func(class string, f *attemptFailure) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+	fail := func(class string, f *AttemptFailure) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 		if f == nil {
-			f = &attemptFailure{}
+			f = &AttemptFailure{}
 		}
 		if err := parallel.join(x, true); err != nil {
 			class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
@@ -58,11 +58,11 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 	}
 	plan, err := x.unaryPlan(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	submit, err := plan.RequestURL()
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	bound := s.bindExchange(x, provider, slot, a.UpstreamModel, plan.Config(), state)
 	if err := bound.validateEndpoint(submit); err != nil {
@@ -71,7 +71,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(ClassTimeout, &AttemptFailure{overall: true})
 	}
 	actx, cancel := context.WithCancel(attemptCtx)
 	defer cancel()
@@ -103,12 +103,12 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 	if err != nil {
 		var incompatible *oif.Incompatibility
 		if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
-			return fail(classPolicy, &attemptFailure{policyCode: incompatible.Code})
+			return fail(classPolicy, &AttemptFailure{policyCode: incompatible.Code})
 		}
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+		return fail(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})
 	}
 	if guardErr := parallel.join(x, true); guardErr != nil {
-		return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+		return fail(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 	}
 	if x.guard.engine.HasPhase(guardrails.Output) {
 		texts, guardErr := plan.GuardrailOutput(result)
@@ -120,7 +120,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 			guardErr = x.inspectOperationOutput(texts)
 		}
 		if guardErr != nil {
-			return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+			return fail(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 		}
 	}
 	fact.Class = ClassSuccess

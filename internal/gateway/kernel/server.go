@@ -781,7 +781,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		if parsed.Stream && x.workflow != nil {
 			sw := &fault.StreamWriter{W: w, Family: family, Headers: streamedHeaders{x}}
 			if err := sw.Emit(x.workflow.finalFrames); err != nil {
-				out.Err = (&attemptFailure{class: classCancelled}).toError()
+				out.Err = (&AttemptFailure{class: ClassCancelled}).Fault()
 				out.Cancelled = true
 			} else {
 				out.Committed = true
@@ -841,7 +841,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			err = rc.Flush()
 		}
 		if err != nil {
-			out.Err = (&attemptFailure{class: classCancelled}).toError()
+			out.Err = (&AttemptFailure{class: ClassCancelled}).Fault()
 			out.Cancelled = true
 		} else {
 			x.Delivered(s.Now())

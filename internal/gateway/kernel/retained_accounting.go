@@ -194,7 +194,7 @@ func (s *Server) retainedSettle(ctx context.Context, x *Call, p *Pin) {
 	s.settleAdmission(ctx, x)
 }
 
-func observeRetainedUsage(exchange *pinnedExchange, source oif.Document, generation bool) error {
+func observeRetainedUsage(exchange *PinnedExchange, source oif.Document, generation bool) error {
 	fact := exchange.fact()
 	if !generation {
 		// A completed control/search request has no generated tokens. Its

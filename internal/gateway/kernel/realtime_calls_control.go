@@ -164,14 +164,14 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		}
 		pending := sess.responses.Pending()
 		sess.usageMu.Unlock()
-		class := classProtocol
+		class := ClassProtocol
 		cancelled := false
 		if failure != nil {
 			switch {
 			case failure.Code == "key_revoked" || strings.HasPrefix(failure.Code, "provider_credential_"):
 				class = classCredential
 			case failure.Code == "realtime_session_expired":
-				class = classTimeout
+				class = ClassTimeout
 			}
 		}
 		if len(x.facts) > 0 {

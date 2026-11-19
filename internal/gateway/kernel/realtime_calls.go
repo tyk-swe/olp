@@ -593,7 +593,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
-		return nil, 0, UpstreamError(&attemptFailure{Status: resp.StatusCode, upstream: nativeError})
+		return nil, 0, UpstreamError(&AttemptFailure{Status: resp.StatusCode, upstream: nativeError})
 	}
 	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
 	if ok {
@@ -602,7 +602,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxWebRTCSDPBytes+1))
 	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
-		fact.Class = classProtocol
+		fact.Class = ClassProtocol
 		fact.RecordEvidence(true)
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
@@ -613,7 +613,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	}
 	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.Model, callID)
 	if !ok || controlErr != nil {
-		fact.Class = classProtocol
+		fact.Class = ClassProtocol
 		fact.RecordEvidence(true)
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)

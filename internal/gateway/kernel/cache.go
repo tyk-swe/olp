@@ -483,11 +483,11 @@ func (s *Server) replayCache(ctx context.Context, x *Call) *Outcome {
 	if x.generation.parsed.Stream {
 		for _, frame := range c.entry.Frames {
 			if err := ctx.Err(); err != nil {
-				return &Outcome{Err: (&attemptFailure{class: classCancelled}).toError(), Cancelled: true}
+				return &Outcome{Err: (&AttemptFailure{class: ClassCancelled}).Fault(), Cancelled: true}
 			}
 			fact.Committed = true
 			if err := x.generation.emit(frame); err != nil {
-				return &Outcome{Err: (&attemptFailure{class: classCancelled}).toError(), Committed: true, Cancelled: true}
+				return &Outcome{Err: (&AttemptFailure{class: ClassCancelled}).Fault(), Committed: true, Cancelled: true}
 			}
 			if x.capture != nil {
 				x.capture.CaptureStreamFrame(x.family, frame)

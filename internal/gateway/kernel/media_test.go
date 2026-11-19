@@ -560,7 +560,7 @@ func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 			body: `{"data":[{"id":"stored-video"}]}`,
 			facts: []events.AttemptFact{
 				{Class: ClassSuccess, Status: http.StatusOK, Committed: true},
-				{Class: classUpstreamServer, Status: http.StatusServiceUnavailable},
+				{Class: ClassUpstreamServer, Status: http.StatusServiceUnavailable},
 			},
 		},
 		{

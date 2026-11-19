@@ -26,7 +26,7 @@ const (
 
 type unaryFailure struct {
 	class   string
-	failure *attemptFailure
+	failure *AttemptFailure
 }
 
 type unaryExchange struct {
@@ -66,7 +66,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 	}
 	if e.x.workflow != nil && e.x.sessionDebit != nil && !e.x.sessionDebit.dispatched {
 		if failure := e.dispatched(e.ctx, e.x); failure != nil {
-			return nil, &unaryFailure{class: classConnect, failure: &attemptFailure{contractCode: failure.Code, noRetry: true}}
+			return nil, &unaryFailure{class: classConnect, failure: &AttemptFailure{contractCode: failure.Code, noRetry: true}}
 		}
 	}
 	response, err := e.bound.do(e.client, req)
@@ -84,7 +84,7 @@ func (e *unaryExchange) rejected(response *http.Response) *unaryFailure {
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
 	response.Body.Close()
 	e.fact.Status = response.StatusCode
-	failure := &attemptFailure{Status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
+	failure := &AttemptFailure{Status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
 	class := e.state.rejected(response.StatusCode, failure.upstream)
 	if class == classRateLimit {
 		failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), e.now())
@@ -96,14 +96,14 @@ func (e *unaryExchange) readJSON(response *http.Response) ([]byte, *unaryFailure
 	defer response.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(e.bodyCap)+1))
 	if err != nil {
 		return nil, &unaryFailure{class: e.state.classify(err, false)}
 	}
 	if len(raw) > e.bodyCap {
-		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	return raw, nil
 }
@@ -137,10 +137,10 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 	io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
 	response.Body.Close()
 	if err != nil {
-		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	if err := e.bound.validateEndpoint(location); err != nil {
-		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	return e.poll(location)
 }
@@ -148,15 +148,15 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 func (e *unaryExchange) terminal(raw []byte, location string) ([]byte, *unaryFailure) {
 	state, err := e.plan.PollState(raw)
 	if err != nil {
-		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	switch state {
 	case operations.PollSucceeded:
 		return raw, nil
 	case operations.PollFailed:
-		return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{Status: http.StatusOK}}
+		return nil, &unaryFailure{class: ClassUpstreamServer, failure: &AttemptFailure{Status: http.StatusOK}}
 	}
-	return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+	return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 }
 
 func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
@@ -189,13 +189,13 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 			}
 			state, err := e.plan.PollState(raw)
 			if err != nil {
-				return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
+				return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
 			}
 			if state == operations.PollSucceeded {
 				return raw, nil
 			}
 			if state == operations.PollFailed {
-				return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{Status: http.StatusOK}}
+				return nil, &unaryFailure{class: ClassUpstreamServer, failure: &AttemptFailure{Status: http.StatusOK}}
 			}
 		case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500:
 			io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
@@ -205,7 +205,7 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 		}
 	}
 	e.cancelPoll(location)
-	return nil, &unaryFailure{class: classTimeout, failure: &attemptFailure{overall: true}}
+	return nil, &unaryFailure{class: ClassTimeout, failure: &AttemptFailure{overall: true}}
 }
 
 func (e *unaryExchange) wait(location string, header http.Header) *unaryFailure {

@@ -198,7 +198,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		}
 		resource = lifecycle.Resource()
 		if resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
-			fail(pinUnavailable())
+			fail(PinUnavailable())
 			return
 		}
 		use := RetainedRetrieval
@@ -212,7 +212,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		}
 		x.Route = route
 		if !p.Provider.Connector().Supports(e.Operation, e.Surface, "unary") {
-			fail(pinUnavailable())
+			fail(PinUnavailable())
 			return
 		}
 		if e.Action != "delete" {
@@ -314,7 +314,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		if status == http.StatusNoContent {
 			body = nil
 		}
-		s.writeStateJSONStatus(w, x, body, status, native.Exchange)
+		s.WriteStateJSONStatus(w, x, body, status, native.Exchange)
 		return
 	}
 	nativeID, validID := NativeResourceID(response, retainedBodyLimit)
@@ -331,7 +331,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{IDs: []string{nativeID}})
 		if prepareErr != nil || prepared.Commit(commitCtx) != nil {
 			if referenceErr == nil {
-				native.Exchange.interrupt(classProtocol, true)
+				native.Exchange.Interrupt(ClassProtocol, true)
 			}
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
 			return
@@ -349,7 +349,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	native.Exchange.completeRetainedControl()
 	status = native.StatusCode
-	s.writeStateJSONStatus(w, x, projected, status, native.Exchange)
+	s.WriteStateJSONStatus(w, x, projected, status, native.Exchange)
 }
 
 func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug string, body []byte) ([]byte, *fault.Error) {
@@ -541,7 +541,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			admitted[entry.route.Slug] = true
 		}
 	}
-	var delivered []*pinnedExchange
+	var delivered []*PinnedExchange
 	responseBytes := 256
 	for _, entry := range ready {
 		resource, p, route := entry.resource, entry.pin, entry.route
@@ -552,7 +552,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, "agents/"+url.PathEscape(resource.UpstreamID), nil)
 		if urlErr != nil {
 			s.settlePinnedHold(ctx, p.Hold)
-			fail(pinUnavailable())
+			fail(PinUnavailable())
 			return 409
 		}
 		native, callErr := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
@@ -621,7 +621,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		fail(encodeErr)
 		return encodeErr.Status
 	}
-	s.writeStateJSONStatus(w, x, body, http.StatusOK, delivered...)
+	s.WriteStateJSONStatus(w, x, body, http.StatusOK, delivered...)
 	return 200
 }
 

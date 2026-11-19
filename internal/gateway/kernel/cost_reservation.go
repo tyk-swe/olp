@@ -108,7 +108,7 @@ func (s *Server) routeBound(x *Call, boundOf func(routing.Attempt) rates.Cost) r
 
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
-func (s *Server) reserveFallbackCost(ctx context.Context, x *Call) *fault.Error {
+func (s *Server) ReserveFallbackCost(ctx context.Context, x *Call) *fault.Error {
 	if x.workflow != nil {
 		return nil
 	}

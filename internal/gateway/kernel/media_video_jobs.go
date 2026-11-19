@@ -106,7 +106,7 @@ func (s *Server) refreshListRecord(ctx context.Context, x *Call, record jobs.Rec
 	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, media.VideoGet{ID: upstream})
 	if transportFailure != nil {
 		if transportFailure.quota != "" || transportFailure.class == classLimitsUnavailable {
-			return record, &fact, false, transportFailure.toError()
+			return record, &fact, false, transportFailure.Fault()
 		}
 		return record, &fact, transportFailure.dispatched, nil
 	}
@@ -160,12 +160,12 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	update, ok := jobs.Observe(mediaVideo(result), s.Now())
 	if !ok {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 		return
 	}
 	updated, err := s.Deps.Media.Store.Refresh(r.Context(), record.ID, jobs.Unfenced, update)
 	if err != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: classConnect})
 		return
 	}
 	var body []byte
@@ -176,7 +176,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		body, renderFailure = media.EncodeVideoObject(mediaVideo(result), updated.ID, updated.RouteSlug)
 	}
 	if renderFailure != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
@@ -228,7 +228,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 	}
 	artifact := mediaArtifact(result.Payload)
 	if artifact == nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
@@ -296,13 +296,13 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	} else {
 		receipt := mediaDeleted(result)
 		if receipt == nil {
-			s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+			s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 			return
 		}
 		deleted = receipt.Deleted
 	}
 	if !deleted {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classUpstreamClient, Status: http.StatusBadGateway})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: classUpstreamClient, Status: http.StatusBadGateway})
 		return
 	}
 	finalized, err := s.Deps.Media.Store.Finalize(r.Context(), record.ID, jobs.Unfenced)
@@ -312,7 +312,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if finalized.Lifecycle != jobs.Deleted {
 		s.Deps.Media.Jobs.RecordGap()
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: classConnect})
 		return
 	}
 	if record.StrictContract && result == nil {
@@ -332,7 +332,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		body, renderFailure = media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
 	}
 	if renderFailure != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
@@ -340,8 +340,8 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) mediaFailOutcome(x *Call, w http.ResponseWriter, failure *attemptFailure) {
-	e := failure.toError()
+func (s *Server) mediaFailOutcome(x *Call, w http.ResponseWriter, failure *AttemptFailure) {
+	e := failure.Fault()
 	s.finishMedia(x, &mediaOutcome{err: e, committed: failure.committed}, e.Status)
 	fault.WriteSurfaceError(w, e, "openai")
 }

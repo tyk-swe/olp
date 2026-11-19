@@ -226,7 +226,7 @@ func (s *Server) abandonBatch(ctx context.Context, resourceID uuid.UUID) {
 	}
 }
 
-func (s *Server) SendBatch(ctx context.Context, x *Call, p *Pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
+func (s *Server) SendBatch(ctx context.Context, x *Call, p *Pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *PinnedExchange, *fault.Error) {
 	resp, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
 		if failure.acceptance.Unresolved() {
