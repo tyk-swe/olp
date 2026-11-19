@@ -92,51 +92,31 @@ type creation[T any] struct {
 }
 
 func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (httpkit.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := s.access.Replay(r, tx, p, c.fingerprint)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		if err := s.access.RequireProject(r.Context(), tx, p, c.projectID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, c.fingerprint, func(tx pgx.Tx, p authz.Principal) (*string, error) {
+		if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
+			return nil, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	projectID, err := httpkit.ParseOptionalUUID(c.projectID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := s.access.RequireProject(r.Context(), tx, p, projectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	target, err := c.parse(projectID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	created, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated, ETag: created.etag, Location: res.path + id, Body: created.body}
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".create", res.kind, id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		projectID, err := httpkit.ParseOptionalUUID(c.projectID)
+		if err != nil {
+			return nil, err
+		}
+		return projectID, s.access.RequireProject(r.Context(), tx, p, projectID)
+	}, func(tx pgx.Tx, p authz.Principal, projectID *string) (httpkit.Reply, access.Event, error) {
+		target, err := c.parse(projectID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		created, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusCreated, ETag: created.etag, Location: res.path + id, Body: created.body},
+			access.Event{Action: res.kind + ".create", Resource: res.kind, ID: id}, nil
+	})
 }
 
 func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, current document, etag string) error) (httpkit.Reply, error) {
@@ -173,36 +153,18 @@ func (s *Server) delete(res resource) access.Handler {
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		tx, p, err := s.access.BeginMutation(r)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		defer tx.Rollback(r.Context())
-		claim, replayed, err := s.access.Replay(r, tx, p, map[string]string{res.parameter: id})
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if replayed != nil {
-			return *replayed, tx.Commit(r.Context())
-		}
-		locked, err := res.lockForChange(r.Context(), tx, p, id)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err := httpkit.Match(r, locked.etag); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err := removalError(res.kind, res.remove(r.Context(), tx, id)); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), res.kind+".delete", res.kind, id, "success", locked.projectID); err != nil {
-			return httpkit.Reply{}, err
-		}
-		result := httpkit.Reply{Status: http.StatusNoContent}
-		if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return result, tx.Commit(r.Context())
+		return access.Remove(s.access, r, map[string]string{res.parameter: id}, func(tx pgx.Tx, p authz.Principal) (revision, error) {
+			return res.lockForChange(r.Context(), tx, p, id)
+		}, func(tx pgx.Tx, _ authz.Principal, locked revision) (httpkit.Reply, access.Event, error) {
+			if err := httpkit.Match(r, locked.etag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if err := removalError(res.kind, res.remove(r.Context(), tx, id)); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			return httpkit.Reply{Status: http.StatusNoContent},
+				access.Event{Action: res.kind + ".delete", Resource: res.kind, ID: id, Project: locked.projectID}, nil
+		})
 	}
 }
 
