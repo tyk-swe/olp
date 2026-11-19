@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/publishedprompt"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -201,15 +202,15 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Cal
 		}
 		if operation == "generation" {
 			if family == wire.Chat {
-				if _, _, _, found := promptReference(doc, wire.Chat); !found {
-					if _, _, _, found := promptReference(doc, wire.Responses); found {
+				if !publishedprompt.Referenced(doc, wire.Chat) {
+					if publishedprompt.Referenced(doc, wire.Responses) {
 						family = wire.Responses
 					}
 				}
 			}
-			if _, _, _, found := promptReference(doc, family); found {
+			if publishedprompt.Referenced(doc, family) {
 				bindings := []oif.Change{}
-				if geminiPromptFamily(family) {
+				if family == wire.Gemini || family == wire.GeminiStream {
 					for _, name := range []string{"model", "stream"} {
 						if _, ok := doc.Root().Lookup(name); ok {
 							bindings = append(bindings, oif.Change{Pointer: "/" + name, Remove: true, Origin: oif.IdentityBinding, Reason: "playground route and mode binding"})
