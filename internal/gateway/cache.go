@@ -91,7 +91,7 @@ func (s *Server) initializeCache(x *call) *fault.Error {
 	if c.NoStore || !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
 		return nil
 	}
-	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+	if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 		return nil
 	}
 	doc := x.requestDocument()
@@ -295,7 +295,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 			return requestError(err)
 		}
 		doc = prepared.document
-		x.guardrailInput = prepared.guardrailSegments
+		x.guard.input = prepared.guardrailSegments
 	}
 	// Defaults and protocol preparation can add retention even when the caller
 	// omitted it. Only the effective upstream request can establish eligibility.
@@ -377,8 +377,8 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		return guardrailError(err)
 	}
 	if parallel != nil {
-		c.parallelEngine = x.guardrailEngine
-		c.parallelInput = slices.Clone(x.guardrailInput)
+		c.parallelEngine = x.guard.engine
+		c.parallelInput = slices.Clone(x.guard.input)
 	}
 	lookup, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	var ticket cache.Ticket

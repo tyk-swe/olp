@@ -346,7 +346,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
-		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(),
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(),
 		PolicyDecisions: x.policyDecisions, Route: x.route.Slug, RouteRevisionID: x.route.RevisionID,
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt: now, CompletedAt: now, Attempts: []events.AttemptFact{fact},

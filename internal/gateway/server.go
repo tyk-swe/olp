@@ -945,7 +945,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *fault.Error {
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
 	options.Demand = func(_ routing.Provider, t routing.Target) *routing.TokenDemand {
-		if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+		if x.guard.engine.HasAction(guardrails.Input, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 			return nil
 		}
 		return x.sourceDemand(t.ProviderModel)

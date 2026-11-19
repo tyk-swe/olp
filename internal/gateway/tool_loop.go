@@ -91,7 +91,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *fa
 	if err != nil {
 		return workflowError(err)
 	}
-	if x.guardrailEngine.HasCompression() {
+	if x.guard.engine.HasCompression() {
 		zero := "0"
 		tools = append(tools, WorkflowTool{Definition: routing.MCPToolsetTool{
 			Alias: recoveryToolName, Name: recoveryToolName, Classification: "read_only", UnitPrice: &zero,
@@ -266,8 +266,8 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			return 0, fault.InvalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
 		}
 		x.generation.parsed = parsed
-		if x.guardrailEngine != nil && x.guardrailEngine.HasCompression() {
-			x.guardrailCtx = ctx
+		if x.guard.engine != nil && x.guard.engine.HasCompression() {
+			x.guard.ctx = ctx
 			if _, _, err := x.inspectGuardrailInput(parsed.OIF().Document()); err != nil {
 				return 0, guardrailError(err)
 			}

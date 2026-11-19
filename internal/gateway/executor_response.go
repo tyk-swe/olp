@@ -33,7 +33,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			EndUserDigest:        x.endUserDigest,
 			BudgetGroupID:        x.budgetGroupID,
 			Attribution:          x.attribution,
-			EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions,
+			EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions,
 			UserID:      x.userID,
 			Family:      string(x.family),
 			Mode:        x.mode,

@@ -17,8 +17,8 @@ import (
 )
 
 func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
-	if x.guardrailEngine != nil {
-		x.guardrailCtx = ctx
+	if x.guard.engine != nil {
+		x.guard.ctx = ctx
 	}
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true, Declared: provider.Connector().Classification()}}
 	var parallel *parallelGuardrail
@@ -110,11 +110,11 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if guardErr := parallel.join(x, true); guardErr != nil {
 		return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 	}
-	if x.guardrailEngine.HasPhase(guardrails.Output) {
+	if x.guard.engine.HasPhase(guardrails.Output) {
 		texts, guardErr := plan.GuardrailOutput(result)
 		if guardErr != nil {
-			unavailable, e := x.guardrailEngine.Unavailable(guardrails.Output)
-			x.recordGuardrails(unavailable.Decisions)
+			unavailable, e := x.guard.engine.Unavailable(guardrails.Output)
+			x.guard.record(unavailable.Decisions)
 			guardErr = e
 		} else {
 			guardErr = x.inspectOperationOutput(texts)

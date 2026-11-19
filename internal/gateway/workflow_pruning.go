@@ -47,10 +47,10 @@ type pruningResponse struct {
 }
 
 func (s *Server) pruneWorkflow(ctx context.Context, x *call, request *wire.Request) (*wire.Request, *fault.Error) {
-	if x.guardrailEngine == nil || x.workflow == nil {
+	if x.guard.engine == nil || x.workflow == nil {
 		return request, nil
 	}
-	return s.pruneWorkflowPolicies(ctx, x, request, x.guardrailEngine.TypeSafePolicies())
+	return s.pruneWorkflowPolicies(ctx, x, request, x.guard.engine.TypeSafePolicies())
 }
 
 func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wire.Request, policies []guardrails.TypeSafePolicy) (*wire.Request, *fault.Error) {
@@ -127,15 +127,15 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 
 func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *fault.Error) {
 	document := request.OIF().Document()
-	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guardrailEngine.OnlyTypeSafe() {
-		result, err := x.guardrailEngine.Unavailable()
-		x.recordGuardrails(result.Decisions)
+	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guard.engine.OnlyTypeSafe() {
+		result, err := x.guard.engine.Unavailable()
+		x.guard.record(result.Decisions)
 		return nil, nil, guardrailError(err)
 	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
-		result, failure := x.guardrailEngine.Unavailable()
-		x.recordGuardrails(result.Decisions)
+		result, failure := x.guard.engine.Unavailable()
+		x.guard.record(result.Decisions)
 		return nil, nil, guardrailError(failure)
 	}
 	segments := slices.Clone(surface.Segments)
@@ -259,7 +259,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 		actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID,
 		authority: *current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
 		userID: parent.userID, origin: usage.OriginClassifier, parent: accountingID,
-		priority: parent.priority, internalGuardrail: true, authorize: parent.authorize,
+		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
 		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
 		routeLeg: routeLeg{route: &route}, workflow: parent.workflow,
 		generation: generationCall{runLimits: parent.generation.runLimits},

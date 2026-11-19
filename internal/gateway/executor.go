@@ -392,8 +392,8 @@ func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.S
 
 // attempt performs one upstream call with one credential.
 func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
-	if x.guardrailEngine != nil {
-		x.guardrailCtx = ctx
+	if x.guard.engine != nil {
+		x.guard.ctx = ctx
 	}
 	cfg := provider.Connector()
 	fact.Carried = cfg.CarriedByPlugin()
@@ -469,7 +469,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	x.guardrailInput = prepared.guardrailSegments
+	x.guard.input = prepared.guardrailSegments
 	for _, decision := range prepared.policyDecisions {
 		recordDecision(x, decision)
 	}
@@ -635,7 +635,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		}
 		deliver := emit
 		var guarded *guardstream.Stream
-		if x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+		if x.guard.engine.HasPhase(guardrails.OutputStream) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 			guarded, err = x.guardrailStream()
 			if err != nil {
 				return fail(classPolicy, &attemptFailure{policyCode: guardrailError(err).Code, overall: true, noRetry: true})
@@ -742,7 +742,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 					}
 				}
 			}
-			x.recordGuardrails(guarded.Decisions())
+			x.guard.record(guarded.Decisions())
 		}
 		if err == nil && strictResponseIncomplete {
 			st.settled = true
@@ -810,7 +810,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if guardErr := parallel.join(x, true); guardErr != nil {
 		err = guardErr
 	}
-	if err == nil && completion != nil && !x.generation.parsed.Stream && x.guardrailEngine != nil {
+	if err == nil && completion != nil && !x.generation.parsed.Stream && x.guard.engine != nil {
 		completion.Body, err = x.inspectGuardrailOutput(completion.Body)
 	}
 	if completion != nil {

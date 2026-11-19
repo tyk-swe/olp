@@ -104,16 +104,16 @@ func (x *call) providerAdmission(provider *routing.Provider, targetID, model str
 }
 
 func (x *call) preparedGuardrailInput(format wire.Format, document oif.Document) (guardrailInput, error) {
-	if x.guardrailEngine == nil {
+	if x.guard.engine == nil {
 		return guardrailInput{document: document}, nil
 	}
-	if coverage := interaction.CheckGuardrailCoverage(format, document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
-		result, err := x.guardrailEngine.Unavailable()
-		x.recordGuardrails(result.Decisions)
+	if coverage := interaction.CheckGuardrailCoverage(format, document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guard.engine.OnlyTypeSafe()) {
+		result, err := x.guard.engine.Unavailable()
+		x.guard.record(result.Decisions)
 		return guardrailInput{document: document, decisions: result.Decisions}, err
 	}
-	result, err := x.evaluateGuardrailInput(x.guardrailCtx, document, true)
-	x.recordGuardrails(result.decisions)
+	result, err := x.evaluateGuardrailInput(x.guard.ctx, document, true)
+	x.guard.record(result.decisions)
 	return result, err
 }
 
@@ -135,18 +135,18 @@ func (x *call) buildProvider(provider *routing.Provider, targetID, model string)
 		}
 		decisions, err := plan.CheckInput()
 		var input guardrailInput
-		if err == nil && x.guardrailEngine != nil {
+		if err == nil && x.guard.engine != nil {
 			document := plan.EffectiveRequest().OIF().Document()
-			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
-				result, failure := x.guardrailEngine.Unavailable()
-				x.recordGuardrails(result.Decisions)
+			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guard.engine.OnlyTypeSafe()) {
+				result, failure := x.guard.engine.Unavailable()
+				x.guard.record(result.Decisions)
 				if failure != nil {
 					return preparedProvider{guardrailDecisions: result.Decisions}, failure
 				}
 				input = guardrailInput{decisions: result.Decisions}
 			} else {
-				input, err = x.evaluateGuardrailInput(x.guardrailCtx, document, true)
-				x.recordGuardrails(input.decisions)
+				input, err = x.evaluateGuardrailInput(x.guard.ctx, document, true)
+				x.guard.record(input.decisions)
 			}
 		}
 		effective := x.summarize(plan.EffectiveRequest())
@@ -242,7 +242,7 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
 	counter := estimate.ForModel(model)
-	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+	if x.guard.engine.HasAction(guardrails.Input, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 		to := effective.prompt.Estimate(counter, nil)
 		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
 	}
@@ -267,7 +267,7 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
 func (x *call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guard.engine == nil
 }
 
 type encodedRequest struct {
