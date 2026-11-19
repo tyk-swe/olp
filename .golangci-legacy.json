@@ -1,7 +1,6 @@
 {
   "fileOverMaxLines": [
     "internal/access/identity.go",
-    "internal/access/keys.go",
     "internal/access/oidc.go",
     "internal/access/scim_write.go",
     "internal/batches/store.go",
@@ -64,8 +63,6 @@
     "cmd/olp/config.go parseWithFlags",
     "cmd/olp/maintenance.go Maintenance",
     "cmd/olp/run.go Run",
-    "internal/access/keys.go Server.transitionKey",
-    "internal/access/keys.go Server.updateAPIKey",
     "internal/access/mfa_manage.go Server.beginMFAEnrollment",
     "internal/access/mfa_verify.go Server.mfaVerify",
     "internal/access/oidc.go Server.beginOIDC",
