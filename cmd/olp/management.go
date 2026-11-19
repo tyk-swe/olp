@@ -167,7 +167,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	providerServer.Register(mux)
 	codeaccounts.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
+	playground := &gateway.Playground{Gateway: m.Gateway}
+	playgroundLimits := []access.RouteOption{access.MaxBody(gateway.PlaygroundBodyLimit), access.Deadline(gateway.PlaygroundTimeout)}
+	m.Access.Route(mux, "POST /api/v1/playground", playground.Handle, playgroundLimits...)
+	m.Access.Stream(mux, "POST /api/v1/playground/stream", playground.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)

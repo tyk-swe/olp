@@ -200,9 +200,6 @@
     "internal/usage/event_decode.go wireEvent.decode",
     "internal/usage/routinginputs/inputs.go loadRoutingRateCards"
   ],
-  "gatewayImportsManagement": [
-    "internal/gateway/playground.go"
-  ],
   "handRolledTransaction": [
     "internal/mcp/registration/server.go",
     "internal/media/jobs/api.go",
