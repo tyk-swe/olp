@@ -150,18 +150,15 @@ func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if locked.ETag != current.ETag {
-			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 		}
 		rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, source)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", rotated.ID, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, nil
+		return httpkit.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, access.Event{Action: "provider.credential.rotate", Resource: "provider_credential", ID: rotated.ID}, nil
 	})
 }
 

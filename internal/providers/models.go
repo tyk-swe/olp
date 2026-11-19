@@ -177,20 +177,13 @@ func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error
 // The upstream call ran without the installation lock, so authority and
 // project reach are decided again under it before anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
-	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, error) {
+	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
 		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{}, access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded))
+		return httpkit.Reply{}, access.Event{Action: action, Resource: "provider", ID: id, Failed: !succeeded}, nil
 	})
 	return err
-}
-
-func auditOutcome(succeeded bool) string {
-	if succeeded {
-		return "success"
-	}
-	return "failure"
 }
 
 func probeStatus(succeeded bool) string {
@@ -253,14 +246,12 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		}
 		models = append(models, listed...)
 	}
-	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return s.detailReply(r.Context(), tx, id)
+		reply, err := s.detailReply(r.Context(), tx, id)
+		return reply, access.Event{Action: "provider.discover", Resource: "provider", ID: id}, err
 	})
 }
 
@@ -320,17 +311,15 @@ func (s *Server) setModel(r *http.Request, _ authz.Principal) (httpkit.Reply, er
 	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := s.setDraftModel(r.Context(), tx, current, modelID, input); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return s.detailReply(r.Context(), tx, id)
+		reply, err := s.detailReply(r.Context(), tx, id)
+		return reply, access.Event{Action: "provider.model.update", Resource: "provider_model", ID: modelID}, err
 	})
 }
 
@@ -384,15 +373,13 @@ func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, err
 	case certified < len(m.Capabilities):
 		status = "partial"
 	}
-	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
 		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), defaultSlot, certified, at)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Detail(certifyReply{ProviderID: id, ModelID: modelID, Status: status, CheckedAt: at, CertifiedCount: certified, AttemptedCount: len(results), Results: results}, etag), nil
+		event := access.Event{Action: "provider.model.certify", Resource: "provider_model", ID: modelID, Failed: certified == 0}
+		return httpkit.Detail(certifyReply{ProviderID: id, ModelID: modelID, Status: status, CheckedAt: at, CertifiedCount: certified, AttemptedCount: len(results), Results: results}, etag), event, nil
 	})
 	if err == nil && certified == len(m.Capabilities) {
 		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)

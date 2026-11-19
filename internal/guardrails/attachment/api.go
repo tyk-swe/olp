@@ -53,18 +53,18 @@ func (a *API) attach(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return target{}, err
 		}
 		return t, authorize(p, t, authz.Change)
-	}, func(tx pgx.Tx, p authz.Principal, t target) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, t target) (httpkit.Reply, access.Event, error) {
 		if err := requirePolicy(ctx, tx, p, t); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		created, err := create(ctx, tx, p.UserID(), placement)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := a.settle(r, tx, p, "guardrail.attach", created.ID, "The effective policy is incompatible with an attached route."); err != nil {
-			return httpkit.Reply{}, err
+		if err := a.republish(r, tx, p, "The effective policy is incompatible with an attached route."); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: http.StatusCreated, Body: created}, nil
+		return httpkit.Reply{Status: http.StatusCreated, Body: created}, attachmentEvent("guardrail.attach", created.ID), nil
 	})
 }
 
@@ -94,26 +94,26 @@ func (a *API) replace(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 			return locked{}, err
 		}
 		return locked{t, etag}, authorize(p, t, authz.Change)
-	}, func(tx pgx.Tx, p authz.Principal, current locked) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, current locked) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, current.etag); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		next := current.target
 		next.PolicyRevisionID = revisionID
 		if err := requirePolicy(ctx, tx, p, next); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag, err := repoint(ctx, tx, id, revisionID)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := a.settle(r, tx, p, "guardrail.attachment.replace", id, "Activate the policy revision and check compatibility with attached routes."); err != nil {
-			return httpkit.Reply{}, err
+		if err := a.republish(r, tx, p, "Activate the policy revision and check compatibility with attached routes."); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		return httpkit.Detail(struct {
 			guardrails.Attachment
 			ETag string `json:"etag"`
-		}{next.Attachment, etag}, etag), nil
+		}{next.Attachment, etag}, etag), attachmentEvent("guardrail.attachment.replace", id), nil
 	})
 }
 
@@ -129,23 +129,27 @@ func (a *API) detach(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return "", err
 		}
 		return etag, authorize(p, t, authz.Change)
-	}, func(tx pgx.Tx, p authz.Principal, etag string) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, etag string) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, etag); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := remove(ctx, tx, id); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := a.settle(r, tx, p, "guardrail.detach", id, "The effective policy is incompatible with an attached route."); err != nil {
-			return httpkit.Reply{}, err
+		if err := a.republish(r, tx, p, "The effective policy is incompatible with an attached route."); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: http.StatusNoContent}, nil
+		return httpkit.Reply{Status: http.StatusNoContent}, attachmentEvent("guardrail.detach", id), nil
 	})
 }
 
-func (a *API) settle(r *http.Request, tx pgx.Tx, p authz.Principal, action, id, incompatible string) error {
+func (a *API) republish(r *http.Request, tx pgx.Tx, p authz.Principal, incompatible string) error {
 	if err := a.publish(r.Context(), tx, p.UserID()); err != nil {
 		return httpkit.Invalid("attachment", incompatible)
 	}
-	return access.Audit(r.Context(), tx, r, p.Actor(), action, "guardrail_attachment", id, "success")
+	return nil
+}
+
+func attachmentEvent(action, id string) access.Event {
+	return access.Event{Action: action, Resource: "guardrail_attachment", ID: id}
 }

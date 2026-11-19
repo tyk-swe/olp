@@ -398,31 +398,28 @@ func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if _, external := source.(externalCredential); external && slot.CredentialVersionID != nil {
 		return httpkit.Reply{}, httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		slots, err := loadSlots(r.Context(), tx, id)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		existing := findSlot(slots, slotID)
 		if err = matchSlot(r, current, existing); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := s.saveDraftSlot(r.Context(), tx, current, slotID, slot, source, existing, len(slots)); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		updated, err := readProvider(r.Context(), tx, id)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		result, err := s.slotList(r.Context(), tx, updated)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		result.ParentMutation = &httpkit.ParentMutation{Previous: current.ETag, Current: updated.ETag}
-		return result, nil
+		return result, access.Event{Action: "provider.slot.update", Resource: "provider_slot", ID: slotID}, nil
 	})
 }
 
@@ -530,26 +527,23 @@ func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	input := map[string]string{"provider_id": providerID, "slot_id": slotID}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		rows, err := loadSlots(r.Context(), tx, providerID)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		slot := findSlot(rows, slotID)
 		if slot == nil {
-			return httpkit.Reply{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 		}
 		if err = matchSlot(r, current, slot); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag, err := s.deleteDraftSlot(r.Context(), tx, providerID, slotID, slot)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: http.StatusNoContent, ParentMutation: &httpkit.ParentMutation{Previous: current.ETag, Current: etag}}, nil
+		return httpkit.Reply{Status: http.StatusNoContent, ParentMutation: &httpkit.ParentMutation{Previous: current.ETag, Current: etag}}, access.Event{Action: "provider.slot.delete", Resource: "provider_slot", ID: slotID}, nil
 	})
 }
 

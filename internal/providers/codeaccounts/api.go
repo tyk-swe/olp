@@ -63,21 +63,18 @@ func (a API) requestAllowanceRead(r *http.Request, _ authz.Principal) (httpkit.R
 			return connectionProfile{}, err
 		}
 		return connectionProfile{kind: connectors.Kind(providerconfig.Value(kind)), authMode: connectors.AuthMode(providerconfig.Value(authMode)), id: providerconfig.Value(profileID)}, p.Project(&project, authz.Change)
-	}, func(tx pgx.Tx, p authz.Principal, profile connectionProfile) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, profile connectionProfile) (httpkit.Reply, access.Event, error) {
 		signal, known := codeadapter.AllowanceSignalForProfile(profile.kind, profile.authMode, profile.id)
 		if !known || !signal.ActiveQualified {
-			return httpkit.Reply{}, httpkit.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "code_account.allowance_read", "code_account", id, "success"); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		var body json.RawMessage
 		if err := tx.QueryRow(r.Context(), accountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.OK(body), nil
+		return httpkit.OK(body), access.Event{Action: "code_account.allowance_read", Resource: "code_account", ID: id}, nil
 	})
 }

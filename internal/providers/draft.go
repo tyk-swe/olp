@@ -103,21 +103,19 @@ func (s *Server) updateProvider(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		prepared, err := connection.Prepare(r.Context(), s.ConnectionPolicy(tx), input.Configuration)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = s.StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return s.detailReply(r.Context(), tx, id)
+		reply, err := s.detailReply(r.Context(), tx, id)
+		return reply, access.Event{Action: "provider.update", Resource: "provider", ID: id}, err
 	})
 }
 

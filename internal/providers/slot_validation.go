@@ -80,14 +80,12 @@ func (s *Server) validateSlot(r *http.Request, p authz.Principal) (httpkit.Reply
 	probeErr := s.validateModelAccess(r.Context(), current.target(credential), *slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
+	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return s.slotList(r.Context(), tx, locked)
+		reply, err := s.slotList(r.Context(), tx, locked)
+		return reply, access.Event{Action: "provider.slot.validate", Resource: "provider_slot", ID: slotID, Failed: probeErr != nil}, err
 	})
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -118,14 +118,14 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return struct{}{}, httpkit.Invalid("project_id", "Choose the owning project.")
 		}
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, in.ProjectID)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		value, err := a.save(r, tx, p, nil, change, *in.ProjectID, in.Type, in.Configuration)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		reply := httpkit.Detail(value, value.ETag)
 		reply.Status, reply.Location = http.StatusCreated, "/api/v1/guardrails/"+value.ID
-		return reply, nil
+		return reply, access.Event{Action: "guardrail.create", Resource: "guardrail", ID: value.ID}, nil
 	})
 }
 
@@ -138,18 +138,18 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Definition) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Definition) (httpkit.Reply, access.Event, error) {
 		if err := changeable(r, current); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if in.ProjectID != nil || in.Type != "" {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "A guardrail's project and type are immutable.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "A guardrail's project and type are immutable.")
 		}
 		value, err := a.save(r, tx, p, &current, change, current.ProjectID, current.Type, in.Configuration)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Detail(value, value.ETag), nil
+		return httpkit.Detail(value, value.ETag), access.Event{Action: "guardrail.update", Resource: "guardrail", ID: value.ID}, nil
 	})
 }
 
@@ -159,17 +159,14 @@ func (a *API) retire(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Definition) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Definition) (httpkit.Reply, access.Event, error) {
 		if err := changeable(r, current); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := retire(ctx, tx, id); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(ctx, tx, r, p.Actor(), "guardrail.retire", "guardrail", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: http.StatusNoContent}, nil
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "guardrail.retire", Resource: "guardrail", ID: id}, nil
 	})
 }
 
@@ -214,13 +211,6 @@ func (a *API) save(r *http.Request, tx pgx.Tx, p authz.Principal, current *Defin
 		return Definition{}, httpkit.Fail(http.StatusConflict, "guardrail_exists", "Choose an unused guardrail name in this project.")
 	}
 	if err != nil {
-		return Definition{}, err
-	}
-	action := "guardrail.update"
-	if current == nil {
-		action = "guardrail.create"
-	}
-	if err = access.Audit(ctx, tx, r, p.Actor(), action, "guardrail", saved.ID, "success"); err != nil {
 		return Definition{}, err
 	}
 	value, err := load(ctx, tx, saved.ID)

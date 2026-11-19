@@ -103,14 +103,14 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return struct{}{}, httpkit.Invalid("project_id", "Choose a project.")
 		}
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, &in.ProjectID)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		value, err := a.save(r, tx, p, nil, in.ProjectID, in)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		reply := httpkit.Detail(value, value.ETag)
 		reply.Status, reply.Location = http.StatusCreated, "/api/v1/guardrail-policies/"+value.ID
-		return reply, nil
+		return reply, access.Event{Action: "guardrail_policy.create", Resource: "guardrail_policy", ID: value.ID}, nil
 	})
 }
 
@@ -123,18 +123,18 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, access.Event, error) {
 		if err := changeable(r, current); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if in.ProjectID != "" && in.ProjectID != current.ProjectID {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "The owning project is immutable.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The owning project is immutable.")
 		}
 		value, err := a.save(r, tx, p, &current, current.ProjectID, in)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Detail(value, value.ETag), nil
+		return httpkit.Detail(value, value.ETag), access.Event{Action: "guardrail_policy.update", Resource: "guardrail_policy", ID: value.ID}, nil
 	})
 }
 
@@ -144,17 +144,14 @@ func (a *API) retire(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, access.Event, error) {
 		if err := changeable(r, current); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := retire(ctx, tx, id); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(ctx, tx, r, p.Actor(), "guardrail_policy.retire", "guardrail_policy", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: http.StatusNoContent}, nil
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "guardrail_policy.retire", Resource: "guardrail_policy", ID: id}, nil
 	})
 }
 
@@ -232,13 +229,6 @@ func (a *API) save(r *http.Request, tx pgx.Tx, p authz.Principal, current *Polic
 	}
 	saved, err := Save(ctx, tx, p.UserID(), current, draft)
 	if err != nil {
-		return Policy{}, err
-	}
-	action := "guardrail_policy.update"
-	if current == nil {
-		action = "guardrail_policy.create"
-	}
-	if err = access.Audit(ctx, tx, r, p.Actor(), action, "guardrail_policy", saved.ID, "success"); err != nil {
 		return Policy{}, err
 	}
 	return load(ctx, tx, saved.ID)

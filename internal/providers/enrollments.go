@@ -136,11 +136,11 @@ func (s *Server) startGrantEnrollment(r *http.Request, p authz.Principal) (httpk
 	if err != nil {
 		return httpkit.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
 	}
-	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ authz.Principal, _ *record) (httpkit.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
 		if err := enrollment.Save(ctx, tx, s.access); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: 201, Body: started(enrollment)}, nil
+		return httpkit.Reply{Status: 201, Body: started(enrollment)}, access.Event{}, nil
 	})
 	return reply, err
 }
@@ -393,11 +393,11 @@ func (s *Server) cancelGrantEnrollment(r *http.Request, _ authz.Principal) (http
 			return nil, err
 		}
 		return current, principal.Project(current.ProjectID, authz.Change)
-	}, func(tx pgx.Tx, principal authz.Principal, _ *record) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, principal authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
 		if err := grants.Cancel(r.Context(), tx, providerID, enrollmentID, principal.ID); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: 204}, nil
+		return httpkit.Reply{Status: 204}, access.Event{}, nil
 	})
 	return reply, err
 }

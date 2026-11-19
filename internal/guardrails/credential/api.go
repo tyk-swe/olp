@@ -84,15 +84,12 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	ctx := r.Context()
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, &in.ProjectID)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		id, err := Create(ctx, tx, a.server.Keys, a.server.Installation, New{ProjectID: &in.ProjectID, Name: in.Name, Secret: in.Credential, CreatedBy: p.UserID()})
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(ctx, tx, r, p.Actor(), "guardrail.credential.create", "guardrail_credential", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: http.StatusCreated, Body: created{ID: id, Name: in.Name, ProjectID: in.ProjectID}}, nil
+		return httpkit.Reply{Status: http.StatusCreated, Body: created{ID: id, Name: in.Name, ProjectID: in.ProjectID}}, access.Event{Action: "guardrail.credential.create", Resource: "guardrail_credential", ID: id}, nil
 	})
 }
 
@@ -108,23 +105,20 @@ func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return "", err
 		}
 		return project, p.Project(&project, authz.Change)
-	}, func(tx pgx.Tx, p authz.Principal, project string) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, project string) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, id); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		inUse, err := referenced(ctx, tx, id)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if inUse {
-			return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "guardrail_credential_in_use", "A retained guardrail revision still references this credential.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "guardrail_credential_in_use", "A retained guardrail revision still references this credential.")
 		}
 		if err := remove(ctx, tx, id); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.AuditForProject(ctx, tx, r, p.Actor(), "guardrail.credential.delete", "guardrail_credential", id, "success", &project); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: http.StatusNoContent}, nil
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "guardrail.credential.delete", Resource: "guardrail_credential", ID: id, Project: &project}, nil
 	})
 }

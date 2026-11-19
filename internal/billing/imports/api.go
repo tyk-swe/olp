@@ -82,26 +82,26 @@ func (a *API) put(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if bytes.Equal(bytes.TrimSpace(input.Credential), []byte("null")) {
 		return httpkit.Reply{}, httpkit.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	}
-	return access.Mutate(a.server, r, input, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, owner provider) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, input, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, owner provider) (httpkit.Reply, access.Event, error) {
 		existing, found, err := lockRecord(r.Context(), tx, id)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := httpkit.Match(r, matchETag(owner, existing, found)); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		desired, err := parseDesired(owner, existing, input)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag, err := Save(r.Context(), tx, a.vault, id, desired, p.UserID())
 		if err != nil {
-			return httpkit.Reply{}, credentialInvalid(err)
+			return httpkit.Reply{}, access.Event{}, credentialInvalid(err)
 		}
 		if found {
-			return a.reply(r, tx, p, id, "provider.billing_import.update", http.StatusOK, etag)
+			return a.reply(r, tx, id, "provider.billing_import.update", http.StatusOK, etag)
 		}
-		return a.reply(r, tx, p, id, "provider.billing_import.create", http.StatusCreated, etag)
+		return a.reply(r, tx, id, "provider.billing_import.create", http.StatusCreated, etag)
 	})
 }
 
@@ -156,31 +156,22 @@ func (a *API) remove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if _, err := a.changeable(r.Context(), id)(tx, p); err != nil {
-		return httpkit.Reply{}, err
-	}
-	existing, found, err := lockRecord(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !found {
-		return httpkit.Reply{}, errImportMissing
-	}
-	if err := httpkit.Match(r, existing.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := Remove(r.Context(), tx, id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.billing_import.delete", "provider", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+	return access.Transact(a.server, r, a.changeable(r.Context(), id), func(tx pgx.Tx, _ authz.Principal, _ provider) (httpkit.Reply, access.Event, error) {
+		existing, found, err := lockRecord(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !found {
+			return httpkit.Reply{}, access.Event{}, errImportMissing
+		}
+		if err := httpkit.Match(r, existing.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := Remove(r.Context(), tx, id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "provider.billing_import.delete", Resource: "provider", ID: id}, nil
+	})
 }
 
 func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -188,32 +179,29 @@ func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, access.Event, error) {
 		etag := httpkit.NewID()
 		found, err := scheduleNow(r.Context(), tx, id, etag)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !found {
-			return httpkit.Reply{}, errImportMissing
+			return httpkit.Reply{}, access.Event{}, errImportMissing
 		}
-		return a.reply(r, tx, p, id, "provider.billing_import.run", http.StatusAccepted, etag)
+		return a.reply(r, tx, id, "provider.billing_import.run", http.StatusAccepted, etag)
 	})
 }
 
-func (a *API) reply(r *http.Request, tx pgx.Tx, p authz.Principal, id, action string, status int, etag string) (httpkit.Reply, error) {
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
+func (a *API) reply(r *http.Request, tx pgx.Tx, id, action string, status int, etag string) (httpkit.Reply, access.Event, error) {
 	current, _, err := readRecord(r.Context(), tx, id)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	body, err := document(current)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	return httpkit.Reply{Status: status, ETag: etag, Body: body}, nil
+	return httpkit.Reply{Status: status, ETag: etag, Body: body}, access.Event{Action: action, Resource: "provider", ID: id}, nil
 }
 
 func (a *API) visible(ctx context.Context, p authz.Principal, id string) error {
