@@ -282,17 +282,17 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	if x.unary != nil {
 		plan, err := x.unaryPlan(&p, a.TargetID, a.UpstreamModel)
 		if err != nil {
-			return requestError(err)
+			return RequestError(err)
 		}
 		var err2 error
 		doc, err2 = oif.ParseJSON(plan.Body(), x.unary.source.Document().Limits())
 		if err2 != nil {
-			return requestError(err2)
+			return RequestError(err2)
 		}
 	} else {
 		prepared, err := x.generationRequest(&p, a.TargetID, a.UpstreamModel)
 		if err != nil {
-			return requestError(err)
+			return RequestError(err)
 		}
 		doc = prepared.document
 		x.guard.input = prepared.guardrailSegments
@@ -495,7 +495,7 @@ func (s *Server) replayCache(ctx context.Context, x *Call) *Outcome {
 		}
 		return &Outcome{Committed: true}
 	}
-	return &Outcome{completion: &wire.Completion{Body: c.entry.Body, Usage: c.metadata.Usage}}
+	return &Outcome{Completion: &wire.Completion{Body: c.entry.Body, Usage: c.metadata.Usage}}
 }
 func (x *Call) captureCacheFrame(frame []byte) {
 	c := x.cache
@@ -519,8 +519,8 @@ func (s *Server) storeCache(x *Call, out *Outcome, status int) {
 	if f.Class != ClassSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.operationName() != "moderation" {
 		return
 	}
-	if out.completion != nil {
-		c.body = out.completion.Body
+	if out.Completion != nil {
+		c.body = out.Completion.Body
 	}
 	if len(c.body) == 0 && len(c.frames) == 0 {
 		return

@@ -618,8 +618,8 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 				out = &Outcome{Err: admissionErr}
 			} else {
 				out = s.execute(ctx, x)
-				if out.completion != nil {
-					raw = out.completion.Body
+				if out.Completion != nil {
+					raw = out.Completion.Body
 				}
 			}
 		}
@@ -661,8 +661,8 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 			out = &Outcome{Err: e}
 		} else {
 			out = s.execute(ctx, x)
-			if out.completion != nil {
-				raw = []byte(strings.TrimSpace(out.completion.OutputText))
+			if out.Completion != nil {
+				raw = []byte(strings.TrimSpace(out.Completion.OutputText))
 			}
 		}
 	} else {

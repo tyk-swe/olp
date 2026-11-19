@@ -93,7 +93,7 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 				return plan, false, selectionError(err, p.route.Slug)
 			}
 		}
-		return plan, false, requestError(err)
+		return plan, false, RequestError(err)
 	}
 	if plan.Delegate != "" && p.kind != pinnedPlanning {
 		return plan, true, p.server.delegate(ctx, x, plan)
@@ -111,7 +111,7 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 		for _, decision := range p.decisions {
 			recordDecision(x, decision)
 		}
-		problem := requestError(p.semantic)
+		problem := RequestError(p.semantic)
 		if p.unbounded && problem.Code == "target_capability" {
 			problem.Status = http.StatusUnprocessableEntity
 		}

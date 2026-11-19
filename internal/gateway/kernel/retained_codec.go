@@ -63,7 +63,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 			return nil, source, "", fault.ServerError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
 		}
 		body, err := readBounded(r.Body, s.Config.MaxBodyBytes)
-		if errors.Is(err, errResponseTooLarge) {
+		if errors.Is(err, ErrResponseTooLarge) {
 			return nil, source, "", ingress.BodyTooLarge()
 		}
 		if err != nil {

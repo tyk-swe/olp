@@ -298,43 +298,43 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 		if x.generation.parsed.Stream {
 			x.generation.emit = func(frame []byte) error {
 				if int64(frames.Len()+len(frame)) > s.Config.MaxResponseBytes {
-					return errResponseTooLarge
+					return ErrResponseTooLarge
 				}
 				_, err := frames.Write(frame)
 				return err
 			}
 		}
 		out := s.executeModelStep(ctx, x, x.generation.parsed, *authority)
-		if out.Err == nil && out.completion != nil && x.workflow.responseMCP && !x.responseMCPContractCertified() {
+		if out.Err == nil && out.Completion != nil && x.workflow.responseMCP && !x.responseMCPContractCertified() {
 			x.workflow.responseMCP = false
 			x.workflow.responseItems = nil
 		}
-		if out.Err == nil && out.completion != nil && x.generation.parsed.Stream {
+		if out.Err == nil && out.Completion != nil && x.generation.parsed.Stream {
 			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.Config.MaxEventBytes), int(s.Config.MaxResponseBytes), x.named().Slug)
 			if err != nil {
 				return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 			}
-			out.completion.ToolCalls, out.completion.OutputText, out.completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
+			out.Completion.ToolCalls, out.Completion.OutputText, out.Completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
 			if len(completion.ToolCalls) != 0 && x.family == wire.Responses {
-				out.completion.Body = completion.Body
+				out.Completion.Body = completion.Body
 			} else if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
 				body, err := protocols.WorkflowStreamBody(x.family, bytes.NewReader(frames.Bytes()), int(s.Config.MaxEventBytes))
 				if err != nil {
 					return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 				}
-				out.completion.Body = body
+				out.Completion.Body = body
 			}
 		}
-		if out.Err == nil && out.completion != nil && !x.generation.parsed.Stream && x.family.Surface() == "gemini" && !protocols.WorkflowSingleCandidate(out.completion.Body) {
+		if out.Err == nil && out.Completion != nil && !x.generation.parsed.Stream && x.family.Surface() == "gemini" && !protocols.WorkflowSingleCandidate(out.Completion.Body) {
 			return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
 		}
-		if out.Err != nil || out.completion == nil || len(out.completion.ToolCalls) == 0 {
-			if out.Err == nil && out.completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
-				body, err := projectResponseMCPItems(out.completion.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
+		if out.Err != nil || out.Completion == nil || len(out.Completion.ToolCalls) == 0 {
+			if out.Err == nil && out.Completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
+				body, err := projectResponseMCPItems(out.Completion.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
 				if err != nil {
 					return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
 				}
-				out.completion.Body = body
+				out.Completion.Body = body
 			}
 			if out.Err == nil && x.generation.parsed.Stream {
 				if len(x.workflow.responseItems) > 0 {
@@ -352,17 +352,17 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 		if int64(iteration)+1 == *x.generation.runLimits.MaxIterations {
 			return &Outcome{Err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 		}
-		if int64(len(out.completion.ToolCalls)+x.workflow.calls) > *x.generation.runLimits.MaxToolCalls {
+		if int64(len(out.Completion.ToolCalls)+x.workflow.calls) > *x.generation.runLimits.MaxToolCalls {
 			return &Outcome{Err: fault.InvalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
 		}
-		pause, failure := s.pauseWorkflow(ctx, x, out.completion, iteration)
+		pause, failure := s.pauseWorkflow(ctx, x, out.Completion, iteration)
 		if failure != nil {
 			return &Outcome{Err: failure}
 		}
 		if pause != nil {
-			return &Outcome{completion: out.completion, approval: pause}
+			return &Outcome{Completion: out.Completion, approval: pause}
 		}
-		parsed, failure := s.continueToolLoop(ctx, x, out.completion, x.workflow.ordinal)
+		parsed, failure := s.continueToolLoop(ctx, x, out.Completion, x.workflow.ordinal)
 		if failure != nil {
 			return &Outcome{Err: failure}
 		}

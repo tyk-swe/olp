@@ -21,6 +21,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/surface/playground"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -172,10 +173,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	apikeys.NewAPI(m.Access).Register(mux)
 	auditlog.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	playground := &kernel.Playground{Gateway: m.Gateway}
-	playgroundLimits := []access.RouteOption{access.MaxBody(kernel.PlaygroundBodyLimit), access.Deadline(kernel.PlaygroundTimeout)}
-	m.Access.Route(mux, "POST /api/v1/playground", playground.Handle, playgroundLimits...)
-	m.Access.Stream(mux, "POST /api/v1/playground/stream", playground.Stream, playgroundLimits...)
+	playgroundAPI := playground.NewAPI(m.Gateway)
+	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
+	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
+	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)

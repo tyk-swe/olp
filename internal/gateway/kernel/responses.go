@@ -120,7 +120,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *Call, authority keya
 	}
 	next, err := parsed.WithField("previous_response_id", encoded)
 	if err != nil {
-		return requestError(err)
+		return RequestError(err)
 	}
 	x.generation.parsed = next
 	return nil

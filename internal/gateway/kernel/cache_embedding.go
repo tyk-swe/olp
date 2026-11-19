@@ -80,8 +80,8 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 			return nil, "", e
 		}
 		out = s.execute(ctx, x)
-		if out.completion != nil {
-			raw = out.completion.Body
+		if out.Completion != nil {
+			raw = out.Completion.Body
 		}
 	}
 	if out.Err != nil {

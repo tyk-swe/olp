@@ -262,7 +262,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 	}
 	next, err := parsed.WithResourceBindings(changes...)
 	if err != nil {
-		return requestError(err)
+		return RequestError(err)
 	}
 	x.generation.parsed, x.generation.resources = next, bindings
 	return nil

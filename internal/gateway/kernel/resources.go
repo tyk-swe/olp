@@ -97,7 +97,7 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	return body, nil
 }

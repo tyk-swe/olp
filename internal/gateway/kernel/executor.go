@@ -90,7 +90,7 @@ func (x *Call) Delivered(at time.Time) {
 
 // outcome is the terminal result of the attempt loop.
 type Outcome struct {
-	completion *wire.Completion
+	Completion *wire.Completion
 	approval   *workflowPause
 	Err        *fault.Error
 	Committed  bool
@@ -346,7 +346,7 @@ func (s *Server) execute(ctx context.Context, x *Call) *Outcome {
 		},
 	})
 	return &Outcome{
-		completion: out.result,
+		Completion: out.result,
 		Err:        out.err,
 		Committed:  out.committed,
 		Cancelled:  out.cancelled,
@@ -824,7 +824,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 			fact.FinishReasons = []string{completion.FinishReason}
 		}
 		if !x.generation.parsed.Stream && (encodedWire != x.family || x.family == wire.Embeddings || x.family == wire.Rerank) && int64(len(completion.Body)) > s.Config.MaxResponseBytes {
-			err = errResponseTooLarge
+			err = ErrResponseTooLarge
 		}
 	}
 	if err != nil {
@@ -876,7 +876,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 		case errors.As(err, &violation):
 			f.contractCode = "fidelity_protocol_violation"
 			return fail(ClassProtocol, f)
-		case errors.Is(err, errResponseTooLarge):
+		case errors.Is(err, ErrResponseTooLarge):
 			return fail(ClassProtocol, f)
 		case errors.Is(err, wire.ErrAggregateTooLarge):
 			f.aggregateTooLarge = true

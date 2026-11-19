@@ -273,7 +273,7 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 		}
 	}
 	if int64(len(delivery.Body)) > s.Config.MaxResponseBytes {
-		return errResponseTooLarge
+		return ErrResponseTooLarge
 	}
 	return nil
 }
