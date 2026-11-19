@@ -2,9 +2,13 @@ package kernel
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 )
@@ -100,6 +104,53 @@ func TestRequestsTheGatewayCannotUnderstandAreRefusedBeforeAnyProviderAndRecorde
 			}
 			if env := h.sink.last(t); env.Status != tc.want.status || len(env.Attempts) != 0 {
 				t.Errorf("recorded status %d with %d attempts, want %d with none", env.Status, len(env.Attempts), tc.want.status)
+			}
+		})
+	}
+}
+
+type lostCaller struct {
+	header       http.Header
+	write, flush error
+}
+
+func (c lostCaller) Header() http.Header            { return c.header }
+func (lostCaller) WriteHeader(int)                  {}
+func (c lostCaller) Write(b []byte) (int, error)    { return len(b), c.write }
+func (lostCaller) SetReadDeadline(time.Time) error  { return nil }
+func (lostCaller) SetWriteDeadline(time.Time) error { return nil }
+func (c lostCaller) FlushError() error              { return c.flush }
+
+func TestAWholeReplyCountsAsDeliveredOnlyWhenTheCallerReceivesIt(t *testing.T) {
+	gone := errors.New("caller is gone")
+	lost := func(caller lostCaller) func(*harness) {
+		return func(h *harness) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(entryChat))
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", "application/json")
+			h.server.Config.Handler.ServeHTTP(caller, req)
+		}
+	}
+	for name, tc := range map[string]struct {
+		send      func(*harness)
+		outcome   string
+		delivered bool
+	}{
+		"received": {func(h *harness) {
+			resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(entryChat), nil)
+			resp.Body.Close()
+		}, "success", true},
+		"reply not written": {lost(lostCaller{header: http.Header{}, write: gone}), "cancelled", false},
+		"reply not flushed": {lost(lostCaller{header: http.Header{}, flush: gone}), "cancelled", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			tc.send(h)
+			env := h.sink.last(t)
+			attempt := env.Attempts[len(env.Attempts)-1]
+			if env.Outcome != tc.outcome || !env.Committed || !attempt.Committed || (env.FirstByte != nil) != tc.delivered {
+				t.Fatalf("envelope outcome %q, committed %t, attempt committed %t, first byte %v, want outcome %q and delivered %t",
+					env.Outcome, env.Committed, attempt.Committed, env.FirstByte, tc.outcome, tc.delivered)
 			}
 		})
 	}
