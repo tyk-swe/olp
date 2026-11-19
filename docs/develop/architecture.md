@@ -202,6 +202,17 @@ package instead.
   management kit serves the control plane. `cmd/olp` is the only place that
   knows both, so pass a collaborator in there instead of importing across.
 - Nothing under `internal` imports `cmd`.
+- `internal/domain` is vocabulary and logic that does no I/O. It imports only
+  `internal/domain` and the signed reference catalog, and never `net/http`, a
+  database driver or the Valkey client. Take the value in as an argument and
+  do the I/O in the caller.
+- `internal/platform` is the infrastructure every feature builds on, such as
+  the database pool, egress, secrets and telemetry. It imports only
+  `internal/platform` and `internal/domain`, never a feature.
+- Every other directory under `internal` is named for the module that owns a
+  behavior, including its SQL, validation and routes. A new package goes in
+  `internal/domain` when it does no I/O, in `internal/platform` when it is
+  infrastructure no single module owns, and next to its module otherwise.
 - `internal/access` is the management kit and holds no feature. It
   authenticates callers, registers routes, runs write transactions and records
   audit rows. A new resource gets its own package that imports the kit.
