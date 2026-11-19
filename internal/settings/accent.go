@@ -1,4 +1,4 @@
-package access
+package settings
 
 import (
 	"encoding/hex"

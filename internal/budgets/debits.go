@@ -1,4 +1,4 @@
-package access
+package budgets
 
 import (
 	"net/http"
@@ -10,7 +10,7 @@ import (
 
 // executionDebits reports financial exposure, not invoice charges. Accounting
 // facts and all existing spend/budget endpoints keep their original meaning.
-func (s *Server) executionDebits(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) debits(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -19,7 +19,7 @@ func (s *Server) executionDebits(r *http.Request, p authz.Principal) (httpkit.Re
 	if key != "" && !debitOwnerUUID(key) {
 		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use a canonical API key UUID.")
 	}
-	rows, err := s.Pool.Query(r.Context(), `SELECT id::text,api_key_id::text,project_id::text,run_id::text,kind,state,currency,cost_bound::text,charge_bound::text,observed_cost::text,observed_charge::text,CASE WHEN closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,cost_bound-observed_cost) END::text,CASE WHEN closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,charge_bound-observed_charge) END::text,bound_violation,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') FROM olp.execution_debits WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR api_key_id=NULLIF($4,'')::uuid) ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), key, page.Limit+1)
+	rows, err := a.server.Pool.Query(r.Context(), `SELECT id::text,api_key_id::text,project_id::text,run_id::text,kind,state,currency,cost_bound::text,charge_bound::text,observed_cost::text,observed_charge::text,CASE WHEN closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,cost_bound-observed_cost) END::text,CASE WHEN closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,charge_bound-observed_charge) END::text,bound_violation,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') FROM olp.execution_debits WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR api_key_id=NULLIF($4,'')::uuid) ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), key, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

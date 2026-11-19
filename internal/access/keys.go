@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -131,20 +130,6 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	return nil
 }
 
-// parseProjectID canonicalises an optional project_id, so project lookups,
-// ownership comparisons and idempotency fingerprints see one spelling.
-func parseProjectID(value *string) (*string, error) {
-	if value == nil {
-		return nil, nil
-	}
-	id, err := uuid.Parse(*value)
-	if err != nil {
-		return nil, httpkit.Invalid("project_id", "Use a valid UUID.")
-	}
-	canonical := id.String()
-	return &canonical, nil
-}
-
 // AdvanceAuthority advances key authority, so every gateway reloads API keys
 // and which credential versions may serve on its next poll.
 type AuthorityGeneration struct {
@@ -224,7 +209,7 @@ func (s *Server) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	projectID, err := parseProjectID(input.ProjectID)
+	projectID, err := httpkit.ParseProjectID(input.ProjectID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

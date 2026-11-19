@@ -4,8 +4,8 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -81,7 +81,7 @@ func (c Connection) resolve(ctx context.Context, q database.Queryer, name, proje
 }
 
 func enrolled(ctx context.Context, q database.Queryer, providerID string, configuration connection.Configuration, pool string, in scope) error {
-	at := slices.IndexFunc(in.pools, func(p resolved[access.CodePoolInput]) bool { return p.ref == pool })
+	at := slices.IndexFunc(in.pools, func(p resolved[codeadmin.PoolInput]) bool { return p.ref == pool })
 	if at < 0 {
 		return httpkit.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
 	}

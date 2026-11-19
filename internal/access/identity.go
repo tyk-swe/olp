@@ -17,15 +17,12 @@ import (
 )
 
 func (s *Server) Register(mux *http.ServeMux) {
-	s.Route(mux, "GET /api/v1/execution-debits", s.executionDebits)
-	s.registerCodeMode(mux)
 	s.registerSCIM(mux)
 	s.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
 	s.Public(mux, "POST /api/v1/saml/acs", s.samlACS, MaxBody(2<<20))
 	s.Public(mux, "GET /api/v1/saml/complete", s.completeSAML)
 	s.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
 	s.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, MaxBody(2<<20))
-	s.Route(mux, "PUT /api/v1/branding", s.updateBranding, MaxBody(100<<10))
 	s.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
 	s.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
 	s.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
@@ -36,7 +33,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
 	public := map[string]PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
-		"GET /api/v1/branding":            s.branding,
 		"GET /api/v1/auth/capabilities":   s.capabilities,
 		"POST /api/v1/auth/mfa/verify":    s.mfaVerify,
 		"POST /api/v1/auth/mfa/enroll":    s.mfaBootstrap,
@@ -65,21 +61,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"POST /api/v1/profile/reauthenticate":         s.reauthenticate,
 		"POST /api/v1/api-keys/{api_key_id}/end-user": s.lookupEndUser,
 
-		"GET /api/v1/budget-increases":                  s.budgetIncreases,
-		"POST /api/v1/budget-increases":                 s.createBudgetIncrease,
-		"GET /api/v1/budget-increases/{increase_id}":    s.budgetIncrease,
-		"DELETE /api/v1/budget-increases/{increase_id}": s.revokeBudgetIncrease,
-
 		"GET /api/v1/api-keys": s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
 		"GET /api/v1/api-keys/{api_key_id}": s.apiKey, "PATCH /api/v1/api-keys/{api_key_id}": s.updateAPIKey,
 		"POST /api/v1/api-keys/{api_key_id}/revoke": s.revokeAPIKey, "POST /api/v1/api-keys/{api_key_id}/rotate": s.rotateAPIKey,
-		"GET /api/v1/budget-groups": s.budgetGroups, "POST /api/v1/budget-groups": s.createBudgetGroup,
-		"GET /api/v1/budget-groups/{budget_group_id}": s.budgetGroup, "PATCH /api/v1/budget-groups/{budget_group_id}": s.updateBudgetGroup,
-		"DELETE /api/v1/budget-groups/{budget_group_id}": s.deleteBudgetGroup,
 		"GET /api/v1/audit":                        s.auditEvents,
-		"GET /api/v1/settings":                     s.settings,
-		"GET /api/v1/settings/{key}":               s.setting,
-		"PUT /api/v1/settings/{key}":               s.updateSetting,
 		"GET /api/v1/workload-issuers":             s.workloadIssuers,
 		"POST /api/v1/workload-issuers":            s.createWorkloadIssuer,
 		"GET /api/v1/workload-issuers/{issuer_id}": s.workloadIssuer,

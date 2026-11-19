@@ -1,4 +1,4 @@
-package access
+package budgets
 
 import (
 	"net/http"
@@ -58,7 +58,7 @@ func costs(l keyauthority.AdmissionLimits) *keyauthority.BudgetPolicy {
 	return &keyauthority.BudgetPolicy{DailyCostLimit: l.DailyCostLimit, WeeklyCostLimit: l.WeeklyCostLimit, MonthlyCostLimit: l.MonthlyCostLimit}
 }
 
-func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p authz.Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
+func (a *API) target(r *http.Request, tx pgx.Tx, p authz.Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
 	if err = t.validate(); err != nil {
 		return
 	}
@@ -66,7 +66,7 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p authz.Princi
 		if err = p.Authorize(authz.Settings); err != nil {
 			return
 		}
-		owner = limits.AggregateBudgetID("installation", s.Installation)
+		owner = limits.AggregateBudgetID("installation", a.server.Installation)
 		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
 		return
 	}

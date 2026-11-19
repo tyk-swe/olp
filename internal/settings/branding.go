@@ -1,4 +1,4 @@
-package access
+package settings
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
@@ -37,9 +39,9 @@ func accentScaleOf(accent string) *accentScale {
 	return &scale
 }
 
-func (s *Server) branding(r *http.Request) (httpkit.Reply, error) {
+func (a *API) branding(r *http.Request) (httpkit.Reply, error) {
 	var name, logo, accent, etag string
-	err := s.Pool.QueryRow(r.Context(), "SELECT name,logo,accent,branding_etag::text FROM olp.installation WHERE singleton").Scan(&name, &logo, &accent, &etag)
+	err := a.server.Pool.QueryRow(r.Context(), "SELECT name,logo,accent,branding_etag::text FROM olp.installation WHERE singleton").Scan(&name, &logo, &accent, &etag)
 	return httpkit.Detail(newBrandingIdentity(name, logo, accent, etag), etag), err
 }
 
@@ -65,7 +67,7 @@ func validateLogo(raw string) (string, error) {
 	return mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-func (s *Server) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name   string  `json:"name"`
 		Logo   *string `json:"logo"`
@@ -92,24 +94,15 @@ func (s *Server) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var current string
-	if err = tx.QueryRow(r.Context(), "SELECT branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "branding.update", "installation", s.Installation, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(identity, identity.ETag), tx.Commit(r.Context())
+	return access.Transact(a.server, r, func(tx pgx.Tx, _ authz.Principal) (struct{}, error) {
+		var current string
+		if err := tx.QueryRow(r.Context(), "SELECT branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, httpkit.Match(r, current)
+	}, func(tx pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
+		_, err := tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag)
+		return httpkit.Detail(identity, identity.ETag), access.Event{Action: "branding.update", Resource: "installation", ID: a.server.Installation}, err
+	})
 }

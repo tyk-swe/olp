@@ -297,3 +297,17 @@ func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
 	}
 	return items, rows.Err()
 }
+
+// ParseProjectID canonicalises an optional project_id, so project lookups,
+// ownership comparisons and idempotency fingerprints see one spelling.
+func ParseProjectID(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*value)
+	if err != nil {
+		return nil, Invalid("project_id", "Use a valid UUID.")
+	}
+	canonical := id.String()
+	return &canonical, nil
+}
