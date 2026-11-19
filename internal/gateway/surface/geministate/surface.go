@@ -20,8 +20,8 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 	s := surface{k}
 	mux.HandleFunc("OPTIONS /gemini/upload/", k.Preflight)
 	mux.HandleFunc("OPTIONS /gemini/download/", k.Preflight)
-	mux.HandleFunc("POST /gemini/upload/v1beta/files", s.geminiUploadStart)
-	mux.HandleFunc("POST /gemini/upload/{session}", s.geminiUploadCommand)
+	mux.HandleFunc("POST /gemini/upload/v1beta/files", s.startUpload)
+	mux.HandleFunc("POST /gemini/upload/{session}", s.continueUpload)
 	mux.HandleFunc("GET /gemini/v1beta/files", s.geminiListFiles)
 	mux.HandleFunc("GET /gemini/v1beta/files/{name}", s.geminiGetFile)
 	mux.HandleFunc("DELETE /gemini/v1beta/files/{name}", s.geminiDeleteFile)
