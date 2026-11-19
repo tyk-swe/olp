@@ -21,8 +21,6 @@ import (
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type MediaDeps struct {
@@ -363,121 +361,6 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Cal
 		out.status = http.StatusOK
 	}
 	return out
-}
-
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
-	attemptCtx, atr := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
-	finishTrace := func() {
-		if atr == nil {
-			return
-		}
-		if u := fact.Usage; u != nil {
-			atr.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
-		}
-		atr.Finish(fact.Class, fact.Status)
-	}
-	fail := func(class string, f *AttemptFailure) (events.AttemptFact, *transport.Result, *AttemptFailure) {
-		if f == nil {
-			f = &AttemptFailure{}
-		}
-		f.class = class
-		fact.Class = class
-		fact.Committed = f.committed
-		f.accepted = fact.Status == http.StatusOK
-		f.Acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.Status, Accepted: f.accepted}.Acceptance()
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = f.Acceptance
-			if f.committed {
-				fact.Interaction.ClientState = usage.ClientPartial
-			}
-		}
-		fact.Duration = s.Now().Sub(fact.StartedAt)
-		if f.retryAfter > 0 {
-			retry := f.retryAfter
-			fact.RetryAfter = &retry
-		}
-		fact.RecordEvidence(f.billingUncertain())
-		finishTrace()
-		return fact, nil, f
-	}
-	encoded, err := x.encodeMedia(x.request.release.Snapshot(), *provider, a.TargetID, a.UpstreamModel)
-	if err != nil {
-		return fail(ClassProtocol, nil)
-	}
-	call, effective, strictTemplate, bound := encoded.call, encoded.effective, encoded.template, encoded.bound
-	cfg := provider.Connector()
-	deadline, _ := ctx.Deadline()
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		return fail(ClassTimeout, &AttemptFailure{overall: true})
-	}
-	timeout := min(a.Timeout, remaining)
-	actx, cancel := context.WithTimeout(attemptCtx, timeout)
-	defer cancel()
-
-	secret, err := s.slotSecret(actx, x, slot, provider, a.UpstreamModel)
-	if err != nil {
-		return fail(classCredential, nil)
-	}
-	headers := http.Header{}
-	atr.InjectUpstream(headers)
-	networkSecret, err := s.providerNetworkSecret(actx, x.request.release, provider)
-	if err != nil {
-		return fail(classCredential, nil)
-	}
-	target := transport.Target{Sensitive: &x.sensitive, CallerCredential: provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
-	result, failure := s.Deps.Media.Transport.Do(actx, target, call, transport.Options{Strict: strictTemplate != nil, Headers: headers})
-	if failure != nil {
-		fact.Status = failure.Status
-		return fail(mediaClass(failure), &AttemptFailure{
-			Status:     failure.Status,
-			retryAfter: failure.RetryAfter,
-			upstream:   failure.Upstream,
-			dispatched: failure.Dispatched,
-		})
-	}
-	fact.Status = result.Status
-	if artifact := mediaArtifact(result.Payload); strictTemplate != nil && artifact != nil {
-		if _, err := artifact.BlobReference(); err != nil {
-			return fail(ClassProtocol, &AttemptFailure{dispatched: true})
-		}
-	}
-	if strictTemplate != nil && result.Source.Valid() {
-		if _, err := strictTemplate.JSONResult(bound.Descriptor, result.Source); err != nil {
-			if images, ok := result.Payload.(transport.Images); ok {
-				s.removeImages(images.ImageResult)
-			}
-			class := ClassProtocol
-			if call.Ambiguous {
-				class = classAmbiguous
-			}
-			return fail(class, &AttemptFailure{dispatched: true})
-		}
-	}
-	fb := result.FirstByte
-	fact.FirstByte = &fb
-	fact.Class = "success"
-	fact.Usage = mediaUsage(effective, result)
-	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = upstream.Terminal
-	}
-	if events, ok := result.Payload.(transport.Events); ok {
-		var streamFailure *AttemptFailure
-		fact.Usage, fact.Committed, streamFailure = s.streamMediaEvents(actx, w, x, events.Body, strictTemplate, bound)
-		if streamFailure != nil {
-			if call.Ambiguous && !streamFailure.committed && streamFailure.class == ClassTimeout {
-				streamFailure.class = classAmbiguous
-			}
-			return fail(streamFailure.class, streamFailure)
-		}
-		if fact.Interaction != nil {
-			fact.Interaction.ClientState = usage.ClientTerminal
-		}
-	}
-	fact.Duration = s.Now().Sub(fact.StartedAt)
-	fact.RecordEvidence(true)
-	finishTrace()
-	return fact, result, nil
 }
 
 func mediaClass(f *transport.Failure) string {

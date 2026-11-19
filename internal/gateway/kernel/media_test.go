@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -643,4 +644,74 @@ func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 func jsonEqual(a, b []byte) bool {
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
+}
+
+func TestEachKindOfMediaProviderFailureIsClassifiedAndOnlyAStartedStreamIsCommitted(t *testing.T) {
+	t.Parallel()
+	const (
+		image  = `{"model":"{route}","prompt":"a red fox","size":"1024x1024"}`
+		speech = `{"model":"{route}","input":"hello","voice":"alloy","stream_format":"sse"}`
+		delta  = "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AAAA\"}\n\n"
+	)
+	failed := func(status int) []mediaReply {
+		return []mediaReply{{status, "application/json", `{"error":{"message":"refused"}}`}}
+	}
+	for _, tc := range []struct {
+		name            string
+		replies         []mediaReply
+		strict, streams bool
+		status          int
+		code, class     string
+		attemptStatus   int
+		committed       bool
+	}{
+		{name: "rate limited", replies: failed(http.StatusTooManyRequests),
+			status: http.StatusTooManyRequests, code: "upstream_rate_limit", class: classRateLimit, attemptStatus: http.StatusTooManyRequests},
+		{name: "credential refused", replies: failed(http.StatusUnauthorized),
+			status: http.StatusBadGateway, code: "upstream_authentication_failed", class: classCredential, attemptStatus: http.StatusUnauthorized},
+		{name: "request rejected", replies: failed(http.StatusBadRequest),
+			status: http.StatusBadRequest, code: "upstream_rejected", class: classUpstreamClient, attemptStatus: http.StatusBadRequest},
+		{name: "provider error", replies: failed(http.StatusInternalServerError),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous, attemptStatus: http.StatusInternalServerError},
+		{name: "unreadable reply", replies: reply("application/json", "not json"),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+		{name: "strict reply without the image", replies: reply("application/json", `{"created":1}`), strict: true,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous, attemptStatus: http.StatusOK},
+		{name: "stream that never starts", replies: reply("text/event-stream", ""), streams: true,
+			status: http.StatusBadGateway, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK},
+		{name: "stream cut after its first frame", replies: reply("text/event-stream", delta), streams: true,
+			status: http.StatusOK, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK, committed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			request := mediaCase{operation: media.OpImageGeneration, path: "/v1/images/generations", json: image, replies: tc.replies}
+			if tc.strict {
+				request.provider = func(p *routing.Provider) {
+					p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
+				}
+				request.route = func(r *routing.Route) { r.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict} }
+			}
+			if tc.streams {
+				request.operation, request.mode, request.path, request.json = media.OpSpeech, "streaming", "/v1/audio/speech", speech
+			}
+			got := runMediaCase(t, request)
+			said := fmt.Sprint(got.Body)
+			if raw, ok := got.Body.(json.RawMessage); ok {
+				said = string(raw)
+			}
+			if got.Status != tc.status || !strings.Contains(said, `"code":"`+tc.code+`"`) {
+				t.Fatalf("reply = %d %s, want %d with code %s", got.Status, said, tc.status, tc.code)
+			}
+			if tc.committed && !strings.HasPrefix(said, delta) {
+				t.Fatalf("the frame the provider did send was not delivered: %s", said)
+			}
+			if len(got.Upstream) != 1 || len(got.Attempts) != 1 {
+				t.Fatalf("expected one provider call and one attempt: %+v", got)
+			}
+			attempt := got.Attempts[0]
+			if attempt.Class != tc.class || attempt.Status != tc.attemptStatus || attempt.Committed != tc.committed || attempt.Usage != nil {
+				t.Fatalf("attempt = %+v, want class %s status %d committed %v without usage", attempt, tc.class, tc.attemptStatus, tc.committed)
+			}
+		})
+	}
 }
