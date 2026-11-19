@@ -171,6 +171,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
@@ -182,6 +183,15 @@ flag for one. A surface that needs something from a shared step sets a general
 field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
 kernel's tests register the same assembly, so the refusal matrix in
 `kernel/surfaces_test.go` covers a surface's routes after it moves.
+
+A handler in a surface reads as a list of steps. `surface/geminiinteractions`
+is the example for a request that admits, pins, sends and answers. Its handler
+calls one named kernel step per stage, such as `ReserveGeneration`,
+`GatePinnedGeneration` and `SettleGeneration` in `kernel/pinned_generation.go`,
+and keeps the request's state on one small struct. A surface calls kernel
+steps and never reads or writes the `Call`'s admission or settlement fields.
+When a surface needs a stage the kernel does not name yet, add the step to the
+kernel and call it.
 
 Put new code in the kernel only when every surface needs it. Code that reads a
 few values from the `Call` takes them as a config struct and moves beneath the
