@@ -57,14 +57,29 @@ func (r *Remote) sharesServer(ctx context.Context, c *coordination.Client) bool 
 }
 
 func (r *Remote) Do(ctx context.Context, args ...string) (any, error) {
+	c, err := r.connection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.Do(ctx, args...)
+}
+
+func (r *Remote) Search(ctx context.Context, args ...string) ([]coordination.SearchDocument, error) {
+	c, err := r.connection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.Search(ctx, args...)
+}
+
+func (r *Remote) connection(ctx context.Context) (*coordination.Client, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
-		r.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	if r.client == nil {
 		if time.Now().Before(r.retry) {
-			r.mu.Unlock()
 			return nil, ErrUnavailable
 		}
 		c, err := coordination.Open(ctx, r.configuration)
@@ -76,14 +91,11 @@ func (r *Remote) Do(ctx context.Context, args ...string) (any, error) {
 				c.Close()
 			}
 			r.retry = time.Now().Add(reconnectDelay)
-			r.mu.Unlock()
 			return nil, ErrUnavailable
 		}
 		r.client = c
 	}
-	c := r.client
-	r.mu.Unlock()
-	return c.Do(ctx, args...)
+	return r.client, nil
 }
 
 func (r *Remote) Close() {

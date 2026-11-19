@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
@@ -184,8 +185,10 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(out.status)
 	out.committed = true
-	if n := len(x.facts); n > 0 {
-		x.facts[n-1].Committed = true
+	var attempt *events.AttemptFact
+	if n := len(x.facts); n > 0 && x.family != wire.VideoList {
+		attempt = &x.facts[n-1]
+		attempt.Committed = true
 	}
 	err := write()
 	if err == nil {
@@ -194,14 +197,14 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 	if err != nil {
 		out.err = (&attemptFailure{class: classCancelled}).toError()
 		out.cancelled, out.status = true, 0
-		if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
-			x.facts[n-1].Interaction.ClientState = usage.ClientPartial
+		if attempt != nil && attempt.Interaction != nil {
+			attempt.Interaction.ClientState = usage.ClientPartial
 		}
 		return
 	}
 	x.delivered(s.now())
-	if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
-		x.facts[n-1].Interaction.ClientState = usage.ClientTerminal
+	if attempt != nil && attempt.Interaction != nil {
+		attempt.Interaction.ClientState = usage.ClientTerminal
 	}
 }
 

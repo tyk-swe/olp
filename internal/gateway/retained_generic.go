@@ -614,6 +614,14 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
 		return 502
 	}
+	if observeErr != nil {
+		fail(fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed."))
+		return 503
+	}
+	if s.persistRetainedResult(commitCtx, resource, e, parsed) != nil {
+		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
+		return 503
+	}
 	projected, projectErr := s.projectRetainedGeneric(r.Context(), resource, e, parsed, rewrite)
 	if projectErr != nil {
 		if e.Action == "delete" {
@@ -624,15 +632,11 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		fail(public)
 		return public.Status
 	}
-	if e.Action != "delete" && observeErr == nil {
+	if e.Action != "delete" {
 		_ = observeRetainedUsage(native.exchange, parsed, false)
 		native.exchange.complete(classSuccess)
 	}
-	if err := s.persistRetainedResult(commitCtx, resource, e, parsed); err != nil {
-		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
-		return 503
-	}
-	if observeErr != nil || s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
+	if s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed."))
 		return 503
 	}
@@ -786,14 +790,15 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	routeReservedCharge := make(map[string]rates.Cost)
 	routeActual := make(map[string]rates.Cost)
 	routeActualCharge := make(map[string]rates.Cost)
-	routeDispatched := make(map[string]bool)
+	lastRouteRead := make(map[string]*pinnedExchange)
 	defer func() {
 		zero := int64(0)
 		for slug, lease := range routeLeases {
-			if routeDispatched[slug] {
+			read := lastRouteRead[slug]
+			if read != nil && !read.fact().BillingUncertain {
 				lease.SetActualCost(routeActual[slug].String(), routeActualCharge[slug].String())
 			}
-			quota.SettleKey(ctx, lease, routeDispatched[slug], &zero, s.log)
+			quota.SettleKey(ctx, lease, read != nil, &zero, s.log)
 		}
 	}()
 	admitRoute := func(entry retainedListEntry) int {
@@ -913,7 +918,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			fail(public)
 			return public.Status
 		}
-		routeDispatched[route.Slug] = true
+		lastRouteRead[route.Slug] = native.exchange
 		body, readErr := native.readBody(s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {

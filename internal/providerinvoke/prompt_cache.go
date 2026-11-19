@@ -148,7 +148,7 @@ func cacheControls(blocks []oif.Value, ttl string) (int, bool) {
 			count++
 		}
 		kind, _ := block.Lookup("type")
-		if text, _ := kind.Chars(); text == "tool_result" {
+		if text, _ := kind.Chars(); text == "tool_result" || text == "search_result" {
 			content, _ := block.Lookup("content")
 			nested, ok := cacheControls(content.Elements(), ttl)
 			if !ok {

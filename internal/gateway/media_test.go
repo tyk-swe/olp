@@ -27,8 +27,10 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 )
@@ -543,6 +545,38 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	}
 	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != classSuccess || attempt.Committed {
 		t.Fatalf("unexpected attempt evidence: %+v", attempt)
+	}
+}
+
+func TestDeliveredVideoListKeepsFailedPollUncommitted(t *testing.T) {
+	h := newHarness(t, Config{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		x := &call{
+			family:  wire.VideoList,
+			request: h.gateway.begin(w, r),
+			facts: []events.AttemptFact{
+				{Class: classSuccess, Status: http.StatusOK, Committed: true},
+				{Class: classUpstreamServer, Status: http.StatusServiceUnavailable},
+			},
+		}
+		x.notePolls()
+		out := &mediaOutcome{status: http.StatusOK}
+		h.gateway.deliverMediaJSON(w, x, out, []byte(`{"data":[{"id":"stored-video"}]}`))
+		h.gateway.finishMedia(x, out, out.status)
+	}))
+	defer server.Close()
+	response, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("stored-video")) {
+		t.Fatalf("list returned %d, %s, %v", response.StatusCode, body, err)
+	}
+	env := h.sink.last(t)
+	if !env.Committed || len(env.Attempts) != 2 || !env.Attempts[0].Committed || env.Attempts[1].Committed {
+		t.Fatalf("list commit evidence = %v, attempts = %+v", env.Committed, env.Attempts)
 	}
 }
 

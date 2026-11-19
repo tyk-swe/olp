@@ -65,7 +65,7 @@ func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testi
 		if err := initSecrets([]string{"--dir", dir, "--database-dir", databaseDir}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
-		databaseURL := bundledURL(dir)
+		const databaseURL = "postgres://olp@postgres:5432/olp"
 		env := map[string]string{
 			"OLP_DATABASE_PASSWORD_FILE":     filepath.Join(dir, "postgres_password"),
 			"OLP_DATABASE_PASSWORD_FILE_URL": databaseURL,

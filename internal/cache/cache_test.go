@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -151,9 +151,25 @@ func TestPromptPolicyValidateRequiresASessionLabelForSessionKeys(t *testing.T) {
 }
 
 type fakeCommander struct {
-	values map[string]string
-	hashes map[string]map[string]string
-	resp3  bool
+	values    map[string]string
+	hashes    map[string]map[string]string
+	searchErr error
+}
+
+func (f *fakeCommander) Search(_ context.Context, a ...string) ([]coordination.SearchDocument, error) {
+	start := strings.Index(a[1], "{")
+	end := strings.Index(a[1], "}")
+	if start < 0 || end <= start {
+		return nil, errors.New("unsupported query")
+	}
+	bucket := a[1][start+1 : end]
+	var documents []coordination.SearchDocument
+	for key, hash := range f.hashes {
+		if hash["bucket"] == bucket && hash["vector"] != "" {
+			documents = append(documents, coordination.SearchDocument{Key: key, Doc: map[string]string{"__vector_score": "0"}})
+		}
+	}
+	return documents, f.searchErr
 }
 
 func (f *fakeCommander) Do(_ context.Context, a ...string) (any, error) {
@@ -173,32 +189,6 @@ func (f *fakeCommander) Do(_ context.Context, a ...string) (any, error) {
 		return nil, errors.New("unsupported script")
 	case "FT.CREATE":
 		return "OK", nil
-	case "FT.SEARCH":
-		start := strings.Index(a[2], "{")
-		end := strings.Index(a[2], "}")
-		if start < 0 || end < 0 || end < start {
-			return nil, errors.New("unsupported query")
-		}
-		bucket := a[2][start+1 : end]
-		keys := []string{}
-		for key, hash := range f.hashes {
-			if hash["bucket"] == bucket && hash["vector"] != "" {
-				keys = append(keys, key)
-			}
-		}
-		slices.Sort(keys)
-		if f.resp3 {
-			results := make([]any, 0, len(keys))
-			for _, key := range keys {
-				results = append(results, map[string]any{"id": key, "extra_attributes": map[string]any{"__vector_score": "0"}})
-			}
-			return map[string]any{"total_results": int64(len(results)), "results": results}, nil
-		}
-		reply := []any{int64(len(keys))}
-		for _, key := range keys {
-			reply = append(reply, key, []any{"__vector_score", "0"})
-		}
-		return reply, nil
 	case "HGET":
 		if hash, ok := f.hashes[a[1]]; ok {
 			if value, ok := hash[a[2]]; ok {
@@ -285,13 +275,20 @@ func TestNearestMissesWhenPurgeFollowsTicketResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket.VectorSpace = "embed"
-	for _, resp3 := range []bool{false, true} {
-		client.resp3 = resp3
+	t.Run("before purge", func(t *testing.T) {
 		entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
 		if err != nil || entry == nil || string(entry.Body) != "answer" {
-			t.Fatalf("got entry %v and %v before any purge (RESP3=%v), want the stored answer", entry, err, resp3)
+			t.Fatalf("got entry %v and %v before any purge, want the stored answer", entry, err)
 		}
-	}
+	})
+	t.Run("failed search", func(t *testing.T) {
+		client.searchErr = errors.New("search timed out")
+		defer func() { client.searchErr = nil }()
+		entry, _, err := store.Nearest(t.Context(), ticket, vector, policy, Controls{})
+		if entry != nil || !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("got entry %v and %v from partial search results, want cache unavailable", entry, err)
+		}
+	})
 	bare := Ticket{Key: ticket.Key, Bucket: ticket.Bucket, VectorSpace: ticket.VectorSpace}
 	if entry, _, err := store.Nearest(t.Context(), bare, vector, policy, Controls{}); err != nil || entry != nil {
 		t.Errorf("got entry %v and %v for a ticket without generation data, want a miss", entry, err)

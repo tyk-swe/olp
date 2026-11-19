@@ -124,6 +124,18 @@ func (c *Client) Do(ctx context.Context, args ...string) (any, error) {
 	return reply(c.raw.Do(command, c.raw.B().Arbitrary(args...).Build()))
 }
 
+type SearchDocument = valkey.FtSearchDoc
+
+func (c *Client) Search(ctx context.Context, args ...string) ([]SearchDocument, error) {
+	command, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	_, documents, err := c.raw.Do(command, c.raw.B().Arbitrary("FT.SEARCH").Args(args...).ReadOnly()).AsFtSearch()
+	if err != nil {
+		return nil, commandError(err)
+	}
+	return documents, nil
+}
+
 // DoBlocking runs a command that waits server side, such as XREADGROUP BLOCK,
 // on a dedicated connection so it cannot stall the shared pipelined one. The
 // caller's context bounds it in place of the request timeout.
@@ -169,8 +181,12 @@ func reply(result valkey.ValkeyResult) (any, error) {
 	if err == nil || valkey.IsValkeyNil(err) {
 		return value, nil
 	}
+	return nil, commandError(err)
+}
+
+func commandError(err error) *CommandError {
 	_, refused := valkey.IsValkeyErr(err)
-	return nil, &CommandError{Cause: err, Ambiguous: !refused}
+	return &CommandError{Cause: err, Ambiguous: !refused}
 }
 
 func Namespace(installation string) string { return "olp:" + installation + ":" }
