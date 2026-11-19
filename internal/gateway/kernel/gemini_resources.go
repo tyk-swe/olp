@@ -943,7 +943,7 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 		}
-		x.geminiFileBinary = true
+		x.pinnedBinary = true
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			return upstreamError(failure)

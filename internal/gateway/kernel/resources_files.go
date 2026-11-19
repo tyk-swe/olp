@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -386,9 +387,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
 		return nil, exchange.fail(classCredential, nil)
 	}
-	if x.anthropicFilesBeta {
-		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
-	}
+	maps.Copy(req.Header, x.pinnedHeaders)
 	resp, failure := s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 	// A provider can respond before consuming the body. Keep its rejection as
 	// authoritative; only successful headers with an incomplete upload are invalid.

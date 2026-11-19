@@ -104,7 +104,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(fileIDs) > 0 {
-		x.anthropicFilesBeta = true
+		x.pinnedHeaders = anthropicFilesHeaders()
 	}
 	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
 	if parseErr != nil {

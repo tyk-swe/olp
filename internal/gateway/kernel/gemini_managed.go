@@ -221,7 +221,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 	}
 	endpoint := parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media"
-	x.geminiFileBinary = true
+	x.pinnedBinary = true
 	response, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 	if failure != nil {
 		return upstreamError(failure)

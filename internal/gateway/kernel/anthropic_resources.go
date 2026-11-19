@@ -24,6 +24,10 @@ import (
 
 const anthropicFilesBeta = "files-api-2025-04-14"
 
+func anthropicFilesHeaders() http.Header {
+	return http.Header{"Anthropic-Beta": {anthropicFilesBeta}}
+}
+
 func anthropicFilesQuery() url.Values {
 	return url.Values{"beta": []string{"true"}}
 }
@@ -99,7 +103,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, e)
 		return
 	}
-	x.anthropicFilesBeta = true
+	x.pinnedHeaders = anthropicFilesHeaders()
 	endpoint, urlErr := resourceURL(p.provider.Connector(), p.model, "files", anthropicFilesQuery())
 	if urlErr != nil {
 		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
@@ -179,7 +183,7 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 
 func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 	s.anthropicFileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.anthropicFilesBeta = true
+		x.pinnedHeaders = anthropicFilesHeaders()
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -219,7 +223,7 @@ func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) anthropicDeleteFile(w http.ResponseWriter, r *http.Request) {
 	s.anthropicFileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.anthropicFilesBeta = true
+		x.pinnedHeaders = anthropicFilesHeaders()
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -245,12 +249,12 @@ func (s *Server) anthropicDeleteFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 	s.anthropicFileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.anthropicFilesBeta = true
+		x.pinnedHeaders = anthropicFilesHeaders()
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+"/content", anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		x.anthropicFileBinary = true
+		x.pinnedBinary = true
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			return upstreamError(failure)

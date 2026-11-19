@@ -276,7 +276,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	accept := "application/json"
-	if x.anthropicFileBinary || x.geminiFileBinary {
+	if x.pinnedBinary {
 		accept = "application/binary"
 	}
 	req.Header.Set("Accept", accept)
@@ -289,9 +289,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 		}
 		return nil, exchange.fail(classCredential, nil)
 	}
-	if x.anthropicFilesBeta {
-		req.Header.Set("Anthropic-Beta", anthropicFilesBeta)
-	}
+	maps.Copy(req.Header, x.pinnedHeaders)
 	// Skills use the GA contract the pinned SDK parses (id-addressed
 	// versions, latest_version_id). The dated beta header would opt
 	// into legacy response shapes with incompatible identities, so

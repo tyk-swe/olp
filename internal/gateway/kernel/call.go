@@ -43,9 +43,8 @@ type call struct {
 	semanticQueryInvalid bool
 	retained             retainedOperation
 	retainedAdmission    *retainedAdmissionPlan
-	anthropicFilesBeta   bool
-	anthropicFileBinary  bool
-	geminiFileBinary     bool
+	pinnedHeaders        http.Header
+	pinnedBinary         bool
 	serving              *oif.ServingIdentity
 	servingSlot          string
 	servingBinding       string
