@@ -69,8 +69,8 @@ ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
 
 Components that were over the size limit before it existed are listed in
 `eslint-legacy.json`, and the other three rules have no exemptions. The list
-only shrinks: `scripts/check-exemptions.sh` fails `make check-console` when it is
-longer than on the default branch. Split a new oversized component instead of
+only shrinks: `scripts/check-exemptions.sh` fails `make check-console` when it has
+an entry the default branch does not. Split a new oversized component instead of
 listing it, and remove a file from the list in the change that splits it.
 
 ## Page building blocks
