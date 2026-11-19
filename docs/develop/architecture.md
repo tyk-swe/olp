@@ -170,6 +170,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
+| `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
