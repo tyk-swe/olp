@@ -227,7 +227,7 @@ func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target pr
 // as opposed to the request, its credential or its quota.
 func unhealthyClass(class string) bool {
 	switch class {
-	case classUpstreamServer, classConnect, classTimeout, classProtocol:
+	case ClassUpstreamServer, classConnect, ClassTimeout, ClassProtocol:
 		return true
 	}
 	return false

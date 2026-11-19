@@ -12,7 +12,7 @@ func inBandStatus(class string) int {
 		return http.StatusUnauthorized
 	case classRateLimit:
 		return http.StatusTooManyRequests
-	case classTimeout:
+	case ClassTimeout:
 		return http.StatusGatewayTimeout
 	}
 	return http.StatusBadGateway

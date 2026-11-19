@@ -32,7 +32,7 @@ type capHold struct {
 type capCheck struct {
 	owners  []string
 	quota   string
-	refusal *attemptFailure
+	refusal *AttemptFailure
 }
 
 // holdCaps reserves the attempt's estimated cost against every spend cap it
@@ -77,7 +77,7 @@ func (s *Server) holdCaps(ctx context.Context, x *Call, attempt routing.Attempt,
 		lease, err := s.holdCap(decision, x, index, owner, bound, ttl)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			return capCheck{quota: owner.Quota, refusal: &attemptFailure{class: classBudget, quota: owner.Quota, retryAfter: exceeded.RetryAfter}}
+			return capCheck{quota: owner.Quota, refusal: &AttemptFailure{class: classBudget, quota: owner.Quota, retryAfter: exceeded.RetryAfter}}
 		}
 		if err != nil {
 			s.Deps.Admission.Logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.ID, "error", err.Error())

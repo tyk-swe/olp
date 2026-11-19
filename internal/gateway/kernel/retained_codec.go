@@ -35,12 +35,12 @@ func retainedBindingStoreError(err error) error {
 	return fmt.Errorf("%w: %w", errRetainedBindingUnavailable, err)
 }
 
-func retainedProjectionError(exchange *pinnedExchange, err error) *fault.Error {
+func retainedProjectionError(exchange *PinnedExchange, err error) *fault.Error {
 	if errors.Is(err, errRetainedBindingUnavailable) {
-		exchange.interrupt(classProtocol, true)
+		exchange.Interrupt(ClassProtocol, true)
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Resource identity bindings are unavailable.")
 	}
-	exchange.invalidNative()
+	exchange.InvalidNative()
 	return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider response contained an unbound resource identity.")
 }
 

@@ -195,12 +195,12 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, e)
 		return
 	}
-	var exchange *pinnedExchange
+	var exchange *PinnedExchange
 	var body []byte
 	var upstreamID string
 	var err error
 	if adapter == connectors.BatchGeminiManaged {
-		var failure *attemptFailure
+		var failure *AttemptFailure
 		body, upstreamID, exchange, failure = s.uploadGeminiManagedFile(ctx, x, p, uploadFile)
 		if failure != nil {
 			s.Refuse(x, w, UpstreamError(failure))
@@ -305,7 +305,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	s.WriteStateJSON(w, x, out, exchange)
 }
 
-func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*pinnedResponse, *attemptFailure) {
+func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*PinnedResponse, *AttemptFailure) {
 	pipeR, pipeW := io.Pipe()
 	form := multipart.NewWriter(pipeW)
 	sendDone := make(chan error, 1)
@@ -512,7 +512,7 @@ func (s *Server) getPinnedFile(ctx context.Context, w http.ResponseWriter, x *Ca
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed file metadata.")
 	}
 	if err != nil {
-		resp.Exchange.interrupt(classProtocol, true)
+		resp.Exchange.Interrupt(ClassProtocol, true)
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored file mapping is malformed.")
 	}
 	var out []byte
@@ -558,7 +558,7 @@ func (s *Server) getPinnedFile(ctx context.Context, w http.ResponseWriter, x *Ca
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
-		writeDeleted := func(exchanges ...*pinnedExchange) {
+		writeDeleted := func(exchanges ...*PinnedExchange) {
 			s.WriteStateJSON(w, x, MustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}), exchanges...)
 		}
 		adapter, e := storedAdapter(res)
@@ -644,7 +644,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		spool := s.Deps.Staging
 		if spool == nil {
-			resp.Exchange.interrupt(classProtocol, true)
+			resp.Exchange.Interrupt(ClassProtocol, true)
 			return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 		}
 		artifact, err := resp.StageBody(ctx, spool, "file-content", contentType, s.Config.MaxResponseBytes)

@@ -254,7 +254,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 	s.finishGeminiUploadAck(w, x, resp.Exchange)
 }
 
-func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *pinnedExchange, *attemptFailure) {
+func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
 	endpoint, err := geminiUploadOrigin(p.Provider.Connector(), p.Model, s.egress)
 	if err != nil {
 		return nil, "", nil, geminiManagedUploadFailure(classConnect, false)
@@ -275,13 +275,13 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 	if len(start.Header.Values("X-Goog-Upload-URL")) != 1 ||
 		validateGeminiUploadURL(uploadURL, generationURL, s.egress) != nil {
 		_ = start.Body.Close()
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	_ = start.Body.Close()
 	start.Exchange.Complete(ClassSuccess)
 	opened, err := s.Deps.Staging.Open(part.Handle)
 	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	defer opened.File.Close()
 	chunkHeaders := http.Header{
@@ -295,11 +295,11 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 	}
 	defer final.Body.Close()
 	if final.Header.Get("X-Goog-Upload-Status") != "final" {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	body, err := final.ReadBody(s.Config.MaxResponseBytes)
 	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	var result struct {
 		File json.RawMessage `json:"file"`
@@ -307,23 +307,23 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 	var fileObject map[string]json.RawMessage
 	if json.Unmarshal(body, &result) != nil || len(result.File) == 0 ||
 		json.Unmarshal(result.File, &fileObject) != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	var name string
 	if json.Unmarshal(fileObject["name"], &name) != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	if _, err := geminiFileID(name); err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classProtocol, true)
+		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	return body, name, final.Exchange, nil
 }
 
-func geminiManagedUploadFailure(class string, dispatched bool) *attemptFailure {
-	return &attemptFailure{class: class, Status: http.StatusBadGateway, dispatched: dispatched}
+func geminiManagedUploadFailure(class string, dispatched bool) *AttemptFailure {
+	return &AttemptFailure{class: class, Status: http.StatusBadGateway, dispatched: dispatched}
 }
 
-func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*pinnedResponse, *attemptFailure) {
+func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*PinnedResponse, *AttemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.User != nil {
@@ -350,7 +350,7 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, metho
 	}
 	if err := s.applySlotCredential(ctx, x, req, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
 		if ctx.Err() != nil {
-			return nil, exchange.fail(classCancelled, nil)
+			return nil, exchange.fail(ClassCancelled, nil)
 		}
 		return nil, exchange.fail(classCredential, nil)
 	}
@@ -729,7 +729,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	s.finishGeminiUploadAck(w, x, resp.Exchange)
 }
 
-func (s *Server) finishGeminiUploadAck(w http.ResponseWriter, x *Call, exchange *pinnedExchange) {
+func (s *Server) finishGeminiUploadAck(w http.ResponseWriter, x *Call, exchange *PinnedExchange) {
 	controller := http.NewResponseController(w)
 	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if err := controller.Flush(); err != nil {

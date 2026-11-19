@@ -170,7 +170,7 @@ func (s *Server) newFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal 
 
 // rejectedFact records an attempt a quota refused. Nothing was sent, so the
 // attempt carries no status and cannot have been billed by anyone.
-func (s *Server) rejectedFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal int, rejection *attemptFailure) events.AttemptFact {
+func (s *Server) rejectedFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal int, rejection *AttemptFailure) events.AttemptFact {
 	fact := s.newFact(x, a, slot, ordinal)
 	fact.Class = rejection.class
 	fact.Duration = s.Now().Sub(fact.StartedAt)

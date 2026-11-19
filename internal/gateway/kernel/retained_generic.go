@@ -368,7 +368,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 	}
 	if resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
-		fail(pinUnavailable())
+		fail(PinUnavailable())
 		return
 	}
 	use := RetainedRetrieval
@@ -384,7 +384,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	}
 	x.Route = route
 	if !p.Provider.Connector().Supports(e.Operation, e.Surface, "unary") {
-		fail(pinUnavailable())
+		fail(PinUnavailable())
 		return
 	}
 	if e.Action != "delete" {
@@ -536,7 +536,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 				fail(fault.ServerError(503, "provider_state_unavailable", "Deletion evidence could not be committed."))
 				return 503
 			}
-			s.writeStateJSONStatus(w, x, nil, native.StatusCode, native.Exchange)
+			s.WriteStateJSONStatus(w, x, nil, native.StatusCode, native.Exchange)
 			return native.StatusCode
 		}
 	}
@@ -592,7 +592,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 			return 502
 		}
 		if prepareErr != nil {
-			native.Exchange.interrupt(classProtocol, true)
+			native.Exchange.Interrupt(ClassProtocol, true)
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
 		}
@@ -607,7 +607,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 	if creation != nil {
 		if err := creation.Commit(commitCtx); err != nil {
 			if referenceErr == nil && observeErr == nil {
-				native.Exchange.interrupt(classProtocol, true)
+				native.Exchange.Interrupt(ClassProtocol, true)
 			}
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
@@ -622,7 +622,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 		return 503
 	}
 	if s.persistRetainedResult(commitCtx, resource, e, parsed) != nil {
-		native.Exchange.interrupt(classProtocol, true)
+		native.Exchange.Interrupt(ClassProtocol, true)
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 		return 503
 	}
@@ -650,7 +650,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 			return 503
 		}
 	}
-	s.writeStateJSONStatus(w, x, projected, native.StatusCode, native.Exchange)
+	s.WriteStateJSONStatus(w, x, projected, native.StatusCode, native.Exchange)
 	return native.StatusCode
 }
 
@@ -794,7 +794,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	routeReservedCharge := make(map[string]rates.Cost)
 	routeActual := make(map[string]rates.Cost)
 	routeActualCharge := make(map[string]rates.Cost)
-	lastRouteRead := make(map[string]*pinnedExchange)
+	lastRouteRead := make(map[string]*PinnedExchange)
 	defer func() {
 		zero := int64(0)
 		for slug, lease := range routeLeases {
@@ -843,7 +843,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return gateErr.Status
 		}
 	}
-	var delivered []*pinnedExchange
+	var delivered []*PinnedExchange
 	responseBytes := 256
 	readIdx := 0
 	var lastItem *resources.Resource
@@ -902,7 +902,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(retainedapi.Endpoint{Family: e.Family, Action: "get", Method: "GET", Pattern: e.Path + "/{id}"}, map[string]string{"id": resource.UpstreamID}), nil)
 		if urlErr != nil {
 			s.settlePinnedHold(ctx, p.Hold)
-			fail(pinUnavailable())
+			fail(PinUnavailable())
 			return 409
 		}
 		native, callErr := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
@@ -1027,7 +1027,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		fail(encodeErr)
 		return encodeErr.Status
 	}
-	s.writeStateJSONStatus(w, x, body, http.StatusOK, delivered...)
+	s.WriteStateJSONStatus(w, x, body, http.StatusOK, delivered...)
 	return 200
 }
 
@@ -1244,10 +1244,10 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	native.Exchange.Complete(ClassSuccess)
 	response = projected
 	status = native.StatusCode
-	s.writeStateJSONStatus(w, x, response, status, native.Exchange)
+	s.WriteStateJSONStatus(w, x, response, status, native.Exchange)
 }
 
-func retainedRejectedWithoutWork(failure *attemptFailure) bool {
+func retainedRejectedWithoutWork(failure *AttemptFailure) bool {
 	if failure == nil {
 		return false
 	}

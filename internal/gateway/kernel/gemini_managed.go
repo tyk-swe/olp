@@ -229,7 +229,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	defer response.Body.Close()
 	spool := s.Deps.Staging
 	if spool == nil {
-		response.Exchange.interrupt(classProtocol, true)
+		response.Exchange.Interrupt(ClassProtocol, true)
 		return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 	}
 	contentType := response.Header.Get("Content-Type")
@@ -246,7 +246,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if record.Role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
-			response.Exchange.interrupt(classProtocol, !errors.Is(err, errGeminiBatchFidelity))
+			response.Exchange.Interrupt(ClassProtocol, !errors.Is(err, errGeminiBatchFidelity))
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")

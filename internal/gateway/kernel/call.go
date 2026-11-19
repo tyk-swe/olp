@@ -112,7 +112,7 @@ type Call struct {
 
 	once             sync.Once
 	facts            []events.AttemptFact
-	pinned           []*pinnedExchange
+	pinned           []*PinnedExchange
 	Failure          *fault.Error     // terminal error decided before the attempt loop ran
 	firstByte        *time.Duration   // request start to the first payload byte the client received
 	lease            *admission.Lease // the API key reservation, settled once the request ends

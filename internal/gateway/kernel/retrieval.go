@@ -142,10 +142,10 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status = http.StatusOK
-	s.writeStateJSONStatus(w, x, projected, status, native.Exchange)
+	s.WriteStateJSONStatus(w, x, projected, status, native.Exchange)
 }
 
-func (s *Server) retrievalResult(binding *retrieval.Binding, native *pinnedResponse) ([]byte, *fault.Error) {
+func (s *Server) retrievalResult(binding *retrieval.Binding, native *PinnedResponse) ([]byte, *fault.Error) {
 	response, responseErr := native.ReadBody(s.retainedResponseLimit())
 	if responseErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported retrieval response.")

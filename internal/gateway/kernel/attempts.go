@@ -16,14 +16,14 @@ import (
 
 type attemptAdapter[Result any] struct {
 	estimate func(routing.Attempt, *routing.Provider) int64
-	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *attemptFailure)
+	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure)
 }
 
-func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *attemptFailure, *fault.Error) {
+func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure, *fault.Error) {
 	dispatchCtx, finish, err := hold.authorize(ctx, s, x)
 	if err != nil {
 		var result Result
-		return fact, result, &attemptFailure{class: classLimitsUnavailable, noRetry: true}, err
+		return fact, result, &AttemptFailure{class: classLimitsUnavailable, noRetry: true}, err
 	}
 	completed, result, failure := adapter.dispatch(dispatchCtx, attempt, provider, slot, fact)
 	return completed, result, failure, finish()
@@ -61,7 +61,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter at
 			}
 			return out
 		}
-		if e := s.reserveFallbackCost(ctx, x); e != nil {
+		if e := s.ReserveFallbackCost(ctx, x); e != nil {
 			return attemptOutcome[Result]{err: e}
 		}
 	}
@@ -74,7 +74,7 @@ func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attem
 	deadline, _ := ctx.Deadline()
 	snapshot := x.Snapshot()
 	unmeterable := false
-	var last *attemptFailure
+	var last *AttemptFailure
 	var met []string
 route:
 	for _, attempt := range x.attempts {
@@ -108,7 +108,7 @@ route:
 			gate := s.gateAttempt(ctx, x, attempt, &provider, &slot, estimate, deadline)
 			switch gate.verdict {
 			case gateExpired:
-				return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
+				return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()}, nil
 			case gateDenied:
 				next = true
 			case gateRejected:
@@ -158,7 +158,7 @@ route:
 				}
 				if failure.overall || !failoverAllowed(failure.class, failure.committed) {
 					s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure, fact.CredentialSource == "caller")
-					out := attemptOutcome[Result]{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
+					out := attemptOutcome[Result]{err: failure.Fault(), committed: failure.committed, cancelled: failure.class == ClassCancelled}
 					if failure.class == classContentFilter && !failure.committed {
 						// A content filter refuses the request on every target
 						// of the route; only a fallback route can serve it.
@@ -184,16 +184,16 @@ route:
 	}
 	switch {
 	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-		return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
+		return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()}, nil
 	case ctx.Err() != nil:
-		return attemptOutcome[Result]{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}, nil
+		return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassCancelled}).Fault(), cancelled: true}, nil
 	}
 	// Every attempt the route could make failed in a way another target, or
 	// another route, might not.
 	met = append(met, routing.FallbackExhausted)
 	switch {
 	case last != nil:
-		return attemptOutcome[Result]{err: last.toError()}, met
+		return attemptOutcome[Result]{err: last.Fault()}, met
 	case unmeterable:
 		// Every eligible target had a quota that could not be consulted.
 		return attemptOutcome[Result]{err: quota.LimitsUnavailable()}, met
@@ -212,7 +212,7 @@ func meet(met []string, class string) []string {
 // retryWait reports how long to wait before retrying a failed attempt on the
 // same slot, when the route's retry policy allows another try within the
 // request's attempt budget and deadline. An open circuit ends retries.
-func (s *Server) retryWait(x *Call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
+func (s *Server) retryWait(x *Call, providerID string, failure *AttemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
 	rule, ok := x.Route.Retry.Retries(failure.class)
 	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.Open(providerID) {
 		return 0, false
@@ -244,7 +244,7 @@ func failoverAllowed(class string, committed bool) bool {
 		return false
 	}
 	switch class {
-	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential, classContextWindow:
+	case classConnect, ClassTimeout, classRateLimit, ClassUpstreamServer, classCredential, classContextWindow:
 		return true
 	}
 	return false

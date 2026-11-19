@@ -599,7 +599,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 				if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
 					out = &Outcome{Err: admissionErr}
 				} else {
-					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 						return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
 					}})
 					raw = result.result.Body
@@ -642,7 +642,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 		} else if e := s.admitClassifier(ctx, x); e != nil {
 			out = &Outcome{Err: e}
 		} else {
-			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 				return s.unaryAttempt(ctx, x, a, p, slot, fact)
 			}})
 			raw = result.result.Body

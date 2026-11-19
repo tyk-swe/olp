@@ -431,7 +431,7 @@ func (b geminiBatchObject) project(localID, routeSlug string, outputFiles map[st
 	return json.Marshal(b.outer)
 }
 
-func settleGeminiBatchResult(exchange *pinnedExchange, body []byte, batch upstream.GeminiBatch, model string, names geminiInputNames) (geminiBatchObject, json.RawMessage, error) {
+func settleGeminiBatchResult(exchange *PinnedExchange, body []byte, batch upstream.GeminiBatch, model string, names geminiInputNames) (geminiBatchObject, json.RawMessage, error) {
 	object, err := prepareGeminiBatchObject(body, batch, names)
 	if err != nil {
 		return geminiBatchObject{}, nil, err
@@ -833,7 +833,7 @@ func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		}
 		names, namesErr := geminiBatchInputNames(resource)
 		if namesErr != nil {
-			response.Exchange.interrupt(classProtocol, true)
+			response.Exchange.Interrupt(ClassProtocol, true)
 			return geminiBatchProjectionError(errGeminiBatchFidelity)
 		}
 		object, metadata, metadataErr := settleGeminiBatchResult(response.Exchange, body, batch, ResourceModel(resource), names)

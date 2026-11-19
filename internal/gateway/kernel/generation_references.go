@@ -296,7 +296,7 @@ func (s *Server) generationReferenceBudget(x *Call, p *Pin, route *routing.Route
 	authority := x.authority
 	authority.Attribution = x.attribution
 	if s.Deps.Runtime == nil {
-		return unboundedWorkLimits(authority, &p.Provider, &p.Slot, route)
+		return UnboundedWorkLimits(authority, &p.Provider, &p.Slot, route)
 	}
 	return s.UnboundedPinLimits(authority, p, route)
 }

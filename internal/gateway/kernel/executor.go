@@ -34,14 +34,14 @@ import (
 const (
 	ClassSuccess        = events.ClassSuccess
 	classConnect        = string(upstream.Connect)
-	classTimeout        = string(upstream.Timeout)
+	ClassTimeout        = string(upstream.Timeout)
 	classRateLimit      = string(upstream.RateLimit)
-	classUpstreamServer = string(upstream.ServerError)
+	ClassUpstreamServer = string(upstream.ServerError)
 	classUpstreamClient = string(upstream.ClientError)
 	classCredential     = string(upstream.Credential)
-	classProtocol       = string(upstream.Protocol)
+	ClassProtocol       = string(upstream.Protocol)
 	classPolicy         = "policy"
-	classCancelled      = string(upstream.Cancelled)
+	ClassCancelled      = string(upstream.Cancelled)
 	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
 	// gateway cannot prove; it never fails over.
 	classAmbiguous         = string(upstream.Ambiguous)
@@ -150,7 +150,7 @@ func retryDispatches(route *routing.Route) int {
 	return 1 + retries
 }
 
-type attemptFailure struct {
+type AttemptFailure struct {
 	class        string
 	Status       int
 	committed    bool
@@ -181,7 +181,7 @@ type attemptFailure struct {
 // gateway is free. Exchange evidence, not the class, decides: a declared rule
 // changes how the failure is routed, never what was billed. A failure built
 // without classified evidence falls back to its class.
-func (f *attemptFailure) billingUncertain() bool {
+func (f *AttemptFailure) billingUncertain() bool {
 	if f.committed || f.accepted {
 		return true
 	}
@@ -195,7 +195,7 @@ func (f *attemptFailure) billingUncertain() bool {
 	return f.dispatched
 }
 
-func (f *attemptFailure) toError() (result *fault.Error) {
+func (f *AttemptFailure) Fault() (result *fault.Error) {
 	defer func() {
 		if result != nil && result.Status >= 500 && f.noRetry {
 			result.NoRetry = true
@@ -224,9 +224,9 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 		err := fault.ServerError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
 		err.NoRetry = f.noRetry
 		return err
-	case classCancelled:
+	case ClassCancelled:
 		return &fault.Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
-	case classTimeout:
+	case ClassTimeout:
 		return fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The upstream provider did not respond within the configured deadline.")
 	case classConnect:
 		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
@@ -242,7 +242,7 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 		return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classBudget:
 		return fault.ServerError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
-	case classUpstreamServer:
+	case ClassUpstreamServer:
 		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.Status)+".")
 	case classCredential:
 		code := "upstream_authentication_failed"
@@ -250,7 +250,7 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 			code = "upstream_permission_denied"
 		}
 		return fault.ServerError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
-	case classProtocol:
+	case ClassProtocol:
 		return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
 	case classContentFilter:
 		message := "The upstream provider's content filter refused the request."
@@ -320,7 +320,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *Call, source *wire.Req
 	if e != nil {
 		return &Outcome{Err: e}
 	}
-	if e := s.reserveFallbackCost(stepCtx, x); e != nil {
+	if e := s.ReserveFallbackCost(stepCtx, x); e != nil {
 		quota.SettleKey(ctx, lease, false, nil, s.log)
 		return &Outcome{Err: e}
 	}
@@ -341,7 +341,7 @@ func (s *Server) execute(ctx context.Context, x *Call) *Outcome {
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*wire.Completion]{
 		estimate: x.attemptReservation,
-		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
+		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *AttemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, fact)
 		},
 	})
@@ -391,7 +391,7 @@ func (s *Server) slotAvailable(x *Call, attempt routing.Attempt, slot *routing.S
 }
 
 // attempt performs one upstream call with one credential.
-func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
+func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *AttemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -416,9 +416,9 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 		atr.RecordResponse(fact.ResponseModel, fact.FinishReasons)
 		atr.Finish(fact.Class, fact.Status)
 	}
-	fail := func(class string, f *attemptFailure) (events.AttemptFact, *wire.Completion, *attemptFailure) {
+	fail := func(class string, f *AttemptFailure) (events.AttemptFact, *wire.Completion, *AttemptFailure) {
 		if f == nil {
-			f = &attemptFailure{}
+			f = &AttemptFailure{}
 		}
 		if parallel != nil {
 			if guardErr := parallel.join(x, true); guardErr != nil {
@@ -467,7 +467,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	}
 	prepared, err := x.generationRequest(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	x.guard.input = prepared.guardrailSegments
 	for _, decision := range prepared.policyDecisions {
@@ -479,13 +479,13 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	responseReader := providerinvoke.NewResponseReader(cfg, encodedWire, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
 	responseRequest, err := wire.NewRequest(encodedWire, x.generation.parsed.Route, responseReader.Streaming(), prepared.document)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	responseCodec := protocols.PrepareResponse(responseRequest, x.generation.parsed, x.named().Slug, protocols.EmbeddingEncoding(x.generation.parsed, provider.ParameterDefaults))
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(ClassTimeout, &AttemptFailure{overall: true})
 	}
 	timeout := min(a.Timeout, remaining)
 
@@ -496,7 +496,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 
 	endpoint, err := cfg.URL(encodedWire, a.UpstreamModel, responseReader.Streaming())
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	exchange := s.bindExchange(x, provider, slot, a.UpstreamModel, cfg, st)
 	req, err := exchange.request(actx, http.MethodPost, endpoint, bytes.NewReader(body), make(http.Header))
@@ -530,7 +530,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	}
 	if contract != nil && contract.ToolContinuation() {
 		if err := s.claimToolWork(actx, x, contract, a, slot); err != nil {
-			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true})
+			return fail(ClassProtocol, &AttemptFailure{contractCode: "continuation_unavailable", noRetry: true})
 		}
 	}
 	parallel = s.startParallel(actx, x, cancel)
@@ -539,7 +539,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	}
 	if x.workflow != nil {
 		if e := s.markSessionDispatched(actx, x); e != nil {
-			return fail(classConnect, &attemptFailure{contractCode: e.Code, noRetry: true})
+			return fail(classConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
 		}
 	}
 	resp, err := exchange.do(client, req)
@@ -554,7 +554,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 		status, raw := cfg.Rejection(resp.StatusCode, raw)
-		f := &attemptFailure{Status: status, upstream: x.redacted(openai.ParseErrorBody(raw))}
+		f := &AttemptFailure{Status: status, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := st.rejected(status, f.upstream)
 		if class == classRateLimit {
 			f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
@@ -568,7 +568,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	actionable := false
 	if x.generation.parsed.Stream {
 		if err := responseReader.ValidateStream(resp.Header); err != nil {
-			return fail(classProtocol, &attemptFailure{Status: resp.StatusCode})
+			return fail(ClassProtocol, &AttemptFailure{Status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
 		defer streamCap.Stop()
@@ -638,7 +638,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 		if x.guard.engine.HasPhase(guardrails.OutputStream) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 			guarded, err = x.guardrailStream()
 			if err != nil {
-				return fail(classPolicy, &attemptFailure{policyCode: guardrailError(err).Code, overall: true, noRetry: true})
+				return fail(classPolicy, &AttemptFailure{policyCode: guardrailError(err).Code, overall: true, noRetry: true})
 			}
 			emit = func(frame []byte) error {
 				frames, e := guarded.Push(actx, frame)
@@ -828,7 +828,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 		}
 	}
 	if err != nil {
-		f := &attemptFailure{Status: resp.StatusCode, committed: committed}
+		f := &AttemptFailure{Status: resp.StatusCode, committed: committed}
 		if errors.Is(err, fault.ErrClientWrite) {
 			if terminal, nativeFailure := completion.NativeResponseOutcome(); terminal {
 				// The native result arrived before its client write failed.
@@ -875,12 +875,12 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 			return fail(classPolicy, f)
 		case errors.As(err, &violation):
 			f.contractCode = "fidelity_protocol_violation"
-			return fail(classProtocol, f)
+			return fail(ClassProtocol, f)
 		case errors.Is(err, errResponseTooLarge):
-			return fail(classProtocol, f)
+			return fail(ClassProtocol, f)
 		case errors.Is(err, wire.ErrAggregateTooLarge):
 			f.aggregateTooLarge = true
-			return fail(classProtocol, f)
+			return fail(ClassProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = x.redacted(ue)
 			class := st.classify(err, committed)

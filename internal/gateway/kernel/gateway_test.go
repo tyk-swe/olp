@@ -850,8 +850,8 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		name, class, outcome, errorClass string
 		overallTimeout                   int64
 	}{
-		{"client cancelled", classCancelled, "cancelled", "client_cancelled", 5000},
-		{"overall timeout", classTimeout, "failure", "gateway_timeout", 300},
+		{"client cancelled", ClassCancelled, "cancelled", "client_cancelled", 5000},
+		{"overall timeout", ClassTimeout, "failure", "gateway_timeout", 300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, Config{})
@@ -884,7 +884,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			if _, err := eventstream.NewDecoder().Decode(resp.Body, nil); err != nil || resp.StatusCode != http.StatusOK {
 				t.Fatalf("stream did not start: status=%d err=%v", resp.StatusCode, err)
 			}
-			if tc.class == classCancelled {
+			if tc.class == ClassCancelled {
 				cancel()
 			} else {
 				_, _ = io.ReadAll(resp.Body)
@@ -1256,9 +1256,9 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				writer = &deadlineFailWriter{ResponseRecorder: recorder, ctx: ctx}
 			}
 			failure := h.gateway.streamStoredResponse(ctx, writer, x, &resources.Resource{ID: uuid.NewString(), Kind: resources.KindResponse, UpstreamID: "response-local-fixture", RouteSlug: routeSlug}, p, nil)
-			code, status, class := "response_stream_incomplete", http.StatusBadGateway, classProtocol
+			code, status, class := "response_stream_incomplete", http.StatusBadGateway, ClassProtocol
 			if tc.timeout {
-				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, classTimeout
+				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, ClassTimeout
 			}
 			if tc.frame {
 				if failure != nil || recorder.Code != http.StatusOK {
@@ -1267,7 +1267,7 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				outcome := "failure"
 				envelopeStatus := http.StatusOK
 				if tc.writeFailure {
-					code, class, outcome, envelopeStatus = "client_cancelled", classCancelled, "cancelled", 0
+					code, class, outcome, envelopeStatus = "client_cancelled", ClassCancelled, "cancelled", 0
 				}
 				h.sink.mu.Lock()
 				defer h.sink.mu.Unlock()
@@ -1298,7 +1298,7 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 		name, object, class string
 	}{
 		{"valid terminal result", `"response"`, ClassSuccess},
-		{"invalid terminal result", `7`, classProtocol},
+		{"invalid terminal result", `7`, ClassProtocol},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
@@ -1363,7 +1363,7 @@ func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
 			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
 			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/batches/native", nil, "")
 			if failure != nil {
-				t.Fatal(failure.toError())
+				t.Fatal(failure.Fault())
 			}
 			defer response.Body.Close()
 			body, err := response.ReadBody(h.gateway.Config.MaxResponseBytes)
@@ -1428,7 +1428,7 @@ type failedFlushWriter struct{ *httptest.ResponseRecorder }
 
 func (w failedFlushWriter) FlushError() error { return io.ErrClosedPipe }
 
-func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
+func TestPinnedAcknowledgementRequiresFlush(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, Config{})
 	h.mock.set("a", status(http.StatusNoContent, ""))
@@ -1438,12 +1438,12 @@ func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
 	x.Route = &route
 	response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodDelete, p.Provider.Endpoint+"/interactions/native", nil, "")
 	if failure != nil {
-		t.Fatal(failure.toError())
+		t.Fatal(failure.Fault())
 	}
 	w := failedFlushWriter{httptest.NewRecorder()}
-	if failure := h.gateway.finishGeminiInteractionDeletion(t.Context(), w, x, response, func(context.Context) error { return nil }); failure != nil {
-		t.Fatal(failure)
-	}
+	defer response.Body.Close()
+	response.Exchange.Complete(ClassSuccess)
+	h.gateway.WriteStateJSONStatus(w, x, nil, http.StatusOK, response.Exchange)
 	env := h.sink.last(t)
 	if w.Code != http.StatusOK || env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || len(env.Attempts) != 1 ||
 		env.Attempts[0].Class != ClassSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
@@ -1462,10 +1462,10 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 		family            retainedapi.Family
 	}{
 		{"accepted deletion", `{"id":"resource-native","deleted":true}`, ClassSuccess, true, "0.25", store},
-		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, classProtocol, false, "0", store},
-		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, classProtocol, false, "0", store},
+		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, ClassProtocol, false, "0", store},
+		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, ClassProtocol, false, "0", store},
 		{"conversation item returns parent identity", `{"id":"conversation-native"}`, ClassSuccess, true, "0.25", item},
-		{"conversation item returns child identity", `{"id":"resource-native"}`, classProtocol, false, "0", item},
+		{"conversation item returns child identity", `{"id":"resource-native"}`, ClassProtocol, false, "0", item},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
@@ -1604,7 +1604,7 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
 		t.Fatalf("binding store failure was not reported as unavailable: %d, %s", status, w.Body.String())
 	}
-	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != ClassProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
 		t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
 	}
 	if probed, granted := h.gateway.health.Claim(p.Provider.ID); !probed || !granted {
@@ -1642,7 +1642,7 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 		t.Fatalf("attempts = %+v", env.Attempts)
 	}
 	attempt := env.Attempts[0]
-	if attempt.Class != classProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
+	if attempt.Class != ClassProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
 		attempt.Usage == nil || attempt.Usage.InputTokens != 10 || attempt.Usage.OutputTokens != 5 || attempt.Usage.TotalTokens != 15 {
 		t.Fatalf("compaction accounting after binding failure = %+v, usage = %+v", attempt, attempt.Usage)
 	}
@@ -1708,7 +1708,7 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 			h.gateway.Refuse(x, w, failure)
 			h.gateway.settlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
-			if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].LocalRefusal != tc.local {
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != ClassProtocol || env.Attempts[0].LocalRefusal != tc.local {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
 			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed != tc.local || granted != tc.local {
@@ -1735,7 +1735,7 @@ func openTestProbe(t *testing.T, h *harness, provider string) (bool, bool) {
 			now = now.Add(health.CircuitOpenFor + time.Millisecond)
 			return h.gateway.health.Claim(provider)
 		}
-		h.gateway.health.Record(provider, events.AttemptFact{Class: classProtocol}, false)
+		h.gateway.health.Record(provider, events.AttemptFact{Class: ClassProtocol}, false)
 	}
 	t.Fatal("circuit stayed closed after consecutive provider failures")
 	return false, false
@@ -1937,7 +1937,7 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 	authorize := func(row *resources.Resource) *fault.Error {
 		switch {
 		case strings.HasPrefix(row.ID, "stale"):
-			return pinUnavailable()
+			return PinUnavailable()
 		case strings.HasPrefix(row.ID, "hidden"):
 			return fault.NotFoundError("not_found", "No resource with this identifier exists for this key.")
 		case row.ID == "broken-1":

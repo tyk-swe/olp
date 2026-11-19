@@ -349,7 +349,7 @@ type mediaOutcome struct {
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Call) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*transport.Result]{
 		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
-		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *attemptFailure) {
+		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
@@ -365,7 +365,7 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Cal
 	return out
 }
 
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *attemptFailure) {
+func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -376,9 +376,9 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 		}
 		atr.Finish(fact.Class, fact.Status)
 	}
-	fail := func(class string, f *attemptFailure) (events.AttemptFact, *transport.Result, *attemptFailure) {
+	fail := func(class string, f *AttemptFailure) (events.AttemptFact, *transport.Result, *AttemptFailure) {
 		if f == nil {
-			f = &attemptFailure{}
+			f = &AttemptFailure{}
 		}
 		f.class = class
 		fact.Class = class
@@ -402,14 +402,14 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 	}
 	encoded, err := x.encodeMedia(x.request.release.Snapshot(), *provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(ClassProtocol, nil)
 	}
 	call, effective, strictTemplate, bound := encoded.call, encoded.effective, encoded.template, encoded.bound
 	cfg := provider.Connector()
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(ClassTimeout, &AttemptFailure{overall: true})
 	}
 	timeout := min(a.Timeout, remaining)
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
@@ -429,7 +429,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 	result, failure := s.Deps.Media.Transport.Do(actx, target, call, transport.Options{Strict: strictTemplate != nil, Headers: headers})
 	if failure != nil {
 		fact.Status = failure.Status
-		return fail(mediaClass(failure), &attemptFailure{
+		return fail(mediaClass(failure), &AttemptFailure{
 			Status:     failure.Status,
 			retryAfter: failure.RetryAfter,
 			upstream:   failure.Upstream,
@@ -439,7 +439,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 	fact.Status = result.Status
 	if artifact := mediaArtifact(result.Payload); strictTemplate != nil && artifact != nil {
 		if _, err := artifact.BlobReference(); err != nil {
-			return fail(classProtocol, &attemptFailure{dispatched: true})
+			return fail(ClassProtocol, &AttemptFailure{dispatched: true})
 		}
 	}
 	if strictTemplate != nil && result.Source.Valid() {
@@ -447,11 +447,11 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 			if images, ok := result.Payload.(transport.Images); ok {
 				s.removeImages(images.ImageResult)
 			}
-			class := classProtocol
+			class := ClassProtocol
 			if call.Ambiguous {
 				class = classAmbiguous
 			}
-			return fail(class, &attemptFailure{dispatched: true})
+			return fail(class, &AttemptFailure{dispatched: true})
 		}
 	}
 	fb := result.FirstByte
@@ -462,10 +462,10 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 		fact.Interaction.UpstreamState = upstream.Terminal
 	}
 	if events, ok := result.Payload.(transport.Events); ok {
-		var streamFailure *attemptFailure
+		var streamFailure *AttemptFailure
 		fact.Usage, fact.Committed, streamFailure = s.streamMediaEvents(actx, w, x, events.Body, strictTemplate, bound)
 		if streamFailure != nil {
-			if call.Ambiguous && !streamFailure.committed && streamFailure.class == classTimeout {
+			if call.Ambiguous && !streamFailure.committed && streamFailure.class == ClassTimeout {
 				streamFailure.class = classAmbiguous
 			}
 			return fail(streamFailure.class, streamFailure)
