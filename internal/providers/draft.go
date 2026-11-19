@@ -48,39 +48,22 @@ func (s *Server) createProvider(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = authorizeCredential(p, credential); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created provider, so the caller must
-		// still reach its project to receive it.
-		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(a, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		if err := authorizeCredential(p, credential); err != nil {
+			return struct{}{}, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	created, err := s.createDraft(r.Context(), tx, p, input, credential)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := created.ID, created.ETag
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": stateDraft, "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		// The stored reply carries the created provider, so the caller must
+		// reach its project before a replay is served.
+		return struct{}{}, a.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		created, err := s.createDraft(r.Context(), tx, p, input, credential)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag := created.ID, created.ETag
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": stateDraft, "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
+		return result, access.Event{Action: "provider.create", Resource: "provider", ID: id}, nil
+	})
 }
 
 // invalidateEvidence downgrades every certified capability after a transport

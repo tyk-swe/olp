@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -39,46 +40,39 @@ func (m *Management) retireCodeBinding(r *http.Request, _ authz.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := m.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var project, root string
-	var provider *string
-	err = tx.QueryRow(r.Context(), `SELECT x.project_id,x.root_id,x.paid_provider_id FROM `+codeBindingRows+` x WHERE x.id=$1`, id).Scan(&project, &root, &provider)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(&project, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := m.access.Replay(r, tx, p, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	table := func() string {
-		if provider != nil {
-			return "olp.code_paid_bindings"
+	return access.Mutate(m.access, r, id, func(tx pgx.Tx, p authz.Principal) (codeBinding, error) {
+		var project, root string
+		var provider *string
+		err = tx.QueryRow(r.Context(), `SELECT x.project_id,x.root_id,x.paid_provider_id FROM `+codeBindingRows+` x WHERE x.id=$1`, id).Scan(&project, &root, &provider)
+		if err != nil {
+			return codeBinding{}, err
 		}
-		return "olp.code_bindings"
-	}()
-	if _, err = tx.Exec(r.Context(), `UPDATE `+table+` SET retired_at=now() WHERE id=$1 AND retired_at IS NULL`, root); err != nil {
-		return httpkit.Reply{}, err
+		if err = p.Project(&project, authz.Change); err != nil {
+			return codeBinding{}, err
+		}
+		return codeBinding{root: root, paid: provider != nil}, nil
+	}, func(tx pgx.Tx, p authz.Principal, binding codeBinding) (httpkit.Reply, access.Event, error) {
+		root := binding.root
+		if _, err = tx.Exec(r.Context(), `UPDATE `+binding.table()+` SET retired_at=now() WHERE id=$1 AND retired_at IS NULL`, root); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var body json.RawMessage
+		if err = tx.QueryRow(r.Context(), `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x WHERE x.id=$1`, root).Scan(&body); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		out := httpkit.OK(body)
+		return out, access.Event{Action: "code_binding.retire", Resource: "code_binding", ID: root}, nil
+	})
+}
+
+type codeBinding struct {
+	root string
+	paid bool
+}
+
+func (b codeBinding) table() string {
+	if b.paid {
+		return "olp.code_paid_bindings"
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_binding.retire", "code_binding", root, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var body json.RawMessage
-	if err = tx.QueryRow(r.Context(), `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x WHERE x.id=$1`, root).Scan(&body); err != nil {
-		return httpkit.Reply{}, err
-	}
-	out := httpkit.OK(body)
-	if err = m.access.CompleteReplay(r, tx, claim, out); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return out, tx.Commit(r.Context())
+	return "olp.code_bindings"
 }

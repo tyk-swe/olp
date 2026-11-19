@@ -515,42 +515,22 @@ func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created draft, so the caller must
-		// still reach its project to receive it.
-		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(a, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		// The stored reply carries what was created, so the caller must reach
+		// its project before a replay is served.
+		return struct{}{}, a.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.create", "route_draft", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
+		return result, access.Event{Action: "route_draft.create", Resource: "route_draft", ID: id}, nil
+	})
 }
 
 func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

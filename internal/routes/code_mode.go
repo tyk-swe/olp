@@ -92,51 +92,38 @@ func (s *Server) publishCodeRoute(r *http.Request, _ authz.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var document []byte
-	var project, etag string
-	if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(&project, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var route codemode.Route
-	if err = json.Unmarshal(document, &route); err != nil {
-		return httpkit.Reply{}, err
-	}
-	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	route = published.Route
-	adapters := published.Adapters
-	if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
+	return access.Mutate(s.Access, r, id, func(tx pgx.Tx, p authz.Principal) (codeDraft, error) {
+		var document []byte
+		var project, etag string
+		if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
+			return codeDraft{}, err
+		}
+		if err = p.Project(&project, authz.Change); err != nil {
+			return codeDraft{}, err
+		}
+		return codeDraft{document: document, etag: etag}, nil
+	}, func(tx pgx.Tx, p authz.Principal, draft codeDraft) (httpkit.Reply, access.Event, error) {
+		document, etag := draft.document, draft.etag
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var route codemode.Route
+		if err = json.Unmarshal(document, &route); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		route = published.Route
+		adapters := published.Adapters
+		if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
 
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_route.publish", "code_route", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	out := httpkit.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
-	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return out, tx.Commit(r.Context())
+		out := httpkit.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
+		return out, access.Event{Action: "code_route.publish", Resource: "code_route", ID: id}, nil
+	})
 }
 
 func (s *Server) codeRevisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -510,4 +497,9 @@ func validatedCodeRouteTargets(input map[string]codemode.PaidTarget) (map[string
 	}()
 
 	return paidTargets, nil
+}
+
+type codeDraft struct {
+	document []byte
+	etag     string
 }

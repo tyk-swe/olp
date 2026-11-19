@@ -566,44 +566,29 @@ func (s *Server) createTemplate(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = ValidateTemplateInput(&input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if err = WriteTemplate(r.Context(), tx, id, etag, p.UserID(), &input, false); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_template.create", "route_template", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	created, err := loadTemplate(r.Context(), tx, id, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result, err := s.templateDetail(r.Context(), tx, created)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result.Status, result.Location = 201, "/api/v1/route-templates/"+id
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(a, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		// The stored reply carries what was created, so the caller must reach
+		// its project before a replay is served.
+		return struct{}{}, a.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := ValidateTemplateInput(&input); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if err := WriteTemplate(r.Context(), tx, id, etag, p.UserID(), &input, false); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		created, err := loadTemplate(r.Context(), tx, id, false)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result, err := s.templateDetail(r.Context(), tx, created)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result.Status, result.Location = 201, "/api/v1/route-templates/"+id
+		return result, access.Event{Action: "route_template.create", Resource: "route_template", ID: id}, nil
+	})
 }
 
 // WriteTemplate inserts or replaces a validated template; a duplicate name is
@@ -704,43 +689,29 @@ func (s *Server) applyTemplate(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	t, err := loadTemplate(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(t.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	results, promoted, err := s.instantiate(r.Context(), tx, []*template{t}, "", p.UserID())
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var generation *release.Published
-	if promoted {
-		published, err := release.Publish(r.Context(), tx, p.UserID())
+	return access.Mutate(a, r, nil, func(tx pgx.Tx, p authz.Principal) (*template, error) {
+		t, err := loadTemplate(r.Context(), tx, id, true)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return nil, err
 		}
-		generation = &published
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_template.apply", "route_template", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 200, Body: map[string]any{"results": results, "runtime_generation": generation}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		if err := p.Project(t.ProjectID, authz.Change); err != nil {
+			return nil, err
+		}
+		return t, nil
+	}, func(tx pgx.Tx, p authz.Principal, t *template) (httpkit.Reply, access.Event, error) {
+		results, promoted, err := s.instantiate(r.Context(), tx, []*template{t}, "", p.UserID())
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var generation *release.Published
+		if promoted {
+			published, err := release.Publish(r.Context(), tx, p.UserID())
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			generation = &published
+		}
+		result := httpkit.Reply{Status: 200, Body: map[string]any{"results": results, "runtime_generation": generation}}
+		return result, access.Event{Action: "route_template.apply", Resource: "route_template", ID: id}, nil
+	})
 }
