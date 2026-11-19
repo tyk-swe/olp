@@ -119,6 +119,10 @@ Before adding complexity for a speculative or vanishingly unlikely race or secur
 This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it
 
 
+## Architecture rules
+
+A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler, and never add a file to the `hand_rolled` list in `scripts/check-lint.sh`. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
+
 ## Agent skills
 
 Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update lockfile skills with `npx skills@latest update`. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness
