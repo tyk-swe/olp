@@ -46,10 +46,6 @@ func (s *Server) registerGeminiLifecycle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /gemini/ws/"+live, s.geminiLive)
 	mux.HandleFunc("GET /ws/"+live, s.geminiLive)
 	mux.HandleFunc("OPTIONS /gemini/ws/", s.preflight)
-	mux.HandleFunc("POST /gemini/v1beta/interactions", s.geminiInteractionCreate)
-	mux.HandleFunc("GET /gemini/v1beta/interactions/{id}", s.geminiInteractionResource)
-	mux.HandleFunc("DELETE /gemini/v1beta/interactions/{id}", s.geminiInteractionResource)
-	mux.HandleFunc("POST /gemini/v1beta/interactions/{id}/cancel", s.geminiInteractionResource)
 }
 
 // geminiClientKey validates all SDK-supported key locations before the shared

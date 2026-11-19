@@ -1428,7 +1428,7 @@ type failedFlushWriter struct{ *httptest.ResponseRecorder }
 
 func (w failedFlushWriter) FlushError() error { return io.ErrClosedPipe }
 
-func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
+func TestPinnedAcknowledgementRequiresFlush(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, Config{})
 	h.mock.set("a", status(http.StatusNoContent, ""))
@@ -1441,9 +1441,9 @@ func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
 		t.Fatal(failure.Fault())
 	}
 	w := failedFlushWriter{httptest.NewRecorder()}
-	if failure := h.gateway.finishGeminiInteractionDeletion(t.Context(), w, x, response, func(context.Context) error { return nil }); failure != nil {
-		t.Fatal(failure)
-	}
+	defer response.Body.Close()
+	response.Exchange.Complete(ClassSuccess)
+	h.gateway.WriteStateJSONStatus(w, x, nil, http.StatusOK, response.Exchange)
 	env := h.sink.last(t)
 	if w.Code != http.StatusOK || env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || len(env.Attempts) != 1 ||
 		env.Attempts[0].Class != ClassSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
