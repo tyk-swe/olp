@@ -94,20 +94,11 @@ type call struct {
 	parent   string
 	priority string
 
-	guardrailEngine           *guardrails.Engine
-	guardrailCtx              context.Context
-	guardrailMasks            *guardrails.Masking
-	guardrailInput            []guardrails.Segment
-	workflowRecovery          []guardrails.Segment
-	workflowRecoveryCalls     []string
-	guardrailMu               sync.Mutex
-	guardrailDecisions        []guardrails.Evidence
-	guardrailAttemptActive    bool
-	guardrailAttemptDecisions []guardrails.Evidence
-	guardrailModels           map[[32]byte]guardrails.Verdict
-	internalGuardrail         bool
-	operationOverride         string
-	policyDecisions           []contentpolicy.Decision
+	guard                 guardrailCall
+	workflowRecovery      []guardrails.Segment
+	workflowRecoveryCalls []string
+	operationOverride     string
+	policyDecisions       []contentpolicy.Decision
 
 	captureContext context.Context
 	capture        *capture.Collector
@@ -120,20 +111,19 @@ type call struct {
 	pinnedSlot    *routing.Slot
 	providerState bool
 
-	once              sync.Once
-	facts             []events.AttemptFact
-	pinned            []*pinnedExchange
-	failure           *fault.Error     // terminal error decided before the attempt loop ran
-	firstByte         *time.Duration   // request start to the first payload byte the client received
-	lease             *admission.Lease // the API key reservation, settled once the request ends
-	dispatched        bool             // at least one attempt was handed to a provider
-	stepDispatched    bool
-	guardrailMetadata bool
-	responseMetadata  bool
-	attemptCount      int
-	attemptVendor     string
-	grantGeneration   int64
-	sensitive         egress.Sensitive
+	once             sync.Once
+	facts            []events.AttemptFact
+	pinned           []*pinnedExchange
+	failure          *fault.Error     // terminal error decided before the attempt loop ran
+	firstByte        *time.Duration   // request start to the first payload byte the client received
+	lease            *admission.Lease // the API key reservation, settled once the request ends
+	dispatched       bool             // at least one attempt was handed to a provider
+	stepDispatched   bool
+	responseMetadata bool
+	attemptCount     int
+	attemptVendor    string
+	grantGeneration  int64
+	sensitive        egress.Sensitive
 	routeLeg
 
 	generation generationCall

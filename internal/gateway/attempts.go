@@ -45,8 +45,8 @@ type attemptOutcome[Result any] struct {
 // the loop continues on the fallback route within the same deadline and
 // attempt budget.
 func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
-	if x.guardrailEngine != nil {
-		x.guardrailCtx = ctx
+	if x.guard.engine != nil {
+		x.guard.ctx = ctx
 	}
 	var generation string
 	if x.request.release != nil && x.request.release.Snapshot() != nil {
@@ -142,13 +142,13 @@ route:
 				fact := s.newFact(x, attempt, slot, x.spent)
 				// Streams can persist accounting before dispatch returns.
 				fact.Retry, fact.Budgets = retry, gate.hold.budgets
-				if x.guardrailEngine != nil {
-					x.startGuardrailAttempt(fact.GuardrailDecisions)
+				if x.guard.engine != nil {
+					x.guard.ledger.startAttempt(fact.GuardrailDecisions)
 				}
 				dispatchCtx, finishLease := gate.hold.dispatchContext(ctx, s, x)
 				fact, result, failure, authorityErr := dispatchWithLease(dispatchCtx, gate.hold, adapter, s, x, attempt, &provider, slot, fact)
-				if x.guardrailEngine != nil {
-					fact.GuardrailDecisions = x.finishGuardrailAttempt()
+				if x.guard.engine != nil {
+					fact.GuardrailDecisions = x.guard.ledger.finishAttempt()
 				}
 				if completionErr, cancelled := gate.hold.complete(ctx, s, x, attemptCompletion{fact: fact, failure: failure, authority: authorityErr, attempt: attempt, estimate: estimate, finishLease: finishLease}); completionErr != nil {
 					return attemptOutcome[Result]{err: completionErr, cancelled: cancelled}, nil

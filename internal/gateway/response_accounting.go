@@ -35,8 +35,8 @@ func (s *Server) pendingResponseUsage(x *call, fact *events.AttemptFact, metadat
 
 func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
 	copyFact := *fact
-	if x.guardrailAttemptActive {
-		copyFact.GuardrailDecisions = x.attemptGuardrailEvidence()
+	if decisions, active := x.guard.ledger.duringAttempt(); active {
+		copyFact.GuardrailDecisions = decisions
 	}
 	copyFact.GenerationUsageDeferred = false
 	copyFact.RecordEvidence(true)
@@ -65,7 +65,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metad
 	ev, err := events.UsageEvent(events.Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
-		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
 		Operation: x.family.Operation(), Surface: x.family.Surface(),
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt:           x.request.startedAt, CompletedAt: now,

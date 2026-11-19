@@ -165,21 +165,21 @@ func (x *call) buildUnary(targetID string) (unaryAdmission, error) {
 }
 
 func (x *call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
-	if !x.guardrailEngine.HasPhase(guardrails.Input) && !x.guardrailEngine.HasPhase(guardrails.InputParallel) {
+	if !x.guard.engine.HasPhase(guardrails.Input) && !x.guard.engine.HasPhase(guardrails.InputParallel) {
 		return nil, nil
 	}
 	texts, err := plan.GuardrailInput()
 	if err == nil {
 		evidence, failure := x.inspectOperationInput(texts)
-		x.recordGuardrails(evidence)
+		x.guard.record(evidence)
 		return evidence, failure
 	}
-	result, unavailable := x.guardrailEngine.Unavailable(guardrails.Input)
-	x.recordGuardrails(result.Decisions)
-	parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
-	x.recordGuardrails(parallel.Decisions)
+	result, unavailable := x.guard.engine.Unavailable(guardrails.Input)
+	x.guard.record(result.Decisions)
+	parallel, parallelErr := x.guard.engine.Unavailable(guardrails.InputParallel)
+	x.guard.record(parallel.Decisions)
 	evidence := guardrails.MergeEvidence(result.Decisions, parallel.Decisions)
-	if x.guardrailEngine.HasLegacyInput() {
+	if x.guard.engine.HasLegacyInput() {
 		return evidence, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
 	}
 	if unavailable != nil {
