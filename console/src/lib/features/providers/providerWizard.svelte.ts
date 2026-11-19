@@ -1,4 +1,4 @@
-import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+import { overviewKeys } from '#lib/features/overview/index.js';
 import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import { refreshProviderReceipt } from './providerChanges';

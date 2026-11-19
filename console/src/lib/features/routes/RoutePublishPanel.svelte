@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { playgroundTemplates } from '#lib/features/inference/playground/templates.js';
+  import { playgroundTemplates } from '#lib/features/inference/index.js';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
   import { modesFor } from '#lib/features/routes/routeEditor.js';

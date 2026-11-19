@@ -153,7 +153,7 @@ export default [
   ...featureNames.flatMap((feature) =>
     importBoundary(
       [`src/lib/features/${feature}/**/*.{ts,svelte}`],
-      legacy.crossFeatureDeepImport,
+      [],
       featureEntryOnly(feature)
     )
   ),

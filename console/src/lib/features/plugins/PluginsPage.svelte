@@ -25,7 +25,7 @@
     uninstallPlugin,
     type Plugin
   } from '#lib/features/plugins/api.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/features/providers/index.js';
 
   const access = useRole();
   const canManage = $derived(access.can('plugins.manage'));

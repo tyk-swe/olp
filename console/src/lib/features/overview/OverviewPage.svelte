@@ -1,6 +1,6 @@
 <script lang="ts">
   import Overview from '#lib/features/overview/Overview.svelte';
-  import ControlOverview from '#lib/features/access/ControlOverview.svelte';
+  import { ControlOverview } from '#lib/features/access/index.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   const services = useServiceCapabilities();

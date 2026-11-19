@@ -3,7 +3,7 @@
   import ProviderBulkActions from './ProviderBulkActions.svelte';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';

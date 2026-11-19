@@ -13,13 +13,17 @@
   import { formatDate } from '#lib/format.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { listOrganizations } from '#lib/features/access/organizations/api.js';
-  import { listProjects } from '#lib/features/access/projects/api.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { organizationKeys } from '#lib/features/access/organizations/organizationKeys.js';
+  import {
+    listOrganizations,
+    listProjects,
+    projectKeys,
+    organizationKeys
+  } from '#lib/features/access/index.js';
+  import {
+    listProviderKinds,
+    listProviderVendors,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     createRateCard,
     createRateCardRevision,

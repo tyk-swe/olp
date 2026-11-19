@@ -1,8 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listApiKeys } from '#lib/features/access/api-keys/api.js';
-  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     saveCodeBudget,

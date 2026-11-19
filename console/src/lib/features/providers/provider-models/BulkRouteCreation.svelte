@@ -7,12 +7,12 @@
   import {
     createRouteDraft,
     activateRoute,
-    type RouteDraftValidation
-  } from '#lib/features/routes/api.js';
-  import {
-    fidelityOptions,
-    type FidelityMode
-  } from '#lib/features/routes/routeFidelity.js';
+    fidelityOptions
+  } from '#lib/features/routes/index.js';
+  import type {
+    RouteDraftValidation,
+    FidelityMode
+  } from '#lib/features/routes/index.js';
   import type { ProviderModelInventory } from '../models';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 

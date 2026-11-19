@@ -16,9 +16,11 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import {
+    listProviderKinds,
+    listProviderVendors,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     createDiscount,
     listDiscounts,

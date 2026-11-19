@@ -17,7 +17,7 @@
   } from '#lib/features/runtime/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { listRuntimeGenerations } from '#lib/features/runtime/api.js';
-  import { usageCompleteness } from '#lib/features/usage/usage.js';
+  import { usageCompleteness } from '#lib/features/usage/index.js';
   import { formatDate, formatTime } from '#lib/format.js';
   import GatewayEpochsPanel from '#lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '#lib/features/runtime/health/ProviderHealthPanel.svelte';

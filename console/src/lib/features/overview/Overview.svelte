@@ -1,6 +1,6 @@
 <script lang="ts">
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
-  import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
+  import { requestKeys, listRequests } from '#lib/features/usage/index.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
@@ -12,7 +12,6 @@
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { copyText } from '#lib/clipboard.js';
   import { getOverview } from '#lib/features/overview/api.js';
-  import { listRequests } from '#lib/features/usage/history/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 

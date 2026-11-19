@@ -9,8 +9,7 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjects } from '#lib/features/agents/api.js';
-  import { agentKeys } from '#lib/features/agents/agentKeys.js';
+  import { listProjects, agentKeys } from '#lib/features/agents/index.js';
   import {
     listTemplates,
     getTemplate,

@@ -12,7 +12,7 @@
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';

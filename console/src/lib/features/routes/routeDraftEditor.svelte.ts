@@ -1,6 +1,9 @@
 import { confirmAction } from '#lib/components/confirm.js';
-import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
-import { providerKeys } from '#lib/features/providers/providerKeys.js';
+import { overviewKeys } from '#lib/features/overview/index.js';
+import {
+  providerKeys,
+  listProviderModelInventory
+} from '#lib/features/providers/index.js';
 import { routeKeys } from '#lib/features/routes/routeKeys.js';
 import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
@@ -34,9 +37,7 @@ import {
   type RouteDraft,
   type RouteSimulation
 } from '#lib/features/routes/api.js';
-import { listProviderModelInventory } from '#lib/features/providers/models.js';
-import { listPublications } from '#lib/features/agents/api.js';
-import { agentKeys } from '#lib/features/agents/agentKeys.js';
+import { listPublications, agentKeys } from '#lib/features/agents/index.js';
 import {
   discoveredOperations,
   discoveredSurfaces,

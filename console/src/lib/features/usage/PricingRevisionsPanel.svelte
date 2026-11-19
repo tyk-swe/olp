@@ -25,12 +25,12 @@
   import { dateTimeLocalValue, formatDate } from '#lib/format.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
   import {
+    listProviderKinds,
     listProviderVendors,
-    type ProviderKind
-  } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+    providerKeys
+  } from '#lib/features/providers/index.js';
+  import type { ProviderKind } from '#lib/features/providers/index.js';
   import { operationKinds } from './history/api';
   import {
     createPricingRevision,
