@@ -289,3 +289,52 @@ func TestCachePurgeRequiresOneScopeAndAgreesWithStatistics(t *testing.T) {
 		t.Fatalf("purge with configured=%v: %s", configured, describe(status, raw))
 	}
 }
+
+func TestSettingAndBrandingWritesValidateGuardStaleAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+
+	const key = "retention.audit_days"
+	setting := s.Want(owner, "GET", "/api/v1/settings/"+key, nil, nil, http.StatusOK)
+	write := func(value string, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, "PUT", "/api/v1/settings/"+key, map[string]any{"value": value}, headers); status != want {
+			t.Fatalf("setting %q: %s", value, describe(status, raw))
+		}
+	}
+	write("0", harness.ETag(setting), http.StatusUnprocessableEntity)
+	write("30", stale, http.StatusPreconditionFailed)
+	write("30", harness.ETag(setting), http.StatusOK)
+	write("31", harness.ETag(setting), http.StatusPreconditionFailed)
+	if stored := s.Want(owner, "GET", "/api/v1/settings/"+key, nil, nil, http.StatusOK); stored["value"] != "30" {
+		t.Fatalf("setting = %v", stored["value"])
+	}
+	if status, raw := s.Do(owner, "PUT", "/api/v1/settings/unknown", map[string]any{"value": "1"}, harness.ETag(setting)); status != http.StatusNotFound {
+		t.Fatalf("unknown setting: %s", describe(status, raw))
+	}
+	if actions, want := auditActions(t, s, key), []string{"setting.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("setting audit = %v, want %v", actions, want)
+	}
+
+	brand := s.Want(owner, "GET", "/api/v1/branding", nil, nil, http.StatusOK)
+	rebrand := func(body map[string]any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, "PUT", "/api/v1/branding", body, headers); status != want {
+			t.Fatalf("branding %v: %s", body, describe(status, raw))
+		}
+	}
+	renamed := map[string]any{"name": "Renamed", "logo": "", "accent": ""}
+	rebrand(map[string]any{"name": "Renamed", "accent": ""}, harness.ETag(brand), http.StatusUnprocessableEntity)
+	rebrand(renamed, stale, http.StatusPreconditionFailed)
+	rebrand(renamed, harness.ETag(brand), http.StatusOK)
+	rebrand(renamed, harness.ETag(brand), http.StatusPreconditionFailed)
+	if stored := s.Want(owner, "GET", "/api/v1/branding", nil, nil, http.StatusOK); stored["name"] != "Renamed" {
+		t.Fatalf("branding name = %v", stored["name"])
+	}
+	var updates int
+	if err := s.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.audit WHERE action='branding.update'`).Scan(&updates); err != nil || updates != 1 {
+		t.Fatalf("branding audit rows = %d, %v", updates, err)
+	}
+}
