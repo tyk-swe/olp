@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type retainedAnswer struct {
+type retainedExchange struct {
 	server   *Server
 	x        *Call
 	endpoint retainedapi.Endpoint
@@ -21,7 +21,9 @@ type retainedAnswer struct {
 	parent   *resources.Resource
 	fence    *resources.Lifecycle
 	deletion bool
+}
 
+type retainedAnswer struct {
 	native       *PinnedResponse
 	body         []byte
 	commit       context.Context
@@ -29,26 +31,24 @@ type retainedAnswer struct {
 	parseErr     error
 	rewrite      retainedapi.PreparedRewrite
 	referenceErr error
-	creation     *resources.PreparedCreation
 }
 
 func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Call, p *Pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
-	a := &retainedAnswer{server: s, x: x, endpoint: e, resource: resource, parent: parent, fence: lifecycle}
-	a.deletion = e.Action == "delete" && resource.Kind == "context_cache"
-	if a.deletion {
-		opened, err := s.Deps.Resources.BeginDeletion(r.Context(), resource)
-		a.fence = opened
-		if err != nil {
-			s.settleFence(r.Context(), a.fence.Reject)
-			fail(fault.ServerError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
-			return 503
-		}
-		defer s.settleFence(r.Context(), a.fence.Close)
+	deletion := e.Action == "delete" && resource.Kind == "context_cache"
+	fence, err := s.dispatchFence(r.Context(), resource, lifecycle, deletion)
+	if err != nil {
+		s.settleFence(r.Context(), fence.Reject)
+		fail(fault.ServerError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
+		return 503
 	}
+	if deletion {
+		defer s.settleFence(r.Context(), fence.Close)
+	}
+	c := retainedExchange{server: s, x: x, endpoint: e, resource: resource, parent: parent, fence: fence, deletion: deletion}
 
 	native, failure := s.PinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
 	if failure != nil {
-		refusal := a.refused(r.Context(), failure)
+		refusal := c.refused(r.Context(), failure)
 		fail(refusal)
 		return refusal.Status
 	}
@@ -60,10 +60,9 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 	}
 	commit, cancel := ResourceCommitContext(r.Context())
 	defer cancel()
-	a.native, a.body, a.commit = native, response, commit
-	a.parse()
+	a := c.answer(native, response, commit)
 	if e.Action == "delete" {
-		written, refusal := a.forget(w)
+		written, refusal := c.forget(w, a)
 		if refusal != nil {
 			fail(refusal)
 			return refusal.Status
@@ -73,9 +72,9 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 		}
 	}
 	if e.Action == "content" {
-		return a.deliverContent(w)
+		return c.deliverContent(w, a)
 	}
-	projected, refusal := a.keep(r.Context())
+	projected, refusal := c.keep(r.Context(), a)
 	if refusal != nil {
 		fail(refusal)
 		return refusal.Status
@@ -84,70 +83,89 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 	return native.StatusCode
 }
 
-func (a *retainedAnswer) refused(ctx context.Context, failure *AttemptFailure) *fault.Error {
-	e, isCreate := a.endpoint, a.endpoint.Action == "create"
-	if a.resource != nil && (isCreate || a.deletion || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
+func (s *Server) dispatchFence(ctx context.Context, resource *resources.Resource, lifecycle *resources.Lifecycle, deletion bool) (*resources.Lifecycle, error) {
+	if !deletion {
+		return lifecycle, nil
+	}
+	return s.Deps.Resources.BeginDeletion(ctx, resource)
+}
+
+func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) *fault.Error {
+	e, isCreate := c.endpoint, c.endpoint.Action == "create"
+	if c.resource != nil && (isCreate || c.deletion || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
 		commit, cancel := ResourceCommitContext(ctx)
-		rejectErr := a.fence.Reject(commit)
+		rejectErr := c.fence.Reject(commit)
 		cancel()
 		if rejectErr != nil {
 			return fault.ServerError(503, "provider_state_unavailable", "Provider rejection could not be committed.")
 		}
 	}
-	if a.resource != nil && !isCreate && failure.Status == http.StatusNotFound {
+	if c.resource != nil && !isCreate && failure.Status == http.StatusNotFound {
 		commit, cancel := ResourceCommitContext(ctx)
 		defer cancel()
-		if removeErr := a.server.Deps.Resources.Tombstone(commit, a.resource.ID); removeErr == nil {
+		if removeErr := c.server.Deps.Resources.Tombstone(commit, c.resource.ID); removeErr == nil {
 			return fault.NotFoundError("not_found", "No resource with this identifier exists for this key.")
 		}
 	}
 	return retainedPublicError(UpstreamError(failure), failure.Status)
 }
 
-func (a *retainedAnswer) parse() {
-	if a.endpoint.Action == "content" {
-		return
+func (c retainedExchange) answer(native *PinnedResponse, body []byte, commit context.Context) retainedAnswer {
+	a := retainedAnswer{native: native, body: body, commit: commit}
+	if c.endpoint.Action == "content" {
+		return a
 	}
-	document := a.body
-	if a.endpoint.Action == "delete" && a.native.StatusCode == http.StatusNoContent {
-		document = []byte(`{}`)
-	}
-	a.parsed, a.parseErr = oif.ParseJSON(document, oif.Limits{MaxBytes: retainedBodyLimit})
-	if a.parseErr == nil && a.parsed.Root().Kind() == oif.Object {
-		a.rewrite, a.referenceErr = retainedapi.PrepareRewrite(a.parsed, retainedResponseRefs(a.endpoint, a.parsed))
-	}
+	parsed, parseErr := oif.ParseJSON(c.document(native, body), oif.Limits{MaxBytes: retainedBodyLimit})
+	rewrite, referenceErr := c.references(parsed, parseErr)
+	return retainedAnswer{native: native, body: body, commit: commit, parsed: parsed, parseErr: parseErr, rewrite: rewrite, referenceErr: referenceErr}
 }
 
-func (a *retainedAnswer) forget(w http.ResponseWriter) (bool, *fault.Error) {
-	s := a.server
-	if !retainedDeleteIdentityMatches(a.endpoint, a.parsed, a.resource, a.parent) {
-		a.referenceErr = resources.ErrContract
+func (c retainedExchange) document(native *PinnedResponse, body []byte) []byte {
+	if c.endpoint.Action == "delete" && native.StatusCode == http.StatusNoContent {
+		return []byte(`{}`)
 	}
+	return body
+}
+
+func (c retainedExchange) references(parsed oif.Document, parseErr error) (retainedapi.PreparedRewrite, error) {
+	var rewrite retainedapi.PreparedRewrite
+	var referenceErr error
+	if parseErr == nil && parsed.Root().Kind() == oif.Object {
+		rewrite, referenceErr = retainedapi.PrepareRewrite(parsed, retainedResponseRefs(c.endpoint, parsed))
+	}
+	if c.endpoint.Action == "delete" && !retainedDeleteIdentityMatches(c.endpoint, parsed, c.resource, c.parent) {
+		return rewrite, resources.ErrContract
+	}
+	return rewrite, referenceErr
+}
+
+func (c retainedExchange) forget(w http.ResponseWriter, a retainedAnswer) (bool, *fault.Error) {
+	s := c.server
 	if a.parseErr == nil && a.parsed.Root().Kind() == oif.Object && a.referenceErr == nil {
 		_ = observeRetainedUsage(a.native.Exchange, a.parsed, false)
 		a.native.Exchange.Complete(ClassSuccess)
 	}
-	if putErr := s.Deps.Resources.Tombstone(a.commit, a.resource.ID); putErr != nil {
+	if putErr := s.Deps.Resources.Tombstone(a.commit, c.resource.ID); putErr != nil {
 		return false, fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated.")
 	}
-	if a.deletion {
-		if err := a.fence.AcceptMutation(a.commit); err != nil {
+	if c.deletion {
+		if err := c.fence.AcceptMutation(a.commit); err != nil {
 			return false, fault.ServerError(503, "provider_state_unavailable", "The accepted deletion could not be committed.")
 		}
 	}
 	if a.native.StatusCode != http.StatusNoContent {
 		return false, nil
 	}
-	observation, observeErr := resources.ObserveRetained(a.resource, a.endpoint, a.parsed, s.Now())
-	if observeErr != nil || s.Deps.Resources.RecordRetainedObservation(a.commit, a.resource, observation, nil) != nil {
+	observation, observeErr := resources.ObserveRetained(c.resource, c.endpoint, a.parsed, s.Now())
+	if observeErr != nil || s.Deps.Resources.RecordRetainedObservation(a.commit, c.resource, observation, nil) != nil {
 		return false, fault.ServerError(503, "provider_state_unavailable", "Deletion evidence could not be committed.")
 	}
-	s.WriteStateJSONStatus(w, a.x, nil, a.native.StatusCode, a.native.Exchange)
+	s.WriteStateJSONStatus(w, c.x, nil, a.native.StatusCode, a.native.Exchange)
 	return true, nil
 }
 
-func (a *retainedAnswer) deliverContent(w http.ResponseWriter) int {
-	s, x, native, response := a.server, a.x, a.native, a.body
+func (c retainedExchange) deliverContent(w http.ResponseWriter, a retainedAnswer) int {
+	s, x, native, response := c.server, c.x, a.native, a.body
 	_ = observeRetainedUsage(native.Exchange, oif.Document{}, false)
 	native.Exchange.Complete(ClassSuccess)
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
@@ -172,63 +190,63 @@ func (a *retainedAnswer) deliverContent(w http.ResponseWriter) int {
 	return native.StatusCode
 }
 
-func (a *retainedAnswer) keep(ctx context.Context) ([]byte, *fault.Error) {
-	if refusal := a.identified(); refusal != nil {
+func (c retainedExchange) keep(ctx context.Context, a retainedAnswer) ([]byte, *fault.Error) {
+	if refusal := c.identified(a); refusal != nil {
 		return nil, refusal
 	}
-	if refusal := a.bind(); refusal != nil {
+	creation, resource, refusal := c.bind(a)
+	if refusal != nil {
 		return nil, refusal
 	}
-	return a.record(ctx)
+	return c.record(ctx, a, creation, resource)
 }
 
-func (a *retainedAnswer) identified() *fault.Error {
-	e := a.endpoint
+func (c retainedExchange) identified(a retainedAnswer) *fault.Error {
+	e := c.endpoint
 	if a.parseErr != nil || a.parsed.Root().Kind() != oif.Object {
 		return fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource object.")
 	}
 	if e.Action != "create" && e.Action != "list" && e.Action != "delete" && !(e.Action == "cancel" && e.Surface == "native") {
 		identity, _ := a.parsed.Root().Lookup(e.Identity)
-		if id, ok := identity.Text(); !ok || id != a.resource.UpstreamID {
+		if id, ok := identity.Text(); !ok || id != c.resource.UpstreamID {
 			return fault.ServerError(502, "provider_protocol_error", "The provider returned a different resource identity.")
 		}
 	}
 	return nil
 }
 
-func (a *retainedAnswer) bind() *fault.Error {
-	s, e := a.server, a.endpoint
+func (c retainedExchange) bind(a retainedAnswer) (*resources.PreparedCreation, *resources.Resource, *fault.Error) {
+	s, e := c.server, c.endpoint
 	if e.Action != "create" {
 		if e.Action != "list" && e.Action != "delete" {
-			if err := resources.EnrichRetained(a.resource, e, a.parsed, s.Now()); err != nil {
-				return fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
+			if err := resources.EnrichRetained(c.resource, e, a.parsed, s.Now()); err != nil {
+				return nil, nil, fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 			}
 		}
-		return nil
+		return nil, c.resource, nil
 	}
 	ids, idErr := retainedCreateIDs(e, a.body)
 	if idErr != nil {
-		return fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity.")
+		return nil, nil, fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity.")
 	}
-	prepared, prepareErr := a.fence.PrepareCreated(resources.CreationResult{
+	prepared, prepareErr := c.fence.PrepareCreated(resources.CreationResult{
 		IDs: ids, Observation: &resources.CreationObservation{Endpoint: e, Document: a.parsed, At: s.Now()},
 	})
 	if errors.Is(prepareErr, resources.ErrRetainedMetadata) {
-		return fault.ServerError(502, "provider_protocol_error", "The provider returned invalid resource billing metadata.")
+		return nil, nil, fault.ServerError(502, "provider_protocol_error", "The provider returned invalid resource billing metadata.")
 	}
 	if prepareErr != nil {
 		a.native.Exchange.Interrupt(ClassProtocol, true)
-		return fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed.")
+		return nil, nil, fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed.")
 	}
-	a.creation, a.resource = prepared, prepared.Resource()
-	return nil
+	return prepared, prepared.Resource(), nil
 }
 
-func (a *retainedAnswer) record(ctx context.Context) ([]byte, *fault.Error) {
-	s, e, native := a.server, a.endpoint, a.native
-	observation, observeErr := resources.ObserveRetained(a.resource, e, a.parsed, s.Now())
-	if a.creation != nil {
-		if err := a.creation.Commit(a.commit); err != nil {
+func (c retainedExchange) record(ctx context.Context, a retainedAnswer, creation *resources.PreparedCreation, resource *resources.Resource) ([]byte, *fault.Error) {
+	s, e, native := c.server, c.endpoint, a.native
+	observation, observeErr := resources.ObserveRetained(resource, e, a.parsed, s.Now())
+	if creation != nil {
+		if err := creation.Commit(a.commit); err != nil {
 			if a.referenceErr == nil && observeErr == nil {
 				native.Exchange.Interrupt(ClassProtocol, true)
 			}
@@ -241,11 +259,11 @@ func (a *retainedAnswer) record(ctx context.Context) ([]byte, *fault.Error) {
 	if observeErr != nil {
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed.")
 	}
-	if s.persistRetainedResult(a.commit, a.resource, e, a.parsed) != nil {
+	if s.persistRetainedResult(a.commit, resource, e, a.parsed) != nil {
 		native.Exchange.Interrupt(ClassProtocol, true)
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
-	projected, refusal := a.project(ctx)
+	projected, refusal := c.project(ctx, a, resource)
 	if refusal != nil {
 		return nil, refusal
 	}
@@ -253,23 +271,23 @@ func (a *retainedAnswer) record(ctx context.Context) ([]byte, *fault.Error) {
 		_ = observeRetainedUsage(native.Exchange, a.parsed, false)
 		native.Exchange.Complete(ClassSuccess)
 	}
-	if s.Deps.Resources.RecordRetainedObservation(a.commit, a.resource, observation, nil) != nil {
+	if s.Deps.Resources.RecordRetainedObservation(a.commit, resource, observation, nil) != nil {
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed.")
 	}
 	if e.Metered && (e.Action == "update" || e.Action == "patch") {
-		if err := a.fence.AcceptMutation(a.commit); err != nil {
+		if err := c.fence.AcceptMutation(a.commit); err != nil {
 			return nil, fault.ServerError(503, "provider_state_unavailable", "The accepted mutation could not be committed.")
 		}
 	}
 	return projected, nil
 }
 
-func (a *retainedAnswer) project(ctx context.Context) ([]byte, *fault.Error) {
-	projected, projectErr := a.server.projectRetainedGeneric(ctx, a.resource, a.endpoint, a.parsed, a.rewrite)
+func (c retainedExchange) project(ctx context.Context, a retainedAnswer, resource *resources.Resource) ([]byte, *fault.Error) {
+	projected, projectErr := c.server.projectRetainedGeneric(ctx, resource, c.endpoint, a.parsed, a.rewrite)
 	if projectErr == nil {
 		return projected, nil
 	}
-	if a.endpoint.Action == "delete" {
+	if c.endpoint.Action == "delete" {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity.")
 	}
 	return nil, retainedProjectionError(a.native.Exchange, projectErr)
