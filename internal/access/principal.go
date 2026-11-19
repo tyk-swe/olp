@@ -18,9 +18,9 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-const userColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"
+const UserColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"
 
-func scanUser(row pgx.Row) (authz.User, error) {
+func ScanUser(row pgx.Row) (authz.User, error) {
 	var u authz.User
 	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Active, &u.AccessScope, &u.ETag, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
@@ -35,8 +35,8 @@ func (s *Server) Authenticate(r *http.Request, q database.Queryer) (authz.Princi
 	}
 	var p authz.Principal
 	p.Kind = "user"
-	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized AND (s.auth_method<>'local' OR s.mfa_verified OR (NOT EXISTS(SELECT 1 FROM olp.mfa_factors f WHERE f.user_id=u.id) AND NOT COALESCE((SELECT value<>'false' FROM olp.settings WHERE key='auth.mfa_required'),false)))", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	p.Token = CookieValue(r, SessionCookie)
+	err := q.QueryRow(r.Context(), "SELECT "+UserColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized AND (s.auth_method<>'local' OR s.mfa_verified OR (NOT EXISTS(SELECT 1 FROM olp.mfa_factors f WHERE f.user_id=u.id) AND NOT COALESCE((SELECT value<>'false' FROM olp.settings WHERE key='auth.mfa_required'),false)))", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, httpkit.Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -47,7 +47,7 @@ func (s *Server) Authenticate(r *http.Request, q database.Queryer) (authz.Princi
 	if err = loadProjects(r.Context(), q, &p); err != nil {
 		return p, err
 	}
-	if r.Method != "GET" && r.Method != "HEAD" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.csrf(p.Token))) {
+	if r.Method != "GET" && r.Method != "HEAD" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.CSRF(p.Token))) {
 		return p, httpkit.Fail(403, "csrf_invalid", "Reload the console before trying again.")
 	}
 	return p, nil
@@ -153,6 +153,6 @@ func (s *Server) machinePrincipal(r *http.Request, q database.Queryer, secret st
 	}
 	return p, nil
 }
-func (s *Server) csrf(token string) string {
+func (s *Server) CSRF(token string) string {
 	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest(secrets.CSRFDigest, token))
 }

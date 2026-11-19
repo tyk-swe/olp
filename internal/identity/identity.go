@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
@@ -18,20 +19,20 @@ import (
 
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerSCIM(mux)
-	s.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
-	s.Public(mux, "POST /api/v1/saml/acs", s.samlACS, MaxBody(2<<20))
-	s.Public(mux, "GET /api/v1/saml/complete", s.completeSAML)
-	s.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
-	s.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, MaxBody(2<<20))
-	s.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
-	s.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
-	s.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
-	s.Route(mux, "POST /api/v1/profile/saml/link", s.beginSAMLLink)
-	s.Route(mux, "POST /api/v1/profile/saml/reauthenticate", s.beginSAMLReauthentication)
-	s.Route(mux, "DELETE /api/v1/profile/saml-identities/{identity_id}", s.unlinkSAML)
-	s.Route(mux, "GET /api/v1/scim/groups", s.scimGroups)
-	s.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
-	public := map[string]PublicHandler{
+	s.access.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
+	s.access.Public(mux, "POST /api/v1/saml/acs", s.samlACS, access.MaxBody(2<<20), access.AnyOrigin())
+	s.access.Public(mux, "GET /api/v1/saml/complete", s.completeSAML, access.CrossSiteNavigation())
+	s.access.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
+	s.access.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, access.MaxBody(2<<20))
+	s.access.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
+	s.access.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
+	s.access.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
+	s.access.Route(mux, "POST /api/v1/profile/saml/link", s.beginSAMLLink)
+	s.access.Route(mux, "POST /api/v1/profile/saml/reauthenticate", s.beginSAMLReauthentication)
+	s.access.Route(mux, "DELETE /api/v1/profile/saml-identities/{identity_id}", s.unlinkSAML)
+	s.access.Route(mux, "GET /api/v1/scim/groups", s.scimGroups)
+	s.access.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
+	public := map[string]access.PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
 		"GET /api/v1/auth/capabilities":   s.capabilities,
 		"POST /api/v1/auth/mfa/verify":    s.mfaVerify,
@@ -39,12 +40,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"POST /api/v1/sessions":           s.login,
 		"POST /api/v1/invitations/accept": s.acceptInvitation,
 		"GET /api/v1/oidc/login":          s.beginOIDCLogin, "POST /api/v1/oidc/login": s.beginOIDCLogin,
-		"GET /api/v1/oidc/callback": s.oidcCallback,
 	}
+	s.access.Public(mux, "GET /api/v1/oidc/callback", s.oidcCallback, access.CrossSiteNavigation())
 	for pattern, fn := range public {
-		s.Public(mux, pattern, fn)
+		s.access.Public(mux, pattern, fn)
 	}
-	routes := map[string]Handler{
+	routes := map[string]access.Handler{
 		"GET /api/v1/sessions":         s.sessions,
 		"GET /api/v1/sessions/current": s.currentSession, "DELETE /api/v1/sessions/current": s.logout,
 		"DELETE /api/v1/sessions/{session_id}": s.revokeSession,
@@ -71,20 +72,20 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"DELETE /api/v1/oidc/identities/{identity_id}": s.unlinkOIDCIdentity,
 	}
 	for pattern, fn := range routes {
-		s.Route(mux, pattern, fn)
+		s.access.Route(mux, pattern, fn)
 	}
 }
 
 func (s *Server) setupStatus(r *http.Request) (httpkit.Reply, error) {
 	var complete bool
-	err := s.Pool.QueryRow(r.Context(), "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete)
-	_, configured := s.Bootstrap()
+	err := s.access.Pool.QueryRow(r.Context(), "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete)
+	_, configured := s.bootstrap()
 	return httpkit.OK(map[string]bool{"setup_required": !complete, "bootstrap_token_configured": configured}), err
 }
 func (s *Server) capabilities(r *http.Request) (httpkit.Reply, error) {
 	var local, oidc, samlEnabled, captureEnabled bool
-	err := s.Pool.QueryRow(r.Context(), authenticationCapabilitiesSQL).Scan(&local, &oidc, &samlEnabled, &captureEnabled)
-	return httpkit.OK(map[string]bool{"local_login_enabled": local && !s.localLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.limitsEnforced, "management_network_restricted": s.managementNetworkRestricted, "retention_enforced": s.limitsEnforced, "notifications_active": true, "payload_capture_active": captureEnabled, "response_cache_configured": s.responseCacheConfigured, "semantic_cache_vectors_unsealed": true}), err
+	err := s.access.Pool.QueryRow(r.Context(), authenticationCapabilitiesSQL).Scan(&local, &oidc, &samlEnabled, &captureEnabled)
+	return httpkit.OK(map[string]bool{"local_login_enabled": local && !s.access.LocalLoginDisabled(), "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.access.LimitsEnforced(), "management_network_restricted": s.managementNetworkRestricted, "retention_enforced": s.access.LimitsEnforced(), "notifications_active": true, "payload_capture_active": captureEnabled, "response_cache_configured": s.responseCacheConfigured, "semantic_cache_vectors_unsealed": true}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
@@ -101,12 +102,12 @@ func (s *Server) passwordWork(r *http.Request, work func()) error {
 // Admission uses its own committed transaction, including denied attempts.
 // Digests retain neither submitted emails/tokens nor raw source addresses.
 func (s *Server) admit(r *http.Request, action, target string) error {
-	tx, err := s.Pool.Begin(r.Context())
+	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	source := s.clientIP(r)
+	source := s.access.ClientIP(r)
 	sourceLimit := 60
 	if action == "invitation" {
 		sourceLimit = 30
@@ -129,7 +130,7 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		var count int
 		err = tx.QueryRow(r.Context(), `INSERT INTO olp.auth_admission(action,digest,attempts) VALUES($1,$2,1)
             ON CONFLICT(action,digest) DO UPDATE SET attempts=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN 1 ELSE LEAST(auth_admission.attempts+1,$3+1) END,
-            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.Auth.Digest(secrets.AdmissionDigest, bucket.key), bucket.limit).Scan(&count)
+            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.access.Auth.Digest(secrets.AdmissionDigest, bucket.key), bucket.limit).Scan(&count)
 		if err != nil {
 			return err
 		}
@@ -154,7 +155,7 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 	if err := s.admit(r, "setup", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
-	token, configured := s.Bootstrap()
+	token, configured := s.bootstrap()
 	if !configured || !hmac.Equal([]byte(token), []byte(r.Header.Get("X-OLP-Setup-Token"))) {
 		return httpkit.Reply{}, httpkit.Fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
 	}
@@ -187,7 +188,7 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 	if err = s.passwordWork(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, err := s.access.Begin(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -211,7 +212,7 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 			return httpkit.Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, authz.UserActor(id), "installation.setup", "installation", s.Installation, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, authz.UserActor(id), "installation.setup", "installation", s.access.Installation, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	response, err := s.newSession(r, tx, id)
@@ -226,7 +227,7 @@ func (s *Server) users(r *http.Request, _ authz.Principal) (httpkit.Reply, error
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(u)-'password_hash'-'role_management'-'oidc_authorized' FROM olp.users u WHERE id<$1 ORDER BY id DESC LIMIT $2", p.Before, p.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT to_jsonb(u)-'password_hash'-'role_management'-'oidc_authorized' FROM olp.users u WHERE id<$1 ORDER BY id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -238,7 +239,7 @@ func (s *Server) user(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(s.Pool.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err := access.ScanUser(s.access.Pool.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
 	return httpkit.Detail(u, u.ETag), err
 }
 func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -263,12 +264,12 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -297,7 +298,7 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
@@ -313,30 +314,32 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	// Issuance is installation-scoped. Existing keys retain their issuer and
 	// policy across account role changes and disabling, as in the reference.
-	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
+	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err = scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err = access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(u, u.ETag), tx.Commit(r.Context())
 }
 
-func (s *Server) EnsureUsableOwner(ctx context.Context, tx pgx.Tx) error {
+// EnsureUsableOwner refuses a change that would leave the installation
+// without an active owner who can still sign in.
+func EnsureUsableOwner(ctx context.Context, tx pgx.Tx, localLoginDisabled bool) error {
 	var exists bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.users WHERE active AND oidc_authorized AND role='owner'
-        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true))`, !s.localLoginDisabled).Scan(&exists)
+        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true))`, !localLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
 	}
 	if exists {
 		return nil
 	}
-	if usable, e := s.usableSAMLOwner(ctx, tx); e != nil {
+	if usable, e := usableSAMLOwner(ctx, tx); e != nil {
 		return e
 	} else if usable {
 		return nil
@@ -388,7 +391,7 @@ func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor au
 	if result.RowsAffected() == 0 {
 		return nil
 	}
-	return Audit(r.Context(), tx, r, actor, "invitation.revoke_for_access_loss", "user", issuer, "success")
+	return access.Audit(r.Context(), tx, r, actor, "invitation.revoke_for_access_loss", "user", issuer, "success")
 }
 
 const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.role,'invited_by',i.invited_by,'invited_by_email',inviter.email,'accepted_by_email',accepted.email,'revoked_by_email',revoker.email,'accepted_at',i.accepted_at,'revoked_at',i.revoked_at,'expires_at',i.expires_at,'created_at',i.created_at,'status',CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END)`
@@ -399,7 +402,7 @@ func (s *Server) invitations(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id<$1 ORDER BY i.id DESC LIMIT $2", p.Before, p.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id<$1 ORDER BY i.id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -434,7 +437,7 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	if hours < 1 || hours > 720 {
 		return httpkit.Reply{}, httpkit.Invalid("expires_in_hours", "Use 1–720 hours.")
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -442,7 +445,7 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	if err = s.requireInvitationLogin(r, tx); err != nil {
 		return httpkit.Reply{}, err
 	}
-	claim, replayed, err := s.Replay(r, tx, p, input)
+	claim, replayed, err := s.access.Replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -460,7 +463,7 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.access.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
 		return httpkit.Reply{}, err
 	}
 	body, err := invitation(r, tx, id)
@@ -468,10 +471,10 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 		return httpkit.Reply{}, err
 	}
 	result := httpkit.Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v1/invitations/" + id}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.create", "invitation", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "invitation.create", "invitation", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
@@ -481,12 +484,12 @@ func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.Replay(r, tx, p, nil)
+	claim, replayed, err := s.access.Replay(r, tx, p, nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -504,7 +507,7 @@ func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.revoke", "invitation", id, "success"); err != nil {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "invitation.revoke", "invitation", id, "success"); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -513,7 +516,7 @@ func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 		return httpkit.Reply{}, err
 	}
 	result := httpkit.OK(body)
-	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
@@ -540,7 +543,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if err := s.passwordWork(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, err := s.access.Begin(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -549,7 +552,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	var id, address, role string
-	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest(secrets.InvitationDigest, input.Token)).Scan(&id, &address, &role)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.access.Auth.Digest(secrets.InvitationDigest, input.Token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpkit.Reply{}, httpkit.Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
 	}
@@ -563,7 +566,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, authz.UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, authz.UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	response, err := s.localSession(r, tx, userID)
@@ -578,7 +581,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 func (s *Server) localLoginEnabled(r *http.Request, q database.Queryer) (bool, error) {
 	var enabled bool
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
-	return enabled && !s.localLoginDisabled, err
+	return enabled && !s.access.LocalLoginDisabled(), err
 }
 
 func (s *Server) requireInvitationLogin(r *http.Request, q database.Queryer) error {

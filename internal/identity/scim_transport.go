@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"encoding/json"
@@ -6,10 +6,10 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
@@ -35,26 +35,20 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 	})
 }
 
-func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
-	req := declared(pattern, false)
+func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h access.Handler) {
+	admit := s.access.Admit(pattern, access.MaxBody(scim.MaxBody), access.AnyOrigin())
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, scim.MaxBody, 15*time.Second)
+		r, p, cancel, err := admit(w, r)
 		defer cancel()
 		var reply httpkit.Reply
-		if err == nil {
-			var p authz.Principal
-			r, p, err = s.admitRoute(r, req)
-			if err == nil {
-				if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
-					typ, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
-					if e != nil || typ != "application/scim+json" && typ != "application/json" {
-						err = scim.Fail(415, "", "Send application/scim+json or application/json.")
-					}
-				}
-				if err == nil {
-					reply, err = h(r, p)
-				}
+		if err == nil && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") {
+			typ, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if e != nil || typ != "application/scim+json" && typ != "application/json" {
+				err = scim.Fail(415, "", "Send application/scim+json or application/json.")
 			}
+		}
+		if err == nil {
+			reply, err = h(r, p)
 		}
 		if err != nil {
 			s.writeSCIMError(w, err)
@@ -85,7 +79,7 @@ type scimFailure struct {
 func (s *Server) writeSCIMError(w http.ResponseWriter, err error) {
 	f, known := scimFailureFor(err)
 	if !known {
-		s.log.Error("SCIM request failed", failure(err)...)
+		s.access.LogFailure("SCIM request failed", err)
 	}
 	renderSCIMError(w, f)
 }

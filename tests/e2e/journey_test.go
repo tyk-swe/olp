@@ -522,3 +522,61 @@ func TestAuditLogFiltersByResourceAndRejectsBadFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestManagementTransportDeniesForeignOriginsExceptOnProtocolEndpoints(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	foreign := map[string]string{"Origin": "https://attacker.example"}
+	crossSite := map[string]string{"Sec-Fetch-Site": "cross-site"}
+	both := map[string]string{"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"}
+	denied := func(what string, status int, raw []byte) {
+		t.Helper()
+		if status != http.StatusForbidden || !strings.Contains(string(raw), "origin_denied") {
+			t.Fatalf("%s: %s", what, describe(status, raw))
+		}
+	}
+	admitted := func(what string, status int, raw []byte) {
+		t.Helper()
+		if strings.Contains(string(raw), "origin_denied") {
+			t.Fatalf("%s: %s", what, describe(status, raw))
+		}
+	}
+
+	status, raw := s.Do(owner, "POST", "/api/v1/projects", map[string]any{"name": "foreign"}, harness.Idempotent(foreign))
+	denied("cookie write from a foreign origin", status, raw)
+	status, raw = s.Do(owner, "GET", "/api/v1/projects", nil, crossSite)
+	denied("cross-site cookie read", status, raw)
+	if status, raw := s.Do(owner, "GET", "/api/v1/projects", nil, foreign); status != http.StatusOK {
+		t.Fatalf("same-site read with a foreign Origin header: %s", describe(status, raw))
+	}
+
+	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+		"name": "automation", "scopes": []string{"keys"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}, harness.Idempotent(), http.StatusCreated)
+	machine := &harness.Caller{Name: "automation token", Token: token["secret"].(string)}
+	if status, raw := s.Do(machine, "POST", "/api/v1/api-keys", map[string]any{"name": "automated", "scopes": []string{"inference"}}, harness.Idempotent(both)); status != http.StatusCreated {
+		t.Fatalf("bearer write from a foreign origin: %s", describe(status, raw))
+	}
+
+	status, raw = s.Do(owner, "GET", "/api/v1/oidc/callback", nil, crossSite)
+	admitted("cross-site OIDC callback", status, raw)
+	status, raw = s.Do(owner, "GET", "/api/v1/saml/complete", nil, crossSite)
+	admitted("cross-site SAML completion", status, raw)
+	status, raw = s.Do(owner, "POST", "/api/v1/saml/acs", nil, both)
+	admitted("SAML response posted by the identity provider", status, raw)
+	status, raw = s.Do(owner, "POST", "/api/v1/saml/login", nil, foreign)
+	denied("SAML login from a foreign origin", status, raw)
+
+	if status, raw := s.Do(owner, "GET", "/scim/v2/Users", nil, both); status != http.StatusForbidden || strings.Contains(string(raw), "origin_denied") {
+		t.Fatalf("SCIM with a console session: %s", describe(status, raw))
+	}
+
+	conflicting := map[string]string{"Cookie": "__Host-olp_session=one; __Host-olp_session=two"}
+	if status, raw := s.Do(nil, "GET", "/api/v1/projects", nil, conflicting); status != http.StatusBadRequest || !strings.Contains(string(raw), "conflicting_cookie_values") {
+		t.Fatalf("conflicting cookies: %s", describe(status, raw))
+	}
+	if status, raw := s.Do(nil, "GET", "/scim/v2/Users", nil, conflicting); status != http.StatusUnauthorized {
+		t.Fatalf("SCIM ignores cookies: %s", describe(status, raw))
+	}
+}

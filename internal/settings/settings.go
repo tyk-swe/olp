@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -98,7 +100,7 @@ func (a *API) store(r *http.Request, tx pgx.Tx, p authz.Principal, key, value st
 		return httpkit.Reply{}, err
 	}
 	if key == "auth.local_login_enabled" {
-		if err := a.server.EnsureUsableOwner(r.Context(), tx); err != nil {
+		if err := identity.EnsureUsableOwner(r.Context(), tx, a.server.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}

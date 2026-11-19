@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
@@ -53,7 +54,7 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if input.Active == nil {
 		return httpkit.Reply{}, httpkit.Invalid("active", "Provide the active state.")
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -103,13 +104,13 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, err
 		}
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
+	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", userID))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -125,7 +126,7 @@ func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Re
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -146,10 +147,10 @@ func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Re
 	if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "user.deprovision", "user", userID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "user.deprovision", "user", userID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())

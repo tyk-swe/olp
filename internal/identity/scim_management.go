@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
@@ -19,7 +20,7 @@ func (s *Server) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+scimGroupJSON+" FROM olp.scim_groups g WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+scimGroupJSON+" FROM olp.scim_groups g WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -48,7 +49,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 	if input.Mapping == nil {
 		return httpkit.Reply{}, httpkit.Invalid("mapping", "Provide an explicit mapping object.")
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -80,13 +81,13 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
+	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "scim.group.mapping.update", "scim_group", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "scim.group.mapping.update", "scim_group", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var body []byte
@@ -149,9 +150,9 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Princi
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return err
 	}
-	if err = s.EnsureUsableOwner(ctx, tx); err != nil {
+	if err = EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {
 		return err
 	}
-	_, err = AdvanceAuthority(ctx, tx)
+	_, err = access.AdvanceAuthority(ctx, tx)
 	return err
 }

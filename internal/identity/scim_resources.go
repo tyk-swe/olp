@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"encoding/json"
@@ -18,9 +18,9 @@ import (
 
 func (s *Server) scimSQL(group bool) string {
 	if group {
-		return `SELECT g.id,g.etag,g.document || jsonb_build_object('id',g.id,'members',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',u.id,'display',u.display_name,'$ref',` + sqlText(s.Origin+"/scim/v2/Users/") + `||u.id::text,'type','User') ORDER BY u.id) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.scim_users su ON su.user_id=u.id WHERE m.group_id=g.id AND su.deleted_at IS NULL AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','Group','created',g.created_at,'lastModified',g.updated_at,'version','W/"'||g.etag::text||'"','location',` + sqlText(s.Origin+"/scim/v2/Groups/") + `||g.id::text)) AS resource FROM olp.scim_groups g`
+		return `SELECT g.id,g.etag,g.document || jsonb_build_object('id',g.id,'members',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',u.id,'display',u.display_name,'$ref',` + sqlText(s.access.Origin+"/scim/v2/Users/") + `||u.id::text,'type','User') ORDER BY u.id) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.scim_users su ON su.user_id=u.id WHERE m.group_id=g.id AND su.deleted_at IS NULL AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','Group','created',g.created_at,'lastModified',g.updated_at,'version','W/"'||g.etag::text||'"','location',` + sqlText(s.access.Origin+"/scim/v2/Groups/") + `||g.id::text)) AS resource FROM olp.scim_groups g`
 	}
-	return `SELECT u.id,u.etag,su.document || jsonb_build_object('id',u.id,'userName',u.email,'displayName',u.display_name,'active',u.active,'roles',jsonb_build_array(jsonb_build_object('value',u.role,'primary',true)),'groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',g.id,'display',g.document->>'displayName','$ref',` + sqlText(s.Origin+"/scim/v2/Groups/") + `||g.id::text,'type','direct') ORDER BY g.id) FROM olp.scim_group_members m JOIN olp.scim_groups g ON g.id=m.group_id WHERE m.user_id=u.id AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','User','created',u.created_at,'lastModified',u.updated_at,'version','W/"'||u.etag::text||'"','location',` + sqlText(s.Origin+"/scim/v2/Users/") + `||u.id::text)) AS resource FROM olp.scim_users su JOIN olp.users u ON u.id=su.user_id WHERE su.deleted_at IS NULL`
+	return `SELECT u.id,u.etag,su.document || jsonb_build_object('id',u.id,'userName',u.email,'displayName',u.display_name,'active',u.active,'roles',jsonb_build_array(jsonb_build_object('value',u.role,'primary',true)),'groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',g.id,'display',g.document->>'displayName','$ref',` + sqlText(s.access.Origin+"/scim/v2/Groups/") + `||g.id::text,'type','direct') ORDER BY g.id) FROM olp.scim_group_members m JOIN olp.scim_groups g ON g.id=m.group_id WHERE m.user_id=u.id AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','User','created',u.created_at,'lastModified',u.updated_at,'version','W/"'||u.etag::text||'"','location',` + sqlText(s.access.Origin+"/scim/v2/Users/") + `||u.id::text)) AS resource FROM olp.scim_users su JOIN olp.users u ON u.id=su.user_id WHERE su.deleted_at IS NULL`
 }
 
 // Origin is operator configuration, escaped as a SQL literal, never a request Host.
@@ -43,7 +43,7 @@ func (s *Server) scimGet(r *http.Request, _ authz.Principal, group bool) (httpki
 	if err != nil {
 		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
 	}
-	d, etag, err := s.scimRead(r, s.Pool, group, id)
+	d, etag, err := s.scimRead(r, s.access.Pool, group, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -153,7 +153,7 @@ func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpk
 	query := base + fmt.Sprintf("SELECT (SELECT count(*) FROM selected), COALESCE((SELECT jsonb_agg(resource) FROM (SELECT resource FROM selected ORDER BY %s LIMIT $%d OFFSET $%d) page),'[]'::jsonb)", order, len(compiled.Args)-1, len(compiled.Args))
 	var total int64
 	var data []byte
-	if err = s.Pool.QueryRow(r.Context(), query, compiled.Args...).Scan(&total, &data); err != nil {
+	if err = s.access.Pool.QueryRow(r.Context(), query, compiled.Args...).Scan(&total, &data); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var resources []scim.Document

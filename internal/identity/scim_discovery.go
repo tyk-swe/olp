@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"net/http"
@@ -51,14 +51,14 @@ func scimSchemas() []map[string]any {
 
 func (s *Server) scimDiscovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if strings.HasSuffix(r.URL.Path, "/ServiceProviderConfig") {
-		return httpkit.OK(map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": map[string]any{"supported": true}, "bulk": map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0}, "filter": map[string]any{"supported": true, "maxResults": 200}, "changePassword": map[string]any{"supported": false}, "sort": map[string]any{"supported": true}, "etag": map[string]any{"supported": true}, "authenticationSchemes": []any{map[string]any{"type": "oauthbearertoken", "name": "OLP management token", "description": "Installation-wide management token with access scope; creator authority is rechecked on every request.", "primary": true}}, "meta": map[string]any{"resourceType": "ServiceProviderConfig", "location": s.Origin + "/scim/v2/ServiceProviderConfig"}}), nil
+		return httpkit.OK(map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": map[string]any{"supported": true}, "bulk": map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0}, "filter": map[string]any{"supported": true, "maxResults": 200}, "changePassword": map[string]any{"supported": false}, "sort": map[string]any{"supported": true}, "etag": map[string]any{"supported": true}, "authenticationSchemes": []any{map[string]any{"type": "oauthbearertoken", "name": "OLP management token", "description": "Installation-wide management token with access scope; creator authority is rechecked on every request.", "primary": true}}, "meta": map[string]any{"resourceType": "ServiceProviderConfig", "location": s.access.Origin + "/scim/v2/ServiceProviderConfig"}}), nil
 	}
 	var resources []map[string]any
 	if strings.Contains(r.URL.Path, "/Schemas") {
 		resources = scimSchemas()
 		for _, schema := range resources {
 			schema["schemas"] = []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}
-			schema["meta"] = map[string]any{"resourceType": "Schema", "location": s.Origin + "/scim/v2/Schemas/" + schema["id"].(string)}
+			schema["meta"] = map[string]any{"resourceType": "Schema", "location": s.access.Origin + "/scim/v2/Schemas/" + schema["id"].(string)}
 		}
 	} else {
 		for _, kind := range []string{"User", "Group"} {
@@ -66,7 +66,7 @@ func (s *Server) scimDiscovery(r *http.Request, _ authz.Principal) (httpkit.Repl
 			if kind == "Group" {
 				schema, extension = scim.GroupSchema, scim.GroupExtension
 			}
-			resources = append(resources, map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": kind, "name": kind, "endpoint": "/" + kind + "s", "schema": schema, "schemaExtensions": []any{map[string]any{"schema": extension, "required": false}}, "meta": map[string]any{"resourceType": "ResourceType", "location": s.Origin + "/scim/v2/ResourceTypes/" + kind}})
+			resources = append(resources, map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": kind, "name": kind, "endpoint": "/" + kind + "s", "schema": schema, "schemaExtensions": []any{map[string]any{"schema": extension, "required": false}}, "meta": map[string]any{"resourceType": "ResourceType", "location": s.access.Origin + "/scim/v2/ResourceTypes/" + kind}})
 		}
 	}
 	id := r.PathValue("schema_id")

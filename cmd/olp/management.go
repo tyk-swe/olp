@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/auditlog"
@@ -84,6 +86,7 @@ type Management struct {
 	AgentGrants    *personal.Store
 	IdentityClient *http.Client
 	Access         *access.Server
+	Identity       *identity.Server
 	Egress         *egress.Policy
 	Limits         *sharedLimits
 	Runtime        *release.Manager
@@ -105,27 +108,31 @@ type Management struct {
 	PluginIndex *pluginindex.Signed
 }
 
+func (m Management) registerGuardrails(mux *http.ServeMux) {
+	publish := func(ctx context.Context, tx pgx.Tx, actor string) error {
+		_, err := release.Publish(ctx, tx, actor)
+		return err
+	}
+	credential.NewAPI(m.Access).Register(mux)
+	definition.NewAPI(m.Access, publish).Register(mux)
+	policy.NewAPI(m.Access, publish, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
+	}).Register(mux)
+	attachment.NewAPI(m.Access, publish).Register(mux)
+}
+
 // Register mounts the whole management API: the published contract, every
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
 	management.NewMCP(m.Access, mux).Register(mux)
-	m.Access.Register(mux)
+	m.Identity.Register(mux)
 	projects.New(m.Access).Register(mux)
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
 	cacheadmin.NewAPI(m.Access, m.ResponseCache).Register(mux)
-	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
-		_, err := release.Publish(ctx, tx, actor)
-		return err
-	}
-	credential.NewAPI(m.Access).Register(mux)
-	definition.NewAPI(m.Access, publishGuardrails).Register(mux)
-	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
-	}).Register(mux)
-	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)
+	m.registerGuardrails(mux)
 	a2a.NewManagement(m.Access, m.AgentTasks, agents.NewTaskOperations(m.AgentTasks, m.AgentPeers, m.AgentGrants)).Register(mux)
 	publications.New(m.Access, m.Egress, m.AgentPeers.ValidateCard).Register(mux)
 	runs.NewManagement(m.Access).Register(mux)
@@ -204,6 +211,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	reconciliation.NewAPI(m.Access, time.Now).Register(mux)
 	promotionserve.Register(mux, promotionserve.Deps{
 		Access:     m.Access,
+		SignIn:     m.Identity,
 		Egress:     m.Egress,
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
@@ -247,15 +255,19 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	}
 	identityClient := access.IdentityHTTPClient()
 	control := access.New(access.Config{
-		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Bootstrap: func() (string, bool) { return secrets.ReadBootstrapToken(c.BootstrapTokenFile) }, Egress: core.policy, Log: log,
+		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Egress: core.policy, Log: log,
 		OIDCClient: identityClient,
 		RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
 			_, err := release.Publish(ctx, tx, actor)
 			return err
 		},
 		ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
-		LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
-		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil,
+		LocalLoginDisabled: !c.LocalLoginEnabled, LimitsEnforced: in.limiter != nil,
+	})
+	signIn := identity.New(control, identity.Config{
+		Bootstrap:                   func() (string, bool) { return secrets.ReadBootstrapToken(c.BootstrapTokenFile) },
+		ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
+		ResponseCacheConfigured:     core.responseCache != nil,
 	})
 	// Installing reads a module's manifest once, which the
 	// interpreter is ready to do several times sooner.
@@ -265,7 +277,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	}
 	return Management{
 		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants,
-		Access: control, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
+		Access: control, Identity: signIn, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
 		Gateway: in.gateway, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
 		Log: log, PluginRuntime: pluginRuntime, PluginHost: core.pluginHost, Unconfined: core.unconfined,
 		Catalog: in.catalog, CatalogKeys: in.catalogKeys, PluginIndex: in.pluginIndex,

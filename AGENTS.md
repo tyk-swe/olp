@@ -125,7 +125,7 @@ Lint enforces the structure, so read the failure message and fix the code. `.gol
 
 A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
 
-In Go, nothing under `internal/gateway` imports `internal/access` and nothing under `internal/access` imports the gateway, because only `cmd/olp` wires the serving and management planes together. A function stays under 100 lines and a file under 500 lines of code, outside tests and generated files
+In Go, nothing under `internal/gateway` imports `internal/access` and nothing under `internal/access` imports the gateway, because only `cmd/olp` wires the serving and management planes together. `internal/access` is the management kit that authenticates callers, registers routes and runs write transactions, so a new resource gets its own package that imports the kit and never goes inside it. A function stays under 100 lines and a file under 500 lines of code, outside tests and generated files
 
 In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. `console/README.md` has the details
 

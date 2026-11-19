@@ -8,10 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -35,7 +32,7 @@ var identityEgress = egress.Policy{}
 
 // oidcAddresses resolves host to the addresses identity egress may dial; one
 // disallowed answer rejects the host.
-func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
+func IdentityAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addresses, err := identityEgress.Resolve(ctx, host)
@@ -62,7 +59,7 @@ func oidcHTTPClient(injected *http.Client) *http.Client {
 		if err != nil {
 			return nil, errors.New("invalid OIDC address")
 		}
-		addresses, err := oidcAddresses(ctx, host)
+		addresses, err := IdentityAddresses(ctx, host)
 		if err != nil {
 			return nil, err
 		}
@@ -126,25 +123,4 @@ func (b *oidcBody) Read(p []byte) (int, error) {
 		return 0, errors.New("OIDC response is too large")
 	}
 	return n, err
-}
-func safeReturn(value string) bool {
-	if value == "" {
-		return true
-	}
-	if !strings.HasPrefix(value, "/") {
-		return false
-	}
-	// Check escaped input for controls, backslashes, and authority prefixes,
-	// while preserving safe query escapes in the original redirect destination.
-	decoded, err := url.PathUnescape(value)
-	if err != nil || !utf8.ValidString(decoded) || strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "\\") || strings.IndexFunc(decoded, unicode.IsControl) >= 0 {
-		return false
-	}
-	path, err := url.Parse(value)
-	if err != nil {
-		return false
-	}
-	base := url.URL{Scheme: "https", Host: "console.invalid", Path: "/"}
-	destination := base.ResolveReference(path)
-	return destination.Scheme == base.Scheme && destination.Host == base.Host && destination.User == nil
 }

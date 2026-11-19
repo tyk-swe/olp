@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/jackc/pgx/v5"
 	dsig "github.com/russellhaering/goxmldsig"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
@@ -75,7 +76,7 @@ func loadSAML(ctx context.Context, q database.Queryer) (samlConfiguration, error
 }
 
 func (s *Server) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	c, e := loadSAML(r.Context(), s.Pool)
+	c, e := loadSAML(r.Context(), s.access.Pool)
 	return httpkit.Detail(c, c.ETag), e
 }
 
@@ -93,7 +94,7 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 	}) {
 		return m, httpkit.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
 	}
-	if CheckIdentityURL(m.RedirectURL) != nil {
+	if access.CheckIdentityURL(m.RedirectURL) != nil {
 		return m, httpkit.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
 	}
 	for field, value := range map[string]string{"email_attribute": c.EmailAttribute, "groups_attribute": c.GroupsAttribute, "name_attribute": c.NameAttribute} {
@@ -150,7 +151,7 @@ func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfigu
 	if err != nil {
 		return nil, m, err
 	}
-	raw, err := s.Keys.Read(r.Context(), q, s.Installation, c.ID, secrets.SAMLKey)
+	raw, err := s.access.Keys.Read(r.Context(), q, s.access.Installation, c.ID, secrets.SAMLKey)
 	if err != nil {
 		return nil, m, err
 	}
@@ -172,9 +173,9 @@ func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfigu
 	if err != nil {
 		return nil, m, err
 	}
-	metadataURL, _ := url.Parse(s.Origin + "/api/v1/saml/metadata")
-	acs, _ := url.Parse(s.Origin + "/api/v1/saml/acs")
-	sp := &saml.ServiceProvider{EntityID: s.Origin + "/api/v1/saml/metadata", Key: rsaKey, Certificate: cert, MetadataURL: *metadataURL, AcsURL: *acs, IDPMetadata: m.Entity, SignatureMethod: dsig.RSASHA256SignatureMethod, AuthnNameIDFormat: saml.PersistentNameIDFormat, HTTPClient: s.oidcClient}
+	metadataURL, _ := url.Parse(s.access.Origin + "/api/v1/saml/metadata")
+	acs, _ := url.Parse(s.access.Origin + "/api/v1/saml/acs")
+	sp := &saml.ServiceProvider{EntityID: s.access.Origin + "/api/v1/saml/metadata", Key: rsaKey, Certificate: cert, MetadataURL: *metadataURL, AcsURL: *acs, IDPMetadata: m.Entity, SignatureMethod: dsig.RSASHA256SignatureMethod, AuthnNameIDFormat: saml.PersistentNameIDFormat, HTTPClient: s.access.IdentityClient()}
 	return sp, m, nil
 }
 
@@ -189,7 +190,7 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 	if err := ValidateSAMLDefinition(input.SAMLDefinition); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -209,14 +210,14 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
 func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
-	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.Origin + "/api/v1/saml/metadata"}
+	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.access.Origin + "/api/v1/saml/metadata"}
 	if err := p.Authorize(authz.Access); err != nil {
 		return c, err
 	}
@@ -246,7 +247,7 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Pri
 		}
 		defer clear(raw)
 		defer clear(key.Private)
-		if e = s.Keys.Store(ctx, tx, s.Installation, c.ID, secrets.SAMLKey, raw, nil); e != nil {
+		if e = s.access.Keys.Store(ctx, tx, s.access.Installation, c.ID, secrets.SAMLKey, raw, nil); e != nil {
 			return c, e
 		}
 		c.Certificate = encodeSAMLCertificate(key.Certificate)
@@ -265,7 +266,7 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Pri
 			return c, err
 		}
 	}
-	if err = s.EnsureUsableOwner(ctx, tx); err != nil {
+	if err = EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {
 		return c, err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
@@ -286,14 +287,14 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := CheckIdentityURL(input.URL); err != nil {
+	if err := access.CheckIdentityURL(input.URL); err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Use a safe identity metadata URL.")
 	}
 	req, err := http.NewRequestWithContext(r.Context(), "GET", input.URL, nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	resp, err := s.oidcClient.Do(req)
+	resp, err := s.access.IdentityClient().Do(req)
 	if err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint is unavailable or outside identity egress policy.")
 	}
@@ -303,18 +304,18 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint did not return a valid document.")
 	}
 	m, err := samlidentity.ParseMetadata(b)
-	if err != nil || CheckIdentityURL(m.RedirectURL) != nil {
+	if err != nil || access.CheckIdentityURL(m.RedirectURL) != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Invalid or unsupported SAML identity metadata.")
 	}
 	return httpkit.OK(map[string]any{"metadata_xml": string(b), "idp_entity_id": m.Entity.EntityID}), nil
 }
 
 func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
-	c, err := loadSAML(r.Context(), s.Pool)
+	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil {
 		return err
 	}
-	sp, _, err := s.samlProvider(r, s.Pool, c)
+	sp, _, err := s.samlProvider(r, s.access.Pool, c)
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package access
+package identity
 
 const authenticationCapabilitiesSQL = `SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),
  COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),

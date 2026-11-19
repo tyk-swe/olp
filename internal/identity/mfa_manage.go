@@ -1,4 +1,4 @@
-package access
+package identity
 
 import (
 	"bytes"
@@ -11,13 +11,14 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/pquerna/otp/totp"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'kind',kind,'name',name,'created_at',created_at,'last_used_at',last_used_at) FROM olp.mfa_factors WHERE user_id=$1 ORDER BY created_at", p.ID)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'kind',kind,'name',name,'created_at',created_at,'last_used_at',last_used_at) FROM olp.mfa_factors WHERE user_id=$1 ORDER BY created_at", p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -27,16 +28,16 @@ func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, e
 	}
 	var remaining int
 	var revision string
-	if err = s.Pool.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM olp.mfa_recovery_codes WHERE user_id=$1),mfa_revision::text FROM olp.users WHERE id=$1", p.ID).Scan(&remaining, &revision); err != nil {
+	if err = s.access.Pool.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM olp.mfa_recovery_codes WHERE user_id=$1),mfa_revision::text FROM olp.users WHERE id=$1", p.ID).Scan(&remaining, &revision); err != nil {
 		return httpkit.Reply{}, err
 	}
-	required, err := ReadLocalMFARequired(r.Context(), s.Pool)
+	required, err := ReadLocalMFARequired(r.Context(), s.access.Pool)
 	_, webErr := s.webAuthn()
 	return httpkit.Detail(map[string]any{"factors": factors, "recovery_codes_remaining": remaining, "required": required, "etag": revision, "webauthn_available": webErr == nil}, revision), err
 }
 
 func (s *Server) mfaManageChallenge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -84,7 +85,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, err := s.access.Begin(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -107,11 +108,11 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 			return httpkit.Reply{}, err
 		}
 	} else {
-		p, e := s.Reauthorize(r, tx)
+		p, e := s.access.Reauthorize(r, tx)
 		if e != nil {
 			return httpkit.Reply{}, e
 		}
-		if err = s.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+		if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
 			return httpkit.Reply{}, err
 		}
 		f.UserID = p.ID
@@ -138,7 +139,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 		id := httpkit.NewID()
 		f.SecretID = &id
 		expires := time.Now().Add(mfaTTL)
-		if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {
+		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {
 			return httpkit.Reply{}, err
 		}
 		picture, e := key.Image(256, 256)
@@ -183,7 +184,7 @@ func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -191,7 +192,7 @@ func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err = s.checkMFARevision(r, tx, p); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+	if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var count int
@@ -229,7 +230,7 @@ func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1 AND id<>$2", p.ID, p.SessionID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "mfa.remove", "mfa_factor", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "mfa.remove", "mfa_factor", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
@@ -244,7 +245,7 @@ func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal)
 }
 
 func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -252,7 +253,7 @@ func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	if err = s.checkMFARevision(r, tx, p); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+	if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
 	configured, err := mfaConfigured(r.Context(), tx, p.ID)
@@ -269,7 +270,7 @@ func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "mfa.recovery.rotate", "user", p.ID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "mfa.recovery.rotate", "user", p.ID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.OK(map[string]any{"recovery_codes": codes}), tx.Commit(r.Context())
