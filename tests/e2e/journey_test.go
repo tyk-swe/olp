@@ -5,13 +5,16 @@ package e2e_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -211,4 +214,53 @@ func TestFirstOwnerSetupWaitsForAMountedBootstrapToken(t *testing.T) {
 		t.Fatalf("bootstrap_token_configured=%v after mounting the token", configured)
 	}
 	s.Owner()
+}
+
+func TestSinkWritesReplayGuardRetainedHistoryAndAuditOnce(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	sink := func(name string, extra map[string]any) map[string]any {
+		body := map[string]any{"name": name, "destination": "https://sinks.example.com/export", "streams": []string{"requests"}, "enabled": true}
+		maps.Copy(body, extra)
+		return body
+	}
+	key := harness.Idempotent()
+	draft := sink("warehouse", map[string]any{"type": "https", "credential": "signing-secret"})
+	created := s.Want(owner, "POST", "/api/v1/sinks", draft, key, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/sinks", draft, key, http.StatusCreated); replayed["id"] != created["id"] {
+		t.Fatalf("replayed create answered sink %v, want %v", replayed["id"], created["id"])
+	}
+	id := created["id"].(string)
+	path := "/api/v1/sinks/" + id
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	if status, raw := s.Do(owner, "PUT", path, sink("lake", nil), harness.Idempotent(stale)); status != http.StatusPreconditionFailed {
+		t.Fatalf("stale update: %s", describe(status, raw))
+	}
+	if status, raw := s.Do(owner, "PUT", path, sink("lake", map[string]any{"type": "https"}), harness.Idempotent(harness.ETag(created))); status != http.StatusUnprocessableEntity {
+		t.Fatalf("update that restates the immutable type: %s", describe(status, raw))
+	}
+	updated := s.Want(owner, "PUT", path, sink("lake", nil), harness.Idempotent(harness.ETag(created)), http.StatusOK)
+	if updated["name"] != "lake" || updated["has_credential"] != true || updated["etag"] == created["etag"] {
+		t.Fatalf("updated sink = %v, want the new name, the kept credential and a new etag", updated)
+	}
+	s.Want(owner, "DELETE", path, nil, harness.Idempotent(harness.ETag(updated)), http.StatusNoContent)
+	var etag string
+	if err := s.Pool.QueryRow(t.Context(), "SELECT etag::text FROM olp.managed_export_sinks WHERE id=$1 AND retired_at IS NOT NULL AND credential_id IS NULL", id).Scan(&etag); err != nil {
+		t.Fatalf("retired sink kept its credential or stayed active: %v", err)
+	}
+	if status, raw := s.Do(owner, "PUT", path, sink("lake", nil), harness.Idempotent(harness.ETag(map[string]any{"etag": etag}))); status != http.StatusConflict {
+		t.Fatalf("update of a retired sink: %s", describe(status, raw))
+	}
+	rows, err := s.Pool.Query(t.Context(), `SELECT action COLLATE "C" FROM olp.audit WHERE resource_id::text=$1 ORDER BY 1`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"sink.create", "sink.retire", "sink.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("audit actions = %v, want %v", actions, want)
+	}
 }
