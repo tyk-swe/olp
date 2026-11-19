@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -33,7 +33,7 @@ type scope struct {
 	bindings  bindings
 	deps      provider.Deps
 	accounts  []resolved[codeaccounts.Input]
-	pools     []resolved[access.CodePoolInput]
+	pools     []resolved[codeadmin.PoolInput]
 }
 
 type routeInput struct {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
@@ -45,7 +46,7 @@ type codeRoute struct {
 }
 
 func (s *Server) codeRoutes(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
+	return codeadmin.List(s.Access, r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
 		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
 		||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("v.connections")+`)
 		FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
@@ -82,7 +83,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if validationError != nil {
 		return httpkit.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
+	return codeadmin.Write(s.Access, r, codeadmin.Routes, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
