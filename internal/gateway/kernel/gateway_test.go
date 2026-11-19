@@ -2446,3 +2446,110 @@ func TestACallerLeavingDuringARetryWaitEndsTheRequestAsCancelledWithoutAnotherAt
 		t.Fatalf("outcome = %q with %d attempts, provider calls %d and %d; want one attempt and a cancelled request", env.Outcome, len(env.Attempts), calls.a.Load(), calls.b.Load())
 	}
 }
+
+type unaryAttemptSeen struct {
+	class     string
+	status    int
+	uncertain bool
+}
+
+func TestAWholeOperationFallsBackOnlyWhenTheProviderRefusedItAndIsNeverRepeatedOnceItMayHaveRun(t *testing.T) {
+	const routeDeadline = 5 * time.Second
+	const found = `{"type":"search","web":{"results":[{"title":"Found","url":"https://example.com/found","description":"result"}]}}`
+	served := unaryAttemptSeen{"success", http.StatusOK, false}
+	for name, tc := range map[string]struct {
+		provider   http.HandlerFunc
+		timeout    int64
+		status     int
+		code       string
+		final      bool
+		retryAfter time.Duration
+		attempts   []unaryAttemptSeen
+	}{
+		"rate limited": {
+			provider: providerReply(http.StatusTooManyRequests, map[string]string{"Retry-After": "7"}, `{"error":{"message":"slow down"}}`),
+			status:   http.StatusOK, retryAfter: 7 * time.Second, attempts: []unaryAttemptSeen{{"rate_limit", http.StatusTooManyRequests, false}, served},
+		},
+		"credential refused": {
+			provider: providerReply(http.StatusUnauthorized, nil, `{"error":{"message":"bad key"}}`),
+			status:   http.StatusOK, attempts: []unaryAttemptSeen{{"credential", http.StatusUnauthorized, false}, served},
+		},
+		"request the provider rejects": {
+			provider: providerReply(http.StatusBadRequest, nil, `{"error":{"message":"bad","type":"invalid_request_error"}}`),
+			status:   http.StatusBadRequest, code: "upstream_rejected", attempts: []unaryAttemptSeen{{"upstream_client", http.StatusBadRequest, false}},
+		},
+		"provider error": {
+			provider: providerReply(http.StatusInternalServerError, nil, `{"error":{"message":"boom"}}`),
+			status:   http.StatusBadGateway, code: "ambiguous_upstream_result", final: true, attempts: []unaryAttemptSeen{{"ambiguous", http.StatusInternalServerError, true}},
+		},
+		"silent provider": {
+			provider: providerStream(stalled), timeout: 80,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", final: true, attempts: []unaryAttemptSeen{{"ambiguous", 0, true}},
+		},
+		"unreadable reply": {
+			provider: providerReply(http.StatusOK, nil, `not json`),
+			status:   http.StatusBadGateway, code: "fidelity_protocol_violation", final: true, attempts: []unaryAttemptSeen{{"protocol", http.StatusOK, true}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, Config{})
+			h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range s.Providers {
+					provider.VendorID = "brave"
+					provider.ProfileID, provider.ProfileRevision = "brave-search", connectors.ProfileRevision
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "search", Surface: "openai", Mode: "unary"}}
+					s.Providers[id] = provider
+				}
+				route := s.Routes[routeSlug]
+				route.Operations = []string{"search"}
+				for i := range route.Targets {
+					route.Targets[i].Timeout = cmp.Or(tc.timeout, route.Targets[i].Timeout)
+				}
+				s.Routes[routeSlug] = route
+			})
+			var second atomic.Int64
+			h.mock.set("a", tc.provider)
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				second.Add(1)
+				providerReply(http.StatusOK, nil, found)(w, r)
+			})
+			started := time.Now()
+			resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"test","max_results":1}`), map[string]string{"X-OLP-Route": routeSlug})
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if elapsed := time.Since(started); tc.timeout > 0 && elapsed > routeDeadline/2 {
+				t.Fatalf("a provider silent past its %dms target timeout held the caller for %v", tc.timeout, elapsed)
+			}
+
+			code := ""
+			if found := replyErrorCode.FindSubmatch(raw); found != nil {
+				code = string(found[1])
+			}
+			if resp.StatusCode != tc.status || code != tc.code {
+				t.Fatalf("reply = %d %q, want %d %q: %.300s", resp.StatusCode, code, tc.status, tc.code, raw)
+			}
+			if tc.code == "" && !strings.Contains(string(raw), "https://example.com/found") {
+				t.Fatalf("the caller did not get the result: %.300s", raw)
+			}
+			if final := resp.Header.Get("X-Should-Retry") == "false"; final != tc.final {
+				t.Fatalf("the reply told the caller not to retry = %t, want %t", final, tc.final)
+			}
+			if asked := second.Load() == 1; asked != (len(tc.attempts) == 2) {
+				t.Fatalf("the second provider was asked %d times after %s", second.Load(), name)
+			}
+
+			env := h.sink.last(t)
+			seen := make([]unaryAttemptSeen, len(env.Attempts))
+			for i, attempt := range env.Attempts {
+				seen[i] = unaryAttemptSeen{attempt.Class, attempt.Status, attempt.BillingUncertain}
+			}
+			if !slices.Equal(seen, tc.attempts) {
+				t.Fatalf("attempts = %+v, want %+v", seen, tc.attempts)
+			}
+			if got := cmp.Or(env.Attempts[0].RetryAfter, new(time.Duration)); *got != tc.retryAfter {
+				t.Fatalf("the first attempt recorded a provider wait of %v, want %v", *got, tc.retryAfter)
+			}
+		})
+	}
+}
