@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
@@ -92,24 +93,15 @@ func (s *Server) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var current string
-	if err = tx.QueryRow(r.Context(), "SELECT branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "branding.update", "installation", s.Installation, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(identity, identity.ETag), tx.Commit(r.Context())
+	return Transact(s, r, func(tx pgx.Tx, _ authz.Principal) (struct{}, error) {
+		var current string
+		if err := tx.QueryRow(r.Context(), "SELECT branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, httpkit.Match(r, current)
+	}, func(tx pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
+		_, err := tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag)
+		return httpkit.Detail(identity, identity.ETag), Event{Action: "branding.update", Resource: "installation", ID: s.Installation}, err
+	})
 }

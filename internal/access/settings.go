@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
@@ -63,53 +64,49 @@ func (s *Server) updateSetting(r *http.Request, _ authz.Principal) (httpkit.Repl
 	default:
 		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "This setting does not exist.")
 	}
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if key == "auth.local_login_enabled" {
-		if err = p.Authorize(authz.LocalLogin); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if key == "auth.mfa_required" {
-		if err = p.Authorize(authz.Access); err != nil {
-			return httpkit.Reply{}, err
+	return Transact(s, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, settingChangeable(r, tx, p, key)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		reply, err := s.storeSetting(r, tx, p, key, input.Value)
+		return reply, Event{Action: "setting.update", Resource: "setting", ID: key}, err
+	})
+}
+
+func settingChangeable(r *http.Request, tx pgx.Tx, p authz.Principal, key string) error {
+	needs := map[string]authz.Operation{"auth.local_login_enabled": authz.LocalLogin, "auth.mfa_required": authz.Access}
+	if operation, restricted := needs[key]; restricted {
+		if err := p.Authorize(operation); err != nil {
+			return err
 		}
 	}
 	var etag string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.settings WHERE key=$1", key).Scan(&etag); err != nil {
-		return httpkit.Reply{}, err
+	if err := tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.settings WHERE key=$1", key).Scan(&etag); err != nil {
+		return err
 	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
+	return httpkit.Match(r, etag)
+}
+
+func (s *Server) storeSetting(r *http.Request, tx pgx.Tx, p authz.Principal, key, value string) (httpkit.Reply, error) {
 	if key == "budgets.time_zone" {
-		if _, err = tx.Exec(r.Context(), "SELECT olp.schedule_budget_zone($1,now())", input.Value); err != nil {
+		if _, err := tx.Exec(r.Context(), "SELECT olp.schedule_budget_zone($1,now())", value); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key=$4", input.Value, etag, p.UserID(), key); err != nil {
+	etag := httpkit.NewID()
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key=$4", value, etag, p.UserID(), key); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if key == "auth.local_login_enabled" {
-		if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
+		if err := s.EnsureUsableOwner(r.Context(), tx); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
 	if key == "guardrails.stream_window_bytes" && s.RuntimePublisher != nil {
-		if err = s.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
+		if err := s.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
 			return httpkit.Reply{}, httpkit.Invalid("value", "The window is incompatible with published guardrails.")
 		}
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "setting.update", "setting", key, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
 	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s WHERE key=$1", key).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(json.RawMessage(data), etag), tx.Commit(r.Context())
+	err := tx.QueryRow(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s WHERE key=$1", key).Scan(&data)
+	return httpkit.Detail(json.RawMessage(data), etag), err
 }
