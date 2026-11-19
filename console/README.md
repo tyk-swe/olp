@@ -69,7 +69,7 @@ ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
 
 Files that broke a rule before it existed are listed in `eslint-legacy.json`.
 Those lists only shrink: `scripts/check-exemptions.sh` fails `make check-console`
-when a list is longer than on the default branch. Fix a new violation instead of
+when a list has an entry the default branch does not. Fix a new violation instead of
 listing the file, and remove a file from its list in the change that fixes it.
 
 ## Page building blocks
