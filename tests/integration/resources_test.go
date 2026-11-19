@@ -878,6 +878,7 @@ type retainedObject struct {
 	ID, Status       string
 	InputFileID      string `json:"input_file_id"`
 	ProcessingStatus string `json:"processing_status"`
+	VectorStoreID    string `json:"vector_store_id"`
 	Deleted          bool
 	Data             []struct{ ID string }
 }
@@ -1303,6 +1304,109 @@ func TestGeminiInteractionsHideProviderIdentifiersContinueOnTheirProviderAndIsol
 	g.send(t, "DELETE", interactions+"/"+first.ID, geminiKey("owner", nil), "", 200)
 	g.send(t, "GET", interactions+"/"+first.ID, geminiKey("owner", nil), "", 404)
 	if sent := upstream.sent("DELETE /interactions/interaction-" + providerOwned + "-1"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
+	}
+}
+
+func vectorStoreReplies(string, int) map[string]string {
+	store, path := `{"id":"vs_`+providerOwned+`","object":"vector_store","name":"notes","status":"completed","created_at":1,"file_counts":{"total":0}}`, "/vector_stores/vs_"+providerOwned
+	file := `{"id":"file-` + providerOwned + `","object":"vector_store.file","vector_store_id":"vs_` + providerOwned + `","status":"completed","created_at":1}`
+	return map[string]string{
+		"POST /files":             `{"id":"file-` + providerOwned + `","object":"file","bytes":5,"created_at":1,"filename":"a.txt","purpose":"assistants","status":"processed"}`,
+		"POST /vector_stores":     store,
+		"GET " + path:             store,
+		"POST " + path:            store,
+		"DELETE " + path:          `{"id":"vs_` + providerOwned + `","object":"vector_store.deleted","deleted":true}`,
+		"POST " + path + "/files": file,
+		"GET " + path + "/files":  `{"object":"list","data":[` + file + `],"has_more":false}`,
+		"GET " + path + "/files/file-" + providerOwned: file,
+	}
+}
+
+func TestVectorStoresHideProviderIdentifiersBindFilesReplayCreationAndIsolateKeys(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "stores", "stores-model"
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price:       rates.Price{ProviderKind: "azure_openai", Model: model, Operation: "vector_store", StoragePerGiBDay: new("0.10"), Currency: "USD"},
+		EffectiveAt: fixture.observedAt,
+	})
+	upstream := &retainedUpstream{replies: vectorStoreReplies}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch", "vector_store"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const stores = "/v1/vector_stores"
+	submit := func(key, path, contentType, body, submission string, want int) retainedObject {
+		t.Helper()
+		_, raw := g.send(t, "POST", path, map[string]string{"Authorization": "Bearer " + key, "Content-Type": contentType, "Idempotency-Key": submission}, body, want)
+		var decoded retainedObject
+		_ = json.Unmarshal(raw, &decoded)
+		return decoded
+	}
+
+	upload := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	file := submit("owner", "/v1/files", "multipart/form-data; boundary=b", upload, uuid.NewString(), 200)
+	creation := uuid.NewString()
+	store := submit("owner", stores, "application/json", `{"name":"notes"}`, creation, 200)
+	if file.ID == "" || store.ID == "" {
+		t.Fatalf("creation returned file %q and store %q, want gateway identifiers", file.ID, store.ID)
+	}
+	replayed, _ := g.send(t, "POST", stores, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json", "Idempotency-Key": creation}, `{"name":"notes"}`, 409)
+	if got := replayed.Get("X-OLP-Resource-ID"); got != store.ID {
+		t.Fatalf("a replayed creation points at %q, want %q", got, store.ID)
+	}
+	if created := upstream.sent("POST /vector_stores"); len(created) != 1 || created[0].key != "listed-secret" {
+		t.Fatalf("the provider saw creations %+v, want one under the provider credential", created)
+	}
+	own := stores + "/" + store.ID
+	if got := g.call(t, "owner", "GET", own, "", "", 200); got.ID != store.ID {
+		t.Fatalf("store read returned %q, want %q", got.ID, store.ID)
+	}
+	if got := g.call(t, "owner", "GET", stores, "", "", 200).identifiers(); !slices.Equal(got, []string{store.ID}) {
+		t.Fatalf("owner lists stores %v, want %v", got, []string{store.ID})
+	}
+	if got := submit("owner", own, "application/json", `{"name":"renamed"}`, "", 200); got.ID != store.ID {
+		t.Fatalf("store update returned %q, want %q", got.ID, store.ID)
+	}
+
+	attached := submit("owner", own+"/files", "application/json", `{"file_id":"`+file.ID+`"}`, uuid.NewString(), 200)
+	if attached.ID == "" || attached.VectorStoreID != store.ID {
+		t.Fatalf("attachment = %+v, want a gateway identifier inside store %q", attached, store.ID)
+	}
+	bound := upstream.sent("POST /vector_stores/vs_" + providerOwned + "/files")
+	if len(bound) != 1 || !strings.Contains(bound[0].body, `"file_id":"file-`+providerOwned+`"`) || strings.Contains(bound[0].body, file.ID) {
+		t.Fatalf("attachment reached the provider as %+v, want the provider's file identifier", bound)
+	}
+	if got := g.call(t, "owner", "GET", own+"/files/"+attached.ID, "", "", 200); got.ID != attached.ID || got.VectorStoreID != store.ID {
+		t.Fatalf("attachment read = %+v, want %q inside %q", got, attached.ID, store.ID)
+	}
+	if got := g.call(t, "owner", "GET", own+"/files", "", "", 200).identifiers(); !slices.Equal(got, []string{attached.ID}) {
+		t.Fatalf("owner lists attachments %v, want %v", got, []string{attached.ID})
+	}
+
+	seen := len(upstream.sent("GET /vector_stores/vs_"+providerOwned)) + len(upstream.sent("POST /vector_stores/vs_"+providerOwned+"/files"))
+	if got := g.call(t, "stranger", "GET", stores, "", "", 200).identifiers(); len(got) != 0 {
+		t.Fatalf("another key lists stores %v", got)
+	}
+	g.call(t, "stranger", "GET", own, "", "", 404)
+	g.call(t, "stranger", "GET", own+"/files", "", "", 404)
+	g.call(t, "stranger", "GET", own+"/files/"+attached.ID, "", "", 404)
+	g.call(t, "stranger", "DELETE", own, "", "", 404)
+	submit("stranger", own, "application/json", `{"name":"taken"}`, "", 404)
+	submit("stranger", own+"/files", "application/json", `{"file_id":"`+file.ID+`"}`, uuid.NewString(), 404)
+	if after := len(upstream.sent("GET /vector_stores/vs_"+providerOwned)) + len(upstream.sent("POST /vector_stores/vs_"+providerOwned+"/files")); after != seen {
+		t.Fatalf("another key's requests reached the provider %d times", after-seen)
+	}
+
+	if got := g.call(t, "owner", "DELETE", own, "", "", 200); got.ID != store.ID || !got.Deleted {
+		t.Fatalf("store delete = %+v", got)
+	}
+	g.call(t, "owner", "GET", own, "", "", 404)
+	if sent := upstream.sent("DELETE /vector_stores/vs_" + providerOwned); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
 	}
 }
