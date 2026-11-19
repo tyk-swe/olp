@@ -2102,7 +2102,7 @@ func TestHealthProbesAskEachOptedInProviderOncePerIntervalAndOpenItsCircuitOnlyW
 				t.Fatalf("shared probe results = %+v", results)
 			}
 			until, open := circuits[fixture.providerID]
-			if open != test.circuit || (open && until.Before(started.Add(test.probe.Interval()))) {
+			if open != test.circuit || (open && until.Before(started.Truncate(time.Millisecond).Add(test.probe.Interval()))) {
 				t.Fatalf("fleet circuits = %v, want open %t for at least the probe interval", circuits, test.circuit)
 			}
 			if len(seen) != 1 {
