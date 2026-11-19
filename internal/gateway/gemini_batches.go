@@ -21,10 +21,10 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )

@@ -5,7 +5,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/domain/priority"
 )
 
 // Requests are normal unless their key or caller says otherwise; the

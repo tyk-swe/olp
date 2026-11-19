@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const gapEvidenceSQL = `SELECT COALESCE(SUM(event_count), 0)::bigint,

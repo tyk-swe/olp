@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
 type httpConnection struct {

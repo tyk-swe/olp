@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const dueAlertSQL = `WITH current_windows(window_kind,window_id) AS (

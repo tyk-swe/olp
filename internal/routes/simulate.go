@@ -10,8 +10,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
@@ -19,11 +19,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // simulationInput is the draft request and the normalized input used by both

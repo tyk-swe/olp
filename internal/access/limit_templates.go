@@ -5,7 +5,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func CheckLimitTemplates(ctx context.Context, q database.Queryer, project *string, names ...*string) error {

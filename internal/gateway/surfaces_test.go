@@ -25,9 +25,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 

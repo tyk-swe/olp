@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers/connection"

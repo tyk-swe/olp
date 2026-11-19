@@ -12,10 +12,10 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type Store struct {

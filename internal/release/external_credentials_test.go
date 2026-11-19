@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 type externalResolveFunc func(context.Context, secretstore.Reference) ([]byte, error)

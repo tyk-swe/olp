@@ -10,8 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

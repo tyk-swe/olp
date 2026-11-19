@@ -20,7 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 )
 
 type Pattern struct {

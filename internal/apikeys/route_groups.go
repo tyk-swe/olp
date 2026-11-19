@@ -6,7 +6,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func checkKeyRouteGroups(r *http.Request, q database.Queryer, names []string, projectID *string) error {

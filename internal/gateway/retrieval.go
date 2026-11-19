@@ -6,9 +6,9 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routing"
 )

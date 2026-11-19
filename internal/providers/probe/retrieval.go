@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func (p *Prober) certifyRetrieval(ctx context.Context, t Target, model string) error {

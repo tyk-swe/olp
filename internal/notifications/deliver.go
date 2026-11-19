@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const (

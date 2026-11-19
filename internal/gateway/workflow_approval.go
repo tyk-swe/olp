@@ -10,12 +10,12 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 

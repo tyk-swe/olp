@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"golang.org/x/net/http/httpguts"

@@ -17,9 +17,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/signing"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // APIVersion identifies the catalog document format.

@@ -18,12 +18,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 

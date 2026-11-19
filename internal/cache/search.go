@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 // index returns the vector index for a dimension, creating it on first use.

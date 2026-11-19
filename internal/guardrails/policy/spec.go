@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type input struct {

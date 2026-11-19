@@ -39,7 +39,7 @@ protocol and authentication mechanism used to reach that connection.
 ### Reviewed vendor contracts
 
 `GET /api/v1/provider-vendors` lists the vendor catalog. Each vendor is a
-reviewed contract in [`internal/vendors`](../../internal/vendors/catalog.go): the
+reviewed contract in [`internal/domain/vendors`](../../internal/domain/vendors/catalog.go): the
 operations its documentation lists, the generation dialects it speaks, and the
 request fields it refuses or spells differently. A vendor is admitted only the
 operations its contract lists, so a preset never claims media, moderation or

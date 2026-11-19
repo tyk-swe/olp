@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func CheckIdentityURL(raw string) error {

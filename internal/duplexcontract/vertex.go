@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/geminilifecycle"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {

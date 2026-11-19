@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 // ProviderDaySpend is the operator spend one provider accrued on one UTC day:

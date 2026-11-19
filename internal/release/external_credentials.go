@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/secretstore"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 )
 
 const externalCredentialTTL = time.Minute

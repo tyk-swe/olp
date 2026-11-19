@@ -13,14 +13,14 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 type createRequest struct {

@@ -6,8 +6,8 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers/connection"

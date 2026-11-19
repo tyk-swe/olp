@@ -12,15 +12,15 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // A route template turns the models a provider activation certifies into

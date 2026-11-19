@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"

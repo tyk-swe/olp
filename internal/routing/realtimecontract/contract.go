@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // Config is compiled once for each published strict route target.

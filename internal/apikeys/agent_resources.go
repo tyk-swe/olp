@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/consumerscope"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/domain/consumerscope"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func addedKeyAgentResources(policy, previous keyauthority.KeyPolicy) keyauthority.KeyPolicy {

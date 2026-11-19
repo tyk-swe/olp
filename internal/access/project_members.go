@@ -3,7 +3,7 @@ package access
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func ActiveProjectMember(ctx context.Context, q database.Queryer, projectID, userID string) (bool, error) {

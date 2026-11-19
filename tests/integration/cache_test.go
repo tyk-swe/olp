@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 

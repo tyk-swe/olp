@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 type responseMCPTool struct {

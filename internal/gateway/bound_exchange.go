@@ -9,7 +9,7 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 )

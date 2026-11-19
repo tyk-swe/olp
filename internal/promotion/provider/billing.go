@@ -11,8 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 

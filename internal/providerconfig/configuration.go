@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type Identity[T string | *string] struct {

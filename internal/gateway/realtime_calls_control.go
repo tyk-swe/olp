@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )

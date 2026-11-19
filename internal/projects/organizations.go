@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const organizationFields = `'id',o.id,'name',o.name,'etag',o.etag,'created_by',o.created_by,'created_at',o.created_at,'updated_at',o.updated_at,'project_count',(SELECT count(*) FROM olp.projects p WHERE p.organization_id=o.id)`

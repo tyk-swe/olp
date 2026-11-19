@@ -5,10 +5,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 )
 
 func (c Config) OperationURL(d operations.Dialect, model string) (string, error) {

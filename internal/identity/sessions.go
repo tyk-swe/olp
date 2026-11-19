@@ -10,8 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func (s *Server) sessionBody(r *http.Request, q database.Queryer, u authz.User, token string) (any, error) {

@@ -3,9 +3,9 @@ package gateway
 import (
 	"context"
 
+	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/geminilifecycle"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 )

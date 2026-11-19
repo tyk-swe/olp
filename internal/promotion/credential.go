@@ -7,8 +7,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 )
 
 const MaxSecret = 64 << 10

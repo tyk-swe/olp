@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )

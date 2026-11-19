@@ -5,7 +5,7 @@ import (
 	"maps"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func ReadProjectNames(ctx context.Context, q database.Queryer) (map[string]string, error) {

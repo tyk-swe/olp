@@ -3,7 +3,7 @@ package fault
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/surface"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // RequestSurface names the inference API a gateway request speaks.

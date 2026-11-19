@@ -19,16 +19,16 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/settings"
 
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
-	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 	"github.com/tyk-swe/olp/internal/usage/reports"
-	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -48,7 +48,6 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
@@ -63,6 +62,8 @@ import (
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -73,7 +74,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 )

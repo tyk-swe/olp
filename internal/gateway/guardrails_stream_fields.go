@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type guardrailStreamField struct {

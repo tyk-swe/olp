@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type offer struct {

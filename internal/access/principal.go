@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const UserColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"

@@ -14,7 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 type filesFlavor struct {

@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/models"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

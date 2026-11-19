@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/priority"
 )
 
 type Preferences struct {

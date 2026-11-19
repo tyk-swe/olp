@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/vendors"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 )
 
 func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {

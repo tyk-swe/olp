@@ -14,13 +14,13 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 

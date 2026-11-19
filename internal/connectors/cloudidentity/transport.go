@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 const responseLimit = 1 << 20

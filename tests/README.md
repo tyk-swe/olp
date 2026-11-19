@@ -54,7 +54,7 @@ dispatch and continuation ownership, both A2A wire versions, publication
 isolation, guardrail detection, MCP registration validation, tool pricing and
 resolution, grant binding, a gateway slice for credential redaction, cost
 reservation, cache replay and guardrail wiring, and the business metric
-exposition in `internal/telemetry`. They also cover the provider egress policy
+exposition in `internal/platform/telemetry`. They also cover the provider egress policy
 that keeps requests off private addresses, SCIM document, patch and filter
 parsing, SAML response verification against a test identity provider, the
 admission pool and its weighted queue, response cache keys and policy
@@ -205,7 +205,7 @@ callers every management route admits, derived from the contract and the
 policy, and is maintained by hand. Review such a diff as a security change.
 Secret-purpose changes surface in the generated tables in the security
 architecture documentation. Regenerate those tables deliberately with
-`go test ./internal/secrets -run TestPurposeDocumentation -update` after
+`go test ./internal/platform/secrets -run TestPurposeDocumentation -update` after
 reviewing the purpose change.
 
 ## Retained fixtures
@@ -216,7 +216,7 @@ comparator in `tests/fidelity` stays because the protocol tests use it.
 Neither is a test suite on its own.
 
 `tests/fixtures/tokens` holds the ground truth for the token estimator in
-`internal/operations/tokenization/estimate`. `generate.py` is the only
+`internal/domain/operations/tokenization/estimate`. `generate.py` is the only
 thing that writes those fixtures. It runs offline and is deterministic, so
 a clean rerun leaves no diff.
 

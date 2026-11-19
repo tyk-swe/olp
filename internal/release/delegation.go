@@ -13,9 +13,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 var ErrDelegationBounds = errors.New("invalid delegation bounds")

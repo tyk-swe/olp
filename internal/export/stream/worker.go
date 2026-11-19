@@ -14,8 +14,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/export/destination"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 )
 
 const (

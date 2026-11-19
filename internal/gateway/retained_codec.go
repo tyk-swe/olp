@@ -17,13 +17,13 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 var errRetainedBindingUnavailable = errors.New("retained resource binding unavailable")

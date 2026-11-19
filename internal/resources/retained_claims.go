@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 )
 
 var ErrSettlementClosed = errors.New("retained settlement is closed")

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func TestLoadMountedRefusesACredentialItCouldNotSend(t *testing.T) {

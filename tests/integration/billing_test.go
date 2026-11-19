@@ -33,9 +33,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/imports"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 	bigqueryapi "google.golang.org/api/bigquery/v2"
 )

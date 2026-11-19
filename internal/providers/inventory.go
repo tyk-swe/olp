@@ -12,11 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (s *Server) kinds(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

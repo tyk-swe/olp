@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

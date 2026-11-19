@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/apikeys"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage/retention"
 
 	"github.com/jackc/pgx/v5/pgxpool"

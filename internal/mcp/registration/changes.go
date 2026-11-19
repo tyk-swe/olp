@@ -11,8 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type registrationChange struct{ id, etag, action string }

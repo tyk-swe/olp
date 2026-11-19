@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 type scripted struct {

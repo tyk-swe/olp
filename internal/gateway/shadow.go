@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"

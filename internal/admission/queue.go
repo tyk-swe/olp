@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/metric"
-	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/domain/priority"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 type Class int

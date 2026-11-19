@@ -131,8 +131,8 @@ jobs:
             echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/develop/catalog.md#signing-keys" >&2
             exit 1
           fi
-          go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json
-          go run -tags release ./internal/signing/cmd/olpsign verify internal/catalog/catalog.json internal/pluginindex/index.json
+          go run ./cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json
+          go run -tags release ./cmd/olpsign verify internal/catalog/catalog.json internal/pluginindex/index.json
           go test -tags release -run 'TestEmbedded' ./internal/catalog
       - if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -324,7 +324,7 @@ jobs:
       # this commit, and the release fails unless each digest is the one the
       # index lists, so the modules published here are the reviewed ones.
       - name: Build the indexed plugins
-        run: go run ./internal/pluginindex/cmd/pluginindex check /tmp/catalog
+        run: go run ./cmd/pluginindex check /tmp/catalog
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: /tmp/catalog/*

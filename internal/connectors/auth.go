@@ -12,8 +12,8 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
 	"github.com/tyk-swe/olp/internal/connectors/cloudidentity"
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 var (
