@@ -580,3 +580,118 @@ func TestManagementTransportDeniesForeignOriginsExceptOnProtocolEndpoints(t *tes
 		t.Fatalf("SCIM ignores cookies: %s", describe(status, raw))
 	}
 }
+
+func TestPlaygroundRunsARouteForItsProjectMembersStreamsItAndAccountsItToTheInstallation(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "playground"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	provider := s.activeProvider(owner, "playground-provider", newVendor(t).URL, project)
+	slug := uniqueName("playground")
+	s.publishedRoute(owner, slug, provider, project)
+	typed := map[string]any{"model": slug, "input": "hello"}
+	streamed := map[string]any{"model": slug, "input": "hello", "stream": true}
+
+	answered := func(what string, result map[string]any) {
+		t.Helper()
+		attempts, _ := result["routing"].([]any)
+		usage, _ := result["usage"].(map[string]any)
+		if result["model"] != slug || len(attempts) != 1 || usage["input_tokens"] != float64(vendor.InputTokens) || usage["output_tokens"] != float64(vendor.OutputTokens) {
+			t.Fatalf("%s = %v, want one attempt on %s with the provider's usage", what, result, slug)
+		}
+		attempt := attempts[0].(map[string]any)
+		if attempt["provider_id"] != provider["id"] || attempt["upstream_model"] != vendor.Model {
+			t.Fatalf("%s attempt = %v, want provider %v model %s", what, attempt, provider["id"], vendor.Model)
+		}
+	}
+	s.Eventually("the playground reaching the published route", 20*time.Second, func() (bool, string) {
+		status, raw := s.Do(owner, "POST", "/api/v1/playground", typed, nil)
+		return status == http.StatusOK, describe(status, raw)
+	})
+	document := map[string]any{"model": slug, "request": map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hello"}}}}
+	for what, body := range map[string]map[string]any{"typed input": typed, "request document": document} {
+		result := s.Want(owner, "POST", "/api/v1/playground", body, nil, http.StatusOK)
+		if result["output_text"] != vendor.Answer || result["provider_model"] != vendor.Model {
+			t.Fatalf("%s = %v, want the provider's answer", what, result)
+		}
+		answered(what, result)
+	}
+
+	status, raw := s.Do(owner, "POST", "/api/v1/playground/stream", streamed, nil)
+	events := playgroundEvents(t, raw)
+	if status != http.StatusOK || len(events) < 2 || events[len(events)-1].name != "done" {
+		t.Fatalf("stream = %s, want provider frames then done", describe(status, raw))
+	}
+	text := ""
+	for _, event := range events[:len(events)-1] {
+		frame, _ := event.data["data"].(string)
+		if event.name != "frame" || frame == "" {
+			t.Fatalf("stream event = %v, want a provider frame", event)
+		}
+		text += frame
+	}
+	if !strings.Contains(text, vendor.Answer) {
+		t.Fatalf("stream frames = %q, want the provider's answer", text)
+	}
+	answered("stream summary", events[len(events)-1].data)
+
+	for what, refused := range map[string]struct {
+		path string
+		body map[string]any
+	}{
+		"a stream on the whole reply endpoint":  {"/api/v1/playground", streamed},
+		"a whole reply on the stream endpoint":  {"/api/v1/playground/stream", typed},
+		"embeddings without a request document": {"/api/v1/playground", map[string]any{"model": slug, "operation": "embeddings", "input": "hello"}},
+		"a request document beside typed input": {"/api/v1/playground", map[string]any{"model": slug, "input": "hello", "request": document["request"]}},
+	} {
+		if status, raw := s.Do(owner, "POST", refused.path, refused.body, nil); status != http.StatusUnprocessableEntity {
+			t.Errorf("%s: %s, want 422", what, describe(status, raw))
+		}
+	}
+
+	outsider := s.Invite(owner, "outsider@example.com", authz.RoleDeveloper)
+	profile := s.Want(outsider, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	s.Want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	outsider = s.Login("outsider@example.com")
+	missing := map[string]any{"model": "missing", "input": "hello"}
+	for path, body := range map[string]map[string]any{"/api/v1/playground": typed, "/api/v1/playground/stream": streamed} {
+		hidden := s.Want(outsider, "POST", path, body, nil, http.StatusNotFound)
+		absent := s.Want(owner, "POST", "/api/v1/playground", missing, nil, http.StatusNotFound)
+		if hidden["type"] != absent["type"] || hidden["detail"] != strings.ReplaceAll(absent["detail"].(string), "missing", slug) {
+			t.Errorf("%s outside the project = %v, want the reply of a missing route %v", path, hidden, absent)
+		}
+	}
+	viewer := s.Invite(owner, "viewer@example.com", authz.RoleViewer)
+	if status, raw := s.Do(viewer, "POST", "/api/v1/playground", typed, nil); status != http.StatusForbidden {
+		t.Errorf("viewer: %s, want 403", describe(status, raw))
+	}
+
+	s.Eventually("playground usage reaching durable storage", 20*time.Second, func() (bool, string) {
+		var attempts, unkeyed int64
+		err := s.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE r.origin='playground' AND r.api_key_id IS NULL AND f.api_key_id IS NULL)
+ FROM olp.attempt_usage_facts f JOIN olp.requests r ON r.id=f.request_id`).Scan(&attempts, &unkeyed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return attempts == 4 && unkeyed == 4, fmt.Sprintf("attempts=%d playground attempts without a key=%d", attempts, unkeyed)
+	})
+}
+
+type playgroundEvent struct {
+	name string
+	data map[string]any
+}
+
+func playgroundEvents(t *testing.T, raw []byte) []playgroundEvent {
+	t.Helper()
+	var events []playgroundEvent
+	for block := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n\n") {
+		name, payload, found := strings.Cut(block, "\ndata: ")
+		event := playgroundEvent{name: strings.TrimPrefix(name, "event: ")}
+		if !found || json.Unmarshal([]byte(payload), &event.data) != nil {
+			t.Fatalf("playground stream block %q is not an event with JSON data", block)
+		}
+		events = append(events, event)
+	}
+	return events
+}
