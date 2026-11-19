@@ -107,13 +107,13 @@ func (s *Server) newFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal 
 		x.routingInputs = s.Deps.Runtime.RoutingInputs()
 	}
 	fact.CardRev, fact.CardPinned = x.resolveAttemptCardRevision(a.ProviderID, x.Route, fact.StartedAt)
-	provider, known := x.snapshot().FindProvider(a.ProviderID)
+	provider, known := x.Snapshot().FindProvider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true
 	}
 	fact.CommitmentPinned = known
 	if known {
-		timeline := x.snapshot()
+		timeline := x.Snapshot()
 		if s.Deps.Runtime != nil {
 			if release := s.Deps.Runtime.Release(); release != nil {
 				timeline = release.Snapshot()
@@ -138,13 +138,13 @@ func (s *Server) newFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal 
 	}
 	evidence := x.preparation().attemptEvidence(a)
 	fact.GuardrailDecisions = evidence.guardrails
-	if x.strict() {
+	if x.Strict() {
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			return fact
 		}
 		if x.family == wire.Realtime {
-			if _, ok := x.snapshot().RealtimeTemplate(x.Route.Slug, a.TargetID); ok {
+			if _, ok := x.Snapshot().RealtimeTemplate(x.Route.Slug, a.TargetID); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 			return fact
@@ -152,13 +152,13 @@ func (s *Server) newFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal 
 		if x.family == wire.Batch || x.family == wire.File ||
 			x.family == wire.AnthropicFile || x.family == wire.AnthropicBatch ||
 			x.family == wire.GeminiFile || x.family == wire.GeminiBatch || x.family == wire.CloudBatch {
-			if _, ok := x.snapshot().DurableTemplate(x.Route.Slug, a.TargetID); ok {
+			if _, ok := x.Snapshot().DurableTemplate(x.Route.Slug, a.TargetID); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 			return fact
 		}
 		if x.media != nil {
-			if _, ok := x.snapshot().MediaTemplate(x.Route.Slug, a.TargetID, string(x.media.Op())); ok {
+			if _, ok := x.Snapshot().MediaTemplate(x.Route.Slug, a.TargetID, string(x.media.Op())); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 		} else if evidence.planClass != "" {

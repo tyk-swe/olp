@@ -172,7 +172,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	var p *Pin
 	defer func() { s.settleSession(r.Context(), x, p) }()
-	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "native", "realtime", func(provider *routing.Provider, model string) bool {
+	p, e = s.SelectPinSurface(ctx, x, &route, "realtime", "native", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == descriptor.ProfileID && provider.Connector().Supports("realtime", "native", "realtime") && provider.Supports(model, "realtime", "native", "realtime")
 	})
 	if e != nil {
@@ -257,7 +257,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	usageRecord, usageComplete, relayErr := s.relayNativeDuplex(ctx, x, p, client, upstream, token, observer, template.Transport(), int(limit))
 	class := classProtocol
 	cancelled := false
-	if x.strict() && relayErr != nil {
+	if x.Strict() && relayErr != nil {
 		class = classAmbiguous
 		switch {
 		case errors.Is(relayErr, errDuplexProviderError):
@@ -295,7 +295,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	if relayErr != nil {
 		x.Failure, status = fault.ServerError(http.StatusBadGateway, "duplex_incomplete", "The duplex session ended without a complete transport contract."), http.StatusBadGateway
-		if x.strict() {
+		if x.Strict() {
 			switch {
 			case errors.Is(relayErr, errDuplexProviderError):
 				x.Failure = fault.ServerError(http.StatusBadGateway, "duplex_provider_error", "The duplex provider reported an error.")
@@ -316,7 +316,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, out = http.StatusOK, &Outcome{Committed: true}
-	if x.strict() {
+	if x.Strict() {
 		status = http.StatusSwitchingProtocols
 	}
 }

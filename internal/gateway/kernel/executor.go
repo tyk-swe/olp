@@ -120,7 +120,7 @@ func (s *Server) walkDispatchable(x *Call, attempts []routing.Attempt, visit fun
 	repeats := retryDispatches(x.Route)
 	available := 0
 	for _, attempt := range attempts {
-		provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
+		provider, ok := x.Snapshot().FindProvider(attempt.ProviderID)
 		if !ok {
 			continue
 		}
@@ -383,7 +383,7 @@ func (s *Server) slotAvailable(x *Call, attempt routing.Attempt, slot *routing.S
 	if !slot.Allows(attempt.UpstreamModel, x.Route.Slug, x.keyID) {
 		return false
 	}
-	provider := x.snapshot().Provider(attempt.ProviderID)
+	provider := x.Snapshot().Provider(attempt.ProviderID)
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
@@ -660,7 +660,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 				if err := contract.ValidateEvent(event); err != nil {
 					return err
 				}
-				if x.strict() && x.family == wire.Responses {
+				if x.Strict() && x.family == wire.Responses {
 					if kind, present := event.Source().Root().Lookup("type"); present {
 						if text, ok := kind.Text(); ok && text == "response.incomplete" {
 							strictResponseIncomplete = true
@@ -787,7 +787,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 				}
 				if err == nil && encodedWire == x.family {
 					completion = native
-					if x.strict() && x.family == wire.Responses {
+					if x.Strict() && x.family == wire.Responses {
 						source := native.Native.Source()
 						if _, present := source.Lookup("/model"); present {
 							model, _ := json.Marshal(x.named().Slug)

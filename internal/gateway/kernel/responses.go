@@ -225,7 +225,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *Call, authority keyau
 			expires = &at
 		}
 	}
-	if x.strict() {
+	if x.Strict() {
 		deferred := s.pendingResponseUsage(x, &fact, metadata)
 		encoded, _ := json.Marshal(metadata)
 		commitCtx, stopCommit := ResourceCommitContext(ctx)
@@ -616,7 +616,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *Call, fact *
 	}
 	response, present := event.Source().Root().Lookup("response")
 	if !present || response.Kind() == oif.Null {
-		if x.strict() {
+		if x.Strict() {
 			return errResponseMapping
 		}
 		return nil
@@ -698,7 +698,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *Call, fact *even
 	}
 	response, present := doc.Root().Lookup("response")
 	if !present || response.Kind() == oif.Null {
-		if x.strict() {
+		if x.Strict() {
 			if kind, found := doc.Root().Lookup("type"); found {
 				if name, valid := kind.Text(); valid && (name == "response.created" || name == "response.in_progress" || name == "response.queued") {
 					return nil, errResponseMapping
@@ -725,7 +725,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *Call, fact *even
 		return nil, errResponseMapping
 	}
 	var mapped oif.Document
-	if x.strict() {
+	if x.Strict() {
 		projection := responseProjection{upstreamID: upstreamID, localID: local, route: x.Route.Slug}
 		if previous := x.previousResponse(); previous != nil {
 			projection.previousUpstream, projection.previousLocal = previous.UpstreamID, previous.ID
@@ -791,7 +791,7 @@ func (s *Server) putStreamResponse(ctx context.Context, x *Call, fact *events.At
 	}
 	deferred := s.pendingResponseUsage(x, fact, metadata)
 	encoded, _ := json.Marshal(metadata)
-	if x.strict() {
+	if x.Strict() {
 		return s.putStrictResponse(ctx, x, fact, upstreamID, state, encoded, expires)
 	}
 	res, err := s.Deps.Resources.Put(ctx, &resources.Resource{

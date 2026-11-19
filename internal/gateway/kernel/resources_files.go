@@ -47,7 +47,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.Route = &route
-	if x.strict() && !authority.Policy.AllowProviderState {
+	if x.Strict() && !authority.Policy.AllowProviderState {
 		s.Refuse(x, w, providerStateForbidden())
 		return
 	}
@@ -84,13 +84,13 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil))
 		return
 	}
-	if x.strict() && !s.Deps.Resources.Encrypted() {
+	if x.Strict() && !s.Deps.Resources.Encrypted() {
 		s.Refuse(x, w, providerStateForbidden())
 		return
 	}
 	var strictSource []byte
 	fileFirst := false
-	if x.strict() {
+	if x.Strict() {
 		fields, normalized := form.SourceFields()
 		fileFirst = len(fields) == 2 && fields[0].Name == "file"
 		if normalized || len(fields) != 2 || len(extra) != 0 || purpose != "batch" ||
@@ -127,7 +127,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, e)
 		return
 	}
-	if x.strict() {
+	if x.Strict() {
 		if refusal := strictBatchTargetRefusal(p); refusal != nil {
 			s.ReleaseHold(r.Context(), p.Hold)
 			s.Refuse(x, w, refusal)
@@ -144,7 +144,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, fault.InvalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param))
 		return
 	}
-	if adapter.Managed() || adapter == connectors.BatchOpenAI && !x.strict() && purpose == "batch" {
+	if adapter.Managed() || adapter == connectors.BatchOpenAI && !x.Strict() && purpose == "batch" {
 		if adapter != connectors.BatchOpenAI && (purpose != "batch" || len(extra) > 0) {
 			param := "purpose"
 			s.ReleaseHold(r.Context(), p.Hold)
@@ -172,8 +172,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	var strictServing oif.ServingIdentity
 	var strictEndpoint string
 	var strictItems int
-	if x.strict() {
-		template, ok := x.snapshot().DurableTemplate(route.Slug, p.Target.ID)
+	if x.Strict() {
+		template, ok := x.Snapshot().DurableTemplate(route.Slug, p.Target.ID)
 		if !ok {
 			s.ReleaseHold(r.Context(), p.Hold)
 			s.Refuse(x, w, fault.InvalidRequest("target_capability", "The selected target has no strict batch contract.", nil))
@@ -229,7 +229,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 			return
 		}
-		if x.strict() {
+		if x.Strict() {
 			if _, upstreamID, err = strictResult(body, ""); err != nil {
 				s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."))
 				return
@@ -252,7 +252,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindFile
-	if x.strict() {
+	if x.Strict() {
 		kind = resources.KindStrictFile
 		metadata = durableMetadata(p.Model)
 		expires = s.durableExpiry(expires)
@@ -273,7 +273,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:          expires,
 	}
 	var res *resources.Resource
-	if x.strict() {
+	if x.Strict() {
 		version := resources.DurableContractVersion
 		resource.ContractVersion = &version
 		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: strictSource, Result: body, Binding: p.Model, Serving: strictServing,
@@ -291,7 +291,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out []byte
-	if x.strict() {
+	if x.Strict() {
 		out, err = durableProjection(body, res.ID, nil)
 	} else if adapter.Managed() {
 		out, err = s.fileObject(r.Context(), res)
@@ -418,7 +418,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.Gate.Release(r.Context())
-	limit, after, e := listArgs(r)
+	limit, after, e := ListArgs(r)
 	if e != nil {
 		s.Refuse(x, w, e)
 		return

@@ -518,7 +518,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			x.ingress = "gemini"
 		}
 		writeError := func(w http.ResponseWriter, e *fault.Error) {
-			if x.strict() && x.dispatched && e.Status >= 500 {
+			if x.Strict() && x.dispatched && e.Status >= 500 {
 				copy := *e
 				copy.NoRetry = true
 				e = &copy
@@ -860,7 +860,7 @@ func (s *Server) prepare(ctx context.Context, x *Call, authorize func(*routing.R
 	if x.generation.parsed.Stream {
 		x.mode = "streaming"
 	}
-	route, ok := x.snapshot().FindRoute(x.generation.parsed.Route)
+	route, ok := x.Snapshot().FindRoute(x.generation.parsed.Route)
 	if !ok {
 		return fault.ModelNotFound(x.generation.parsed.Route)
 	}
@@ -871,7 +871,7 @@ func (s *Server) prepare(ctx context.Context, x *Call, authorize func(*routing.R
 	if route.ToolExecution != "gateway" && len(x.generation.approval) > 0 {
 		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	if route.ToolExecution == "gateway" && x.strict() {
+	if route.ToolExecution == "gateway" && x.Strict() {
 		return fault.InvalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
 	}
 	if route.ToolExecution == "gateway" && !x.generation.toolsetsSelected {
@@ -922,7 +922,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	if e := s.checkRouteFidelity(ctx, x.Route); e != nil {
 		return e
 	}
-	if x.strict() {
+	if x.Strict() {
 		if x.actor == "playground" {
 			param := "client_contract"
 			return fault.InvalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
@@ -965,7 +965,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 			session.semantic = errors.New("provider-state capability unavailable")
 			return nil, session.semantic
 		}
-		if !x.strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
+		if !x.Strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
 			metadata, _ := p.Metadata(t.ProviderModel)
 			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
 				session.semantic = errors.New("model does not declare structured-output support")

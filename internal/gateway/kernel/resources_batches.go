@@ -60,7 +60,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, e)
 		return
 	}
-	if candidate, exists := x.snapshot().FindRoute(file.RouteSlug); exists {
+	if candidate, exists := x.Snapshot().FindRoute(file.RouteSlug); exists {
 		x.Route = &candidate
 	}
 	p, route, e := s.ResolveResource(r.Context(), x, authority, file, "batch", RetainedNewWork)
@@ -145,12 +145,12 @@ func (s *Server) planBatch(ctx context.Context, x *Call, authority keyauthority.
 	if e := managedBatchShape(request.source, p.Provider.VendorID, adapter); e != nil {
 		return batchPlan{}, e
 	}
-	if x.strict() {
+	if x.Strict() {
 		if e := s.strictBatchAdmission(ctx, x, authority, request, file, contract, p); e != nil {
 			return batchPlan{}, e
 		}
 	}
-	manifest, e := inputBatchManifest(file, adapter, request.endpoint, x.strict())
+	manifest, e := inputBatchManifest(file, adapter, request.endpoint, x.Strict())
 	if e != nil {
 		return batchPlan{}, e
 	}
@@ -167,7 +167,7 @@ func (s *Server) planBatch(ctx context.Context, x *Call, authority keyauthority.
 		id: uuid.New(), adapter: adapter, kind: resources.KindBatch, window: window, manifest: manifest,
 		clientMetadata: request.source.Fields()["metadata"],
 	}
-	if x.strict() {
+	if x.Strict() {
 		return s.planStrictBatch(x, request, file, contract, p, route, plan)
 	}
 	return planFilesBatch(request, file, p, plan)
@@ -238,7 +238,7 @@ func (m batchManifest) usable(adapter connectors.BatchAdapter) bool {
 }
 
 func (s *Server) planStrictBatch(x *Call, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *Pin, route *routing.Route, plan batchPlan) (batchPlan, *fault.Error) {
-	template, ok := x.snapshot().DurableTemplate(route.Slug, p.Target.ID)
+	template, ok := x.Snapshot().DurableTemplate(route.Slug, p.Target.ID)
 	if !ok {
 		return batchPlan{}, fault.InvalidRequest("target_capability", "The selected target has no strict batch contract.", nil)
 	}
@@ -324,7 +324,7 @@ func openAIBatchBody(source oif.Document, upstreamFile string, p *Pin, window ba
 
 func (s *Server) submitBatch(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *pinnedExchange, *fault.Error) {
 	submission, e := s.BeginBatch(ctx, x, authority.ID, p, BatchIntent{
-		resourceID: plan.id, Kind: plan.kind, Adapter: plan.adapter, Surface: batches.SurfaceOpenAI,
+		ResourceID: plan.id, Kind: plan.kind, Adapter: plan.adapter, Surface: batches.SurfaceOpenAI,
 		Operation: request.operation, Window: plan.window.length, Expected: plan.expected, Submission: plan.submission,
 		Source: request.source, Canonical: request.source.Bytes(), Effective: plan.body, serving: plan.serving,
 	})
@@ -441,7 +441,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.Gate.Release(r.Context())
-	limit, after, e := listArgs(r)
+	limit, after, e := ListArgs(r)
 	if e != nil {
 		s.Refuse(x, w, e)
 		return

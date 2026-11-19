@@ -18,10 +18,10 @@ func (x *Call) workflowModelCost(attempt routing.Attempt) *fault.Error {
 	if x.workflow == nil || x.generation.runLimits.MaxRunCost == nil {
 		return nil
 	}
-	if attempt.Price == nil || x.snapshot() == nil {
+	if attempt.Price == nil || x.Snapshot() == nil {
 		return workflowUnboundedCost()
 	}
-	provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
+	provider, ok := x.Snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
 		return workflowUnboundedCost()
 	}

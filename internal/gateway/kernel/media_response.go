@@ -119,7 +119,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 	result := out.result
 	switch payload := result.Payload.(type) {
 	case transport.Images:
-		if x.strict() && result.Source.Valid() {
+		if x.Strict() && result.Source.Valid() {
 			defer s.removeImages(payload.ImageResult)
 			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
 			return
@@ -142,7 +142,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 			return err
 		})
 	case transport.Transcript:
-		if x.strict() && result.Source.Valid() {
+		if x.Strict() && result.Source.Valid() {
 			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
 			return
 		}
@@ -157,7 +157,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 	case transport.Video:
 		var body []byte
 		var failure *media.Error
-		if x.strict() {
+		if x.Strict() {
 			body, failure = media.EncodeStrictVideoObject(result.Source, payload.ID, outJobID(out), x.media.Route())
 		} else {
 			body, failure = media.EncodeVideoObject(payload.VideoJobResult, outJobID(out), x.media.Route())

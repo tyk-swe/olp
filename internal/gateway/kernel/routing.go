@@ -85,7 +85,7 @@ func (s *Server) planning(x *Call, kind planningKind, route *routing.Route, oper
 
 func (p *planningSession) selectPlan(ctx context.Context, options routing.Options) (routing.Plan, bool, *fault.Error) {
 	x := p.call
-	plan, err := routing.Select(x.snapshot(), p.route.Slug, p.operation, p.surface, p.mode, x.affinity, options)
+	plan, err := routing.Select(x.Snapshot(), p.route.Slug, p.operation, p.surface, p.mode, x.affinity, options)
 	if err != nil {
 		if p.kind == canonicalPlanning || p.kind == mediaPlanning {
 			var selection *routing.SelectionError
@@ -117,7 +117,7 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 		}
 		return plan, false, problem
 	}
-	if p.kind == canonicalPlanning && x.strict() {
+	if p.kind == canonicalPlanning && x.Strict() {
 		for _, decision := range plan.Decisions {
 			if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
 				return plan, false, fault.InvalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)

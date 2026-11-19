@@ -117,7 +117,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.strict() {
+	if x.Strict() {
 		if e := strictRealtimeHandshake(snapshot, &route, r); e != nil {
 			fail(e)
 			return
@@ -128,10 +128,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x.estimate = resourceEstimate
 	var p *Pin
 	defer func() { s.settleSession(r.Context(), x, p) }()
-	if x.strict() {
+	if x.Strict() {
 		// Realtime has an operation-owned duplex contract. Retained Responses
 		// eligibility and the unary codec say nothing about a native session.
-		p, e = s.selectPinSurface(ctx, x, &route, "realtime", "openai", "realtime", func(provider *routing.Provider, model string) bool {
+		p, e = s.SelectPinSurface(ctx, x, &route, "realtime", "openai", "realtime", func(provider *routing.Provider, model string) bool {
 			return provider.Connector().Supports("realtime", "openai", "realtime") && provider.Supports(model, "realtime", "openai", "realtime")
 		})
 	} else {
@@ -141,9 +141,9 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.strict() {
+	if x.Strict() {
 		if _, ok := snapshot.RealtimeTemplate(route.Slug, p.Target.ID); !ok {
-			fail(policyUnavailable("realtime_contract_unavailable", "The selected target has no compiled strict realtime contract."))
+			fail(PolicyUnavailable("realtime_contract_unavailable", "The selected target has no compiled strict realtime contract."))
 			return
 		}
 	}
@@ -183,7 +183,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
 	terminalStatus := http.StatusOK
-	if x.strict() {
+	if x.Strict() {
 		// A strict WebSocket has already committed HTTP 101 at this boundary.
 		// Later transport errors are carried by close frames and the Attempt.
 		terminalStatus = http.StatusSwitchingProtocols
@@ -193,7 +193,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 
 		client.Close(websocket.StatusInternalError, "upstream unavailable")
 		x.Failure = e
-		if x.strict() {
+		if x.Strict() {
 			s.Finish(x, &Outcome{Err: e, Committed: true}, terminalStatus)
 		} else {
 			s.Finish(x, nil, e.Status)
@@ -262,7 +262,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 			x.Failure = (&attemptFailure{class: classTimeout}).toError()
 		}
 		status := x.Failure.Status
-		if x.strict() {
+		if x.Strict() {
 			status = terminalStatus
 		}
 		s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: cancelled}, status)
@@ -287,7 +287,7 @@ func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *ht
 		}
 		return nil
 	}
-	return policyUnavailable("realtime_contract_unavailable", "The route has no compiled strict OpenAI realtime target.")
+	return PolicyUnavailable("realtime_contract_unavailable", "The route has no compiled strict OpenAI realtime target.")
 }
 
 func realtimeUpgrade(r *http.Request) bool {
@@ -506,7 +506,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *Call, p *Pin, client, con
 				func() {
 					usageMu.Lock()
 					defer usageMu.Unlock()
-					if u := responses.ProviderFrame(typ, data, x.strict()); u != nil {
+					if u := responses.ProviderFrame(typ, data, x.Strict()); u != nil {
 						usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
 						usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
 						addUsageShare(&usage.CachedInputTokens, u.CachedInputTokens)
@@ -518,7 +518,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *Call, p *Pin, client, con
 						have = true
 					}
 				}()
-			} else if x.strict() {
+			} else if x.Strict() {
 				func() {
 					usageMu.Lock()
 					defer usageMu.Unlock()
@@ -609,7 +609,7 @@ loop:
 		code = websocket.StatusInternalError
 	}
 	usageMu.Lock()
-	pending := x.strict() && responses.Pending()
+	pending := x.Strict() && responses.Pending()
 	usageMu.Unlock()
 	if !clientClosed && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		// The provider closed a socket while a native response still owed
@@ -631,7 +631,7 @@ loop:
 	if have {
 		observedUsage = usage
 	}
-	pending = x.strict() && responses.Pending()
+	pending = x.Strict() && responses.Pending()
 	if clientClosed && (pending || clientDeliveryFailed) {
 		return observedUsage, observed, fmt.Errorf("%w: %v", errRealtimeClientClosed, first)
 	}

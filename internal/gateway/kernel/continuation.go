@@ -47,7 +47,7 @@ type storedContinuation struct {
 	Query           url.Values                `json:"query"`
 }
 
-func (x *Call) snapshot() *routing.View {
+func (x *Call) Snapshot() *routing.View {
 	if x.historicalSnapshot != nil {
 		return x.historicalSnapshot
 	}

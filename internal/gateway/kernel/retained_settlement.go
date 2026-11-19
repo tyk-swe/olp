@@ -43,7 +43,7 @@ func (s *Server) prepareRetainedAccounting(x *Call, p *Pin, route *routing.Route
 			return fault.ServerError(503, "pricing_unavailable", "Every retained billing component and model needs a published price before acceptance.")
 		}
 		if e.Operation == "eval" && !retainedEvalPricingSupported(price, x.attemptCardRevisionForRoute(p.Provider.ID, route, x.request.startedAt), string(p.Provider.Kind), p.Provider.VendorID, model) {
-			return policyUnavailable("unsupported_metered_operation", "Evaluation totals cannot establish per-invocation input tiers; publish prices and rate cards without those tiers.")
+			return PolicyUnavailable("unsupported_metered_operation", "Evaluation totals cannot establish per-invocation input tiers; publish prices and rate cards without those tiers.")
 		}
 		template, err := s.settlementTemplate(x, &cp, e.Surface, operation, s.Now())
 		if err != nil {

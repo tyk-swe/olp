@@ -136,7 +136,7 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 				x := costExecution(t, tc.body, tc.family, 1, routing.Attempt{UpstreamModel: "gemini-2.5-flash", Price: costPrice()})
 				x.request.id, x.request.minted = uuid.NewString(), true
 				attempt := x.attempts[0]
-				snapshot := x.snapshot().Clone()
+				snapshot := x.Snapshot().Clone()
 				provider := snapshot.Providers[attempt.ProviderID]
 				provider.Kind = "gemini"
 				provider.ParameterDefaults = protocols.Object{"generationConfig": json.RawMessage(`{"maxOutputTokens":32768,"candidateCount":4}`)}
@@ -305,7 +305,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				ID: uuid.NewString(), Markup: "2", EffectiveAt: now.Add(-time.Hour),
 			})}}
 			originalCardID := card.Revisions[0].ID
-			snapshot := x.snapshot().Clone()
+			snapshot := x.Snapshot().Clone()
 			provider := snapshot.Providers[x.attempts[0].ProviderID]
 			switch owner {
 			case "provider":
@@ -424,7 +424,7 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"first"}],"max_tokens":8}`, wire.Chat, 1, routing.Attempt{})
 			attempt := x.attempts[0]
-			provider := x.snapshot().Provider(attempt.ProviderID)
+			provider := x.Snapshot().Provider(attempt.ProviderID)
 			provider.Kind = "openai_compatible"
 			if transformed {
 				x.Route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
@@ -509,7 +509,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: refreshed}}
 			s := &Server{Now: func() time.Time { return now }, fleet: &health.Fleet{}, Deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, keyauthority.Authority{})
-			provider := x.snapshot().Provider(x.attempts[0].ProviderID)
+			provider := x.Snapshot().Provider(x.attempts[0].ProviderID)
 			fact := s.newFact(x, x.attempts[0], provider.Slots[0], 1)
 			assertAccountingCardPin(t, fact, fresh, "")
 		})

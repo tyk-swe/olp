@@ -26,10 +26,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-const defaultBatchCompletionWindow = 24 * time.Hour
+const DefaultBatchCompletionWindow = 24 * time.Hour
 
 type BatchIntent struct {
-	resourceID uuid.UUID
+	ResourceID uuid.UUID
 	Kind       string
 	Adapter    connectors.BatchAdapter
 	Surface    batches.Surface
@@ -79,7 +79,7 @@ func batchLineOperation(source oif.Document) (string, wire.LineOperation, *fault
 func batchCompletionWindow(source oif.Document, vendor string) (batchWindow, *fault.Error) {
 	value, present := source.Root().Lookup("completion_window")
 	if !present {
-		return batchWindow{label: "24h", length: defaultBatchCompletionWindow}, nil
+		return batchWindow{label: "24h", length: DefaultBatchCompletionWindow}, nil
 	}
 	raw, valid := value.Text()
 	if !valid {
@@ -130,7 +130,7 @@ func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p 
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
 	if p.Provider.CredentialSource == "caller" {
-		return batchSubmission{}, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
+		return batchSubmission{}, PolicyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
 	}
 	digester := s.Deps.Digester
 	if digester == nil {
@@ -183,7 +183,7 @@ func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p 
 }
 
 func (s *Server) batchResource(x *Call, authorityID string, p *Pin, intent BatchIntent) resources.Resource {
-	id := intent.resourceID
+	id := intent.ResourceID
 	if id == uuid.Nil {
 		id = uuid.Must(uuid.NewV7())
 	}

@@ -60,7 +60,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}()
 	fail := func(e *fault.Error) {
 		x.Failure, status = e, e.Status
-		if x.dispatched && x.strict() && e.Status >= 500 {
+		if x.dispatched && x.Strict() && e.Status >= 500 {
 			copy := *e
 			copy.NoRetry = true
 			e = &copy
@@ -170,7 +170,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		p.Hold = gate.hold
 		x.attempts, x.budget = []routing.Attempt{p.attempt}, 1
 	} else {
-		p, e = s.selectPinSurface(ctx, x, &route, "generation", "gemini", x.mode, func(provider *routing.Provider, model string) bool {
+		p, e = s.SelectPinSurface(ctx, x, &route, "generation", "gemini", x.mode, func(provider *routing.Provider, model string) bool {
 			return provider.ProfileID == "gemini-interactions" && provider.Connector().Supports("generation", "gemini", x.mode) && provider.Supports(model, "generation", "gemini", x.mode)
 		})
 		if e != nil {

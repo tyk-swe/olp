@@ -118,7 +118,7 @@ func (s *Server) classify(ctx context.Context, x *Call, c *routing.ClassifierPre
 // classification route answers with its highest-scoring label, a generation
 // route with its trimmed reply.
 func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.ClassifierPredicate) classification {
-	route, ok := parent.snapshot().FindRoute(c.Route)
+	route, ok := parent.Snapshot().FindRoute(c.Route)
 	switch {
 	case !ok || parent.generation.parsed == nil:
 		return classification{failure: classifierFailed}
@@ -176,7 +176,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	failed := classification{failure: classifierFailed}
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
-	if x.snapshot().HasBodyLimits() {
+	if x.Snapshot().HasBodyLimits() {
 		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
@@ -212,7 +212,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 func (s *Server) generateLabel(ctx context.Context, x *Call, slug, text string) (classification, *Outcome) {
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
-	if x.snapshot().HasBodyLimits() {
+	if x.Snapshot().HasBodyLimits() {
 		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	parsed, err := protocols.Parse(wire.Chat, body, "")

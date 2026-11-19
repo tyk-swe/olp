@@ -36,7 +36,6 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	s.registerRetainedLifecycle(mux)
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
-	s.registerCloudBatchState(mux)
 	if s.Deps.Staging != nil {
 		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
@@ -119,9 +118,9 @@ func fireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
 		return nil
 	}
 	for _, target := range route.Targets {
-		provider, ok := x.snapshot().FindProvider(target.ProviderID)
+		provider, ok := x.Snapshot().FindProvider(target.ProviderID)
 		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
-			return policyUnavailable("target_capability",
+			return PolicyUnavailable("target_capability",
 				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
 		}
 	}
@@ -130,7 +129,7 @@ func fireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
 
 func strictBatchTargetRefusal(p *Pin) *fault.Error {
 	if p != nil && p.Provider.Kind != "openai" && p.Provider.Kind != "azure_openai" {
-		return policyUnavailable("target_capability",
+		return PolicyUnavailable("target_capability",
 			"Strict routes serve files and batches only for OpenAI and Azure.")
 	}
 	return nil
@@ -149,12 +148,12 @@ func ResourceModel(res *resources.Resource) string {
 }
 
 func (s *Server) selectPin(ctx context.Context, x *Call, route *routing.Route, operation, mode string) (*Pin, *fault.Error) {
-	return s.selectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
+	return s.SelectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
 		return stateQualified(p, model, operation, mode)
 	})
 }
 
-func (s *Server) selectPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
+func (s *Server) SelectPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
 	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
 }
 
@@ -338,7 +337,7 @@ func (s *Server) NativeStateRoute(x *Call, authority keyauthority.Authority, r *
 	if slug == "" {
 		return nil, fault.InvalidRequest("missing_required_parameter", wording.missingRoute, nil)
 	}
-	route, ok := x.snapshot().FindRoute(slug)
+	route, ok := x.Snapshot().FindRoute(slug)
 	if !ok {
 		return nil, fault.ModelNotFound(slug)
 	}
@@ -349,8 +348,8 @@ func (s *Server) NativeStateRoute(x *Call, authority keyauthority.Authority, r *
 	if !slices.Contains(route.Operations, "batch") {
 		return nil, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
 	}
-	if x.strict() {
-		return nil, policyUnavailable("target_capability", wording.strictRoute)
+	if x.Strict() {
+		return nil, PolicyUnavailable("target_capability", wording.strictRoute)
 	}
 	if e := x.GuardrailSurfaceGate(&route); e != nil {
 		return nil, e
@@ -360,7 +359,7 @@ func (s *Server) NativeStateRoute(x *Call, authority keyauthority.Authority, r *
 
 func (s *Server) NativeStatePin(ctx context.Context, x *Call, route *routing.Route) (*Pin, *fault.Error) {
 	surface := x.family.Surface()
-	return s.selectPinSurface(ctx, x, route, "batch", surface, "unary", func(p *routing.Provider, model string) bool {
+	return s.SelectPinSurface(ctx, x, route, "batch", surface, "unary", func(p *routing.Provider, model string) bool {
 		return p.Connector().Supports("batch", surface, "unary") && p.Supports(model, "batch", surface, "unary")
 	})
 }
@@ -770,7 +769,7 @@ func resourceListError(err error, message string) *fault.Error {
 	return fault.ServerError(http.StatusInternalServerError, "internal_error", message)
 }
 
-func listArgs(r *http.Request) (int, string, *fault.Error) {
+func ListArgs(r *http.Request) (int, string, *fault.Error) {
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)

@@ -74,7 +74,7 @@ func (x *Call) limitRoute() string {
 func requestEstimate(x *Call) int64 {
 	var reserved int64
 	for _, attempt := range x.attempts {
-		provider := x.snapshot().Provider(attempt.ProviderID)
+		provider := x.Snapshot().Provider(attempt.ProviderID)
 		reserved = max(reserved, x.attemptReservation(attempt, &provider))
 	}
 	return max(reserved, 1)

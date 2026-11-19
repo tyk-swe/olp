@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func policyUnavailable(code, message string) *fault.Error {
+func PolicyUnavailable(code, message string) *fault.Error {
 	return &fault.Error{Status: http.StatusUnprocessableEntity, Type: "invalid_request_error", Code: code, Message: message}
 }
 
@@ -31,7 +31,7 @@ func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *fault.Error
 
 func policySurfaceGate(route *routing.Route) *fault.Error {
 	if route != nil && route.ContentPolicy != nil && len(route.ContentPolicy.Rules) > 0 {
-		return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has a content policy this surface cannot enforce; use a canonical request surface.")
+		return PolicyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has a content policy this surface cannot enforce; use a canonical request surface.")
 	}
 	return nil
 }
@@ -52,13 +52,13 @@ func (s *Server) enforceContentPolicy(x *Call) *fault.Error {
 	}
 	if compiled.HasOutput() {
 		if x.generation.parsed.Stream {
-			return policyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.Route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
+			return PolicyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.Route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
 		}
 		if x.providerState {
-			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.Route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
+			return PolicyUnavailable("content_policy_surface_unavailable", "The model `"+x.Route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
-	if x.strict() || x.preparation().hasProviders() {
+	if x.Strict() || x.preparation().hasProviders() {
 		// The compiled interaction inspected the effective destination after
 		// defaults while filtering candidates. Inspecting the caller projection
 		// again would not establish coverage of that actual invocation.
@@ -79,7 +79,7 @@ func (s *Server) enforceContentPolicy(x *Call) *fault.Error {
 			return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 		})
 		if err != nil {
-			return policyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
+			return PolicyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
 		}
 		switch {
 		case blocked:

@@ -401,8 +401,8 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if !x.strict() {
-		fail(policyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract."))
+	if !x.Strict() {
+		fail(PolicyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract."))
 		return
 	}
 	if held, exposureErr := s.sessionExposureHeld(r.Context(), authority.ID); exposureErr != nil {
@@ -414,7 +414,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), webRTCBound)
 	x.estimate = resourceEstimate
-	p, e := s.selectPinSurface(bg, x, &route, "realtime", "openai", "webrtc", func(provider *routing.Provider, model string) bool {
+	p, e := s.SelectPinSurface(bg, x, &route, "realtime", "openai", "webrtc", func(provider *routing.Provider, model string) bool {
 		return provider.Connector().Supports("realtime", "openai", "webrtc") && provider.Supports(model, "realtime", "openai", "webrtc")
 	})
 	if e != nil {
@@ -431,7 +431,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok || !template.WebRTC() {
 		releasePin()
 		cancel()
-		fail(policyUnavailable("webrtc_contract_unavailable", "The selected target has no compiled governed WebRTC contract."))
+		fail(PolicyUnavailable("webrtc_contract_unavailable", "The selected target has no compiled governed WebRTC contract."))
 		return
 	}
 	boundSession, e := bindWebRTCSession(callReq.session, slug, template.Model())
