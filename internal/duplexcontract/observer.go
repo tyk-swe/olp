@@ -3,7 +3,7 @@ package duplexcontract
 import (
 	"sync"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 type ServerFrame struct {

@@ -2,7 +2,7 @@ package routing
 
 import (
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"reflect"
 	"slices"
 )

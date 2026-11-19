@@ -1,7 +1,7 @@
 package authority
 
 import (
-	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
 type RouteLimits map[string]AdmissionLimits

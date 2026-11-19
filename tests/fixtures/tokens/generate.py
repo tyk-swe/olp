@@ -8,7 +8,7 @@ Run from the repository root:
 
 The script works offline and its output is deterministic, so a clean rerun
 leaves no diff. tiktoken is pinned in pyproject.toml and uv.lock. It reads the
-rank bytes embedded in the Go estimator (internal/operations/tokenization/
+rank bytes embedded in the Go estimator (internal/domain/operations/tokenization/
 estimate/ranks), rebuilds the public .tiktoken text from them, checks it against
 the SHA-256 that tiktoken itself pins for the encoding, and serves it to
 tiktoken through TIKTOKEN_CACHE_DIR, so the oracle and the estimator tokenize
@@ -32,7 +32,7 @@ import tempfile
 import unicodedata
 
 HERE = pathlib.Path(__file__).resolve().parent
-RANKS = HERE.parents[2] / "internal/operations/tokenization/estimate/ranks"
+RANKS = HERE.parents[2] / "internal/domain/operations/tokenization/estimate/ranks"
 MAGIC = b"OLPRANK1"
 BLOB = "https://openaipublic.blob.core.windows.net/encodings/"
 ENCODINGS = ["o200k_base", "cl100k_base"]

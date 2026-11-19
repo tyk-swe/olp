@@ -5,7 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 var imports = metric.Counter("olp_billing_imports_total", "Billing imports this process ran, by provider and outcome.", "provider", "outcome")

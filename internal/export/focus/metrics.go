@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 const pendingSQL = `SELECT sink_id::text, count(*) FROM olp.focus_datasets fd

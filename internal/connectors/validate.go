@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func (c Config) ValidateProfile() error {

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func CurrentTargetIDs(ctx context.Context, q database.Queryer, slug, projectID, providerID, providerModel string) ([]string, error) {

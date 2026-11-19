@@ -10,7 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/surface"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // managementNetwork runs before routing, authentication and admission. The

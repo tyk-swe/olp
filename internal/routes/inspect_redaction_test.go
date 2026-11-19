@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 )
 
 func TestDecisionInspectionRejectsInvalidInlineMedia(t *testing.T) {

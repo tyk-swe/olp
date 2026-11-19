@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 // reconnectDelay backs off reconnect attempts so a down cache does not spin.

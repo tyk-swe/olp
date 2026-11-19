@@ -7,8 +7,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func preparedPromptCache(t testing.TB, format wire.Format, kind connectors.Kind, body string) (Invocation, connectors.Config) {

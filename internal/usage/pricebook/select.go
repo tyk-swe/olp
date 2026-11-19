@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // attemptPricing is one attempt resolved against the pricing revision that was

@@ -52,5 +52,5 @@ docs
 .local
 
 # Go cryptographic implementation source; mounted secret material stays excluded.
-!internal/secrets
-!internal/secrets/*.go
+!internal/platform/secrets
+!internal/platform/secrets/*.go

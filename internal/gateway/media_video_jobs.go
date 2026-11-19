@@ -5,11 +5,11 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {

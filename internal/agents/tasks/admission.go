@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func rateRequest(lookup string, requests, concurrency *int64) admission.Request {

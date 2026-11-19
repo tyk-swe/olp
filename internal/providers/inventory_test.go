@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 type listedVendor struct {

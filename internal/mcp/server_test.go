@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

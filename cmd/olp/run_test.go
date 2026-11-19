@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/admission"
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 )
 
 func TestControlNeverAnswersConsumerProtocolPathsWithTheConsole(t *testing.T) {

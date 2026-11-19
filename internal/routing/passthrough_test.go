@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 )
 
 func passthroughConfig() *PassthroughConfig {

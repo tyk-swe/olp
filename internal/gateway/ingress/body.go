@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/oif"
 )
 
 // ReadBody bounds both the encoded and decoded body before parsing.

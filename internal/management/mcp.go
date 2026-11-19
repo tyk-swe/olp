@@ -14,9 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/oif"
 	client "github.com/tyk-swe/olp/management"
 )
 
