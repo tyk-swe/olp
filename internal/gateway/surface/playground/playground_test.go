@@ -11,13 +11,13 @@ import (
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
 	const exact = `{"count":9007199254740993}`
-	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
+	in := request{ResponseFormat: &format{Type: "json_object"}}
 	for _, test := range []struct{ text, structured string }{
 		{exact, exact},
 		{`{"count":0,"count":9007199254740993}`, exact},
 		{exact + ` {"extra":true}`, ""},
 	} {
-		body, err := json.Marshal(playgroundResponse(kernel.MemberTrail{Route: "team-chat"}, &wire.Completion{OutputText: test.text}, in))
+		body, err := json.Marshal(response(kernel.MemberTrail{Route: "team-chat"}, &wire.Completion{OutputText: test.text}, in))
 		if err != nil {
 			t.Fatal(err)
 		}

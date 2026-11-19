@@ -174,6 +174,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
 | `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
+| `gateway/surface/playground` | The console playground, which runs a route for a signed-in member through `kernel.MemberGeneration`. The composition root registers its two handlers on the management API | `fault`, `kernel`, `publishedprompt` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
