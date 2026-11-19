@@ -5,7 +5,10 @@ import {
   ApiProblem,
   ensureOk,
   unwrap,
-  unwrapPage
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
 } from '#lib/management/http.js';
 import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
@@ -74,7 +77,7 @@ export async function createProvider(
   requestId: string
 ): Promise<string> {
   const response = await apiClient.POST('/api/v1/providers', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response).id;
@@ -90,7 +93,7 @@ export async function updateProvider(
     'patch',
     '/api/v1/providers/{provider_id}',
     {
-      params: { path: { provider_id: id }, header: { 'If-Match': etag } },
+      params: { path: { provider_id: id }, header: ifMatch(etag) },
       body: input
     },
     [['configuration']]
@@ -105,7 +108,7 @@ export async function probeProvider(
     {
       params: {
         path: { provider_id: provider.id },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       }
     }
   );
@@ -127,10 +130,7 @@ export async function activateProvider(
     {
       params: {
         path: { provider_id: provider.id },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       }
     }
   );
@@ -146,10 +146,7 @@ export async function disableProvider(
     {
       params: {
         path: { provider_id: provider.id },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       }
     }
   );
@@ -167,10 +164,7 @@ export async function restoreProviderAsDraft(
     {
       params: {
         path: { provider_id: provider.id },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       }
     },
     [['configuration']]
@@ -196,7 +190,7 @@ export const deleteProvider = async (
     await apiClient.DELETE('/api/v1/providers/{provider_id}', {
       params: {
         path: { provider_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );

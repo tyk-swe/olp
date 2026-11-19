@@ -1,5 +1,10 @@
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  createHeaders,
+  ifMatch
+} from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
 type Schemas = components['schemas'];
 export type BudgetIncrease = Schemas['BudgetIncrease'];
@@ -18,7 +23,7 @@ export async function createIncrease(
 ) {
   return unwrap(
     await apiClient.POST('/api/v1/budget-increases', {
-      params: { header: { 'Idempotency-Key': idempotencyKey } },
+      params: { header: createHeaders(idempotencyKey) },
       body
     })
   );
@@ -28,7 +33,7 @@ export async function revokeIncrease(item: BudgetIncrease) {
     await apiClient.DELETE('/api/v1/budget-increases/{increase_id}', {
       params: {
         path: { increase_id: item.id },
-        header: { 'If-Match': `"${item.etag}"` }
+        header: ifMatch(item.etag)
       }
     })
   );

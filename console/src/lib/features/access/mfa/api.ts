@@ -1,6 +1,11 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapOutcome } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapOutcome,
+  ifMatch
+} from '#lib/management/http.js';
 import {
   parseMFAChallenge,
   type MFAVerification
@@ -43,14 +48,14 @@ export async function verifyMFA(
 export async function removeMFA(id: string, etag: string) {
   ensureOk(
     await apiClient.DELETE('/api/v1/profile/mfa/factors/{factor_id}', {
-      params: { path: { factor_id: id }, header: { 'If-Match': `"${etag}"` } }
+      params: { path: { factor_id: id }, header: ifMatch(etag) }
     })
   );
 }
 export async function recoveryMFA(etag: string) {
   return unwrap(
     await apiClient.POST('/api/v1/profile/mfa/recovery-codes', {
-      params: { header: { 'If-Match': `"${etag}"` } }
+      params: { header: ifMatch(etag) }
     })
   );
 }

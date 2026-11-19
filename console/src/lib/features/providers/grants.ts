@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap } from '#lib/management/http.js';
+import { ensureOk, unwrap, ifMatch } from '#lib/management/http.js';
 import type { Provider } from '#lib/features/providers/providers.js';
 
 type Schemas = components['schemas'];
@@ -25,7 +25,7 @@ export async function startGrantEnrollment(
     {
       params: {
         path: { provider_id: provider.id },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       },
       body: slotId ? { slot_id: slotId } : undefined
     }
@@ -104,7 +104,7 @@ export async function importSubscriptionCredentials(
     {
       params: {
         path: { provider_id: provider.id },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       },
       body: { credentials }
     }

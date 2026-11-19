@@ -67,8 +67,8 @@ ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
 - The `Idempotency-Key` and `If-Match` header names appear only in
   `src/lib/management/`.
 
-Files that broke one of the last three rules before it existed are listed in
-`eslint-legacy.json`. The shared layer rule has no exemptions.
+Files that broke the feature entry or size rule before it existed are listed in
+`eslint-legacy.json`. The shared layer and header rules have no exemptions.
 Those lists only shrink: `scripts/check-exemptions.sh` fails `make check-console`
 when a list is longer than on the default branch. Fix a new violation instead of
 listing the file, and remove a file from its list in the change that fixes it.

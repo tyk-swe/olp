@@ -1,6 +1,13 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -56,7 +63,7 @@ export async function createProject(
 ): Promise<Project> {
   return unwrap(
     await apiClient.POST('/api/v1/projects', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: { name }
     })
   );
@@ -70,7 +77,7 @@ export async function renameProject(
     await apiClient.PATCH('/api/v1/projects/{project_id}', {
       params: {
         path: { project_id: project.id },
-        header: { 'If-Match': project.etag }
+        header: ifMatch(project.etag)
       },
       body: { name }
     })
@@ -109,7 +116,7 @@ export async function putProjectMember(
     await apiClient.PUT('/api/v1/projects/{project_id}/members/{user_id}', {
       params: {
         path: { project_id: project.id, user_id: userId },
-        header: { 'If-Match': project.etag }
+        header: ifMatch(project.etag)
       },
       body: { role }
     })
@@ -124,7 +131,7 @@ export async function removeProjectMember(
     await apiClient.DELETE('/api/v1/projects/{project_id}/members/{user_id}', {
       params: {
         path: { project_id: project.id, user_id: userId },
-        header: { 'If-Match': project.etag }
+        header: ifMatch(project.etag)
       }
     })
   );
@@ -151,7 +158,7 @@ export async function putProjectEndUserPolicy(
     await apiClient.PUT('/api/v1/projects/{project_id}/end-user-policy', {
       params: {
         path: { project_id: projectId },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { policy }
     })
@@ -179,7 +186,7 @@ export async function putProjectAttributionPolicy(
     await apiClient.PUT('/api/v1/projects/{project_id}/attribution-policy', {
       params: {
         path: { project_id: projectId },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { policy }
     })
@@ -207,7 +214,7 @@ export async function putProjectRouteGroups(
     await apiClient.PUT('/api/v1/projects/{project_id}/route-groups', {
       params: {
         path: { project_id: projectId },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { groups }
     })
@@ -235,7 +242,7 @@ export async function putProjectLimitTemplates(
     await apiClient.PUT('/api/v1/projects/{project_id}/limit-templates', {
       params: {
         path: { project_id: projectId },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { templates }
     })
@@ -263,7 +270,7 @@ export async function putProjectAttributionBudgets(
     await apiClient.PUT('/api/v1/projects/{project_id}/attribution-budgets', {
       params: {
         path: { project_id: projectId },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { budgets }
     })
@@ -278,7 +285,7 @@ export const deleteProject = async (
     await apiClient.DELETE('/api/v1/projects/{project_id}', {
       params: {
         path: { project_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );

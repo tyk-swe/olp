@@ -169,18 +169,14 @@ export default [
   },
   {
     files: sourceFiles,
-    ignores: [
-      'src/lib/management/**',
-      ...testFiles,
-      ...legacy.rawMutationHeader
-    ],
+    ignores: ['src/lib/management/**', ...testFiles],
     rules: {
       'no-restricted-syntax': [
         'error',
         {
           selector: 'Literal[value=/^(Idempotency-Key|If-Match)$/]',
           message:
-            'Build mutation headers with mutationHeaders or createHeaders from #lib/management/http.js.'
+            'Build mutation headers with ifMatch, mutationHeaders or createHeaders from #lib/management/http.js.'
         }
       ]
     }

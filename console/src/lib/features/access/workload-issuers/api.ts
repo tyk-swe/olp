@@ -1,5 +1,10 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Issuer = components['schemas']['WorkloadIssuer'];
@@ -24,14 +29,14 @@ export async function saveIssuer(
       await apiClient.PUT('/api/v1/workload-issuers/{issuer_id}', {
         params: {
           path: { issuer_id: current.id },
-          header: { 'If-Match': `"${current.etag}"` }
+          header: ifMatch(current.etag)
         },
         body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/workload-issuers', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body
     })
   );

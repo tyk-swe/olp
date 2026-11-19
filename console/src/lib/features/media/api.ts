@@ -4,7 +4,8 @@ import {
   ApiProblem,
   ensureOk,
   unwrap,
-  unwrapPage
+  unwrapPage,
+  ifMatch
 } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
@@ -57,7 +58,7 @@ export async function deleteMediaJob(
     {
       params: {
         path: { job_id: jobId },
-        header: { 'If-Match': etag }
+        header: ifMatch(etag)
       }
     }
   );

@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, createHeaders } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 
@@ -24,7 +24,7 @@ export async function createDiscount(
   const { data, error, response } = await apiClient.POST(
     '/api/v1/pricing/discounts',
     {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: draft
     }
   );
