@@ -338,3 +338,59 @@ func TestSettingAndBrandingWritesValidateGuardStaleAndAudit(t *testing.T) {
 		t.Fatalf("branding audit rows = %d, %v", updates, err)
 	}
 }
+
+func TestBudgetGroupAndIncreaseWritesReplayGuardStaleAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "budgets"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	expect := func(method, path string, body any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, method, path, body, headers); status != want {
+			t.Fatalf("%s %s: %s", method, path, describe(status, raw))
+		}
+	}
+
+	create := harness.Idempotent()
+	budget := map[string]any{"name": "team", "monthly_cost_limit": "5.00", "project_id": project}
+	group := s.Want(owner, "POST", "/api/v1/budget-groups", budget, create, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/budget-groups", budget, create, http.StatusCreated); replayed["id"] != group["id"] {
+		t.Fatalf("replayed group = %v, want %v", replayed["id"], group["id"])
+	}
+	id := group["id"].(string)
+	path := "/api/v1/budget-groups/" + id
+	rename := map[string]any{"name": "renamed"}
+	expect("PATCH", path, map[string]any{"owner": "x"}, harness.Idempotent(harness.ETag(group)), http.StatusUnprocessableEntity)
+	expect("PATCH", path, rename, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	updated := s.Want(owner, "PATCH", path, rename, harness.Idempotent(harness.ETag(group)), http.StatusOK)
+	if stored := s.Want(owner, "GET", path, nil, nil, http.StatusOK); stored["name"] != "renamed" || stored["etag"] != updated["etag"] {
+		t.Fatalf("stored group = %v", stored)
+	}
+
+	raise := func(window string) map[string]any {
+		return map[string]any{"target": map[string]any{"kind": "budget_group", "id": id}, "window": window, "amount": "1", "reason": "launch week"}
+	}
+	grant := harness.Idempotent()
+	increase := s.Want(owner, "POST", "/api/v1/budget-increases", raise("month"), grant, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/budget-increases", raise("month"), grant, http.StatusCreated); replayed["id"] != increase["id"] {
+		t.Fatalf("replayed increase = %v, want %v", replayed["id"], increase["id"])
+	}
+	expect("POST", "/api/v1/budget-increases", raise("day"), harness.Idempotent(), http.StatusUnprocessableEntity)
+	increasePath := "/api/v1/budget-increases/" + increase["id"].(string)
+	expect("DELETE", increasePath, nil, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	expect("DELETE", increasePath, nil, harness.Idempotent(harness.ETag(increase)), http.StatusNoContent)
+
+	expect("DELETE", path, nil, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	remove := harness.Idempotent(harness.ETag(updated))
+	expect("DELETE", path, nil, remove, http.StatusNoContent)
+	expect("DELETE", path, nil, remove, http.StatusNoContent)
+	expect("GET", path, nil, nil, http.StatusNotFound)
+
+	if actions, want := auditActions(t, s, id), []string{"budget_group.create", "budget_group.delete", "budget_group.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("group audit = %v, want %v", actions, want)
+	}
+	if actions, want := auditActions(t, s, increase["id"].(string)), []string{"budget.increase.create", "budget.increase.revoke"}; !slices.Equal(actions, want) {
+		t.Fatalf("increase audit = %v, want %v", actions, want)
+	}
+}
