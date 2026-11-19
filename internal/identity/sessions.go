@@ -172,42 +172,40 @@ func (s *Server) logout(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 func (s *Server) revokeSession(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.deleteSession(r, false)
 }
+func revokedSession(r *http.Request, p authz.Principal, current bool) (string, error) {
+	if current {
+		return p.SessionID, nil
+	}
+	return httpkit.IDParam(r, "session_id")
+}
+
 func (s *Server) deleteSession(r *http.Request, current bool) (httpkit.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	session := p.SessionID
-	if !current {
-		session, err = httpkit.IDParam(r, "session_id")
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		session, err := revokedSession(r, p, current)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	var id any = session
-	if session == "" {
-		id = nil
-	}
-	var userID string
-	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", id).Scan(&userID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	// Another member's session is invisible to a caller who cannot manage it.
-	if userID != p.ID && p.Authorize(authz.ManageSessions) != nil {
-		return httpkit.Reply{}, pgx.ErrNoRows
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "session.revoke", "session", session, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	response := httpkit.Reply{Status: 204}
-	if session == p.SessionID {
-		response.Cookies = []*http.Cookie{access.ClearCookie(access.SessionCookie), access.ClearCookie(access.CSRFCookie), access.ClearCookie(access.RecentCookie)}
-	}
-	return response, tx.Commit(r.Context())
+		var id any = session
+		if session == "" {
+			id = nil
+		}
+		var userID string
+		if err := tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", id).Scan(&userID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		// Another member's session is invisible to a caller who cannot manage it.
+		if userID != p.ID && p.Authorize(authz.ManageSessions) != nil {
+			return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		response := httpkit.Reply{Status: 204}
+		if session == p.SessionID {
+			response.Cookies = []*http.Cookie{access.ClearCookie(access.SessionCookie), access.ClearCookie(access.CSRFCookie), access.ClearCookie(access.RecentCookie)}
+		}
+		return response, access.Event{Action: "session.revoke", Resource: "session", ID: session}, nil
+	})
 }
 
 func (s *Server) profile(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -256,30 +254,24 @@ func (s *Server) updateProfile(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err := httpkit.ValidText("display_name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = httpkit.Match(r, p.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), httpkit.NewID(), p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "profile.update", "user", p.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	p.User = u
-	reply, err := s.profileBody(r, tx, p)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := httpkit.Match(r, p.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), httpkit.NewID(), p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		p.User = u
+		reply, err := s.profileBody(r, tx, p)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return reply, access.Event{Action: "profile.update", Resource: "user", ID: p.ID}, nil
+	})
 }
 func (s *Server) changePassword(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writePassword(r, p, false)
@@ -327,44 +319,38 @@ func (s *Server) writePassword(r *http.Request, p authz.Principal, enroll bool) 
 	if !valid {
 		return httpkit.Reply{}, httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = httpkit.Match(r, p.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if enroll {
-		if err = s.access.ConsumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = httpkit.Match(r, p.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, httpkit.NewID(), p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	strength, err := sessionStrength(r, tx, p.SessionID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	response, err := s.newSession(r, tx, p.ID, strength)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	response.Status = 200
-	response.Body = u
-	response.ETag = u.ETag
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "profile.password.update", "user", p.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return response, tx.Commit(r.Context())
+		if enroll {
+			if err = s.access.ConsumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, httpkit.NewID(), p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		strength, err := sessionStrength(r, tx, p.SessionID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		response, err := s.newSession(r, tx, p.ID, strength)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		response.Status = 200
+		response.Body = u
+		response.ETag = u.ETag
+		return response, access.Event{Action: "profile.password.update", Resource: "user", ID: p.ID}, nil
+	})
 }
 func validatePurpose(purpose, resource string) error {
 	switch purpose {
@@ -408,39 +394,28 @@ func (s *Server) reauthenticate(r *http.Request, p authz.Principal) (httpkit.Rep
 	if !valid {
 		return httpkit.Reply{}, httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	// Recheck the password snapshot after taking the authority lock.
-	var current bool
-	if err = tx.QueryRow(r.Context(), "SELECT COALESCE(password_hash=$2,false) FROM olp.users WHERE id=$1", p.ID, *hash).Scan(&current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !current {
-		return httpkit.Reply{}, httpkit.Fail(403, "current_password_invalid", "Authenticate again with the current password.")
-	}
-	configured, err := mfaConfigured(r.Context(), tx, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if configured {
-		reply, e := s.mfaChallenge(r, tx, p.ID, "reauth", &p.SessionID, mfaFlowData{RecentPurpose: input.Purpose, RecentResource: input.Resource})
-		if e != nil {
-			return httpkit.Reply{}, e
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		// Recheck the password snapshot after taking the authority lock.
+		var current bool
+		if err := tx.QueryRow(r.Context(), "SELECT COALESCE(password_hash=$2,false) FROM olp.users WHERE id=$1", p.ID, *hash).Scan(&current); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return reply, tx.Commit(r.Context())
-	}
-	response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return response, tx.Commit(r.Context())
+		if !current {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(403, "current_password_invalid", "Authenticate again with the current password.")
+		}
+		configured, err := mfaConfigured(r.Context(), tx, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if configured {
+			reply, err := s.mfaChallenge(r, tx, p.ID, "reauth", &p.SessionID, mfaFlowData{RecentPurpose: input.Purpose, RecentResource: input.Resource})
+			return reply, access.Event{}, err
+		}
+		response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource, false)
+		return response, access.Event{Action: "session.reauthenticate", Resource: "session", ID: p.SessionID}, err
+	})
 }
+
 func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purpose, resource string, factorVerified bool) (httpkit.Reply, error) {
 	if purpose == "mfa_manage" && !factorVerified {
 		configured, e := mfaConfigured(r.Context(), tx, p.ID)

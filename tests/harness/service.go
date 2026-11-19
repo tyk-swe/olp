@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	accessPassword = "a long service test password"
-	StartupLimit   = 30 * time.Second
+	Password     = "a long service test password"
+	StartupLimit = 30 * time.Second
 )
 
 type Environment struct {
@@ -304,14 +304,14 @@ func ETag(record map[string]any) map[string]string {
 func (s *Service) Owner() *Caller {
 	s.T.Helper()
 	owner := &Caller{Name: "owner"}
-	s.Want(owner, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword, "installation_name": s.Env.label}, map[string]string{"X-OLP-Setup-Token": s.Env.Bootstrap}, http.StatusCreated)
+	s.Want(owner, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": Password, "installation_name": s.Env.label}, map[string]string{"X-OLP-Setup-Token": s.Env.Bootstrap}, http.StatusCreated)
 	return owner
 }
 
 func (s *Service) Login(email string) *Caller {
 	s.T.Helper()
 	member := &Caller{Name: email}
-	s.Want(member, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": accessPassword}, nil, http.StatusCreated)
+	s.Want(member, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": Password}, nil, http.StatusCreated)
 	return member
 }
 
@@ -319,7 +319,7 @@ func (s *Service) Invite(owner *Caller, email, role string) *Caller {
 	s.T.Helper()
 	invitation := s.Want(owner, "POST", "/api/v1/invitations", map[string]any{"email": email, "role": role}, Idempotent(), http.StatusCreated)
 	member := &Caller{Name: email}
-	s.Want(member, "POST", "/api/v1/invitations/accept", map[string]any{"token": invitation["token"], "display_name": role, "password": accessPassword}, nil, http.StatusCreated)
+	s.Want(member, "POST", "/api/v1/invitations/accept", map[string]any{"token": invitation["token"], "display_name": role, "password": Password}, nil, http.StatusCreated)
 	return member
 }
 

@@ -264,67 +264,61 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, u.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if input.Role != nil {
-		u.Role = *input.Role
-	}
-	if input.Active != nil {
-		u.Active = *input.Active
-	}
-	if input.AccessScope != nil {
-		u.AccessScope = *input.AccessScope
-	}
-	if id == p.ID && (!u.Active || u.Role != p.Role || u.AccessScope != p.AccessScope) {
-		return httpkit.Reply{}, httpkit.Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
-	}
-	u.ETag = httpkit.NewID()
-	// Taking over a provisioned user ends the project grants their SCIM groups
-	// gave them, which must not leave a project without a manager.
-	managed, err := scimManagedProjects(r, tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = keepSCIMManagers(r, tx, managed); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !u.Active || u.Role != "owner" || u.AccessScope != "global" {
-		if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	// Issuance is installation-scoped. Existing keys retain their issuer and
-	// policy across account role changes and disabling, as in the reference.
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	u, err = access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(u, u.ETag), tx.Commit(r.Context())
+		if err = httpkit.Match(r, u.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if input.Role != nil {
+			u.Role = *input.Role
+		}
+		if input.Active != nil {
+			u.Active = *input.Active
+		}
+		if input.AccessScope != nil {
+			u.AccessScope = *input.AccessScope
+		}
+		if id == p.ID && (!u.Active || u.Role != p.Role || u.AccessScope != p.AccessScope) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
+		}
+		u.ETag = httpkit.NewID()
+		// Taking over a provisioned user ends the project grants their SCIM groups
+		// gave them, which must not leave a project without a manager.
+		managed, err := scimManagedProjects(r, tx)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = keepSCIMManagers(r, tx, managed); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !u.Active || u.Role != "owner" || u.AccessScope != "global" {
+			if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		// Issuance is installation-scoped. Existing keys retain their issuer and
+		// policy across account role changes and disabling, as in the reference.
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		u, err = access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", id))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(u, u.ETag), access.Event{Action: "user.update", Resource: "user", ID: id}, nil
+	})
 }
 
 // EnsureUsableOwner refuses a change that would leave the installation
@@ -437,90 +431,59 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	if hours < 1 || hours > 720 {
 		return httpkit.Reply{}, httpkit.Invalid("expires_in_hours", "Use 1–720 hours.")
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = s.requireInvitationLogin(r, tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := s.access.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	var exists bool
-	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE email=$1)", address).Scan(&exists); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if exists {
-		return httpkit.Reply{}, httpkit.Fail(409, "user_exists", "This email already belongs to a member.")
-	}
-	id, token := httpkit.NewID(), secrets.Token()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.access.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	body, err := invitation(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v1/invitations/" + id}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "invitation.create", "invitation", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.access, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		if err = s.requireInvitationLogin(r, tx); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var exists bool
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE email=$1)", address).Scan(&exists); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if exists {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "user_exists", "This email already belongs to a member.")
+		}
+		id, token := httpkit.NewID(), secrets.Token()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.access.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		body, err := invitation(r, tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v1/invitations/" + id}
+		return result, access.Event{Action: "invitation.create", Resource: "invitation", ID: id}, nil
+	})
 }
 func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "invitation_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.access.Replay(r, tx, p, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	var accepted, revoked *time.Time
-	if err = tx.QueryRow(r.Context(), "SELECT accepted_at,revoked_at FROM olp.invitations WHERE id=$1", id).Scan(&accepted, &revoked); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if accepted != nil {
-		return httpkit.Reply{}, httpkit.Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
-	}
-	if revoked == nil {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, nil, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var accepted, revoked *time.Time
+		if err := tx.QueryRow(r.Context(), "SELECT accepted_at,revoked_at FROM olp.invitations WHERE id=$1", id).Scan(&accepted, &revoked); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "invitation.revoke", "invitation", id, "success"); err != nil {
-			return httpkit.Reply{}, err
+		if accepted != nil {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
 		}
-	}
-	body, err := invitation(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.OK(body)
-	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		if revoked != nil {
+			body, err := invitation(r, tx, id)
+			return httpkit.OK(body), access.Event{}, err
+		}
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		body, err := invitation(r, tx, id)
+		return httpkit.OK(body), access.Event{Action: "invitation.revoke", Resource: "invitation", ID: id}, err
+	})
 }
+
 func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	var input struct {
 		Token       string `json:"token"`

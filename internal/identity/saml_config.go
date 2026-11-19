@@ -190,30 +190,24 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 	if err := ValidateSAMLDefinition(input.SAMLDefinition); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	old, err := loadSAML(r.Context(), tx)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, err
-	}
-	if old.ID != "" {
-		if err = httpkit.Match(r, old.ETag); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		old, err := loadSAML(r.Context(), tx)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	} else if r.Header.Get("If-Match") != "" {
-		return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "No SAML configuration exists.")
-	}
-	c, err := s.StoreSAMLDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(c, c.ETag), tx.Commit(r.Context())
+		if old.ID != "" {
+			if err = httpkit.Match(r, old.ETag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		} else if r.Header.Get("If-Match") != "" {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "No SAML configuration exists.")
+		}
+		c, err := s.StoreSAMLDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(c, c.ETag), access.Event{Action: "saml.configuration.update", Resource: "saml_configuration", ID: c.ID}, nil
+	})
 }
 
 func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {

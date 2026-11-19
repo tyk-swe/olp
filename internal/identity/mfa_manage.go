@@ -37,23 +37,20 @@ func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, e
 }
 
 func (s *Server) mfaManageChallenge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	enabled, err := mfaConfigured(r.Context(), tx, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !enabled {
-		return httpkit.Reply{}, httpkit.Fail(428, "reauthentication_required", "Confirm your password or linked identity before enrolling your first factor.")
-	}
-	reply, err := s.mfaChallenge(r, tx, p.ID, "manage", &p.SessionID, mfaFlowData{RecentPurpose: "mfa_manage"})
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		enabled, err := mfaConfigured(r.Context(), tx, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !enabled {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(428, "reauthentication_required", "Confirm your password or linked identity before enrolling your first factor.")
+		}
+		reply, err := s.mfaChallenge(r, tx, p.ID, "manage", &p.SessionID, mfaFlowData{RecentPurpose: "mfa_manage"})
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return reply, access.Event{}, nil
+	})
 }
 
 type mfaEnrollInput struct {
@@ -184,56 +181,50 @@ func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = s.checkMFARevision(r, tx, p); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var count int
-	if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.mfa_factors WHERE user_id=$1", p.ID).Scan(&count); err != nil {
-		return httpkit.Reply{}, err
-	}
-	required, err := ReadLocalMFARequired(r.Context(), tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if required && count <= 1 {
-		return httpkit.Reply{}, httpkit.Fail(409, "mfa_required", "Enroll a replacement before removing your last required factor.")
-	}
-	deleted, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_factors WHERE id=$1 AND user_id=$2", id, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if deleted.RowsAffected() != 1 {
-		return httpkit.Reply{}, pgx.ErrNoRows
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if count == 1 {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.sessions SET mfa_verified=false WHERE user_id=$1 AND auth_method='local'", p.ID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = s.checkMFARevision(r, tx, p); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1", p.ID); err != nil {
-			return httpkit.Reply{}, err
+		if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1 AND id<>$2", p.ID, p.SessionID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "mfa.remove", "mfa_factor", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
+		var count int
+		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.mfa_factors WHERE user_id=$1", p.ID).Scan(&count); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		required, err := ReadLocalMFARequired(r.Context(), tx)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if required && count <= 1 {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "mfa_required", "Enroll a replacement before removing your last required factor.")
+		}
+		deleted, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_factors WHERE id=$1 AND user_id=$2", id, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if deleted.RowsAffected() != 1 {
+			return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if count == 1 {
+			if _, err = tx.Exec(r.Context(), "UPDATE olp.sessions SET mfa_verified=false WHERE user_id=$1 AND auth_method='local'", p.ID); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1", p.ID); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1 AND id<>$2", p.ID, p.SessionID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: 204}, access.Event{Action: "mfa.remove", Resource: "mfa_factor", ID: id}, nil
+	})
 }
 
 func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal) error {
@@ -245,33 +236,27 @@ func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal)
 }
 
 func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = s.checkMFARevision(r, tx, p); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
-		return httpkit.Reply{}, err
-	}
-	configured, err := mfaConfigured(r.Context(), tx, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !configured {
-		return httpkit.Reply{}, httpkit.Fail(409, "mfa_not_enrolled", "Enroll a factor before creating recovery codes.")
-	}
-	codes, err := s.replaceRecoveryCodes(r.Context(), tx, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "mfa.recovery.rotate", "user", p.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.OK(map[string]any{"recovery_codes": codes}), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := s.checkMFARevision(r, tx, p); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		configured, err := mfaConfigured(r.Context(), tx, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !configured {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "mfa_not_enrolled", "Enroll a factor before creating recovery codes.")
+		}
+		codes, err := s.replaceRecoveryCodes(r.Context(), tx, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.OK(map[string]any{"recovery_codes": codes}), access.Event{Action: "mfa.recovery.rotate", Resource: "user", ID: p.ID}, nil
+	})
 }
