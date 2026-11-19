@@ -9,8 +9,8 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -124,7 +124,7 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 	return out, nil
 }
 
-func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if s.catalog == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
@@ -154,7 +154,7 @@ type acceptCatalogRequest struct {
 
 // The caller names the catalog it reviewed, so an upgrade between review and
 // acceptance cannot store facts nobody saw.
-func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input acceptCatalogRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -165,7 +165,7 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
 		return httpkit.Reply{}, httpkit.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return httpkit.Reply{}, err
 		}

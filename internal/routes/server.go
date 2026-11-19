@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -458,7 +459,7 @@ func reserveOrdinarySlug(ctx context.Context, q database.Queryer, slug string) e
 	return nil
 }
 
-func (s *Server) drafts(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) drafts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -493,7 +494,7 @@ func (s *Server) drafts(r *http.Request, p access.Principal) (httpkit.Reply, err
 	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) draft(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) draft(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -502,13 +503,13 @@ func (s *Server) draft(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(d.ProjectID, access.View); err != nil {
+	if err := p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
 
-func (s *Server) createDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	var input DraftInput
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -552,7 +553,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (httpkit.Reply
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
@@ -571,7 +572,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {
@@ -602,7 +603,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (httpkit.Repl
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
@@ -617,7 +618,7 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {

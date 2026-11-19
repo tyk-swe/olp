@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
@@ -114,7 +114,7 @@ func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
 	}, harness.Idempotent(), http.StatusCreated)
 	path := "/api/v1/notifications/destinations/" + destination
 	match := map[string]string{"If-Match": `"` + destination + `"`}
-	for _, c := range []*harness.Caller{s.Invite(owner, "developer@example.com", access.RoleDeveloper), {Name: "keys token", Token: token["secret"].(string)}} {
+	for _, c := range []*harness.Caller{s.Invite(owner, "developer@example.com", authz.RoleDeveloper), {Name: "keys token", Token: token["secret"].(string)}} {
 		if status, raw := s.Do(c, "DELETE", path, nil, harness.Idempotent(match)); status != http.StatusForbidden {
 			t.Errorf("%s deleted an installation destination: %s", c.Name, describe(status, raw))
 		}

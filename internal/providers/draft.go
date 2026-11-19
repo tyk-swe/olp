@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -37,7 +38,7 @@ type updateRequest struct {
 	Configuration connection.Configuration `json:"configuration"`
 }
 
-func (s *Server) createProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	var input createRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -90,7 +91,7 @@ func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error
 	return err
 }
 
-func (s *Server) updateProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -102,7 +103,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (httpkit.Re
 	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -187,8 +188,8 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	return etag, err
 }
 
-func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) restoreActiveAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if current.ActiveRevisionID == nil {
 			return httpkit.Reply{}, httpkit.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
 		}
@@ -203,9 +204,9 @@ func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (http
 	})
 }
 
-func (s *Server) restoreRevisionAsDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) restoreRevisionAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ref := r.PathValue("revision_id")
-	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpkit.Reply{}, httpkit.Fail(404, "not_found", "Unknown revision.")
@@ -229,7 +230,7 @@ type createdProvider struct {
 	Kind connectors.Kind
 }
 
-func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
+func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
 	var err error
 	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 		return createdProvider{}, err

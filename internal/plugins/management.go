@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -66,7 +67,7 @@ func (s *Management) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/permit", s.permit, access.MaxBody(64<<10), access.Deadline(time.Minute))
 }
 
-func (s *Management) list(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) list(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" WHERE $1 OR p.executable IS NULL ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest", s.Unconfined != nil)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -83,7 +84,7 @@ func (s *Management) list(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	return httpkit.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
 }
 
-func (s *Management) get(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) get(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -102,7 +103,7 @@ func (s *Management) load(ctx context.Context, q database.Queryer, digest string
 	return plugin, err
 }
 
-func (s *Management) install(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	// The route authorizes before reading an upload of up to 32 MiB.
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/wasm" {
 		return httpkit.Reply{}, httpkit.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
@@ -158,7 +159,7 @@ func (s *Management) install(r *http.Request, _ access.Principal) (httpkit.Reply
 	return httpkit.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}, tx.Commit(r.Context())
 }
 
-func (s *Management) approve(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) approve(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -202,7 +203,7 @@ func (s *Management) approve(r *http.Request, _ access.Principal) (httpkit.Reply
 	return reply, err
 }
 
-func (s *Management) uninstall(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) uninstall(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err

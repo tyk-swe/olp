@@ -8,15 +8,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func (s *Server) sessionBody(r *http.Request, q database.Queryer, u User, token string) (any, error) {
+func (s *Server) sessionBody(r *http.Request, q database.Queryer, u authz.User, token string) (any, error) {
 	var sessionID string
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT id::text FROM olp.sessions WHERE digest=$1),'')", s.Auth.Digest(secrets.SessionDigest, token)).Scan(&sessionID)
 	operations := []string{}
-	for _, op := range (Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
+	for _, op := range (authz.Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
 		operations = append(operations, op.String())
 	}
 	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "session_id": sessionID, "csrf_token": s.csrf(token), "operations": operations}, err
@@ -104,7 +105,7 @@ func (s *Server) login(r *http.Request) (httpkit.Reply, error) {
 		}
 	}
 	if !valid || !current || !local {
-		if err = Audit(r.Context(), tx, r, System, "session.login", "session", "", "failure"); err != nil {
+		if err = Audit(r.Context(), tx, r, authz.System, "session.login", "session", "", "failure"); err != nil {
 			return httpkit.Reply{}, err
 		}
 		if err = tx.Commit(r.Context()); err != nil {
@@ -120,12 +121,12 @@ func (s *Server) login(r *http.Request) (httpkit.Reply, error) {
 	if response.Status == 202 {
 		action = "mfa.challenge"
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(id), action, "user", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(id), action, "user", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return response, tx.Commit(r.Context())
 }
-func (s *Server) currentSession(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) currentSession(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	if p.SessionID != "" {
 		if _, err = s.Pool.Exec(r.Context(), "UPDATE olp.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
@@ -135,7 +136,7 @@ func (s *Server) currentSession(r *http.Request, p Principal) (httpkit.Reply, er
 	body, err := s.sessionBody(r, s.Pool, p.User, p.Token)
 	return httpkit.OK(body), err
 }
-func (s *Server) sessions(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) sessions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	pagination, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -145,7 +146,7 @@ func (s *Server) sessions(r *http.Request, p Principal) (httpkit.Reply, error) {
 		userID = p.ID
 	}
 	if userID != p.ID {
-		if err = p.Authorize(ManageSessions); err != nil {
+		if err = p.Authorize(authz.ManageSessions); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -164,10 +165,10 @@ func (s *Server) sessions(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return httpkit.ListReply(items, pagination), err
 }
 
-func (s *Server) logout(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) logout(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.deleteSession(r, true)
 }
-func (s *Server) revokeSession(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) revokeSession(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.deleteSession(r, false)
 }
 func (s *Server) deleteSession(r *http.Request, current bool) (httpkit.Reply, error) {
@@ -192,7 +193,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (httpkit.Reply, er
 		return httpkit.Reply{}, err
 	}
 	// Another member's session is invisible to a caller who cannot manage it.
-	if userID != p.ID && p.Authorize(ManageSessions) != nil {
+	if userID != p.ID && p.Authorize(authz.ManageSessions) != nil {
 		return httpkit.Reply{}, pgx.ErrNoRows
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
@@ -208,7 +209,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (httpkit.Reply, er
 	return response, tx.Commit(r.Context())
 }
 
-func (s *Server) profile(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) profile(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.profileBody(r, s.Pool, p)
 }
 
@@ -218,7 +219,7 @@ type projectOption struct {
 	Role string `json:"role"`
 }
 
-func (s *Server) profileBody(r *http.Request, q database.Queryer, p Principal) (httpkit.Reply, error) {
+func (s *Server) profileBody(r *http.Request, q database.Queryer, p authz.Principal) (httpkit.Reply, error) {
 	var rows pgx.Rows
 	var err error
 	if p.AllProjects {
@@ -244,7 +245,7 @@ func (s *Server) profileBody(r *http.Request, q database.Queryer, p Principal) (
 	}
 	return httpkit.Detail(map[string]any{"id": p.ID, "email": p.Email, "display_name": p.DisplayName, "role": p.Role, "active": p.Active, "access_scope": p.AccessScope, "etag": p.ETag, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "projects": projects}, p.ETag), nil
 }
-func (s *Server) updateProfile(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateProfile(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name string `json:"display_name"`
 	}
@@ -279,13 +280,13 @@ func (s *Server) updateProfile(r *http.Request, _ Principal) (httpkit.Reply, err
 	}
 	return reply, tx.Commit(r.Context())
 }
-func (s *Server) changePassword(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) changePassword(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writePassword(r, p, false)
 }
-func (s *Server) enrollPassword(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) enrollPassword(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writePassword(r, p, true)
 }
-func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (httpkit.Reply, error) {
+func (s *Server) writePassword(r *http.Request, p authz.Principal, enroll bool) (httpkit.Reply, error) {
 	var err error
 	var input struct {
 		Current string `json:"current_password"`
@@ -376,7 +377,7 @@ func validatePurpose(purpose, resource string) error {
 	}
 	return httpkit.Invalid("purpose", "Use a supported security purpose and its required resource ID.")
 }
-func (s *Server) reauthenticate(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) reauthenticate(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	var input struct {
 		Password string `json:"current_password"`
@@ -439,7 +440,7 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (httpkit.Reply, er
 	}
 	return response, tx.Commit(r.Context())
 }
-func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string, factorVerified bool) (httpkit.Reply, error) {
+func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purpose, resource string, factorVerified bool) (httpkit.Reply, error) {
 	if purpose == "mfa_manage" && !factorVerified {
 		configured, e := mfaConfigured(r.Context(), tx, p.ID)
 		if e != nil {
@@ -465,7 +466,7 @@ func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, r
 // ConsumeRecent spends the recent authentication the principal's session
 // holds for purpose and resource, refusing with 428 reauthentication_required
 // unless the session reauthenticated for them within five minutes.
-func (s *Server) ConsumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) error {
+func (s *Server) ConsumeRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purpose, resource string) error {
 	var target any
 	if resource != "" {
 		target = resource

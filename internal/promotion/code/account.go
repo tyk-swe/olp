@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -105,7 +105,7 @@ func accountChange(ctx context.Context, q database.Queryer, a resolved[codeaccou
 	action, err := compared(ctx, q, a, codeaccounts.ReadInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, httpkit.NewID(), a.input, a.to.existing)
 			return err
 		},

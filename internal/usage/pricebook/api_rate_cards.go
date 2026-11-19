@@ -8,11 +8,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *API) listRateCards(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listRateCards(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -52,7 +53,7 @@ func (s *API) listRateCards(r *http.Request, _ access.Principal) (httpkit.Reply,
 	return httpkit.ListReplyBy(items, page, func(c RateCard) string { return c.ID }), nil
 }
 
-func (s *API) createRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createRateCard(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input rateCardInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -96,7 +97,7 @@ func (s *API) createRateCard(r *http.Request, _ access.Principal) (httpkit.Reply
 	return result, tx.Commit(r.Context())
 }
 
-func (s *API) getRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) getRateCard(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "rate_card_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -113,7 +114,7 @@ func (s *API) getRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	return httpkit.OK(card), nil
 }
 
-func (s *API) listRateCardRevisions(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listRateCardRevisions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "rate_card_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -169,7 +170,7 @@ func (s *API) listRateCardRevisions(r *http.Request, _ access.Principal) (httpki
 	return httpkit.OK(param.Page{Items: items, NextCursor: next}), nil
 }
 
-func (s *API) createRateCardRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createRateCardRevision(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input cardRevisionInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err

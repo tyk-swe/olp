@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -79,7 +79,7 @@ func lifecycle(r Route, state State) []promotion.Item {
 }
 
 func Applier(desired Desired) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		state, err := Read(ctx, tx)
 		if err != nil {
 			return err
@@ -93,7 +93,7 @@ func Applier(desired Desired) promotion.Applier {
 	}
 }
 
-func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state State, installed promotion.Directory) error {
+func stage(ctx context.Context, tx pgx.Tx, p authz.Principal, r Route, state State, installed promotion.Directory) error {
 	unchanged, err := state.unchanged(r)
 	if err != nil || unchanged {
 		return err
@@ -128,7 +128,7 @@ func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state St
 	return routes.StageDraftPolicy(ctx, tx, id, httpkit.NewID(), p.UserID(), r.RoutingPolicy)
 }
 
-func draftSlot(drafts map[string]draft, r Route, p access.Principal, projectID *string) (routes.DraftSlot, string) {
+func draftSlot(drafts map[string]draft, r Route, p authz.Principal, projectID *string) (routes.DraftSlot, string) {
 	if staged, ok := drafts[draftKey(r.Slug, r.Project)]; ok {
 		return routes.ExistingDraft{ID: staged.id}, staged.id
 	}

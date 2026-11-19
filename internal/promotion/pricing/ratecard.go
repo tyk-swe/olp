@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -218,7 +218,7 @@ func planCards(ctx context.Context, q database.Queryer, desired []RateCard) ([]p
 	}), nil
 }
 
-func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []RateCard, at destination, normalizer pricebook.Normalizer) error {
+func applyCards(ctx context.Context, tx pgx.Tx, principal authz.Principal, desired []RateCard, at destination, normalizer pricebook.Normalizer) error {
 	existing, currency, err := readCardState(ctx, tx)
 	if err != nil {
 		return err
@@ -227,7 +227,7 @@ func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desi
 		if cardAction(card, existing, currency) == contract.ConfigurationPlanItemActionNoop {
 			continue
 		}
-		if err := principal.Authorize(access.Settings); err != nil {
+		if err := principal.Authorize(authz.Settings); err != nil {
 			return err
 		}
 		cardID, idErr := cardIDFor(ctx, tx, principal, card.Owner, existing[foldedOwner(card.Owner)].id, at)
@@ -241,7 +241,7 @@ func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desi
 	return nil
 }
 
-func cardIDFor(ctx context.Context, tx pgx.Tx, principal access.Principal, owner Owner, existing string, at destination) (string, error) {
+func cardIDFor(ctx context.Context, tx pgx.Tx, principal authz.Principal, owner Owner, existing string, at destination) (string, error) {
 	if existing != "" {
 		return existing, nil
 	}
@@ -263,7 +263,7 @@ func cardIDFor(ctx context.Context, tx pgx.Tx, principal access.Principal, owner
 	}
 }
 
-func storeCard(ctx context.Context, tx pgx.Tx, principal access.Principal, owner pricebook.Owner) (string, error) {
+func storeCard(ctx context.Context, tx pgx.Tx, principal authz.Principal, owner pricebook.Owner) (string, error) {
 	id, err := pricebook.CreateRateCard(ctx, tx, principal.UserID(), owner)
 	return id, pricebook.Problem(err)
 }

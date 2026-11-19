@@ -5,8 +5,8 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -24,7 +24,7 @@ func Planner(desired []Sink, names promotion.Names, bindings promotion.Bindings,
 		Claims: promotion.Map(promotion.Filter(desired, func(s Sink) bool { return s.Signed }), func(s Sink) promotion.Claim {
 			return promotion.Claim{Ref: s.ref(), Accept: acceptCredential}
 		}),
-		Authorize: func(_ context.Context, _ database.Queryer, principal access.Principal) error {
+		Authorize: func(_ context.Context, _ database.Queryer, principal authz.Principal) error {
 			for _, s := range desired {
 				if err := principal.Authorize(operation(s.Owner)); err != nil {
 					return err
@@ -46,12 +46,12 @@ func acceptCredential(credential promotion.Credential) error {
 	return nil
 }
 
-func operation(owner Owner) access.Operation {
+func operation(owner Owner) authz.Operation {
 	switch owner.(type) {
 	case Project:
-		return access.Keys
+		return authz.Keys
 	default:
-		return access.Settings
+		return authz.Settings
 	}
 }
 
@@ -168,7 +168,7 @@ func rotate(ctx context.Context, q database.Queryer, s Sink, current stored, cre
 }
 
 func Applier(desired []Sink, bindings promotion.Bindings, credentials sinks.Credentials) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
 		if len(desired) == 0 {
 			return nil
 		}
@@ -190,7 +190,7 @@ func Applier(desired []Sink, bindings promotion.Bindings, credentials sinks.Cred
 	}
 }
 
-func applySink(ctx context.Context, tx pgx.Tx, principal access.Principal, s Sink, existing map[key]stored, projects promotion.Directory, credential binding, credentials sinks.Credentials) error {
+func applySink(ctx context.Context, tx pgx.Tx, principal authz.Principal, s Sink, existing map[key]stored, projects promotion.Directory, credential binding, credentials sinks.Credentials) error {
 	projectID, err := owningProject(s.Owner, projects, principal)
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func applySink(ctx context.Context, tx pgx.Tx, principal access.Principal, s Sin
 	return credentials.Replace(ctx, tx, id, change.secret)
 }
 
-func owningProject(owner Owner, projects promotion.Directory, principal access.Principal) (*string, error) {
+func owningProject(owner Owner, projects promotion.Directory, principal authz.Principal) (*string, error) {
 	scoped, ok := owner.(Project)
 	if !ok {
 		return nil, nil
@@ -219,7 +219,7 @@ func owningProject(owner Owner, projects promotion.Directory, principal access.P
 	if !present {
 		return nil, httpkit.Invalid("sinks.project", "The owning project is not declared or present at the destination.")
 	}
-	if err := principal.Project(&id, access.Change); err != nil {
+	if err := principal.Project(&id, authz.Change); err != nil {
 		return nil, err
 	}
 	return &id, nil

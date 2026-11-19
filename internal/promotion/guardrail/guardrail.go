@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -176,7 +176,7 @@ func planDefinition(ctx context.Context, q database.Queryer, directory promotion
 }
 
 func GuardrailApplier(desired Section) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -185,12 +185,12 @@ func GuardrailApplier(desired Section) promotion.Applier {
 	}
 }
 
-func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, g Guardrail) error {
+func applyGuardrail(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, g Guardrail) error {
 	project, err := projectID(directory, g.Project)
 	if err != nil {
 		return err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	configuration, err := guardrails.RenameCredentials(g.Configuration, credentialID(ctx, tx, project))

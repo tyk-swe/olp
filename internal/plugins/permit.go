@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
@@ -28,7 +29,7 @@ func (s *Management) unconfinedTier() (*Unconfined, error) {
 
 // executables lists the executables in the unconfined plugin directory, which
 // only an owner sees.
-func (s *Management) executables(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) executables(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tier, err := s.unconfinedTier()
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -49,7 +50,7 @@ func (s *Management) executables(r *http.Request, _ access.Principal) (httpkit.R
 }
 
 // review runs an executable to read its manifest, for an owner to review.
-func (s *Management) review(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) review(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tier, err := s.unconfinedTier()
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -72,7 +73,7 @@ func (s *Management) review(r *http.Request, _ access.Principal) (httpkit.Reply,
 // permit makes an executable an unconfined plugin, pinnable by its digest.
 // It runs with native privileges, so the owner acknowledges that and has
 // reauthenticated for it.
-func (s *Management) permit(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input contract.UnconfinedPluginPermitRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err

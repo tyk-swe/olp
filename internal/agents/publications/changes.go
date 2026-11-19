@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type draftRequest struct {
@@ -49,7 +50,7 @@ func decodeChange(r *http.Request, kind, action string) (change, error) {
 		return change{input: json.RawMessage(`{}`)}, nil
 	}
 }
-func (s *Server) current(r *http.Request, tx pgx.Tx, p access.Principal, kind, action string, input change) (*agentcontract.Publication, error) {
+func (s *Server) current(r *http.Request, tx pgx.Tx, p authz.Principal, kind, action string, input change) (*agentcontract.Publication, error) {
 	if action == "create" {
 		return nil, s.access.RequireProject(r.Context(), tx, p, &input.draft.ProjectID)
 	}
@@ -61,12 +62,12 @@ func (s *Server) current(r *http.Request, tx pgx.Tx, p access.Principal, kind, a
 	if loadErr != nil {
 		return nil, mapConflict(loadErr)
 	}
-	if err := p.Project(&current.ProjectID, access.Change); err != nil {
+	if err := p.Project(&current.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	return current, nil
 }
-func (s *Server) apply(r *http.Request, tx pgx.Tx, p access.Principal, current *agentcontract.Publication, kind, action string, input change) (agentcontract.Publication, error) {
+func (s *Server) apply(r *http.Request, tx pgx.Tx, p authz.Principal, current *agentcontract.Publication, kind, action string, input change) (agentcontract.Publication, error) {
 	switch action {
 	case "create", "update":
 		credentialID, err := s.credential(r.Context(), tx, current, input.draft.Draft, input.draft.Credential, input.draft.EntraClientSecret)

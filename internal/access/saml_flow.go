@@ -13,6 +13,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/samlidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -46,11 +47,11 @@ func (s *Server) beginSAMLLogin(r *http.Request) (httpkit.Reply, error) {
 	return s.beginSAML(r, "login")
 }
 
-func (s *Server) beginSAMLLink(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) beginSAMLLink(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginSAML(r, "link")
 }
 
-func (s *Server) beginSAMLReauthentication(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) beginSAMLReauthentication(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginSAML(r, "reauthenticate")
 }
 
@@ -329,13 +330,13 @@ func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flo
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return httpkit.Reply{}, err
 	}
-	var p Principal
+	var p authz.Principal
 	if flow.Kind != "login" {
 		p, err = s.Authenticate(r, tx)
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err = p.Authorize(Self); err != nil {
+		if err = p.Authorize(authz.Self); err != nil {
 			return httpkit.Reply{}, err
 		}
 		if p.ID != flow.UserID || p.SessionID != flow.SessionID {
@@ -429,7 +430,7 @@ func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flo
 		response.Cookies = session.Cookies
 		response.CSRF = session.CSRF
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(userID), "saml."+flow.Kind, "saml_identity", identityID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(userID), "saml."+flow.Kind, "saml_identity", identityID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return response, nil

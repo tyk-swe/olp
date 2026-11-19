@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -65,7 +66,7 @@ func (s *Server) registerExecutables(mux *http.ServeMux) {
 	s.access.Route(mux, "DELETE /api/v1/mcp-executables/{executable}/permissions/{digest}", s.revokeExecutable)
 }
 
-func (s *Server) listExecutables(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) listExecutables(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if err := s.executables.available(); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -78,7 +79,7 @@ func (s *Server) listExecutables(r *http.Request, _ access.Principal) (httpkit.R
 	}{files}), nil
 }
 
-func (s *Server) reviewExecutable(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) reviewExecutable(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	file, err := s.executables.describe(r.Context(), r.PathValue("executable"))
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -86,7 +87,7 @@ func (s *Server) reviewExecutable(r *http.Request, _ access.Principal) (httpkit.
 	return httpkit.OK(file), nil
 }
 
-func (s *Server) permitExecutable(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) permitExecutable(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input executablePermitInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -121,7 +122,7 @@ func (s *Server) permitExecutable(r *http.Request, _ access.Principal) (httpkit.
 	return httpkit.Reply{Status: http.StatusCreated, Body: executablePermission{ExecutableFile: file.ExecutableFile, Permitted: true}}, tx.Commit(r.Context())
 }
 
-func (s *Server) revokeExecutable(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) revokeExecutable(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -12,11 +13,11 @@ import (
 
 // Published writes use the same draft validation and promotion as the console,
 // inside one conditional transaction. Independent console drafts are untouched.
-func (s *Server) createRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.writePublished(r, "")
 }
 
-func (s *Server) updateRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -41,7 +42,7 @@ func (s *Server) writePublished(r *http.Request, id string) (httpkit.Reply, erro
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err = p.Project(previous.ProjectID, access.Change); err != nil {
+		if err = p.Project(previous.ProjectID, authz.Change); err != nil {
 			return httpkit.Reply{}, err
 		}
 	} else if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {

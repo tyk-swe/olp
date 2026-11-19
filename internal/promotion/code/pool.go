@@ -11,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -162,7 +163,7 @@ func poolChange(ctx context.Context, q database.Queryer, p resolved[access.CodeP
 	action, err := compared(ctx, q, p, access.ReadCodePoolInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
 			_, err := access.SaveCodePool(ctx, tx, principal, p.to.id, httpkit.NewID(), p.input, p.to.existing)
 			return err
 		},

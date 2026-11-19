@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -162,7 +163,7 @@ func storedResolutionEvidence(ctx context.Context, q database.Queryer, call Tool
 	return evidence, true, nil
 }
 
-func (m *Management) resolve(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "call_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -190,7 +191,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&call.ProjectID, access.Change); err != nil {
+	if err = p.Project(&call.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if call.Status == request.Outcome.status() {
@@ -216,7 +217,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (httpkit.Reply
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err := p.Project(&call.ProjectID, access.Change); err != nil {
+	if err := p.Project(&call.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replay, err := m.access.Replay(r, tx, p, request)
@@ -266,7 +267,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (httpkit.Reply
 	return reply, tx.Commit(r.Context())
 }
 
-func (m *Management) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -281,7 +282,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (httpkit.Reply, e
 		if !canonicalUUID(project) {
 			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
-		if err := p.Project(&project, access.View); err != nil {
+		if err := p.Project(&project, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -304,7 +305,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return httpkit.ListReplyBy(items, page, func(call ToolCall) string { return call.ID }), nil
 }
 
-func (m *Management) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "call_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -313,7 +314,7 @@ func (m *Management) get(r *http.Request, p access.Principal) (httpkit.Reply, er
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&call.ProjectID, access.View); err != nil {
+	if err = p.Project(&call.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(call, call.ID), nil

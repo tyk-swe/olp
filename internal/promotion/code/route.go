@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -205,7 +206,7 @@ func routeChange(ctx context.Context, q database.Queryer, r resolved[routeInput]
 	action, republished, err := routeAction(ctx, q, r)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeRoute, Key: r.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 			return saveRoute(ctx, tx, p, r, republished)
 		},
 	}, err
@@ -227,7 +228,7 @@ func routeAction(ctx context.Context, q database.Queryer, r resolved[routeInput]
 	return replacement(!sameDraft || !samePublication), !samePublication, err
 }
 
-func saveRoute(ctx context.Context, tx pgx.Tx, p access.Principal, r resolved[routeInput], republished bool) error {
+func saveRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, r resolved[routeInput], republished bool) error {
 	published := r.input.published
 	if republished && published != nil {
 		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, httpkit.NewID(), published.Policy, r.to.existing)

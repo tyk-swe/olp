@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
@@ -43,7 +44,7 @@ type codeRoute struct {
 	Adapters []codemode.Adapter `json:"adapters"`
 }
 
-func (s *Server) codeRoutes(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) codeRoutes(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
 		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
 		||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("v.connections")+`)
@@ -72,7 +73,7 @@ type CodeRouteInput struct {
 	Enabled                 bool                           `json:"enabled"`
 }
 
-func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) writeCodeRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in CodeRouteInput
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -81,12 +82,12 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (httpkit.Re
 	if validationError != nil {
 		return httpkit.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
+	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
-func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) publishCodeRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -101,7 +102,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (httpkit.
 	if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, access.Change); err != nil {
+	if err = p.Project(&project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := s.Access.Replay(r, tx, p, id)
@@ -138,7 +139,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (httpkit.
 	return out, tx.Commit(r.Context())
 }
 
-func (s *Server) codeRevisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) codeRevisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -147,7 +148,7 @@ func (s *Server) codeRevisions(r *http.Request, p access.Principal) (httpkit.Rep
 	if err = s.Access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.code_routes WHERE id=$1`, id).Scan(&project); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, access.View); err != nil {
+	if err = p.Project(&project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	page, err := httpkit.Page(r)
@@ -207,12 +208,12 @@ func UnpublishCodeRoute(ctx context.Context, tx pgx.Tx, id string) error {
 	return err
 }
 
-func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
+func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
 	in, validationError := raw.Validated()
 	if validationError != nil {
 		return nil, validationError
 	}
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
@@ -279,12 +280,12 @@ func (in CodeRouteInput) validate() error {
 	return nil
 }
 
-func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
 	project, projectError := httpkit.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
 	}
-	if err := p.Project(&project, access.Change); err != nil {
+	if err := p.Project(&project, authz.Change); err != nil {
 		return nil, err
 	}
 	route := in

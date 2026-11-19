@@ -9,10 +9,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-type Evaluator func(*http.Request, access.Principal, guardrails.Pinned, guardrails.Application) (guardrails.Result, error)
+type Evaluator func(*http.Request, authz.Principal, guardrails.Pinned, guardrails.Application) (guardrails.Result, error)
 
 type API struct {
 	server   *access.Server
@@ -35,7 +36,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "POST /api/v1/guardrails/evaluate", a.apply, access.MaxBody(guardrails.MaxContentBytes))
 }
 
-func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -51,7 +52,7 @@ func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return httpkit.ListReplyBy(items, page, func(item Policy) string { return item.ID }), nil
 }
 
-func (a *API) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	value, err := a.visible(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -59,7 +60,7 @@ func (a *API) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return httpkit.Detail(value, value.ETag), nil
 }
 
-func (a *API) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	value, err := a.visible(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -79,7 +80,7 @@ func (a *API) revision(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	return httpkit.Detail(value, revisionID), nil
 }
 
-func (a *API) visible(r *http.Request, p access.Principal) (Policy, error) {
+func (a *API) visible(r *http.Request, p authz.Principal) (Policy, error) {
 	id, err := httpkit.IDParam(r, "policy_id")
 	if err != nil {
 		return Policy{}, err
@@ -88,21 +89,21 @@ func (a *API) visible(r *http.Request, p access.Principal) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	return value, p.Project(guardrails.ProjectPointer(value.ProjectID), access.View)
+	return value, p.Project(guardrails.ProjectPointer(value.ProjectID), authz.View)
 }
 
-func (a *API) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	in, err := decode(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p access.Principal) (struct{}, error) {
+	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		if in.ProjectID == "" {
 			return struct{}{}, httpkit.Invalid("project_id", "Choose a project.")
 		}
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, &in.ProjectID)
-	}, func(tx pgx.Tx, p access.Principal, _ struct{}) (httpkit.Reply, error) {
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, error) {
 		value, err := a.save(r, tx, p, nil, in.ProjectID, in)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -113,7 +114,7 @@ func (a *API) create(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	})
 }
 
-func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "policy_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -122,7 +123,7 @@ func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p access.Principal, current Policy) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, in, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, error) {
 		if err := changeable(r, current); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -137,13 +138,13 @@ func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	})
 }
 
-func (a *API) retire(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) retire(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "policy_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p access.Principal, current Policy) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, input{}, a.locked(r, id), func(tx pgx.Tx, p authz.Principal, current Policy) (httpkit.Reply, error) {
 		if err := changeable(r, current); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -157,7 +158,7 @@ func (a *API) retire(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	})
 }
 
-func (a *API) apply(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) apply(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var in guardrails.Application
 	if err := httpkit.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
 		return httpkit.Reply{}, err
@@ -176,7 +177,7 @@ func (a *API) apply(r *http.Request, p access.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(guardrails.ProjectPointer(selected.ProjectID), access.View); err != nil {
+	if err := p.Project(guardrails.ProjectPointer(selected.ProjectID), authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	ids := revisionIDs(selected.Entries)
@@ -203,13 +204,13 @@ func decode(r *http.Request) (input, error) {
 	return input{Name: name, ProjectID: in.ProjectID, Entries: in.Entries}, err
 }
 
-func (a *API) locked(r *http.Request, id string) func(pgx.Tx, access.Principal) (Policy, error) {
-	return func(tx pgx.Tx, p access.Principal) (Policy, error) {
+func (a *API) locked(r *http.Request, id string) func(pgx.Tx, authz.Principal) (Policy, error) {
+	return func(tx pgx.Tx, p authz.Principal) (Policy, error) {
 		current, err := lock(r.Context(), tx, id)
 		if err != nil {
 			return Policy{}, err
 		}
-		return current, p.Project(guardrails.ProjectPointer(current.ProjectID), access.Change)
+		return current, p.Project(guardrails.ProjectPointer(current.ProjectID), authz.Change)
 	}
 }
 
@@ -223,7 +224,7 @@ func changeable(r *http.Request, current Policy) error {
 	return nil
 }
 
-func (a *API) save(r *http.Request, tx pgx.Tx, p access.Principal, current *Policy, project string, in input) (Policy, error) {
+func (a *API) save(r *http.Request, tx pgx.Tx, p authz.Principal, current *Policy, project string, in input) (Policy, error) {
 	ctx := r.Context()
 	draft, err := NewDraft(ctx, tx, project, in.Name, in.Entries)
 	if err != nil {

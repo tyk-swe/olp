@@ -5,9 +5,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
-func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, Principal) (T, error), apply func(pgx.Tx, Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
+func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error), apply func(pgx.Tx, authz.Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -28,7 +29,7 @@ func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, Prin
 }
 
 // Remove replays before locking because a completed removal leaves nothing to lock.
-func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, Principal) (T, error), apply func(pgx.Tx, Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
+func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error), apply func(pgx.Tx, authz.Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -49,7 +50,7 @@ func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, Prin
 }
 
 // Transact is Mutate for a change that carries no Idempotency-Key.
-func Transact[T any](s *Server, r *http.Request, lock func(pgx.Tx, Principal) (T, error), apply func(pgx.Tx, Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
+func Transact[T any](s *Server, r *http.Request, lock func(pgx.Tx, authz.Principal) (T, error), apply func(pgx.Tx, authz.Principal, T) (httpkit.Reply, error)) (httpkit.Reply, error) {
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err

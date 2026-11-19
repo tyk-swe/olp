@@ -6,8 +6,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -113,7 +113,7 @@ var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id
 	'grant_state',CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' WHEN g.lapsed_at IS NOT NULL THEN 'lapsed' WHEN g.expires_at<=now() THEN 'expired' ELSE 'current' END)
 	FROM olp.code_accounts x JOIN olp.providers p ON p.id=x.provider_id JOIN olp.provider_credentials c ON c.id=x.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id`
 
-func Save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, input Input, existing bool) (json.RawMessage, error) {
+func Save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, input Input, existing bool) (json.RawMessage, error) {
 	in, err := input.validated()
 	if err != nil {
 		return nil, err
@@ -121,8 +121,8 @@ func Save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 	return save(ctx, tx, p, id, etag, in, existing)
 }
 
-func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, in Input, existing bool) (json.RawMessage, error) {
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+func save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, in Input, existing bool) (json.RawMessage, error) {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	var principal string

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -65,11 +66,11 @@ func load(ctx context.Context, q database.Queryer, id string, lock bool) (*Defin
 	}
 	return scan(q.QueryRow(ctx, query, id))
 }
-func operation(project *string) access.Operation {
+func operation(project *string) authz.Operation {
 	if project == nil {
-		return access.Settings
+		return authz.Settings
 	}
-	return access.Keys
+	return authz.Keys
 }
 func (s *Server) Register(mux *http.ServeMux) {
 	a := s.Access
@@ -79,7 +80,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	a.Route(mux, "PUT /api/v1/sinks/{sink_id}", s.update)
 	a.Route(mux, "DELETE /api/v1/sinks/{sink_id}", s.retire)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -102,7 +103,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error
 	}
 	return httpkit.ListReply(items, page), rows.Err()
 }
-func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -111,7 +112,7 @@ func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(d.ProjectID, access.View); err != nil {
+	if err = p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(d, d.ETag), nil
@@ -142,17 +143,17 @@ func validateAndNormalize(in *input, policy *egress.Policy, project *string) err
 	}
 	return nil
 }
-func (s *Server) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.write(r, "", false)
 }
-func (s *Server) update(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.write(r, id, false)
 }
-func (s *Server) retire(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) retire(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "sink_id")
 	if err != nil {
 		return httpkit.Reply{}, err

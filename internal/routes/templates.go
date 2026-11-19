@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -498,7 +499,7 @@ func refusalCode(err error) (string, bool) {
 	return problem.Code, true
 }
 
-func (s *Server) templates(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) templates(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -522,7 +523,7 @@ func (s *Server) templates(r *http.Request, p access.Principal) (httpkit.Reply, 
 	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) template(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) template(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "template_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -531,7 +532,7 @@ func (s *Server) template(r *http.Request, p access.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(t.ProjectID, access.View); err != nil {
+	if err := p.Project(t.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.templateDetail(r.Context(), s.Access.Pool, t)
@@ -559,7 +560,7 @@ func (s *Server) templateDetail(ctx context.Context, q database.Queryer, t *temp
 	return httpkit.Detail(body, t.ETag), nil
 }
 
-func (s *Server) createTemplate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createTemplate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	var input TemplateInput
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -629,7 +630,7 @@ func WriteTemplate(ctx context.Context, tx pgx.Tx, id, etag, actor string, in *T
 	return err
 }
 
-func (s *Server) replaceTemplate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) replaceTemplate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "template_id")
 	if err != nil {
@@ -648,7 +649,7 @@ func (s *Server) replaceTemplate(r *http.Request, _ access.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {
@@ -677,7 +678,7 @@ func (s *Server) replaceTemplate(r *http.Request, _ access.Principal) (httpkit.R
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteTemplate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "template_id")
 	if err != nil {
@@ -692,7 +693,7 @@ func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (httpkit.Re
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {
@@ -709,7 +710,7 @@ func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (httpkit.Re
 
 // applyTemplate applies one template to every active provider, catching up
 // models certified before the template existed.
-func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) applyTemplate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "template_id")
 	if err != nil {
@@ -724,7 +725,7 @@ func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(t.ProjectID, access.Change); err != nil {
+	if err := p.Project(t.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)

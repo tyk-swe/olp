@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
@@ -227,7 +228,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "DELETE /api/v1/retrieval-bindings/{binding_id}", s.write)
 	s.Access.Route(mux, "GET /api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}", s.revision)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -250,7 +251,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error
 	}
 	return httpkit.ListReply(items, page), rows.Err()
 }
-func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "binding_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -259,12 +260,12 @@ func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(d, d.ETag), nil
 }
-func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "binding_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -277,7 +278,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var raw json.RawMessage
@@ -303,7 +304,7 @@ func readBindingInput(r *http.Request) (Input, error) {
 	return normalizeInput(in)
 }
 
-func (s *Server) write(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	retire := r.Method == http.MethodDelete
 	in, err := readBindingInput(r)
 	if err != nil {
@@ -314,7 +315,7 @@ func (s *Server) write(r *http.Request, _ access.Principal) (httpkit.Reply, erro
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Authorize(access.Configure); err != nil {
+	if err = p.Authorize(authz.Configure); err != nil {
 		return httpkit.Reply{}, err
 	}
 	id := r.PathValue("binding_id")
@@ -327,7 +328,7 @@ func (s *Server) write(r *http.Request, _ access.Principal) (httpkit.Reply, erro
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err = p.Project(&current.ProjectID, access.Change); err != nil {
+		if err = p.Project(&current.ProjectID, authz.Change); err != nil {
 			return httpkit.Reply{}, err
 		}
 	} else {

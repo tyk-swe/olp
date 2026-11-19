@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/release"
@@ -49,12 +50,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "PUT /api/v1/routes/{route_id}/catalog", s.putExposure)
 }
 
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.describe(r, func(route routing.Route) bool {
 		if p.Kind == "key" {
 			return p.KeyAuthority != nil && p.KeyAuthority.Allows("models_read", route.Slug, route.ProjectID, time.Now())
 		}
-		return p.Project(route.ProjectID, access.View) == nil
+		return p.Project(route.ProjectID, authz.View) == nil
 	}, true)
 }
 
@@ -127,19 +128,19 @@ func readPublication(ctx context.Context, q database.Queryer, id string) (Public
 	return result, err
 }
 
-func (s *Server) getPublication(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) getPublication(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&id, access.View); err != nil {
+	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	publication, err := readPublication(r.Context(), s.Access.Pool, id)
 	return httpkit.Detail(publication, publication.ETag), err
 }
 
-func (s *Server) putPublication(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putPublication(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -159,7 +160,7 @@ func (s *Server) putPublication(r *http.Request, _ access.Principal) (httpkit.Re
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, access.Change); err != nil {
+	if err = p.Project(&id, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var locked string
@@ -195,7 +196,7 @@ func readExposure(ctx context.Context, q database.Queryer, id string) (Exposure,
 	return result, project, err
 }
 
-func (s *Server) getExposure(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) getExposure(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -204,13 +205,13 @@ func (s *Server) getExposure(r *http.Request, p access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(project, access.View); err != nil {
+	if err = p.Project(project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(result, result.ETag), nil
 }
 
-func (s *Server) putExposure(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putExposure(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -239,7 +240,7 @@ func (s *Server) putExposure(r *http.Request, _ access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(project, access.Change); err != nil {
+	if err = p.Project(project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {

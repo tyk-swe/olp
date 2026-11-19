@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func provisioningID(r *http.Request, name, field string, max int) (string, error) {
@@ -21,7 +22,7 @@ func provisioningID(r *http.Request, name, field string, max int) (string, error
 	return value, nil
 }
 
-func (s *Server) provisionUser(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
@@ -46,7 +47,7 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (httpkit.Reply, err
 	if err = httpkit.ValidText("display_name", input.DisplayName, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if !validRole(input.Role) {
+	if !authz.ValidRole(input.Role) {
 		return httpkit.Reply{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	if input.Active == nil {
@@ -115,7 +116,7 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (httpkit.Reply, err
 	return httpkit.Detail(u, u.ETag), tx.Commit(r.Context())
 }
 
-func (s *Server) deprovisionUser(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	source, err := provisioningID(r, "source", "source", 100)
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -6,11 +6,12 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 const settingJSON = `to_jsonb(s)||CASE WHEN s.key='budgets.time_zone' THEN jsonb_build_object('calendar',olp.budget_calendar_status(now())) ELSE '{}'::jsonb END`
 
-func (s *Server) settings(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) settings(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	rows, err := s.Pool.Query(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
 	if err != nil {
@@ -20,7 +21,7 @@ func (s *Server) settings(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return httpkit.OK(map[string]any{"items": items}), err
 }
 
-func (s *Server) setting(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) setting(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	var data []byte
 	var etag string
@@ -28,7 +29,7 @@ func (s *Server) setting(r *http.Request, p Principal) (httpkit.Reply, error) {
 	return httpkit.Detail(json.RawMessage(data), etag), err
 }
 
-func (s *Server) updateSetting(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateSetting(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Value string `json:"value"`
 	}
@@ -68,12 +69,12 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (httpkit.Reply, err
 	}
 	defer tx.Rollback(r.Context())
 	if key == "auth.local_login_enabled" {
-		if err = p.Authorize(LocalLogin); err != nil {
+		if err = p.Authorize(authz.LocalLogin); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
 	if key == "auth.mfa_required" {
-		if err = p.Authorize(Access); err != nil {
+		if err = p.Authorize(authz.Access); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}

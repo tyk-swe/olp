@@ -14,6 +14,7 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/hotp"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -117,7 +118,7 @@ func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Repl
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
+	if err := Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := tx.Commit(r.Context()); err != nil {
@@ -241,7 +242,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if codes != nil && f.SessionID == nil {
 		reply.Body = map[string]any{"session": reply.Body, "recovery_codes": codes}
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
@@ -288,7 +289,7 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 			return nil, err
 		}
 	}
-	if err := Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.enroll", "mfa_factor", id, "success"); err != nil {
+	if err := Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.enroll", "mfa_factor", id, "success"); err != nil {
 		return nil, err
 	}
 	if count == 0 {

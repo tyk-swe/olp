@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -42,7 +43,7 @@ func (s *DelegationManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/delegation-options", s.options)
 }
 
-func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	keyID, err := httpkit.ParseUUID(r.URL.Query().Get("api_key_id"))
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -62,7 +63,7 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (htt
 	if projectID == nil {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
-	if err := principal.Project(projectID, access.Change); err != nil {
+	if err := principal.Project(projectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
@@ -145,7 +146,7 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (htt
 
 }
 
-func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input delegationConsentRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -174,7 +175,7 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := principal.Project(target.key.ProjectID, access.Change); err != nil {
+	if err := principal.Project(target.key.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -46,7 +47,7 @@ func action(desired Organization, existing map[string]Organization) contract.Con
 }
 
 func Applier(desired []Organization) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		changed, err := applyAll(ctx, tx, p, desired)
 		if err != nil || !changed {
 			return err
@@ -58,7 +59,7 @@ func Applier(desired []Organization) promotion.Applier {
 	}
 }
 
-func applyAll(ctx context.Context, tx pgx.Tx, p access.Principal, organizations []Organization) (bool, error) {
+func applyAll(ctx context.Context, tx pgx.Tx, p authz.Principal, organizations []Organization) (bool, error) {
 	if len(organizations) == 0 {
 		return false, nil
 	}
@@ -70,7 +71,7 @@ func applyAll(ctx context.Context, tx pgx.Tx, p access.Principal, organizations 
 	return changed || rest, err
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, organization Organization) (bool, error) {
+func apply(ctx context.Context, tx pgx.Tx, p authz.Principal, organization Organization) (bool, error) {
 	current, found, err := projects.LockOrganizationByName(ctx, tx, organization.Name)
 	if err != nil {
 		return false, err
@@ -81,8 +82,8 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, organization Orga
 	return setBudget(ctx, tx, p, current, organization.Budget)
 }
 
-func create(ctx context.Context, tx pgx.Tx, p access.Principal, organization Organization) (bool, error) {
-	if err := p.Authorize(access.Access); err != nil {
+func create(ctx context.Context, tx pgx.Tx, p authz.Principal, organization Organization) (bool, error) {
+	if err := p.Authorize(authz.Access); err != nil {
 		return false, err
 	}
 	id, _, err := projects.CreateOrganization(ctx, tx, organization.Name, p.UserID())
@@ -95,14 +96,14 @@ func create(ctx context.Context, tx pgx.Tx, p access.Principal, organization Org
 	return true, nil
 }
 
-func setBudget(ctx context.Context, tx pgx.Tx, p access.Principal, current projects.LockedOrganization, desired *authority.BudgetPolicy) (bool, error) {
+func setBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, current projects.LockedOrganization, desired *authority.BudgetPolicy) (bool, error) {
 	if reflect.DeepEqual(current.Budget, desired) {
 		return false, nil
 	}
-	if err := p.Authorize(access.ManageOrganization); err != nil {
+	if err := p.Authorize(authz.ManageOrganization); err != nil {
 		return false, err
 	}
-	if err := p.Organization(current.ID, access.Change); err != nil {
+	if err := p.Organization(current.ID, authz.Change); err != nil {
 		return false, err
 	}
 	if _, err := projects.SetOrganizationBudget(ctx, tx, current.ID, desired); err != nil {

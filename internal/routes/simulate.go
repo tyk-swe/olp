@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -170,7 +171,7 @@ func validTuple(operation, surface, mode string) error {
 	return nil
 }
 
-func (s *Server) simulateDraft(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -195,7 +196,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(d.ProjectID, access.View); err != nil {
+	if err := p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
@@ -308,7 +309,7 @@ type simulationRequest struct {
 
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
-func (s *Server) simulateRouting(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var input simulationRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
@@ -363,7 +364,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (httpkit.R
 	}
 	route := snapshot.Routes[slug]
 	if _, ok := snapshot.Routes[slug]; ok {
-		if err := p.Project(route.ProjectID, access.View); err != nil {
+		if err := p.Project(route.ProjectID, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}

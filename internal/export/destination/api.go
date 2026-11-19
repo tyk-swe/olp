@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -45,17 +46,17 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/gaps", a.gaps)
 }
 
-func RequireScope(ctx context.Context, server *access.Server, q database.Queryer, p access.Principal, projectID *string) error {
+func RequireScope(ctx context.Context, server *access.Server, q database.Queryer, p authz.Principal, projectID *string) error {
 	if projectID == nil {
-		return p.Authorize(access.Settings)
+		return p.Authorize(authz.Settings)
 	}
-	if err := p.Authorize(access.Keys); err != nil {
+	if err := p.Authorize(authz.Keys); err != nil {
 		return err
 	}
 	return server.RequireProject(ctx, q, p, projectID)
 }
 
-func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -69,12 +70,12 @@ func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 
 func (l listed) MarshalJSON() ([]byte, error) { return l.body, nil }
 
-func (a *API) detail(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) detail(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	body, etag, projectID, err := readSink(r.Context(), a.server.Pool, r.PathValue("export_sink_id"))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, access.View); err != nil {
+	if err := p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(body, etag), nil
@@ -93,7 +94,7 @@ type createRequest struct {
 	Enabled     *bool           `json:"enabled"`
 }
 
-func (a *API) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ctx := r.Context()
 	var input createRequest
 	if err := httpkit.Decode(r, &input); err != nil {
@@ -188,7 +189,7 @@ type updateRequest struct {
 	Enabled     *bool           `json:"enabled"`
 }
 
-func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ctx := r.Context()
 	var input updateRequest
 	if err := httpkit.Decode(r, &input); err != nil {
@@ -264,7 +265,7 @@ func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	return httpkit.Detail(body, etag), tx.Commit(ctx)
 }
 
-func (a *API) delete(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ctx := r.Context()
 	tx, p, err := a.server.BeginMutation(r)
 	if err != nil {
@@ -297,7 +298,7 @@ func (a *API) delete(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(ctx)
 }
 
-func (a *API) gaps(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) gaps(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -1,4 +1,4 @@
-package access
+package authz
 
 import (
 	"slices"
@@ -150,7 +150,13 @@ func TokenScopes() []Operation {
 	return ops
 }
 
-func validRole(role string) bool { return everyone.has(role) }
+func ValidRole(role string) bool { return everyone.has(role) }
+
+// Delegable reports whether a management token may carry op.
+func (op Operation) Delegable() bool { return policy[op].delegable }
+
+// InstallationWide reports whether op takes an installation-wide access scope.
+func (op Operation) InstallationWide() bool { return policy[op].installation }
 
 type operationSet uint32
 
@@ -183,6 +189,17 @@ func (p Principal) Authorize(op Operation) error {
 	return nil
 }
 
+// Delegated returns p as a management token bounded by scopes and by the
+// role its creator holds now.
+func (p Principal) Delegated(scopes []Operation, creatorRole string) Principal {
+	p.creatorRole = creatorRole
+	p.scopes = 0
+	for _, op := range scopes {
+		p.scopes |= 1 << op
+	}
+	return p
+}
+
 // Operations lists every operation p may perform, which the console uses to
 // show only what the server would admit.
 func (p Principal) Operations() []Operation {
@@ -206,6 +223,10 @@ var System Actor
 
 // UserActor attributes an action to a member.
 func UserActor(id string) Actor { return Actor{user: id} }
+
+// Subject returns the member or management token id the actor stands for.
+// Both are empty for System.
+func (a Actor) Subject() (user, token string) { return a.user, a.token }
 
 // Actor attributes p's actions to the member or management token that made
 // the request.

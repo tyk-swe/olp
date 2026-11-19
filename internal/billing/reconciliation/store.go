@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage/reports"
 )
@@ -49,7 +49,7 @@ type daySpend struct {
 	ExcludedCallerAttempts int64
 }
 
-func visibleImports(ctx context.Context, q database.Queryer, p access.Principal, provider uuid.NullUUID) ([]providerImport, error) {
+func visibleImports(ctx context.Context, q database.Queryer, p authz.Principal, provider uuid.NullUUID) ([]providerImport, error) {
 	rows, err := q.Query(ctx, `SELECT pr.id,
 		CASE WHEN bi.provider_id IS NOT NULL THEN bi.last_success_at ELSE bc.last_success_at END,
 		bi.last_error_code, bi.provider_id IS NOT NULL

@@ -5,16 +5,16 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codesessions"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
 // CodeClientConfiguration returns configuration for the latest publication.
 // The management composition registers it with the route's read authorization.
-func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) CodeClientConfiguration(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -26,7 +26,7 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (h
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, access.View); err != nil {
+	if err = p.Project(&project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if len(document) == 0 {

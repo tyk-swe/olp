@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -104,8 +104,8 @@ func installationPolicyDocument(exported map[string]any) map[string]any {
 
 func (s *service) installationToken(owner *harness.Caller, name string) *harness.Caller {
 	s.T.Helper()
-	scopes := make([]string, 0, len(access.TokenScopes()))
-	for _, operation := range access.TokenScopes() {
+	scopes := make([]string, 0, len(authz.TokenScopes()))
+	for _, operation := range authz.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
 	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{

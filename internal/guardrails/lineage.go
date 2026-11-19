@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type Publisher func(ctx context.Context, tx pgx.Tx, actor string) error
@@ -23,8 +24,8 @@ type Lineage interface {
 	Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error
 }
 
-func Activation(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, access.Principal) (httpkit.Reply, error) {
-	return func(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func Activation(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, authz.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, param)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -36,13 +37,13 @@ func Activation(server *access.Server, publish Publisher, lineage Lineage, param
 			return httpkit.Reply{}, err
 		}
 		ctx := r.Context()
-		return access.Mutate(server, r, in, func(tx pgx.Tx, p access.Principal) (Head, error) {
+		return access.Mutate(server, r, in, func(tx pgx.Tx, p authz.Principal) (Head, error) {
 			head, err := lineage.Lock(ctx, tx, id)
 			if err != nil {
 				return Head{}, err
 			}
-			return head, p.Project(ProjectPointer(head.Project), access.Change)
-		}, func(tx pgx.Tx, p access.Principal, head Head) (httpkit.Reply, error) {
+			return head, p.Project(ProjectPointer(head.Project), authz.Change)
+		}, func(tx pgx.Tx, p authz.Principal, head Head) (httpkit.Reply, error) {
 			if err := httpkit.Match(r, head.ETag); err != nil {
 				return httpkit.Reply{}, err
 			}

@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
-func (s *Server) auditEvents(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) auditEvents(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	page, err := httpkit.Page(r)
 	if err != nil {

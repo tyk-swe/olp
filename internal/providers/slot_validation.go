@@ -12,12 +12,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
-func (s *Server) validateSlot(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) validateSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -36,7 +37,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	slots, err := loadSlots(r.Context(), tx, id)
@@ -79,7 +80,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (httpkit.Repl
 	probeErr := s.validateModelAccess(r.Context(), current.target(credential), *slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p access.Principal, locked *record) (httpkit.Reply, error) {
+	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
 		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
 			return httpkit.Reply{}, err
 		}

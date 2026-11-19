@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/export/destination"
 )
@@ -111,7 +112,7 @@ type resolved struct {
 	detectors *string
 }
 
-func (a *API) sinks(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) sinks(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	rows, err := a.server.Pool.Query(r.Context(), sinkOptionsSQL)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -129,7 +130,7 @@ func readConfiguration(ctx context.Context, q database.Queryer, query string) (c
 	return c, err
 }
 
-func (a *API) configuration(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) configuration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, err := readConfiguration(r.Context(), a.server.Pool, configurationSQL)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -137,7 +138,7 @@ func (a *API) configuration(r *http.Request, _ access.Principal) (httpkit.Reply,
 	return httpkit.Detail(c, c.ETag), nil
 }
 
-func (a *API) updateConfiguration(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) updateConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -152,7 +153,7 @@ func (a *API) updateConfiguration(r *http.Request, _ access.Principal) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err := p.Authorize(access.Access); err != nil {
+	if err := p.Authorize(authz.Access); err != nil {
 		return httpkit.Reply{}, err
 	}
 	current, err := readConfiguration(r.Context(), tx, lockConfigurationSQL)
@@ -172,7 +173,7 @@ func (a *API) updateConfiguration(r *http.Request, _ access.Principal) (httpkit.
 	return httpkit.Detail(next, next.ETag), tx.Commit(r.Context())
 }
 
-func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -194,18 +195,18 @@ func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
 	return httpkit.ListReplyBy(policies, page, func(p Policy) string { return p.ID }), nil
 }
 
-func (a *API) detail(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) detail(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	policy, err := readPolicy(r.Context(), a.server.Pool, getPolicySQL, r.PathValue("capture_policy_id"))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(policy.ProjectID, access.View); err != nil {
+	if err := p.Project(policy.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(policy, policy.ETag), nil
 }
 
-func (a *API) create(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input createRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -263,7 +264,7 @@ func (a *API) create(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	return result, tx.Commit(r.Context())
 }
 
-func (a *API) update(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input updateRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -314,7 +315,7 @@ func revise(ctx context.Context, tx pgx.Tx, input updateRequest, current Policy,
 	return scope.sink, storePins(ctx, tx, current.ID, pins)
 }
 
-func (a *API) delete(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tx, p, err := a.server.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -333,12 +334,12 @@ func (a *API) delete(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }
 
-func (a *API) lock(r *http.Request, tx pgx.Tx, p access.Principal) (Policy, error) {
+func (a *API) lock(r *http.Request, tx pgx.Tx, p authz.Principal) (Policy, error) {
 	current, err := readPolicy(r.Context(), tx, lockPolicySQL, r.PathValue("capture_policy_id"))
 	if err != nil {
 		return Policy{}, err
 	}
-	if err := p.Project(current.ProjectID, access.View); err != nil {
+	if err := p.Project(current.ProjectID, authz.View); err != nil {
 		return Policy{}, err
 	}
 	if err := destination.RequireScope(r.Context(), a.server, tx, p, current.ProjectID); err != nil {
@@ -350,7 +351,7 @@ func (a *API) lock(r *http.Request, tx pgx.Tx, p access.Principal) (Policy, erro
 func readPolicy(ctx context.Context, q database.Queryer, query, id string) (Policy, error) {
 	var raw []byte
 	if err := q.QueryRow(ctx, query, id).Scan(&raw); err != nil {
-		return Policy{}, access.NotFoundOr(err)
+		return Policy{}, httpkit.NotFoundOr(err)
 	}
 	return decodePolicy(raw)
 }

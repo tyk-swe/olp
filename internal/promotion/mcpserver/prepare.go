@@ -4,8 +4,8 @@ import (
 	"context"
 	"maps"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
@@ -41,7 +41,7 @@ func (reused) outcome()      {}
 func (limited) outcome()     {}
 func (recertified) outcome() {}
 
-func Prepare(ctx context.Context, pool database.Queryer, p access.Principal, servers []Server, bindings promotion.Bindings, deps Deps) (Prepared, error) {
+func Prepare(ctx context.Context, pool database.Queryer, p authz.Principal, servers []Server, bindings promotion.Bindings, deps Deps) (Prepared, error) {
 	if len(servers) == 0 {
 		return Prepared{}, nil
 	}
@@ -68,10 +68,10 @@ func Prepare(ctx context.Context, pool database.Queryer, p access.Principal, ser
 	})}, nil
 }
 
-func prepare(ctx context.Context, pool database.Queryer, p access.Principal, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (certification, error) {
+func prepare(ctx context.Context, pool database.Queryer, p authz.Principal, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (certification, error) {
 	if existing != nil {
 		projectID := existing.ProjectID
-		if err := p.Project(&projectID, access.Change); err != nil {
+		if err := p.Project(&projectID, authz.Change); err != nil {
 			return certification{}, err
 		}
 	}

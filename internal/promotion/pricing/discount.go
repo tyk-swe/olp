@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -111,7 +111,7 @@ func planDiscounts(ctx context.Context, q database.Queryer, desired []Discount, 
 	}), nil
 }
 
-func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
+func applyDiscounts(ctx context.Context, tx pgx.Tx, principal authz.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !resolves(providers, discount.Provider) }); i >= 0 {
 		return undeclaredDiscount(i)
 	}
@@ -124,7 +124,7 @@ func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, 
 		if discountAction(discount, inForce) == contract.ConfigurationPlanItemActionNoop {
 			continue
 		}
-		if err := principal.Authorize(access.Settings); err != nil {
+		if err := principal.Authorize(authz.Settings); err != nil {
 			return err
 		}
 		normalized, normalizeErr := pricebook.NormalizeDiscount(ctx, tx, pricebook.DiscountInput{

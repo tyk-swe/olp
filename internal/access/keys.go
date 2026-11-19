@@ -14,6 +14,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/priority"
@@ -183,7 +184,7 @@ func (s *Server) keyJSON() string {
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)),'{weekly,limit}',COALESCE(k.policy->'weekly_cost_limit','null'::jsonb))))`
 }
 
-func (s *Server) apiKeys(r *http.Request, principal Principal) (httpkit.Reply, error) {
+func (s *Server) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -202,7 +203,7 @@ func (s *Server) apiKeys(r *http.Request, principal Principal) (httpkit.Reply, e
 	items, err := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, p), err
 }
-func (s *Server) apiKey(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -213,12 +214,12 @@ func (s *Server) apiKey(r *http.Request, p Principal) (httpkit.Reply, error) {
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, View); err != nil {
+	if err := p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(json.RawMessage(data), etag), nil
 }
-func (s *Server) createAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	input := keyInput{KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -299,7 +300,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (httpkit.Reply, erro
 	}
 	return result, tx.Commit(r.Context())
 }
-func (s *Server) updateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := httpkit.Decode(r, &patch); err != nil {
 		return httpkit.Reply{}, err
@@ -335,7 +336,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, erro
 	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name,'expires_at',expires_at),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, Change); err != nil {
+	if err := p.Project(projectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var managed bool
@@ -420,10 +421,10 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, erro
 	}
 	return httpkit.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag), tx.Commit(r.Context())
 }
-func (s *Server) revokeAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) revokeAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.transitionKey(r, false)
 }
-func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) rotateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.transitionKey(r, true)
 }
 func (s *Server) transitionKey(r *http.Request, rotate bool) (httpkit.Reply, error) {
@@ -464,7 +465,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (httpkit.Reply, err
 	}
 	// A stored replay returns the rotated secret, so the caller must still
 	// reach this key's project before it is accepted.
-	if err := p.Project(projectID, Change); err != nil {
+	if err := p.Project(projectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if rotate {

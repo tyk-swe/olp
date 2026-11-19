@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type Management struct{ access *access.Server }
@@ -23,7 +24,7 @@ UNION ALL
 SELECT b.id,b.project_id,b.route_id,b.api_key_id,b.conversation,b.parent_id,b.root_id,NULL::uuid,NULL::text,b.created_at,COALESCE(b.retired_at,root.retired_at),b.provider_id,b.slot_id
 FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id)`
 
-func (m *Management) codeBindings(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) codeBindings(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return m.access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x`, access.CodeMatch{Field: "account_id", SQL: `(x.account_id=$%[1]d::uuid OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=x.root_id AND p.account_id=$%[1]d::uuid))`})
 }
 
@@ -33,7 +34,7 @@ const codePinsSelect = `(SELECT coalesce(jsonb_agg(` + codePinProjection + ` ORD
 
 const codeBindingPins = `CASE WHEN x.paid_provider_id IS NULL THEN ` + codePinsSelect + `x.root_id)` + ` ELSE (SELECT coalesce(jsonb_agg(jsonb_build_object('model',p.model,'target_model',p.selected_model,'account_id',NULL,'principal',NULL,'paid_provider_id',p.provider_id,'paid_slot_id',p.slot_id,'created_at',p.created_at) ORDER BY p.created_at,p.id),'[]'::jsonb) FROM olp.code_paid_bindings p WHERE p.root_id=x.root_id) END`
 
-func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *Management) retireCodeBinding(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -49,7 +50,7 @@ func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, access.Change); err != nil {
+	if err = p.Project(&project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := m.access.Replay(r, tx, p, id)

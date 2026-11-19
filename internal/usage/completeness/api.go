@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage/param"
 )
 
@@ -20,7 +21,7 @@ func (s *API) Register(mux *http.ServeMux) {
 		s.acknowledgeGatewayEpoch)
 }
 
-func (s *API) listGatewayEpochs(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) listGatewayEpochs(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	query := r.URL.Query()
 	limit, err := param.Limit(query)
@@ -54,7 +55,7 @@ func epochStateParam(query url.Values) (*EpochState, error) {
 	return &state, nil
 }
 
-func (s *API) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) acknowledgeGatewayEpoch(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	epoch, err := httpkit.IDParam(r, "process_epoch")
 	if err != nil {
 		return httpkit.Reply{}, err

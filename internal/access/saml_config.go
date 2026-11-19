@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	dsig "github.com/russellhaering/goxmldsig"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/samlidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -73,7 +74,7 @@ func loadSAML(ctx context.Context, q database.Queryer) (samlConfiguration, error
 	return c, err
 }
 
-func (s *Server) samlConfiguration(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, e := loadSAML(r.Context(), s.Pool)
 	return httpkit.Detail(c, c.ETag), e
 }
@@ -103,7 +104,7 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 			return m, httpkit.Invalid(field, "Use a bounded SAML attribute name.")
 		}
 	}
-	if c.DefaultRole != nil && !validRole(*c.DefaultRole) {
+	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
 		return m, httpkit.Invalid("default_role", "Choose a valid role.")
 	}
 	for field, list := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
@@ -111,7 +112,7 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 			return m, httpkit.Invalid(field, "Use at most 500 mappings.")
 		}
 		for i, v := range list {
-			if !validRole(v.Role) || httpkit.ValidText(field, v.ClaimValue, 254) != nil || slices.ContainsFunc(list[:i], func(other roleMapping) bool {
+			if !authz.ValidRole(v.Role) || httpkit.ValidText(field, v.ClaimValue, 254) != nil || slices.ContainsFunc(list[:i], func(other roleMapping) bool {
 				return other.ClaimValue == v.ClaimValue || field == "email_role_mappings" && strings.EqualFold(other.ClaimValue, v.ClaimValue)
 			}) {
 				return m, httpkit.Invalid(field, "Use unique values and valid roles.")
@@ -177,7 +178,7 @@ func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfigu
 	return sp, m, nil
 }
 
-func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		SAMLDefinition
 		Rotate bool `json:"rotate_signing_key"`
@@ -214,9 +215,9 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (httpkit.Rep
 	return httpkit.Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
-func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
+func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
 	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.Origin + "/api/v1/saml/metadata"}
-	if err := p.Authorize(Access); err != nil {
+	if err := p.Authorize(authz.Access); err != nil {
 		return c, err
 	}
 	metadata, err := validateSAML(c)
@@ -278,7 +279,7 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p Principal
 	return c, nil
 }
 
-func (s *Server) importSAMLMetadata(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -308,7 +309,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ Principal) (httpkit.Reply
 	return httpkit.OK(map[string]any{"metadata_xml": string(b), "idp_entity_id": m.Entity.EntityID}), nil
 }
 
-func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ Principal) error {
+func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
 	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil {
 		return err

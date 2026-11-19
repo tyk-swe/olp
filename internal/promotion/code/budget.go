@@ -10,6 +10,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -128,7 +129,7 @@ func budgetChange(ctx context.Context, q database.Queryer, b resolved[access.Cod
 	action, err := compared(ctx, q, b, access.ReadCodeBudgetInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeBudget, Key: b.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 			_, err := access.SaveCodeBudget(ctx, tx, p, b.to.id, httpkit.NewID(), b.input, b.to.existing)
 			return err
 		},

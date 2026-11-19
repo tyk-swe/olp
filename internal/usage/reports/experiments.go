@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
@@ -205,7 +205,7 @@ func ReadExperiments(ctx context.Context, q database.Queryer, f Filters) (Experi
 	return report, err
 }
 
-func (s *API) selectorSavings(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) selectorSavings(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	filters, err := usageFilters(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -217,7 +217,7 @@ func (s *API) selectorSavings(r *http.Request, p access.Principal) (httpkit.Repl
 	return httpkit.OK(report), nil
 }
 
-func (s *API) shadowExperiments(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) shadowExperiments(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	filters, err := usageFilters(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err

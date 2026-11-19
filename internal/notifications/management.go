@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -42,15 +43,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 }
 
-func notificationOperation(projectID *string) access.Operation {
+func notificationOperation(projectID *string) authz.Operation {
 	if projectID == nil {
-		return access.Settings
+		return authz.Settings
 	}
-	return access.Keys
+	return authz.Keys
 }
 
 func (s *Server) list(res resource) access.Handler {
-	return func(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 		page, err := httpkit.Page(r)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -67,7 +68,7 @@ func (s *Server) list(res resource) access.Handler {
 }
 
 func (s *Server) get(res resource) access.Handler {
-	return func(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, res.parameter)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -76,7 +77,7 @@ func (s *Server) get(res resource) access.Handler {
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err := p.Project(found.projectID, access.View); err != nil {
+		if err := p.Project(found.projectID, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 		return httpkit.Detail(found.body, found.etag), nil
@@ -87,7 +88,7 @@ type creation[T any] struct {
 	projectID   *string
 	fingerprint any
 	parse       func(projectID *string) (T, error)
-	insert      func(tx pgx.Tx, p access.Principal, projectID *string, target T, id, etag string) error
+	insert      func(tx pgx.Tx, p authz.Principal, projectID *string, target T, id, etag string) error
 }
 
 func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (httpkit.Reply, error) {
@@ -173,7 +174,7 @@ func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, cur
 }
 
 func (s *Server) delete(res resource) access.Handler {
-	return func(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, res.parameter)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -261,18 +262,18 @@ func (res resource) find(ctx context.Context, q database.Queryer, id string) (do
 	return found, err
 }
 
-func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p access.Principal, id string) (revision, error) {
+func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p authz.Principal, id string) (revision, error) {
 	var locked revision
 	if err := tx.QueryRow(ctx, res.lockSQL, id).Scan(&locked.etag, &locked.projectID); err != nil {
 		return revision{}, err
 	}
-	if err := p.Project(locked.projectID, access.View); err != nil {
+	if err := p.Project(locked.projectID, authz.View); err != nil {
 		return revision{}, err
 	}
 	if err := p.Authorize(notificationOperation(locked.projectID)); err != nil {
 		return revision{}, err
 	}
-	if err := p.Project(locked.projectID, access.Change); err != nil {
+	if err := p.Project(locked.projectID, authz.Change); err != nil {
 		return revision{}, err
 	}
 	return locked, nil

@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -60,7 +61,7 @@ type toolAnnotations struct {
 	OpenWorld   bool `json:"openWorldHint"`
 }
 
-func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (server *MCP) serveMCP(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	var request messages.Request
 	if err := httpkit.DecodeUnique(r, &request, 4<<20); err != nil {
 		return httpkit.Reply{}, err

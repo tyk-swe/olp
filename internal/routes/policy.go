@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -38,22 +39,22 @@ func SamePolicy(a, b *routing.Policy) bool {
 // policyScope names the policy a request addresses and the operation writing
 // it requires: the installation policy is an installation setting, a route
 // draft's is configuration, and an API key's is key management.
-func policyScope(r *http.Request) (string, string, access.Operation, error) {
+func policyScope(r *http.Request) (string, string, authz.Operation, error) {
 	scope := r.PathValue("scope")
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return "", "", 0, err
 	}
-	operation := access.Configure
+	operation := authz.Configure
 	switch scope {
 	case "installation":
 		if id != uuid.Nil.String() {
 			return "", "", 0, httpkit.Invalid("id", "Installation policy uses the nil UUID")
 		}
-		operation = access.Settings
+		operation = authz.Settings
 	case "route-draft":
 	case "api-key":
-		operation = access.Keys
+		operation = authz.Keys
 	default:
 		return "", "", 0, httpkit.Fail(404, "not_found", "Unknown policy scope")
 	}
@@ -106,7 +107,7 @@ func loadPolicy(ctx context.Context, q database.Queryer, scope, id string, lock 
 	err = json.Unmarshal(data, &p)
 	return &p, etag, err
 }
-func (s *Server) policy(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) policy(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	scope, id, _, err := policyScope(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -115,7 +116,7 @@ func (s *Server) policy(r *http.Request, p access.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.View); err != nil {
+	if err := p.Project(project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	policy, etag, err := loadPolicy(r.Context(), s.Access.Pool, scope, id, false)
@@ -128,11 +129,11 @@ func (s *Server) policy(r *http.Request, p access.Principal) (httpkit.Reply, err
 	}
 	return httpkit.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag, "configured": configured}, etag), nil
 }
-func (s *Server) putPolicy(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putPolicy(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.writePolicy(r, false)
 }
 
-func (s *Server) deletePolicy(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deletePolicy(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.writePolicy(r, true)
 }
 
@@ -165,7 +166,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (httpkit.Reply, error
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := principal.Project(project, access.Change); err != nil {
+	if err := principal.Project(project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, principal, policy)

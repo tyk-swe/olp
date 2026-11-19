@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -16,7 +17,7 @@ func (m *Management) registerRetainedManagement(mux *http.ServeMux) {
 	m.Access.Route(mux, "POST /api/v1/provider-resources/{id}/reconcile", m.reconcileRetained)
 	m.Access.Route(mux, "POST /api/v1/provider-resources/{id}/usage-evidence", m.retainedEvidence)
 }
-func (m *Management) retainedManagementResource(r *http.Request, tx pgx.Tx, p access.Principal) (*Resource, error) {
+func (m *Management) retainedManagementResource(r *http.Request, tx pgx.Tx, p authz.Principal) (*Resource, error) {
 	id, err := parseLocal(r.PathValue("id"))
 	if err != nil {
 		return nil, httpkit.Fail(404, "not_found", "No resource exists in this scope.")
@@ -36,12 +37,12 @@ func (m *Management) retainedManagementResource(r *http.Request, tx pgx.Tx, p ac
 	if err != nil {
 		return nil, err
 	}
-	if err = p.Project(project, access.Change); err != nil {
+	if err = p.Project(project, authz.Change); err != nil {
 		return nil, err
 	}
 	return resource, nil
 }
-func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *Management) reconcileRetained(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		UpstreamID string `json:"upstream_id"`
 	}
@@ -53,7 +54,7 @@ func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (htt
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Authorize(access.Configure); err != nil {
+	if err = p.Authorize(authz.Configure); err != nil {
 		return httpkit.Reply{}, err
 	}
 	resource, err := m.retainedManagementResource(r, tx, p)
@@ -91,7 +92,7 @@ type retainedEvidenceInput struct {
 	Terminal           bool             `json:"terminal"`
 }
 
-func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *Management) retainedEvidence(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input retainedEvidenceInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -101,7 +102,7 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Authorize(access.Settings); err != nil {
+	if err = p.Authorize(authz.Settings); err != nil {
 		return httpkit.Reply{}, err
 	}
 	resource, err := m.retainedManagementResource(r, tx, p)

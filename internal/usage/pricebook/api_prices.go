@@ -10,12 +10,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *API) listPricingDiscounts(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingDiscounts(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -41,7 +42,7 @@ func (s *API) listPricingDiscounts(r *http.Request, _ access.Principal) (httpkit
 	return httpkit.ListReplyBy(items, page, func(d Discount) string { return d.ID }), nil
 }
 
-func (s *API) createPricingDiscount(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createPricingDiscount(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input DiscountInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -78,7 +79,7 @@ func (s *API) createPricingDiscount(r *http.Request, _ access.Principal) (httpki
 	return result, tx.Commit(r.Context())
 }
 
-func (s *API) listPricingRevisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingRevisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	query := r.URL.Query()
 	limit, err := param.Limit(query)
@@ -104,7 +105,7 @@ type pricingRevisionInput struct {
 	Prices      []rates.Price `json:"prices"`
 }
 
-func (s *API) createPricingRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createPricingRevision(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input pricingRevisionInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -141,7 +142,7 @@ func (s *API) createPricingRevision(r *http.Request, _ access.Principal) (httpki
 	return result, tx.Commit(r.Context())
 }
 
-func (s *API) referenceCatalog(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) referenceCatalog(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if s.Catalog == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
@@ -151,7 +152,7 @@ func (s *API) referenceCatalog(r *http.Request, _ access.Principal) (httpkit.Rep
 // quotePricing runs the same pricing SQL accounting runs — unpinned, at the
 // simulated instant, with the given project as the charge's consumer — in a
 // transaction it never commits, so quoting writes and audits nothing.
-func (s *API) quotePricing(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input quoteInput
 	if err := httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err

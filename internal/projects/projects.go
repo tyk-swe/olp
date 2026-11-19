@@ -10,14 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 const projectFields = `'organization_id',p.organization_id,'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
 
 const projectFrom = " FROM olp.projects p JOIN olp.users u ON u.id=p.created_by"
 
-func (s *Server) projects(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
-	if err := organizationProject(r, s.access.Pool, principal, access.View); err != nil {
+func (s *Server) projects(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+	if err := organizationProject(r, s.access.Pool, principal, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	p, err := httpkit.Page(r)
@@ -32,12 +33,12 @@ func (s *Server) projects(r *http.Request, principal access.Principal) (httpkit.
 	return httpkit.ListReply(items, p), err
 }
 
-func (s *Server) project(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (s *Server) project(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = organizationProject(r, s.access.Pool, principal, access.View); err != nil {
+	if err = organizationProject(r, s.access.Pool, principal, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var data []byte
@@ -51,7 +52,7 @@ func duplicateName(err error) bool {
 	return errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "projects_name"
 }
 
-func (s *Server) createProject(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createProject(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name string `json:"name"`
 	}
@@ -63,7 +64,7 @@ func (s *Server) createProject(r *http.Request, _ access.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, access.Change); err != nil {
+	if err = organizationProject(r, tx, p, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := s.access.Replay(r, tx, p, input)
@@ -101,7 +102,7 @@ func loadProject(r *http.Request, tx pgx.Tx, id string) (string, error) {
 	return etag, err
 }
 
-func (s *Server) updateProject(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateProject(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name string `json:"name"`
 	}
@@ -117,7 +118,7 @@ func (s *Server) updateProject(r *http.Request, _ access.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, access.Change); err != nil {
+	if err = organizationProject(r, tx, p, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	etag, err := loadProject(r, tx, id)
@@ -151,12 +152,12 @@ const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u
 
 const projectMemberFrom = " FROM olp.project_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.users a ON a.id=m.added_by"
 
-func (s *Server) projectMembers(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectMembers(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = organizationProject(r, s.access.Pool, principal, access.View); err != nil {
+	if err = organizationProject(r, s.access.Pool, principal, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var exists bool
@@ -181,7 +182,7 @@ func (s *Server) projectMembers(r *http.Request, principal access.Principal) (ht
 	return httpkit.ListReplyBy(items, p, func(item map[string]any) string { return item["user_id"].(string) }), nil
 }
 
-func (s *Server) projectMemberships(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectMemberships(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	// The principal already carries its project roles, whether a member's
 	// own or those a management token inherits from its creator.
 	rows, err := s.access.Pool.Query(r.Context(), "SELECT id::text,name FROM olp.projects WHERE $1 OR id=ANY($2::uuid[]) ORDER BY lower(name),id", p.AllProjects, p.ProjectIDs())
@@ -204,11 +205,11 @@ func (s *Server) projectMemberships(r *http.Request, p access.Principal) (httpki
 	return httpkit.OK(map[string]any{"items": items}), rows.Err()
 }
 
-func (s *Server) putProjectMember(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectMember(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.writeProjectMember(r, false)
 }
 
-func (s *Server) deleteProjectMember(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteProjectMember(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.writeProjectMember(r, true)
 }
 
@@ -237,7 +238,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, access.Change); err != nil {
+	if err = organizationProject(r, tx, p, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	etag, err := loadProject(r, tx, projectID)

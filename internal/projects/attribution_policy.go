@@ -8,14 +8,15 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
-func (s *Server) projectAttributionPolicy(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectAttributionPolicy(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&id, access.View); err != nil {
+	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var policy json.RawMessage
@@ -26,7 +27,7 @@ func (s *Server) projectAttributionPolicy(r *http.Request, p access.Principal) (
 	return httpkit.Detail(map[string]any{"policy": policy, "etag": etag}, etag), nil
 }
 
-func (s *Server) putProjectAttributionPolicy(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectAttributionPolicy(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -54,7 +55,7 @@ func (s *Server) putProjectAttributionPolicy(r *http.Request, _ access.Principal
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, access.Change); err != nil {
+	if err = p.Project(&id, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	current, etag, err := ReadPolicies(r.Context(), tx, id)

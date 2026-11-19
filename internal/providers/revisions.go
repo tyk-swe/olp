@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -113,7 +113,7 @@ func (v *revisionRow) summary() revisionSummary {
 	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
-func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -142,7 +142,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, 
 	return httpkit.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -157,7 +157,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return httpkit.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
-func (s *Server) revisionModels(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -187,7 +187,7 @@ func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -279,7 +280,7 @@ func (s *Server) quotaUnavailable(err error) {
 	s.log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
-func (s *Server) slots(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) slots(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -371,7 +372,7 @@ func credentialVersionID(given *string) (*string, error) {
 	return &id, nil
 }
 
-func (s *Server) writeSlot(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -397,7 +398,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (httpkit.Reply, 
 	if _, external := source.(externalCredential); external && slot.CredentialVersionID != nil {
 		return httpkit.Reply{}, httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		slots, err := loadSlots(r.Context(), tx, id)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -491,7 +492,7 @@ func matchSlot(r *http.Request, current *record, slot *slotRow) error {
 	return httpkit.Match(r, slot.ETag)
 }
 
-func (s *Server) getSlot(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -519,7 +520,7 @@ func (s *Server) getSlot(r *http.Request, p access.Principal) (httpkit.Reply, er
 	}{slot.reply(), providerID, slot.Default, slot.ETag}, slot.ETag), nil
 }
 
-func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -529,7 +530,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (httpkit.Reply,
 		return httpkit.Reply{}, err
 	}
 	input := map[string]string{"provider_id": providerID, "slot_id": slotID}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		rows, err := loadSlots(r.Context(), tx, providerID)
 		if err != nil {
 			return httpkit.Reply{}, err

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -117,7 +118,7 @@ func modelID(m modelReply) string { return m.ID }
 
 // The project scope is decided first, so a provider outside it answers 404
 // before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probe.Target, error) {
+func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, error) {
 	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, probe.Target{}, err
@@ -127,7 +128,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 	if err != nil {
 		return nil, probe.Target{}, err
 	}
-	if err = p.Project(current.ProjectID, access.Change); err != nil {
+	if err = p.Project(current.ProjectID, authz.Change); err != nil {
 		return nil, probe.Target{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {
@@ -148,7 +149,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 	return current, current.target(credential, models...), nil
 }
 
-func (s *Server) probe(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -176,7 +177,7 @@ func (s *Server) probe(r *http.Request, p access.Principal) (httpkit.Reply, erro
 // The upstream call ran without the installation lock, so authority and
 // project reach are decided again under it before anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
-	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ *record) (httpkit.Reply, error) {
+	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, error) {
 		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -206,7 +207,7 @@ type discoverRequest struct {
 	} `json:"models"`
 }
 
-func (s *Server) discover(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -252,7 +253,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (httpkit.Reply, e
 		}
 		models = append(models, listed...)
 	}
-	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p access.Principal, locked *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
 		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -263,7 +264,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (httpkit.Reply, e
 	})
 }
 
-func (s *Server) models(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) models(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -306,7 +307,7 @@ func lockModel(ctx context.Context, tx pgx.Tx, providerID, modelID string) (stor
 	return scanModel(tx.QueryRow(ctx, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id=$2 FOR UPDATE", providerID, modelID))
 }
 
-func (s *Server) setModel(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) setModel(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -319,7 +320,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -333,7 +334,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	})
 }
 
-func (s *Server) certify(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -383,7 +384,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (httpkit.Reply, er
 	case certified < len(m.Capabilities):
 		status = "partial"
 	}
-	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p access.Principal, _ *record) (httpkit.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, error) {
 		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), defaultSlot, certified, at)
 		if err != nil {
 			return httpkit.Reply{}, err

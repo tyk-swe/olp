@@ -10,27 +10,28 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
-func (s *Server) projectBudget(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.readAggregateBudget(r, p, true)
 }
 
-func (s *Server) installationBudget(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) installationBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.readAggregateBudget(r, p, false)
 }
 
-func (s *Server) putProjectBudget(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeAggregateBudget(r, p, true)
 }
 
-func (s *Server) putInstallationBudget(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) putInstallationBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeAggregateBudget(r, p, false)
 }
 
 // Table names are selected internally, never supplied by the request.
-func (s *Server) budgetBoundary(r *http.Request, p access.Principal, project, change bool) (id, table, etagColumn, level string, err error) {
+func (s *Server) budgetBoundary(r *http.Request, p authz.Principal, project, change bool) (id, table, etagColumn, level string, err error) {
 	id, table, etagColumn, level = s.access.Installation, "olp.installation", "budget_etag", "installation"
 	if r.PathValue("organization_id") != "" {
 		table, etagColumn, level = "olp.organizations", "etag", "organization"
@@ -38,9 +39,9 @@ func (s *Server) budgetBoundary(r *http.Request, p access.Principal, project, ch
 		if err != nil {
 			return
 		}
-		need := access.View
+		need := authz.View
 		if change {
-			need = access.Change
+			need = authz.Change
 		}
 		err = p.Organization(id, need)
 		return
@@ -53,15 +54,15 @@ func (s *Server) budgetBoundary(r *http.Request, p access.Principal, project, ch
 	if err != nil {
 		return
 	}
-	need := access.View
+	need := authz.View
 	if change {
-		need = access.Change
+		need = authz.Change
 	}
 	err = p.Project(&id, need)
 	return
 }
 
-func (s *Server) readAggregateBudget(r *http.Request, p access.Principal, project bool) (httpkit.Reply, error) {
+func (s *Server) readAggregateBudget(r *http.Request, p authz.Principal, project bool) (httpkit.Reply, error) {
 	id, table, column, level, err := s.budgetBoundary(r, p, project, false)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -72,7 +73,7 @@ func (s *Server) readAggregateBudget(r *http.Request, p access.Principal, projec
 	return httpkit.Detail(map[string]any{"policy": policy, "etag": etag, "usage": usage}, etag), err
 }
 
-func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, project bool) (httpkit.Reply, error) {
+func (s *Server) writeAggregateBudget(r *http.Request, _ authz.Principal, project bool) (httpkit.Reply, error) {
 	var body struct {
 		Policy json.RawMessage `json:"policy"`
 	}

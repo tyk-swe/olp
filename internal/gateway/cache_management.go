@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
@@ -19,7 +20,7 @@ func (s *CacheManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/cache/purge", s.purge)
 	s.Access.Route(mux, "GET /api/v1/cache/statistics", s.statistics)
 }
-func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *CacheManagement) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in struct {
 		RouteID   *string `json:"route_id"`
 		ProjectID *string `json:"project_id"`
@@ -60,7 +61,7 @@ func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (httpkit.Re
 			return httpkit.Reply{}, err
 		}
 	}
-	if err = p.Project(project, access.Change); err != nil {
+	if err = p.Project(project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = s.Cache.Purge(r.Context(), kind, *id); err != nil {
@@ -72,7 +73,7 @@ func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (httpkit.Re
 	return httpkit.OK(map[string]bool{"purged": true}), tx.Commit(r.Context())
 }
 
-func (s *CacheManagement) statistics(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *CacheManagement) statistics(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	route := r.URL.Query().Get("route")
 	if route != "" && !routeidentity.ValidSlug(route) {
 		return httpkit.Reply{}, httpkit.Invalid("route", "Use a route slug.")

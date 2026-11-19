@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type InvestigationFilters struct {
@@ -113,7 +114,7 @@ func validateInvestigationEvidence(ctx context.Context, tx pgx.Tx, project strin
 	return nil
 }
 
-func (s *Management) listInvestigations(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) listInvestigations(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -124,7 +125,7 @@ func (s *Management) listInvestigations(r *http.Request, p access.Principal) (ht
 		if err != nil || id == uuid.Nil || id.String() != project {
 			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
-		if err := p.Project(&project, access.View); err != nil {
+		if err := p.Project(&project, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -141,7 +142,7 @@ func (s *Management) listInvestigations(r *http.Request, p access.Principal) (ht
 	return httpkit.ListReplyBy(items, page, func(item Investigation) string { return item.ID }), nil
 }
 
-func (s *Management) getInvestigation(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) getInvestigation(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "investigation_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -154,7 +155,7 @@ func (s *Management) getInvestigation(r *http.Request, p access.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&item.ProjectID, access.View); err != nil {
+	if err := p.Project(&item.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT ref.value->>'kind' AS kind,ref.value->>'id' AS id,
@@ -178,7 +179,7 @@ func (s *Management) getInvestigation(r *http.Request, p access.Principal) (http
 	}{Investigation: item, Evidence: evidence}), nil
 }
 
-func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) createInvestigation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input InvestigationInput
 	if err := httpkit.DecodeUnique(r, &input, 32<<10); err != nil {
 		return httpkit.Reply{}, err

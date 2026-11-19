@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	filter "github.com/scim2/filter-parser/v2"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/scim"
 )
@@ -37,7 +38,7 @@ func (s *Server) scimRead(r *http.Request, q database.Queryer, group bool, id st
 	return d, etag, err
 }
 
-func (s *Server) scimGet(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+func (s *Server) scimGet(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
 		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
@@ -60,7 +61,7 @@ func scimResourceSchema(group bool) string {
 	return scim.UserSchema
 }
 
-func (s *Server) scimList(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	values := r.URL.Query()
 	if r.Method == "POST" {
 		body, e := scim.Decode(r.Body)

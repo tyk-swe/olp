@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -38,7 +39,7 @@ func (m *API) Register(mux *http.ServeMux) {
 
 var errJobNotFound = httpkit.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
 
-func scoped(r *http.Request, store *Store, p access.Principal, need access.Need) (Record, error) {
+func scoped(r *http.Request, store *Store, p authz.Principal, need authz.Need) (Record, error) {
 	id := r.PathValue("job_id")
 	if _, err := uuid.Parse(id); err != nil {
 		return Record{}, errJobNotFound
@@ -53,17 +54,17 @@ func scoped(r *http.Request, store *Store, p access.Principal, need access.Need)
 	return record, nil
 }
 
-func (m *API) reauthorize(r *http.Request) (access.Principal, Record, error) {
+func (m *API) reauthorize(r *http.Request) (authz.Principal, Record, error) {
 	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
-		return access.Principal{}, Record{}, err
+		return authz.Principal{}, Record{}, err
 	}
 	defer tx.Rollback(r.Context())
-	record, err := scoped(r, NewStore(tx), p, access.Change)
+	record, err := scoped(r, NewStore(tx), p, authz.Change)
 	return p, record, err
 }
 
-func (m *API) audit(r *http.Request, p access.Principal, action, id string) error {
+func (m *API) audit(r *http.Request, p authz.Principal, action, id string) error {
 	tx, err := m.Access.Pool.Begin(r.Context())
 	if err != nil {
 		return err
@@ -75,8 +76,8 @@ func (m *API) audit(r *http.Request, p access.Principal, action, id string) erro
 	return tx.Commit(r.Context())
 }
 
-func (m *API) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
-	record, err := scoped(r, m.Jobs.store, p, access.View)
+func (m *API) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	record, err := scoped(r, m.Jobs.store, p, authz.View)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -91,7 +92,7 @@ func detail(record Record) (httpkit.Reply, error) {
 	return httpkit.Detail(item, record.ETag), nil
 }
 
-func (m *API) refresh(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *API) refresh(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, record, err := m.reauthorize(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -106,8 +107,8 @@ func (m *API) refresh(r *http.Request, _ access.Principal) (httpkit.Reply, error
 	return detail(updated)
 }
 
-func (m *API) content(w http.ResponseWriter, r *http.Request, p access.Principal) error {
-	record, err := scoped(r, m.Jobs.store, p, access.Change)
+func (m *API) content(w http.ResponseWriter, r *http.Request, p authz.Principal) error {
+	record, err := scoped(r, m.Jobs.store, p, authz.Change)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,7 @@ func (m *API) content(w http.ResponseWriter, r *http.Request, p access.Principal
 	return nil
 }
 
-func (m *API) delete(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, record, err := m.reauthorize(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -239,7 +240,7 @@ func decodeCursor(raw string) (*Position, error) {
 	return &Position{CreatedAt: created, ID: id}, nil
 }
 
-func (m *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	apiKey, keyErr := optionalUUID(query.Get("api_key_id"), "api_key_id", "Use an API key identifier.")
 	provider, providerErr := optionalUUID(query.Get("provider_id"), "provider_id", "Use a provider identifier.")

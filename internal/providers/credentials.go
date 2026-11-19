@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -21,7 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
-func (s *Server) credentials(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) credentials(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -61,7 +62,7 @@ type rotateRequest struct {
 }
 
 // Published revisions keep the credential version they were activated with.
-func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -96,7 +97,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	_, replayed, err := a.Replay(r, tx, p, input)
@@ -149,7 +150,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, err
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, locked *record) (httpkit.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, error) {
 		if locked.ETag != current.ETag {
 			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 		}
@@ -173,9 +174,9 @@ type credentialChange struct {
 }
 
 // Only settings administrators may name an external credential reference.
-func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, access.Principal) (*record, error) {
+func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, authz.Principal) (*record, error) {
 	lock := changeable(ctx, id)
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		if err := authorizeCredential(p, source); err != nil {
 			return nil, err
 		}
@@ -185,8 +186,8 @@ func referencing(ctx context.Context, id string, source credentialSource) func(p
 
 // Revoking makes a version unusable in drafts, published revisions and the
 // gateways that learn it through the authority refresh, and ends its grant.
-func (s *Server) revoke(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) revoke(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		credentialID, err := httpkit.IDParam(r, "credential_id")
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -310,9 +311,9 @@ func decodeCredential(plain *string, reference *secretstore.Reference) (credenti
 // External references spend the installation's workload authority. An
 // installation operator must approve the exact version for this provider;
 // project managers may use approved versions but cannot introduce references.
-func authorizeCredential(p access.Principal, source credentialSource) error {
+func authorizeCredential(p authz.Principal, source credentialSource) error {
 	if _, external := source.(externalCredential); external {
-		return p.Authorize(access.Settings)
+		return p.Authorize(authz.Settings)
 	}
 	return nil
 }

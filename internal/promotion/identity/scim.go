@@ -9,6 +9,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -138,7 +139,7 @@ func planSCIM(ctx context.Context, q database.Queryer, d Desired) ([]promotion.I
 }
 
 func SCIMApplier(d Desired, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(d.groups) == 0 {
 			return nil
 		}

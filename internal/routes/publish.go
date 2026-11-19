@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
@@ -133,7 +134,7 @@ func sameBehavior(a, b []byte) bool {
 	return reflect.DeepEqual(left, right)
 }
 
-func (s *Server) validateDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) validateDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
@@ -148,7 +149,7 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, current.ETag); err != nil {
@@ -190,7 +191,7 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (httpkit.Rep
 	return httpkit.Detail(current.summary(), etag), tx.Commit(r.Context())
 }
 
-func (s *Server) activateDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) activateDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
@@ -207,7 +208,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -444,7 +445,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	return &r, nil
 }
 
-func (s *Server) routes(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) routes(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -477,7 +478,7 @@ func (s *Server) routes(r *http.Request, p access.Principal) (httpkit.Reply, err
 	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) route(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) route(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -486,7 +487,7 @@ func (s *Server) route(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(row.ProjectID, access.View); err != nil {
+	if err := p.Project(row.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
@@ -496,7 +497,7 @@ func (s *Server) route(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	return httpkit.Detail(item, row.ETag), nil
 }
 
-func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -509,7 +510,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.View); err != nil {
+	if err := p.Project(project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id<$2 ORDER BY v.id DESC LIMIT $3", id, page.Before, page.Limit+1)
@@ -542,7 +543,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (httpkit.Reply, 
 	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -551,7 +552,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.View); err != nil {
+	if err := p.Project(project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -565,7 +566,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return httpkit.OK(v.json(live)), nil
 }
 
-func (s *Server) retireRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) retireRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
@@ -583,7 +584,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (httpkit.Reply
 	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -617,7 +618,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (httpkit.Reply
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -626,7 +627,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.View); err != nil {
+	if err := p.Project(project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
@@ -687,7 +688,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (httpkit.Repl
 	}), nil
 }
 
-func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) restoreRevision(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "route_id")
 	if err != nil {
@@ -705,7 +706,7 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)

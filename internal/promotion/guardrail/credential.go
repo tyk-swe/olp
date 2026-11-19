@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -19,7 +19,7 @@ type Vault struct {
 }
 
 func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -29,7 +29,7 @@ func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault
 			if err != nil {
 				return err
 			}
-			if err := p.Project(project, access.Change); err != nil {
+			if err := p.Project(project, authz.Change); err != nil {
 				return err
 			}
 			return promotion.Every(g.credentials, func(r reference) error { return ensureCredential(ctx, tx, p, vault, bindings[r.ref], project, r.ref) })
@@ -37,7 +37,7 @@ func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault
 	}
 }
 
-func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault Vault, binding promotion.Credential, project *string, ref promotion.Ref) error {
+func ensureCredential(ctx context.Context, tx pgx.Tx, p authz.Principal, vault Vault, binding promotion.Credential, project *string, ref promotion.Ref) error {
 	_, found, err := credential.FindID(ctx, tx, project, string(ref))
 	if err != nil || found {
 		return err

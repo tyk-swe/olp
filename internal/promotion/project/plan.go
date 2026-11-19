@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -16,7 +16,7 @@ import (
 
 func Planner(desired []Project, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(ctx context.Context, q database.Queryer, p access.Principal) error {
+		Authorize: func(ctx context.Context, q database.Queryer, p authz.Principal) error {
 			current, err := Read(ctx, q)
 			if err != nil {
 				return err
@@ -93,11 +93,11 @@ func catalogItems(desired []Project, current State) []promotion.Item {
 	})
 }
 
-func authorizeCatalog(p access.Principal, desired []Project, current State) error {
+func authorizeCatalog(p authz.Principal, desired []Project, current State) error {
 	if len(publishing(desired, current)) == 0 {
 		return nil
 	}
-	return p.Authorize(access.Access)
+	return p.Authorize(authz.Access)
 }
 
 func publishing(desired []Project, state State) []Project {

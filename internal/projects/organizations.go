@@ -9,12 +9,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
 const organizationFields = `'id',o.id,'name',o.name,'etag',o.etag,'created_by',o.created_by,'created_at',o.created_at,'updated_at',o.updated_at,'project_count',(SELECT count(*) FROM olp.projects p WHERE p.organization_id=o.id)`
 
-func (s *Server) organizations(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) organizations(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -27,12 +28,12 @@ func (s *Server) organizations(r *http.Request, p access.Principal) (httpkit.Rep
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) organization(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) organization(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "organization_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Organization(id, access.View); err != nil {
+	if err = p.Organization(id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var data json.RawMessage
@@ -51,7 +52,7 @@ func CreateOrganization(ctx context.Context, tx pgx.Tx, name, creator string) (s
 	return id, etag, err
 }
 
-func (s *Server) createOrganization(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createOrganization(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in struct {
 		Name string `json:"name"`
 	}
@@ -92,7 +93,7 @@ func (s *Server) createOrganization(r *http.Request, _ access.Principal) (httpki
 	return reply, tx.Commit(r.Context())
 }
 
-func (s *Server) updateOrganization(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateOrganization(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "organization_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -112,7 +113,7 @@ func (s *Server) updateOrganization(r *http.Request, _ access.Principal) (httpki
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Organization(id, access.Change); err != nil {
+	if err = p.Organization(id, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var etag string
@@ -136,12 +137,12 @@ func (s *Server) updateOrganization(r *http.Request, _ access.Principal) (httpki
 	return httpkit.Detail(data, etag), tx.Commit(r.Context())
 }
 
-func (s *Server) organizationMembers(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) organizationMembers(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "organization_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Organization(id, access.View); err != nil {
+	if err = p.Organization(id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	page, err := httpkit.Page(r)
@@ -159,11 +160,11 @@ func (s *Server) organizationMembers(r *http.Request, p access.Principal) (httpk
 	return httpkit.ListReplyBy(items, page, func(item map[string]any) string { return item["user_id"].(string) }), nil
 }
 
-func (s *Server) putOrganizationMember(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) putOrganizationMember(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeOrganizationMember(r, false)
 }
 
-func (s *Server) deleteOrganizationMember(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteOrganizationMember(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeOrganizationMember(r, true)
 }
 
@@ -192,7 +193,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Organization(id, access.Change); err != nil {
+	if err = p.Organization(id, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var etag string
@@ -246,7 +247,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 	return httpkit.Reply{Status: 204, ETag: etag}, tx.Commit(r.Context())
 }
 
-func organizationProject(r *http.Request, q database.Queryer, p access.Principal, need access.Need) error {
+func organizationProject(r *http.Request, q database.Queryer, p authz.Principal, need authz.Need) error {
 	raw := r.PathValue("organization_id")
 	if raw == "" {
 		return nil
@@ -265,7 +266,7 @@ func organizationProject(r *http.Request, q database.Queryer, p access.Principal
 		return err
 	}
 	if !matches {
-		return access.NotFound
+		return httpkit.NotFound
 	}
 	return nil
 }

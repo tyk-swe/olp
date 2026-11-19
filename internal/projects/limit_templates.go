@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
@@ -33,12 +34,12 @@ func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project
 	return nil
 }
 
-func (s *Server) projectLimitTemplates(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectLimitTemplates(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&id, access.View); err != nil {
+	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var templates authority.LimitTemplates
@@ -49,7 +50,7 @@ func (s *Server) projectLimitTemplates(r *http.Request, p access.Principal) (htt
 	return httpkit.Detail(map[string]any{"templates": templates, "etag": etag}, etag), nil
 }
 
-func (s *Server) putProjectLimitTemplates(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectLimitTemplates(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -71,7 +72,7 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ access.Principal) (
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, access.Change); err != nil {
+	if err = p.Project(&id, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	current, etag, err := ReadPolicies(r.Context(), tx, id)

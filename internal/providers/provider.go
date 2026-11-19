@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -74,12 +75,12 @@ func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
 }
 
 // A provider outside p's scope is reported missing.
-func visibleProvider(ctx context.Context, q database.Queryer, p access.Principal, id string) (*record, error) {
+func visibleProvider(ctx context.Context, q database.Queryer, p authz.Principal, id string) (*record, error) {
 	current, err := readProvider(ctx, q, id)
 	if err != nil {
 		return nil, err
 	}
-	if err = p.Project(current.ProjectID, access.View); err != nil {
+	if err = p.Project(current.ProjectID, authz.View); err != nil {
 		return nil, err
 	}
 	return current, nil
@@ -194,7 +195,7 @@ func (p *record) target(credential []byte, probeModels ...string) probe.Target {
 	return probe.Target{ProviderID: p.ID, Connection: p.Connection, Credential: credential, ProbeModels: probeModels}
 }
 
-func (s *Server) providers(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (s *Server) providers(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -222,7 +223,7 @@ func (s *Server) providers(r *http.Request, principal access.Principal) (httpkit
 	return httpkit.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
-func (s *Server) provider(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) provider(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -233,12 +234,12 @@ func (s *Server) provider(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return s.detailReply(r.Context(), s.access.Pool, id)
 }
 
-func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error)) (httpkit.Reply, error) {
+func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error)) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -252,13 +253,13 @@ func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx
 
 // A stored replay discloses the provider, so the project check also guards
 // replays.
-func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (*record, error) {
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+func changeable(ctx context.Context, id string) func(pgx.Tx, authz.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		current, err := lockProvider(ctx, tx, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := p.Project(current.ProjectID, access.Change); err != nil {
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
 			return nil, err
 		}
 		return current, nil
@@ -267,9 +268,9 @@ func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (
 
 // unchangedSince locks a provider that a probe read without the lock and
 // refuses to store the outcome once the provider has moved on.
-func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, access.Principal) (*record, error) {
+func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, authz.Principal) (*record, error) {
 	lock := changeable(ctx, read.ID)
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		current, err := lock(tx, p)
 		if err != nil {
 			return nil, err
@@ -317,12 +318,12 @@ func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]stri
 
 // Deletion is deliberately separate from disable: it removes an unused draft,
 // while published revisions and retained evidence remain addressable.
-func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Remove(s.access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Remove(s.access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, err
 		}

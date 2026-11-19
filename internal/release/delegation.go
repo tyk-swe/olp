@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -305,8 +305,8 @@ func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, p
 	if err != nil {
 		return ErrStaleAuthority
 	}
-	principal := access.Principal{User: access.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
-	if principal.Authorize(access.Keys) != nil || principal.Project(&project, access.Change) != nil {
+	principal := authz.Principal{User: authz.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
+	if principal.Authorize(authz.Keys) != nil || principal.Project(&project, authz.Change) != nil {
 		return ErrInvalidKey
 	}
 	return nil

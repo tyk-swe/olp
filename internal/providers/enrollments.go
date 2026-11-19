@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -89,7 +90,7 @@ func enrollmentIDs(r *http.Request) (string, string, error) {
 	return providerID, enrollmentID, err
 }
 
-func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) startGrantEnrollment(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -109,7 +110,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := httpkit.Match(r, current.ETag); err != nil {
@@ -135,7 +136,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
 	}
-	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (httpkit.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ authz.Principal, _ *record) (httpkit.Reply, error) {
 		if err := enrollment.Save(ctx, tx, s.access); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -164,7 +165,7 @@ func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
 	return slotRow{}, httpkit.Invalid("slot_id", "Unknown credential slot for this connection.")
 }
 
-func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) continueGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -186,7 +187,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (h
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := principal.Project(current.ProjectID, access.Change); err != nil {
+	if err := principal.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	enrollment, err := grants.Claim(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
@@ -227,7 +228,7 @@ func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrol
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
-	if err := principal.Project(locked.ProjectID, access.Change); err != nil {
+	if err := principal.Project(locked.ProjectID, authz.Change); err != nil {
 		return enrollmentCompletion{}, err
 	}
 	stale := httpkit.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
@@ -262,7 +263,7 @@ type grantBinding struct {
 	Action               string
 }
 
-func bindGrant(ctx context.Context, tx pgx.Tx, r *http.Request, actor access.Actor, binding grantBinding, stale error) (enrollmentCompletion, error) {
+func bindGrant(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, binding grantBinding, stale error) (enrollmentCompletion, error) {
 	bound, err := tx.Exec(ctx, `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
   WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, binding.ProviderID, binding.SlotID, binding.Credential.ID, binding.ExpectedCredentialID)
 	if err != nil {
@@ -285,7 +286,7 @@ func completion(providerID, etag string, credential grants.Credential) enrollmen
 	return enrollmentCompletion{ProviderID: providerID, ETag: etag, CredentialID: credential.ID, CredentialVersion: credential.Version, Principal: credential.Principal}
 }
 
-func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) pollGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -304,7 +305,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (httpk
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := principal.Project(current.ProjectID, access.Change); err != nil {
+	if err := principal.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	enrollment, standing, err := grants.Watch(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
@@ -361,14 +362,14 @@ func grantStatus(current *record, standing grants.Standing) enrollmentStatus {
 	return enrollmentStatus{Status: standing.Status}
 }
 
-func (s *Server) failedEnrollment(r *http.Request, actor access.Actor, providerID string, failure error) error {
+func (s *Server) failedEnrollment(r *http.Request, actor authz.Actor, providerID string, failure error) error {
 	if audited := s.auditFailedEnrollment(r, actor, providerID); audited != nil {
 		return audited
 	}
 	return failure
 }
 
-func (s *Server) auditFailedEnrollment(r *http.Request, actor access.Actor, providerID string) error {
+func (s *Server) auditFailedEnrollment(r *http.Request, actor authz.Actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
 	tx, err := s.access.Pool.Begin(ctx)
 	if err != nil {
@@ -381,18 +382,18 @@ func (s *Server) auditFailedEnrollment(r *http.Request, actor access.Actor, prov
 	return tx.Commit(ctx)
 }
 
-func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) cancelGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	reply, err := access.Transact(s.access, r, func(tx pgx.Tx, principal access.Principal) (*record, error) {
+	reply, err := access.Transact(s.access, r, func(tx pgx.Tx, principal authz.Principal) (*record, error) {
 		current, err := readProvider(r.Context(), tx, providerID)
 		if err != nil {
 			return nil, err
 		}
-		return current, principal.Project(current.ProjectID, access.Change)
-	}, func(tx pgx.Tx, principal access.Principal, _ *record) (httpkit.Reply, error) {
+		return current, principal.Project(current.ProjectID, authz.Change)
+	}, func(tx pgx.Tx, principal authz.Principal, _ *record) (httpkit.Reply, error) {
 		if err := grants.Cancel(r.Context(), tx, providerID, enrollmentID, principal.ID); err != nil {
 			return httpkit.Reply{}, err
 		}

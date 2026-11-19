@@ -11,10 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
-func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	var body scim.Document
 	var err error
 	if r.Method != "DELETE" {
@@ -159,7 +160,7 @@ func scimExtension(d scim.Document, key string, user bool) (map[string]any, erro
 	if user && role == "" {
 		role = "viewer"
 	}
-	if role != "" && !validRole(role) {
+	if role != "" && !authz.ValidRole(role) {
 		return nil, scim.Invalid("The role must be owner, operator, developer or viewer.")
 	}
 	scope, err := boundedSCIMText(e["accessScope"], 16, false)
@@ -493,7 +494,7 @@ func (s *Server) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Do
 	return affected, nil
 }
 
-func (s *Server) reconcileSCIMUsers(r *http.Request, tx pgx.Tx, p Principal, ids []string) error {
+func (s *Server) reconcileSCIMUsers(r *http.Request, tx pgx.Tx, p authz.Principal, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}

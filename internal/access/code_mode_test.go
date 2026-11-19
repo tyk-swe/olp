@@ -8,11 +8,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func TestCodeConfigurationWritesRequireProjectManagement(t *testing.T) {
 	const project = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
-	principal := access.Principal{Projects: map[string]string{project: "developer"}}
+	principal := authz.Principal{Projects: map[string]string{project: "developer"}}
 	for name, save := range map[string]func() error{
 		"pool": func() error {
 			_, err := access.SaveCodePool(t.Context(), nil, principal, project, project, access.CodePoolInput{ProjectID: strings.ToUpper(project), Name: "personal work", Kind: "shared", AccountIDs: []string{}, APIKeyIDs: []string{}}, false)

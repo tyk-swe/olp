@@ -16,6 +16,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -36,7 +37,7 @@ type mfaFlowData struct {
 }
 
 type mfaUser struct {
-	User
+	authz.User
 	Credentials []webauthn.Credential
 }
 
@@ -114,7 +115,7 @@ func ReadLocalMFARequired(ctx context.Context, q database.Queryer) (bool, error)
 	}
 }
 
-func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p Principal, required bool) error {
+func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p authz.Principal, required bool) error {
 	var current string
 	if err := tx.QueryRow(ctx, "SELECT value FROM olp.settings WHERE key='auth.mfa_required' FOR UPDATE").Scan(&current); err != nil {
 		return err
@@ -123,7 +124,7 @@ func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p Principal, required b
 	if current == desired {
 		return nil
 	}
-	if err := p.Authorize(Access); err != nil {
+	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, httpkit.NewID(), p.UserID())

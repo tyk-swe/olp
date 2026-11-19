@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
@@ -50,8 +50,8 @@ func eligible(ctx context.Context, q database.Queryer, source stream, sourceID, 
 	if err != nil {
 		return false, err
 	}
-	principal := access.Principal{AllProjects: current.Scope == "global", Projects: projectMembership(projectID, current.ProjectRole)}
-	return current.SourceLive && principal.Project(&projectID, access.View) == nil, nil
+	principal := authz.Principal{AllProjects: current.Scope == "global", Projects: projectMembership(projectID, current.ProjectRole)}
+	return current.SourceLive && principal.Project(&projectID, authz.View) == nil, nil
 }
 
 func Admit(ctx context.Context, q database.Queryer, name string, sourceID, projectID *string, creatorID string) (bool, error) {

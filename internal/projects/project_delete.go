@@ -7,11 +7,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 // Deletion removes an empty project boundary. PostgreSQL foreign keys retain
 // provider, route, key and accounting history until those dependencies permit it.
-func (s *Server) deleteProject(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteProject(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err

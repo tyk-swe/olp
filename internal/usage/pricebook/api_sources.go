@@ -14,10 +14,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *API) listPricingSources(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingSources(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	page, err := httpkit.Page(r)
 	if err != nil {
@@ -43,7 +44,7 @@ func (s *API) listPricingSources(r *http.Request, p access.Principal) (httpkit.R
 	return httpkit.ListReplyBy(items, page, func(source Source) string { return source.ID }), nil
 }
 
-func (s *API) getPricingSource(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) getPricingSource(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	id, err := httpkit.IDParam(r, "pricing_source_id")
 	if err != nil {
@@ -56,7 +57,7 @@ func (s *API) getPricingSource(r *http.Request, p access.Principal) (httpkit.Rep
 	return httpkit.Detail(source, source.ETag), nil
 }
 
-func (s *API) createPricingSource(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createPricingSource(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input sourceInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -134,7 +135,7 @@ func (s *API) validateSourceURL(raw string) error {
 	return nil
 }
 
-func (s *API) updatePricingSource(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) updatePricingSource(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := httpkit.Decode(r, &patch); err != nil {
 		return httpkit.Reply{}, err
@@ -213,7 +214,7 @@ func (s *API) updatePricingSource(r *http.Request, _ access.Principal) (httpkit.
 	return httpkit.Detail(source, source.ETag), tx.Commit(r.Context())
 }
 
-func (s *API) refreshPricingSource(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) refreshPricingSource(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "pricing_source_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -308,7 +309,7 @@ func (s *API) diffLatest(ctx context.Context, candidate []rates.Price) (SourceDi
 	return diff, nil
 }
 
-func (s *API) listPricingSourceSnapshots(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingSourceSnapshots(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	id, err := httpkit.IDParam(r, "pricing_source_id")
 	if err != nil {
@@ -342,7 +343,7 @@ func (s *API) listPricingSourceSnapshots(r *http.Request, p access.Principal) (h
 	return httpkit.ListReplyBy(items, page, func(snapshot SourceSnapshot) string { return snapshot.ID }), nil
 }
 
-func (s *API) publishPricingSourceSnapshot(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) publishPricingSourceSnapshot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input publishInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err

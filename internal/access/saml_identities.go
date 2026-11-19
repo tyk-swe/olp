@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
@@ -54,7 +55,7 @@ func (s *Server) usableSAMLOwner(ctx context.Context, q database.Queryer) (bool,
 	return false, rows.Err()
 }
 
-func (s *Server) samlIdentities(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'issuer',issuer,'subject',subject,'email_at_link',email_at_link,'created_at',created_at,'last_login_at',last_login_at) FROM olp.saml_identities WHERE user_id=$1 ORDER BY created_at,id`, p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -74,7 +75,7 @@ func (s *Server) samlIdentities(r *http.Request, p Principal) (httpkit.Reply, er
 	return httpkit.OK(map[string]any{"items": items, "linking_available": err == nil && c.Enabled, "reauthentication_available": len(usable) > 0}), nil
 }
 
-func (s *Server) unlinkSAML(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "identity_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -170,7 +171,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (httpkit.Reply, error)
 	return session, tx.Commit(r.Context())
 }
 
-func usableSAMLIdentities(r *http.Request, q database.Queryer, p Principal) ([]string, error) {
+func usableSAMLIdentities(r *http.Request, q database.Queryer, p authz.Principal) ([]string, error) {
 	c, err := loadSAML(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil

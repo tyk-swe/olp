@@ -11,6 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -68,7 +69,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.access.Route(mux, "DELETE /api/v1/mcp-user-grants/{grant_id}", s.revoke)
 }
 
-func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -89,7 +90,7 @@ func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply,
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, id).Scan(&project, &draft); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&project, access.Change); err != nil {
+	if err := p.Project(&project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var keyProject string
@@ -111,7 +112,7 @@ func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply,
 	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -132,7 +133,7 @@ func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&server.ProjectID, access.Change); err != nil {
+	if err := p.Project(&server.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var project string
@@ -154,7 +155,7 @@ func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) claim(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -186,7 +187,7 @@ func grantProblem(err error) error {
 	return err
 }
 
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -211,7 +212,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error
 	return httpkit.ListReplyBy(items, page, func(item Standing) string { return item.ID }), nil
 }
 
-func (s *Server) revoke(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revoke(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -229,7 +230,7 @@ func (s *Server) revoke(r *http.Request, p access.Principal) (httpkit.Reply, err
 		return httpkit.Reply{}, err
 	}
 	if member != p.UserID() {
-		if err := p.Project(&project, access.Change); err != nil {
+		if err := p.Project(&project, authz.Change); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}

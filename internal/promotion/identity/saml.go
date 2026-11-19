@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -64,7 +65,7 @@ func planSAML(ctx context.Context, q database.Queryer, desired *access.SAMLDefin
 }
 
 func SAMLApplier(desired Desired, deps Deps, request *http.Request) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if desired.saml == nil {
 			return nil
 		}

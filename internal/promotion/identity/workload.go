@@ -11,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -181,7 +182,7 @@ func readCatalogs(ctx context.Context, q database.Queryer) (map[string]catalog, 
 
 func (d Desired) NeedsPrepare() bool { return len(d.issuers) > 0 }
 
-func Prepare(ctx context.Context, desired Desired, principal access.Principal, deps Deps) (Prepared, error) {
+func Prepare(ctx context.Context, desired Desired, principal authz.Principal, deps Deps) (Prepared, error) {
 	if err := Authorize(desired, principal); err != nil {
 		return Prepared{}, err
 	}
@@ -210,7 +211,7 @@ func prepareIssuer(ctx context.Context, deps Deps, issuer contract.Configuration
 }
 
 func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(desired.issuers) == 0 {
 			return nil
 		}
@@ -225,7 +226,7 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 	}
 }
 
-func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
+func applyIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
 	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err

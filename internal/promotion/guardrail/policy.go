@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -199,12 +199,12 @@ func redefined(before, after map[portable]Guardrail, key portable) bool {
 	return !ok || old.Type != next.Type || !equal(old, next)
 }
 
-func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, policy Policy) error {
+func applyPolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, policy Policy) error {
 	project, err := projectID(directory, policy.Project)
 	if err != nil {
 		return err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	entries, err := promotion.TryMap(policy.Entries, func(e Entry) (guardrails.Entry, error) { return pin(ctx, tx, project, e) })

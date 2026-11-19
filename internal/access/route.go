@@ -10,14 +10,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 // Handler serves a management request whose caller the route has already
 // authenticated and admitted.
-type Handler func(*http.Request, Principal) (httpkit.Reply, error)
+type Handler func(*http.Request, authz.Principal) (httpkit.Reply, error)
 
 // StreamHandler is a Handler that writes its own response.
-type StreamHandler func(http.ResponseWriter, *http.Request, Principal) error
+type StreamHandler func(http.ResponseWriter, *http.Request, authz.Principal) error
 
 // PublicHandler serves a management request that authenticates no principal.
 type PublicHandler func(*http.Request) (httpkit.Reply, error)
@@ -89,7 +90,7 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 			if err != nil {
 				return httpkit.Reply{}, err
 			}
-			p := Principal{Kind: "key", KeyAuthority: &authority}
+			p := authz.Principal{Kind: "key", KeyAuthority: &authority}
 			if req.Admits(p) != nil {
 				return httpkit.Reply{}, httpkit.Forbidden()
 			}
@@ -138,7 +139,7 @@ func (s *Server) Public(mux *http.ServeMux, pattern string, h PublicHandler, opt
 
 // admitRoute authenticates the caller and checks the route requirement, carrying
 // the requirement in the request so a transaction can check it again.
-func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, Principal, error) {
+func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, authz.Principal, error) {
 	r = r.WithContext(context.WithValue(r.Context(), requirementKey{}, req))
 	p, err := s.Authenticate(r, s.Pool)
 	if err != nil {
@@ -150,10 +151,10 @@ func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, Pr
 // Reauthorize resolves the caller again inside tx, after Begin has taken the
 // installation lock, and checks the route requirement again, so a mutation
 // never commits under authority revoked since the request was admitted.
-func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (Principal, error) {
+func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error) {
 	req, ok := r.Context().Value(requirementKey{}).(Requirement)
 	if !ok {
-		return Principal{}, fmt.Errorf("%s was not admitted by a secured route", r.Pattern)
+		return authz.Principal{}, fmt.Errorf("%s was not admitted by a secured route", r.Pattern)
 	}
 	p, err := s.Authenticate(r, tx)
 	if err != nil {
@@ -162,15 +163,15 @@ func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (Principal, error) {
 	return p, req.Admits(p)
 }
 
-func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, Principal, error) {
+func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, authz.Principal, error) {
 	tx, err := s.Begin(r)
 	if err != nil {
-		return nil, Principal{}, err
+		return nil, authz.Principal{}, err
 	}
 	principal, err := s.Reauthorize(r, tx)
 	if err != nil {
 		tx.Rollback(r.Context())
-		return nil, Principal{}, err
+		return nil, authz.Principal{}, err
 	}
 	return tx, principal, nil
 }

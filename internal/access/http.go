@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -332,15 +333,15 @@ func auditSource(r *http.Request) any {
 
 // Audit records a metadata-only audit event inside the mutation's
 // transaction, attributed to actor.
-func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string) error {
+func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string) error {
 	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
 }
 
-func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
+func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
 	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, projectID)
 }
 
-func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
+func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
 	source := auditSource(r)
 	family := "other"
 	agent := r.UserAgent()
@@ -351,11 +352,10 @@ func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Acto
 		}
 	}
 	var userID, tokenID any
-	if actor.user != "" {
-		userID = actor.user
-	}
-	if actor.token != "" {
-		tokenID = actor.token
+	if user, token := actor.Subject(); user != "" {
+		userID = user
+	} else if token != "" {
+		tokenID = token
 	}
 	_, err := tx.Exec(ctx, auditInsertSQL, httpkit.NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
 	return err

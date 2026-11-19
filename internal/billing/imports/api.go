@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -41,7 +42,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/providers/{provider_id}/invoiced-costs", a.invoicedCosts)
 }
 
-func (a *API) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -69,7 +70,7 @@ type putInput struct {
 	Credential json.RawMessage `json:"credential"`
 }
 
-func (a *API) put(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) put(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -81,7 +82,7 @@ func (a *API) put(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	if bytes.Equal(bytes.TrimSpace(input.Credential), []byte("null")) {
 		return httpkit.Reply{}, httpkit.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	}
-	return access.Mutate(a.server, r, input, a.changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, owner provider) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, input, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, owner provider) (httpkit.Reply, error) {
 		existing, found, err := lockRecord(r.Context(), tx, id)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -150,7 +151,7 @@ func credentialInvalid(err error) error {
 	return err
 }
 
-func (a *API) remove(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) remove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -182,12 +183,12 @@ func (a *API) remove(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }
 
-func (a *API) run(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ provider) (httpkit.Reply, error) {
+	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, error) {
 		etag := httpkit.NewID()
 		found, err := scheduleNow(r.Context(), tx, id, etag)
 		if err != nil {
@@ -200,7 +201,7 @@ func (a *API) run(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	})
 }
 
-func (a *API) reply(r *http.Request, tx pgx.Tx, p access.Principal, id, action string, status int, etag string) (httpkit.Reply, error) {
+func (a *API) reply(r *http.Request, tx pgx.Tx, p authz.Principal, id, action string, status int, etag string) (httpkit.Reply, error) {
 	if err := access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -215,7 +216,7 @@ func (a *API) reply(r *http.Request, tx pgx.Tx, p access.Principal, id, action s
 	return httpkit.Reply{Status: status, ETag: etag, Body: body}, nil
 }
 
-func (a *API) visible(ctx context.Context, p access.Principal, id string) error {
+func (a *API) visible(ctx context.Context, p authz.Principal, id string) error {
 	owner, found, err := readProvider(ctx, a.server.Pool, id)
 	if err != nil {
 		return err
@@ -223,11 +224,11 @@ func (a *API) visible(ctx context.Context, p access.Principal, id string) error 
 	if !found {
 		return errProviderMissing
 	}
-	return p.Project(owner.ProjectID, access.View)
+	return p.Project(owner.ProjectID, authz.View)
 }
 
-func (a *API) changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (provider, error) {
-	return func(tx pgx.Tx, p access.Principal) (provider, error) {
+func (a *API) changeable(ctx context.Context, id string) func(pgx.Tx, authz.Principal) (provider, error) {
+	return func(tx pgx.Tx, p authz.Principal) (provider, error) {
 		owner, found, err := lockProvider(ctx, tx, id)
 		if err != nil {
 			return provider{}, err
@@ -235,7 +236,7 @@ func (a *API) changeable(ctx context.Context, id string) func(pgx.Tx, access.Pri
 		if !found {
 			return provider{}, errProviderMissing
 		}
-		return owner, p.Project(owner.ProjectID, access.Change)
+		return owner, p.Project(owner.ProjectID, authz.Change)
 	}
 }
 
@@ -296,7 +297,7 @@ type invoicedCost = struct {
 	Source    string             `json:"source"`
 }
 
-func (a *API) invoicedCosts(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) invoicedCosts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -27,16 +28,16 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "DELETE /api/v1/guardrail-attachments/{attachment_id}", a.detach)
 }
 
-func (a *API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	items, err := list(r.Context(), a.server.Pool)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	visible := slices.DeleteFunc(items, func(item listed) bool { return authorize(p, item.target(), access.View) != nil })
+	visible := slices.DeleteFunc(items, func(item listed) bool { return authorize(p, item.target(), authz.View) != nil })
 	return httpkit.Reply{Status: http.StatusOK, Body: map[string][]listed{"items": visible}}, nil
 }
 
-func (a *API) attach(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) attach(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in guardrails.Attachment
 	if err := httpkit.DecodeUnique(r, &in, 65536); err != nil {
 		return httpkit.Reply{}, err
@@ -46,13 +47,13 @@ func (a *API) attach(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Mutate(a.server, r, placement, func(tx pgx.Tx, p access.Principal) (target, error) {
+	return access.Mutate(a.server, r, placement, func(tx pgx.Tx, p authz.Principal) (target, error) {
 		t, err := locate(ctx, tx, placement)
 		if err != nil {
 			return target{}, err
 		}
-		return t, authorize(p, t, access.Change)
-	}, func(tx pgx.Tx, p access.Principal, t target) (httpkit.Reply, error) {
+		return t, authorize(p, t, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, t target) (httpkit.Reply, error) {
 		if err := requirePolicy(ctx, tx, p, t); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -67,7 +68,7 @@ func (a *API) attach(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	})
 }
 
-func (a *API) replace(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) replace(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "attachment_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -87,13 +88,13 @@ func (a *API) replace(r *http.Request, _ access.Principal) (httpkit.Reply, error
 		target
 		etag string
 	}
-	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p access.Principal) (locked, error) {
+	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (locked, error) {
 		t, etag, err := lock(ctx, tx, id)
 		if err != nil {
 			return locked{}, err
 		}
-		return locked{t, etag}, authorize(p, t, access.Change)
-	}, func(tx pgx.Tx, p access.Principal, current locked) (httpkit.Reply, error) {
+		return locked{t, etag}, authorize(p, t, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, current locked) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, current.etag); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -116,19 +117,19 @@ func (a *API) replace(r *http.Request, _ access.Principal) (httpkit.Reply, error
 	})
 }
 
-func (a *API) detach(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a *API) detach(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "attachment_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	ctx := r.Context()
-	return access.Remove(a.server, r, id, func(tx pgx.Tx, p access.Principal) (string, error) {
+	return access.Remove(a.server, r, id, func(tx pgx.Tx, p authz.Principal) (string, error) {
 		t, etag, err := lock(ctx, tx, id)
 		if err != nil {
 			return "", err
 		}
-		return etag, authorize(p, t, access.Change)
-	}, func(tx pgx.Tx, p access.Principal, etag string) (httpkit.Reply, error) {
+		return etag, authorize(p, t, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, etag string) (httpkit.Reply, error) {
 		if err := httpkit.Match(r, etag); err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -142,7 +143,7 @@ func (a *API) detach(r *http.Request, _ access.Principal) (httpkit.Reply, error)
 	})
 }
 
-func (a *API) settle(r *http.Request, tx pgx.Tx, p access.Principal, action, id, incompatible string) error {
+func (a *API) settle(r *http.Request, tx pgx.Tx, p authz.Principal, action, id, incompatible string) error {
 	if err := a.publish(r.Context(), tx, p.UserID()); err != nil {
 		return httpkit.Invalid("attachment", incompatible)
 	}

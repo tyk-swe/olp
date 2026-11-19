@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -41,7 +42,7 @@ func item[T any](kind contract.ConfigurationPlanItemKind, desired, current *T, d
 }
 
 func MFAApplier(desired Settings) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if desired.RequireLocalMFA == nil {
 			return nil
 		}
@@ -50,13 +51,13 @@ func MFAApplier(desired Settings) promotion.Applier {
 }
 
 func TimeZoneApplier(desired Settings) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		return access.ApplyBudgetTimeZone(ctx, tx, p, desired.TimeZone)
 	}
 }
 
 func BudgetApplier(desired Settings) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		changed, err := access.ApplyInstallationBudget(ctx, tx, p, desired.Budget)
 		if err != nil || !changed {
 			return err
