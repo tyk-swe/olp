@@ -1,10 +1,10 @@
 package completeness
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -60,25 +60,17 @@ func (s *API) acknowledgeGatewayEpoch(r *http.Request, _ authz.Principal) (httpk
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID())
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if acknowledgement == nil {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found",
-			"No unresolved gateway epoch with that identifier was found.")
-	}
-	// Acknowledging is an operator statement about loss they have seen, so each
-	// acknowledgement is audited even when the epoch was already acknowledged.
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(),
-		"request_metadata.gateway_epoch_acknowledge", "request_metadata_gateway_epoch",
-		epoch, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.OK(acknowledgement), tx.Commit(r.Context())
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID())
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if acknowledgement == nil {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found",
+				"No unresolved gateway epoch with that identifier was found.")
+		}
+		// Acknowledging is an operator statement about loss they have seen, so each
+		// acknowledgement is audited even when the epoch was already acknowledged.
+		return httpkit.OK(acknowledgement), access.Event{Action: "request_metadata.gateway_epoch_acknowledge", Resource: "request_metadata_gateway_epoch", ID: epoch}, nil
+	})
 }

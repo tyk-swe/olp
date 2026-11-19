@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -212,59 +213,42 @@ func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, err
 		}
 	}
-	tx, p, err := m.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := p.Project(&call.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replay, err := m.access.Replay(r, tx, p, request)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	switch request.Outcome {
-	case ResolveSettled:
-		resultDigest := sha256.Sum256([]byte("olp:mcp-tool-resolution:" + call.DispatchID + ":" + request.EvidenceDigest))
-		err = debits.SettleToolTx(r.Context(), tx, debits.Result{
-			DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
-			EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
-			Unpriced: call.UnitPrice == nil,
-		})
-	case ResolveNotAccepted:
-		err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{
-			DispatchID: call.DispatchID, ActorID: p.UserID(), EvidenceDigest: evidence,
-		})
-	}
-	if err != nil {
-		if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
-			return httpkit.Reply{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+	return access.Mutate(m.access, r, request, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, p.Project(&call.ProjectID, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		switch request.Outcome {
+		case ResolveSettled:
+			resultDigest := sha256.Sum256([]byte("olp:mcp-tool-resolution:" + call.DispatchID + ":" + request.EvidenceDigest))
+			err = debits.SettleToolTx(r.Context(), tx, debits.Result{
+				DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
+				EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
+				Unpriced: call.UnitPrice == nil,
+			})
+		case ResolveNotAccepted:
+			err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{
+				DispatchID: call.DispatchID, ActorID: p.UserID(), EvidenceDigest: evidence,
+			})
 		}
-		return httpkit.Reply{}, err
-	}
-	tag, err := tx.Exec(r.Context(), `UPDATE olp.mcp_tool_calls SET status=$2 WHERE id=$1 AND status='outcome_unknown'`, call.ID, string(request.Outcome.status()))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if tag.RowsAffected() != 1 {
-		return httpkit.Reply{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
-	}
-	if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), "mcp_tool_call.resolve", "mcp_tool_call", call.ID, "success", &call.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	updated, err := loadToolCall(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Detail(updated, updated.ID)
-	if err = m.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+		if err != nil {
+			if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+			}
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		tag, err := tx.Exec(r.Context(), `UPDATE olp.mcp_tool_calls SET status=$2 WHERE id=$1 AND status='outcome_unknown'`, call.ID, string(request.Outcome.status()))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+		}
+		updated, err := loadToolCall(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Detail(updated, updated.ID)
+		return reply, access.Event{Action: "mcp_tool_call.resolve", Resource: "mcp_tool_call", ID: call.ID, Project: &call.ProjectID}, nil
+	})
 }
 
 func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

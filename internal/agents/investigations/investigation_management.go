@@ -187,46 +187,29 @@ func (s *Management) createInvestigation(r *http.Request, _ authz.Principal) (ht
 	if err := input.Validate(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := s.access.RequireProject(r.Context(), tx, p, &input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replay, err := s.access.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	if input.Filters.RunID != nil {
-		if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, InvestigationEvidence{Kind: "run", ID: *input.Filters.RunID}); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, s.access.RequireProject(r.Context(), tx, p, &input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if input.Filters.RunID != nil {
+			if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, InvestigationEvidence{Kind: "run", ID: *input.Filters.RunID}); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
 		}
-	}
-	for _, evidence := range input.Evidence {
-		if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, evidence); err != nil {
-			return httpkit.Reply{}, err
+		for _, evidence := range input.Evidence {
+			if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, evidence); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
 		}
-	}
-	itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
- RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, httpkit.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "investigation.create", "investigation", item.ID, "success", &item.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Reply{Status: http.StatusCreated, Body: item, Location: "/api/v1/investigations/" + item.ID}
-	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+		itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
+	 RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, httpkit.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Reply{Status: http.StatusCreated, Body: item, Location: "/api/v1/investigations/" + item.ID}
+		return reply, access.Event{Action: "investigation.create", Resource: "investigation", ID: item.ID, Project: &item.ProjectID}, nil
+	})
 }

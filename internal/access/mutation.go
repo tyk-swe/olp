@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -44,7 +45,7 @@ func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	current, err := lock(tx, p)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -72,7 +73,7 @@ func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -100,7 +101,7 @@ func Transact[T any](s *Server, r *http.Request, lock func(pgx.Tx, authz.Princip
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	current, err := lock(tx, p)
 	if err != nil {
 		return httpkit.Reply{}, err

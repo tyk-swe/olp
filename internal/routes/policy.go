@@ -152,76 +152,62 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (httpkit.Reply, error
 		}
 	}
 	a := s.Access
-	tx, principal, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = principal.Authorize(operation); err != nil {
-		return httpkit.Reply{}, err
-	}
-	// The stored reply discloses the policy, so the caller must still reach
-	// the scoped resource's project before a replay is served.
-	project, err := policyProject(r.Context(), tx, scope, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := principal.Project(project, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, principal, policy)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	previous := etag
-	etag = httpkit.NewID()
-	data, _ := json.Marshal(policy)
-	if remove {
-		data = []byte(`{}`)
-	}
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by,configured) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,configured=excluded.configured,updated_at=now()`, scope, id, data, etag, principal.UserID(), !remove); err != nil {
-		return httpkit.Reply{}, err
-	}
-	switch scope {
-	case "route-draft":
-		_, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET etag=$2,state='draft',updated_at=now() WHERE id=$1", id, etag)
-	case "api-key":
-		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
-	}
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if scope != "route-draft" {
-		if _, err = release.Publish(r.Context(), tx, principal.UserID()); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(a, r, policy, func(tx pgx.Tx, principal authz.Principal) (struct{}, error) {
+		if err = principal.Authorize(operation); err != nil {
+			return struct{}{}, err
 		}
-	}
-	action := "routing_policy.update"
-	if remove {
-		action = "routing_policy.delete"
-	}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), action, scope, id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Detail(map[string]any{"policy": &policy, "etag": etag, "configured": true}, etag)
-	if remove {
-		reply = httpkit.Reply{Status: http.StatusNoContent}
-	}
-	if scope != "installation" {
-		reply.ParentMutation = &httpkit.ParentMutation{Previous: previous, Current: etag}
-	}
-	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+		// The stored reply discloses the policy, so the caller must still reach
+		// the scoped resource's project before a replay is served.
+		project, err := policyProject(r.Context(), tx, scope, id)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if err := principal.Project(project, authz.Change); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	}, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		previous := etag
+		etag = httpkit.NewID()
+		data, _ := json.Marshal(policy)
+		if remove {
+			data = []byte(`{}`)
+		}
+		if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by,configured) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,configured=excluded.configured,updated_at=now()`, scope, id, data, etag, principal.UserID(), !remove); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		switch scope {
+		case "route-draft":
+			_, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET etag=$2,state='draft',updated_at=now() WHERE id=$1", id, etag)
+		case "api-key":
+			_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
+		}
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if scope != "route-draft" {
+			if _, err = release.Publish(r.Context(), tx, principal.UserID()); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		action := "routing_policy.update"
+		if remove {
+			action = "routing_policy.delete"
+		}
+		reply := httpkit.Detail(map[string]any{"policy": &policy, "etag": etag, "configured": true}, etag)
+		if remove {
+			reply = httpkit.Reply{Status: http.StatusNoContent}
+		}
+		if scope != "installation" {
+			reply.ParentMutation = &httpkit.ParentMutation{Previous: previous, Current: etag}
+		}
+		return reply, access.Event{Action: action, Resource: scope, ID: id}, nil
+	})
 }

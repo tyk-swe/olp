@@ -137,47 +137,30 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err := RequireScope(ctx, a.server, tx, p, projectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.server.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(ctx)
-	}
-	var count int64
-	if err := tx.QueryRow(ctx, countSinksSQL).Scan(&count); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if count >= maxSinks {
-		return httpkit.Reply{}, httpkit.Invalid("sinks", fmt.Sprintf("This installation already has %d export sinks.", maxSinks))
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if _, err := tx.Exec(ctx, createSinkSQL, id, name, projectID, input.Type, input.Destination, input.Streams, input.Format, filter, settings, enabled, etag, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := a.replaceCredential(ctx, tx, id, nil, input.Credential); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(ctx, tx, r, p.Actor(), "export_sink.create", "export_sink", id, "success", projectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	body, _, _, err := readSink(ctx, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated, ETag: etag, Location: "/api/v1/observability/sinks/" + id, Body: body}
-	if err := a.server.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(ctx)
+	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, RequireScope(ctx, a.server, tx, p, projectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var count int64
+		if err := tx.QueryRow(ctx, countSinksSQL).Scan(&count); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if count >= maxSinks {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", fmt.Sprintf("This installation already has %d export sinks.", maxSinks))
+		}
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if _, err := tx.Exec(ctx, createSinkSQL, id, name, projectID, input.Type, input.Destination, input.Streams, input.Format, filter, settings, enabled, etag, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := a.replaceCredential(ctx, tx, id, nil, input.Credential); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		body, _, _, err := readSink(ctx, tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: http.StatusCreated, ETag: etag, Location: "/api/v1/observability/sinks/" + id, Body: body}
+		return result, access.Event{Action: "export_sink.create", Resource: "export_sink", ID: id, Project: projectID}, nil
+	})
 }
 
 type updateRequest struct {

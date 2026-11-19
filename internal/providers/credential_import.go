@@ -114,32 +114,29 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	locked, err := lockProvider(ctx, tx, current.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(locked.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, locked.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
-		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
-		httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, tx.Commit(ctx)
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		locked, err := lockProvider(ctx, tx, current.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(locked.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, locked.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+			Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
+			httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, access.Event{}, nil
+	})
 }
 
 type importedCredential struct {

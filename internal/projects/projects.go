@@ -59,41 +59,24 @@ func (s *Server) createProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := s.access.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	input.Name = strings.TrimSpace(input.Name)
-	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag, err := CreateProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.create", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id=$1", id).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Location: "/api/v1/projects/" + id, ETag: etag, Body: json.RawMessage(data)}
-	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.access, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, organizationProject(r, tx, p, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		input.Name = strings.TrimSpace(input.Name)
+		if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag, err := CreateProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var data []byte
+		if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id=$1", id).Scan(&data); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/projects/" + id, ETag: etag, Body: json.RawMessage(data)}
+		return result, access.Event{Action: "project.create", Resource: "project", ID: id}, nil
+	})
 }
 
 func loadProject(r *http.Request, tx pgx.Tx, id string) (string, error) {
@@ -227,73 +210,67 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag, err := loadProject(r, tx, projectID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var exists bool
-	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1)", userID).Scan(&exists); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !exists {
-		return httpkit.Reply{}, pgx.ErrNoRows
-	}
-	if remove {
-		var memberRole *string
-		if err = tx.QueryRow(r.Context(), "DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2 RETURNING role", projectID, userID).Scan(&memberRole); errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, pgx.ErrNoRows
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = organizationProject(r, tx, p, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
+		etag, err := loadProject(r, tx, projectID)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-
-	} else {
-
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role", projectID, userID, input.Role, p.UserID()); err != nil {
-			return httpkit.Reply{}, err
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	var hasManager bool
-	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND role='manager')", projectID).Scan(&hasManager); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !hasManager {
-		return httpkit.Reply{}, httpkit.Fail(409, "last_project_manager", "Keep at least one project manager.")
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.access.EnsureUsableOwner(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET etag=$2,updated_at=now() WHERE id=$1", projectID, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	action := "project.member.assign"
-	if remove {
-		action = "project.member.remove"
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "project", projectID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if remove {
-		return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
-	}
-	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id=$2", projectID, userID).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(json.RawMessage(data), etag), tx.Commit(r.Context())
+		var exists bool
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1)", userID).Scan(&exists); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !exists {
+			return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
+		}
+		if remove {
+			var memberRole *string
+			if err = tx.QueryRow(r.Context(), "DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2 RETURNING role", projectID, userID).Scan(&memberRole); errors.Is(err, pgx.ErrNoRows) {
+				return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
+			}
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+
+		} else {
+
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role", projectID, userID, input.Role, p.UserID()); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		var hasManager bool
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND role='manager')", projectID).Scan(&hasManager); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !hasManager {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_project_manager", "Keep at least one project manager.")
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = s.access.EnsureUsableOwner(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET etag=$2,updated_at=now() WHERE id=$1", projectID, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		action := "project.member.assign"
+		if remove {
+			action = "project.member.remove"
+		}
+		if remove {
+			return httpkit.Reply{Status: 204}, access.Event{Action: action, Resource: "project", ID: projectID}, nil
+		}
+		var data []byte
+		if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id=$2", projectID, userID).Scan(&data); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(json.RawMessage(data), etag), access.Event{Action: action, Resource: "project", ID: projectID}, nil
+	})
 }
