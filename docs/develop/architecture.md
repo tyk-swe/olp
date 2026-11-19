@@ -16,7 +16,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/` and `models/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/` and `guardstream/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
 | Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
@@ -163,10 +163,13 @@ The packages beneath it hold what the kernel uses and never import it back.
 | `gateway/traceingest` | OTLP trace ingest on `POST /v1/traces` | none |
 | `gateway/delegation` | delegation grant creation on `POST /v1/delegations` | `fault`, `ingress` |
 | `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
+| `gateway/guardstream` | streamed output guardrails, with the tool call and text framing of each wire family in its own file | none |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
-Put new code in the kernel only when it needs a `call`. A handler that can be
+Put new code in the kernel only when it needs a `call`. Code that reads a few
+values from the `call` takes them as a config struct and moves beneath the
+kernel, as `guardstream.Config` does. A handler that can be
 built from its own collaborators belongs in its own package, as
 `codeforward.Forwarder`, `traceingest.Ingester`, `delegation.Handler` and
 `models.Handler` are. The
