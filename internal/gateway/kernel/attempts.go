@@ -96,8 +96,6 @@ func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attem
 	return run.exhausted()
 }
 
-// routeRun is one pass over a route's targets. It remembers why targets were
-// passed over so an exhausted route can say what stopped it.
 type routeRun[Result any] struct {
 	ctx      context.Context
 	server   *Server
@@ -174,9 +172,6 @@ func (r *routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provi
 	return routeStep[Result]{then: tryNextSlot}
 }
 
-// afterQuota says where a route goes once a quota of the given scope stopped a
-// slot: a route quota stops every target, and a connection quota is shared by
-// every slot of the target.
 func afterQuota(scope string) routeFlow {
 	switch scope {
 	case quota.Route:
