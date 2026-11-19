@@ -168,6 +168,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
 | `gateway/guardstream` | streamed output guardrails, with the tool call and text framing of each wire family in its own file | none |
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
+| `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
