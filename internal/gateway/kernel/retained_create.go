@@ -20,60 +20,62 @@ type retainedSubmission struct {
 	digest []byte
 }
 
-func (q *retainedRequest) create() {
-	s, e := q.server, q.endpoint
+func (q retainedRequest) create() {
+	s, e, end := q.server, q.endpoint, q.reply.end
 	submission, err := q.submission()
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
 	route, err := q.creationRoute(submission.slug)
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
 	bound, err := q.boundResource()
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
 	qualifiers, err := q.slotQualifiers(route)
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
-	q.pin, err = s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", bound, func(provider *routing.Provider, model string) bool {
+	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", bound, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 	}, qualifiers...)
+	end.pin = pin
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
-	if err := q.rewriteCreation(route); err != nil {
-		q.fail(err)
+	rewritten, contentType, err := q.rewriteCreation(pin, route)
+	if err != nil {
+		q.reply.fail(err)
 		return
 	}
 	ctx, cancel := s.StateDeadline(q.r.Context(), route)
 	defer cancel()
-	if err := s.admitRetainedRequest(ctx, q.x, q.authority, q.pin, route, q.metersWork()); err != nil {
-		q.fail(err)
+	if err := s.admitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
+		q.reply.fail(err)
 		return
 	}
-	endpoint, err := q.upstreamURL(ctx)
+	endpoint, err := q.upstreamURL(ctx, pin, q.ancestors)
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
-	lifecycle, err := q.beginCreation(ctx, route, submission)
+	lifecycle, body, err := q.beginCreation(ctx, pin, route, submission, rewritten)
 	if err != nil {
-		q.fail(err)
+		q.reply.fail(err)
 		return
 	}
 	defer s.settleFence(q.r.Context(), lifecycle.Close)
-	q.status = s.retainedDispatch(q.w, q.r.WithContext(ctx), q.x, q.pin, e, lifecycle.Resource(), q.parent, endpoint, q.body, q.contentType, lifecycle, q.fail)
+	end.status = s.retainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, e, lifecycle.Resource(), q.parent, endpoint, body, contentType, lifecycle, q.reply.fail)
 }
 
-func (q *retainedRequest) submission() (retainedSubmission, *fault.Error) {
+func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	slug := strings.TrimSpace(q.r.Header.Get(StateRouteHeader))
 	if q.parent != nil {
 		slug = q.parent.RouteSlug
@@ -89,7 +91,7 @@ func (q *retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	if q.parent != nil {
 		scope += "\x00" + q.parent.ID
 	}
-	digest, err := q.server.retainedBodyDigest(q.endpoint, scope, q.body, q.contentType)
+	digest, err := q.server.retainedBodyDigest(q.endpoint, scope, q.input.body, q.input.contentType)
 	if err != nil {
 		return retainedSubmission{}, err
 	}
@@ -99,7 +101,7 @@ func (q *retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	}
 	if lookupErr == nil {
 		q.x.Route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
-		q.w.Header().Set("X-OLP-Resource-ID", prior.ID)
+		q.reply.w.Header().Set("X-OLP-Resource-ID", prior.ID)
 		return retainedSubmission{}, retainedSubmissionExists()
 	}
 	if !errors.Is(lookupErr, resources.ErrNotFound) {
@@ -112,7 +114,7 @@ func retainedSubmissionExists() *fault.Error {
 	return fault.ServerError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it.")
 }
 
-func (q *retainedRequest) creationRoute(slug string) (*routing.Route, *fault.Error) {
+func (q retainedRequest) creationRoute(slug string) (*routing.Route, *fault.Error) {
 	candidate, ok := q.x.Snapshot().FindRoute(slug)
 	if !ok {
 		return nil, fault.ModelNotFound(slug)
@@ -131,11 +133,11 @@ func (q *retainedRequest) creationRoute(slug string) (*routing.Route, *fault.Err
 	return route, nil
 }
 
-func (q *retainedRequest) boundResource() (*resources.Resource, *fault.Error) {
-	if q.parent != nil || q.source.Root().Kind() != oif.Object {
+func (q retainedRequest) boundResource() (*resources.Resource, *fault.Error) {
+	if q.parent != nil || q.input.source.Root().Kind() != oif.Object {
 		return q.parent, nil
 	}
-	referenced, err := q.server.referencedResources(q.r.Context(), q.x, q.source, q.endpoint)
+	referenced, err := q.server.referencedResources(q.r.Context(), q.x, q.input.source, q.endpoint)
 	if err != nil {
 		return nil, retainedReferenceUnavailable()
 	}
@@ -150,38 +152,37 @@ func (q *retainedRequest) boundResource() (*resources.Resource, *fault.Error) {
 	return referenced[0], nil
 }
 
-func (q *retainedRequest) slotQualifiers(route *routing.Route) ([]retainedSlotQualifier, *fault.Error) {
+func (q retainedRequest) slotQualifiers(route *routing.Route) ([]retainedSlotQualifier, *fault.Error) {
 	if q.endpoint.Operation != "eval" {
 		return nil, nil
 	}
-	qualify, err := retainedEvalSlots(route, q.x.keyID, q.source, q.parent)
+	qualify, err := retainedEvalSlots(route, q.x.keyID, q.input.source, q.parent)
 	if err != nil {
 		return nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
 	}
 	return []retainedSlotQualifier{qualify}, nil
 }
 
-func (q *retainedRequest) rewriteCreation(route *routing.Route) *fault.Error {
-	if q.source.Root().Kind() != oif.Object {
-		return nil
+func (q retainedRequest) rewriteCreation(pin *Pin, route *routing.Route) ([]byte, string, *fault.Error) {
+	if q.input.source.Root().Kind() != oif.Object {
+		return q.input.body, q.input.contentType, nil
 	}
-	rewritten, err := q.server.rewriteRetainedRequest(q.r.Context(), q.x, q.authority, q.pin, route, q.source, q.endpoint)
+	rewritten, err := q.server.rewriteRetainedRequest(q.r.Context(), q.x, q.authority, pin, route, q.input.source, q.endpoint)
 	if err != nil {
-		return retainedReferenceUnavailable()
+		return nil, "", retainedReferenceUnavailable()
 	}
-	body, contentType, err := encodeRetainedRequestBody(q.endpoint, rewritten, q.contentType)
+	body, contentType, err := encodeRetainedRequestBody(q.endpoint, rewritten, q.input.contentType)
 	if err != nil {
-		return fault.InvalidRequest("invalid_request", "The resource upload could not be encoded.", nil)
+		return nil, "", fault.InvalidRequest("invalid_request", "The resource upload could not be encoded.", nil)
 	}
-	q.body, q.contentType = body, contentType
-	return nil
+	return body, contentType, nil
 }
 
-func (q *retainedRequest) beginCreation(ctx context.Context, route *routing.Route, submission retainedSubmission) (*resources.Lifecycle, *fault.Error) {
-	s, e, p := q.server, q.endpoint, q.pin
-	fields, err := retainedInputMetadata(p, route, q.x.keyID, e, q.source, q.parent)
+func (q retainedRequest) beginCreation(ctx context.Context, p *Pin, route *routing.Route, submission retainedSubmission, rewritten []byte) (*resources.Lifecycle, []byte, *fault.Error) {
+	s, e := q.server, q.endpoint
+	fields, err := retainedInputMetadata(p, route, q.x.keyID, e, q.input.source, q.parent)
 	if err != nil {
-		return nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
+		return nil, nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
 	}
 	meta, _ := json.Marshal(fields)
 	version := retainedapi.Revision
@@ -190,27 +191,26 @@ func (q *retainedRequest) beginCreation(ctx context.Context, route *routing.Rout
 		candidate.ParentID = &q.parent.UUID
 		candidate.RouteRevisionID = q.parent.RouteRevisionID
 	}
-	if err := s.prepareRetainedAccounting(q.x, p, route, candidate, e, q.source); err != nil {
-		return nil, err
+	if err := s.prepareRetainedAccounting(q.x, p, route, candidate, e, q.input.source); err != nil {
+		return nil, nil, err
 	}
 	lifecycle, err := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
 	if errors.Is(err, resources.ErrSubmissionConflict) {
-		return nil, fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request.")
+		return nil, nil, fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request.")
 	}
 	if err != nil {
-		return nil, fault.ServerError(503, "provider_state_unavailable", "The submission could not be persisted.")
+		return nil, nil, fault.ServerError(503, "provider_state_unavailable", "The submission could not be persisted.")
 	}
-	q.w.Header().Set("X-OLP-Resource-ID", lifecycle.Resource().ID)
+	q.reply.w.Header().Set("X-OLP-Resource-ID", lifecycle.Resource().ID)
 	if lifecycle.Existing() {
-		return nil, retainedSubmissionExists()
+		return nil, nil, retainedSubmissionExists()
 	}
-	body, err := retainedCorrelationBody(e, lifecycle.Resource(), q.body)
+	body, err := retainedCorrelationBody(e, lifecycle.Resource(), rewritten)
 	if err != nil {
-		return nil, fault.InvalidRequest("invalid_request", "The resource correlation metadata could not be bound.", nil)
+		return nil, nil, fault.InvalidRequest("invalid_request", "The resource correlation metadata could not be bound.", nil)
 	}
-	q.body = body
 	if err := lifecycle.Dispatch(ctx); err != nil {
-		return nil, fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced.")
+		return nil, nil, fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced.")
 	}
-	return lifecycle, nil
+	return lifecycle, body, nil
 }

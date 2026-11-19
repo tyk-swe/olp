@@ -12,20 +12,49 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
-type retainedRequest struct {
-	server      *Server
-	w           http.ResponseWriter
-	r           *http.Request
-	endpoint    retainedapi.Endpoint
-	x           *Call
-	authority   keyauthority.Authority
-	pin         *Pin
-	status      int
+// retainedEnd is the only state a request writes as it proceeds. The deferred
+// settlement reads it, so a step that panics still settles the pin it held.
+type retainedEnd struct {
+	pin    *Pin
+	status int
+}
+
+type retainedReply struct {
+	w       http.ResponseWriter
+	x       *Call
+	action  string
+	surface string
+	end     *retainedEnd
+}
+
+func (y retainedReply) fail(err *fault.Error) {
+	refusal := err
+	if y.action == "create" {
+		final := *err
+		final.NoRetry = true
+		refusal = &final
+	}
+	y.x.Failure = refusal
+	y.end.status = refusal.Status
+	fault.WriteSurfaceError(y.w, refusal, y.surface)
+}
+
+type retainedInput struct {
 	body        []byte
 	source      oif.Document
 	contentType string
-	parent      *resources.Resource
-	ids         map[string]string
+}
+
+type retainedRequest struct {
+	server    *Server
+	r         *http.Request
+	x         *Call
+	authority keyauthority.Authority
+	reply     retainedReply
+	endpoint  retainedapi.Endpoint
+	input     retainedInput
+	parent    *resources.Resource
+	ancestors map[string]string
 }
 
 func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retainedapi.Endpoint) {
@@ -38,28 +67,30 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	x.mode = "unary"
 	x.actor = "api_key_resource"
 	x.retained = retainedOperationForAction(e.Action)
-	q := &retainedRequest{
-		server: s, w: w, r: r, endpoint: e, x: x, authority: authority,
-		status: http.StatusInternalServerError, ids: map[string]string{},
+	end := &retainedEnd{status: http.StatusInternalServerError}
+	defer func() {
+		s.Finish(x, nil, end.status)
+		s.retainedSettle(r.Context(), x, end.pin)
+	}()
+	reply := retainedReply{w: w, x: x, action: e.Action, surface: e.Surface, end: end}
+	if !authority.Policy.AllowProviderState {
+		reply.fail(providerStateForbidden())
+		return
 	}
-	defer q.finish()
-	q.serve()
-}
-
-func (q *retainedRequest) finish() {
-	q.server.Finish(q.x, nil, q.status)
-	q.server.retainedSettle(q.r.Context(), q.x, q.pin)
-}
-
-func (q *retainedRequest) fail(err *fault.Error) {
-	if q.endpoint.Action == "create" {
-		c := *err
-		c.NoRetry = true
-		err = &c
+	if e.Action == "list" && len(e.Ancestors) == 0 {
+		end.status = s.listRetainedGeneric(w, r, x, authority, e, reply.fail)
+		return
 	}
-	q.x.Failure = err
-	q.status = err.Status
-	fault.WriteSurfaceError(q.w, err, q.endpoint.Surface)
+	q, err := s.readRetainedRequest(r, x, authority, e, reply)
+	if err != nil {
+		reply.fail(err)
+		return
+	}
+	if e.Action == "create" {
+		q.create()
+		return
+	}
+	q.change()
 }
 
 func retainedMissing() *fault.Error {
@@ -70,48 +101,31 @@ func retainedReferenceUnavailable() *fault.Error {
 	return fault.InvalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil)
 }
 
-func (q *retainedRequest) serve() {
-	if !q.authority.Policy.AllowProviderState {
-		q.fail(providerStateForbidden())
-		return
-	}
-	if q.endpoint.Action == "list" && len(q.endpoint.Ancestors) == 0 {
-		q.status = q.server.listRetainedGeneric(q.w, q.r, q.x, q.authority, q.endpoint, q.fail)
-		return
-	}
-	if err := q.read(); err != nil {
-		q.fail(err)
-		return
-	}
-	if err := q.resolveAncestors(); err != nil {
-		q.fail(err)
-		return
-	}
-	if q.endpoint.Action == "create" {
-		q.create()
-		return
-	}
-	q.change()
-}
-
-func (q *retainedRequest) read() *fault.Error {
-	body, source, contentType, err := q.server.readRetainedBody(q.r, q.endpoint)
+func (s *Server) readRetainedRequest(r *http.Request, x *Call, authority keyauthority.Authority, declared retainedapi.Endpoint, reply retainedReply) (retainedRequest, *fault.Error) {
+	body, source, contentType, err := s.readRetainedBody(r, declared)
 	if err != nil {
-		return err
+		return retainedRequest{}, err
 	}
-	q.body, q.source, q.contentType = body, source, contentType
-	if q.changesOnlyDisplayFields() {
-		q.endpoint.Metered = false
-		q.x.retained = retainedOperation{use: RetainedHousekeeping}
+	displayOnly := changesOnlyDisplayFields(declared, source)
+	if displayOnly {
+		x.retained = retainedOperation{use: RetainedHousekeeping}
 	}
-	return nil
+	e := meteredUnless(declared, displayOnly)
+	parent, ancestors, err := s.retainedAncestry(r, x, authority, e)
+	if err != nil {
+		return retainedRequest{}, err
+	}
+	return retainedRequest{
+		server: s, r: r, x: x, authority: authority, reply: reply, endpoint: e,
+		input: retainedInput{body: body, source: source, contentType: contentType}, parent: parent, ancestors: ancestors,
+	}, nil
 }
 
-func (q *retainedRequest) changesOnlyDisplayFields() bool {
-	if q.endpoint.Kind != "vector_store" || q.endpoint.Action != "update" {
+func changesOnlyDisplayFields(e retainedapi.Endpoint, source oif.Document) bool {
+	if e.Kind != "vector_store" || e.Action != "update" {
 		return false
 	}
-	for _, field := range q.source.Root().Members() {
+	for _, field := range source.Root().Members() {
 		if field.Name != "name" && field.Name != "metadata" {
 			return false
 		}
@@ -119,50 +133,59 @@ func (q *retainedRequest) changesOnlyDisplayFields() bool {
 	return true
 }
 
-func (q *retainedRequest) resolveAncestors() *fault.Error {
-	ctx := q.r.Context()
-	for i, kind := range q.endpoint.Ancestors {
-		name := "parent" + strconv.Itoa(i)
-		got, err := q.server.Deps.Resources.Get(ctx, kind, q.x.keyID, q.r.PathValue(name))
-		if err != nil {
-			return retainedMissing()
-		}
-		if q.parent != nil && (got.ParentID == nil || *got.ParentID != q.parent.UUID) {
-			return retainedMissing()
-		}
-		if _, _, err := q.server.ResolveResource(ctx, q.x, q.authority, got, q.endpoint.Operation, RetainedHousekeeping); err != nil {
-			return err
-		}
-		q.parent = got
-		q.ids[name] = got.UpstreamID
+func meteredUnless(e retainedapi.Endpoint, free bool) retainedapi.Endpoint {
+	if !free {
+		return e
 	}
-	if !q.addressesBatchFile() {
-		return nil
-	}
-	store, err := q.server.Deps.Resources.GetByUUID(ctx, *q.parent.ParentID, q.x.keyID)
-	if err != nil || store.Kind != "vector_store" {
-		return retainedMissing()
-	}
-	q.parent = store
-	return nil
+	unmetered := e
+	unmetered.Metered = false
+	return unmetered
 }
 
-func (q *retainedRequest) addressesBatchFile() bool {
-	e := q.endpoint
+func (s *Server) retainedAncestry(r *http.Request, x *Call, authority keyauthority.Authority, e retainedapi.Endpoint) (*resources.Resource, map[string]string, *fault.Error) {
+	ctx := r.Context()
+	var parent *resources.Resource
+	ids := map[string]string{}
+	for i, kind := range e.Ancestors {
+		name := "parent" + strconv.Itoa(i)
+		got, err := s.Deps.Resources.Get(ctx, kind, x.keyID, r.PathValue(name))
+		if err != nil {
+			return nil, nil, retainedMissing()
+		}
+		if parent != nil && (got.ParentID == nil || *got.ParentID != parent.UUID) {
+			return nil, nil, retainedMissing()
+		}
+		if _, _, err := s.ResolveResource(ctx, x, authority, got, e.Operation, RetainedHousekeeping); err != nil {
+			return nil, nil, err
+		}
+		parent = got
+		ids[name] = got.UpstreamID
+	}
+	if !addressesBatchFile(e) {
+		return parent, ids, nil
+	}
+	store, err := s.Deps.Resources.GetByUUID(ctx, *parent.ParentID, x.keyID)
+	if err != nil || store.Kind != "vector_store" {
+		return nil, nil, retainedMissing()
+	}
+	return store, ids, nil
+}
+
+func addressesBatchFile(e retainedapi.Endpoint) bool {
 	return e.Kind == "vector_store_file" && len(e.Ancestors) == 2 && e.Ancestors[1] == "vector_store_batch"
 }
 
-func (q *retainedRequest) metersWork() bool {
+func (q retainedRequest) metersWork() bool {
 	e := q.endpoint
 	return e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")
 }
 
-func (q *retainedRequest) upstreamURL(ctx context.Context) (string, *fault.Error) {
+func (q retainedRequest) upstreamURL(ctx context.Context, pin *Pin, ids map[string]string) (string, *fault.Error) {
 	query, err := q.server.retainedQuery(ctx, q.x, q.endpoint, q.parent, q.r.URL.Query())
 	if err != nil {
 		return "", err
 	}
-	endpoint, urlErr := q.pin.Provider.Connector().ResourceURL(q.pin.Model, retainedUpstreamPath(q.endpoint, q.ids), query)
+	endpoint, urlErr := pin.Provider.Connector().ResourceURL(pin.Model, retainedUpstreamPath(q.endpoint, ids), query)
 	if urlErr != nil {
 		return "", fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable.")
 	}
