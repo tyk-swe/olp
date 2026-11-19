@@ -197,10 +197,16 @@ A handler in a surface reads as a list of steps. `surface/geminiinteractions`
 is the example for a request that admits, pins, sends and answers. Its handler
 calls one named kernel step per stage, such as `ReserveGeneration`,
 `GatePinnedGeneration` and `SettleGeneration` in `kernel/pinned_generation.go`,
-and keeps the request's state on one small struct. A surface calls kernel
-steps and never reads or writes the `Call`'s admission or settlement fields.
-When a surface needs a stage the kernel does not name yet, add the step to the
-kernel and call it.
+and a surface calls kernel steps and never reads or writes the `Call`'s
+admission or settlement fields. When a surface needs a stage the kernel does
+not name yet, add the step to the kernel and call it.
+
+A step takes what it needs as arguments and returns what it found, so its
+dependencies are in its signature. The request value is built once and is not
+written again. `kernel/retained_request.go` is the example. The only state a
+handler writes is what its deferred settlement must still read when a step
+panics, such as the pin and the status, and that state lives in one small type
+that says so, like `retainedEnd`.
 
 Put new code in the kernel only when every surface needs it. Code that reads a
 few values from the `Call` takes them as a config struct and moves beneath the
