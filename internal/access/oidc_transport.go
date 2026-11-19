@@ -35,7 +35,7 @@ var identityEgress = egress.Policy{}
 
 // oidcAddresses resolves host to the addresses identity egress may dial; one
 // disallowed answer rejects the host.
-func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
+func IdentityAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addresses, err := identityEgress.Resolve(ctx, host)
@@ -62,7 +62,7 @@ func oidcHTTPClient(injected *http.Client) *http.Client {
 		if err != nil {
 			return nil, errors.New("invalid OIDC address")
 		}
-		addresses, err := oidcAddresses(ctx, host)
+		addresses, err := IdentityAddresses(ctx, host)
 		if err != nil {
 			return nil, err
 		}

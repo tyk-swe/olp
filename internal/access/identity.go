@@ -106,7 +106,7 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	source := s.clientIP(r)
+	source := s.ClientIP(r)
 	sourceLimit := 60
 	if action == "invitation" {
 		sourceLimit = 30
@@ -238,7 +238,7 @@ func (s *Server) user(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(s.Pool.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err := ScanUser(s.Pool.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", id))
 	return httpkit.Detail(u, u.ETag), err
 }
 func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -268,7 +268,7 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err := ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", id))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -319,7 +319,7 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err = scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
+	u, err = ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", id))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

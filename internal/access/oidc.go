@@ -99,7 +99,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 		u, _ := url.Parse(endpoint) // Syntax was checked by oidcURL.
-		if _, err := oidcAddresses(ctx, u.Hostname()); err != nil {
+		if _, err := IdentityAddresses(ctx, u.Hostname()); err != nil {
 			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 	}
@@ -384,9 +384,9 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (httpkit.Reply, error) 
 		options = append(options, oauth2.SetAuthURLParam("prompt", "login"), oauth2.SetAuthURLParam("max_age", "0"))
 	}
 	authorizationURL := oauth.AuthCodeURL(flow.State, options...)
-	response := httpkit.Reply{Status: 200, Body: map[string]string{"authorization_url": authorizationURL}, Cookies: []*http.Cookie{cookie("__Host-olp_oidc_login_"+id, cookieToken, 10*time.Minute, true)}}
+	response := httpkit.Reply{Status: 200, Body: map[string]string{"authorization_url": authorizationURL}, Cookies: []*http.Cookie{NewCookie("__Host-olp_oidc_login_"+id, cookieToken, 10*time.Minute, true)}}
 	if kind == "link" {
-		response.Cookies = append(response.Cookies, clearCookie(recentCookie))
+		response.Cookies = append(response.Cookies, ClearCookie(RecentCookie))
 	}
 	if r.Method == "GET" {
 		response.Status = 303
@@ -416,7 +416,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	if err != nil {
 		return flow, config, err
 	}
-	if !hmac.Equal(digest, s.Auth.Digest(secrets.OIDCCookieDigest, cookieValue(r, "__Host-olp_oidc_login_"+id))) {
+	if !hmac.Equal(digest, s.Auth.Digest(secrets.OIDCCookieDigest, CookieValue(r, "__Host-olp_oidc_login_"+id))) {
 		return flow, config, httpkit.Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
 	}
 	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.OIDCFlow)
@@ -581,7 +581,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply httpkit.Reply, callbackErr
 			return httpkit.Reply{}, httpkit.Fail(403, "oidc_session_changed", "Your access changed. Sign in again before verifying your identity.")
 		}
 	}
-	response := httpkit.Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}}
+	response := httpkit.Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{ClearCookie("__Host-olp_oidc_login_" + flow.ID)}}
 	if flow.Kind != "login" {
 		if flow.Kind == "link" {
 			if userID != "" {
@@ -924,7 +924,7 @@ func oidcFailureRedirect(flow oidcFlow, err error) httpkit.Reply {
 	}
 	reply := httpkit.Reply{Status: 303, Location: destination + "?" + query.Encode()}
 	if flow.ID != "" {
-		reply.Cookies = []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}
+		reply.Cookies = []*http.Cookie{ClearCookie("__Host-olp_oidc_login_" + flow.ID)}
 	}
 	return reply
 }

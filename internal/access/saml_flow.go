@@ -146,7 +146,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at) VALUES($1,$2,$3,$4,$5,$6)", flow.ID, s.Auth.Digest(secrets.SAMLStateDigest, state), s.Auth.Digest(secrets.SAMLCookieDigest, browser), c.ETag, request.ID, flow.Expires); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{cookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, tx.Commit(r.Context())
+	return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{NewCookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, tx.Commit(r.Context())
 }
 
 func (s *Server) readSAMLFlow(r *http.Request, q database.Queryer, state string) (samlFlow, []byte, *time.Time, error) {
@@ -291,7 +291,7 @@ func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.Auth.Digest(secrets.SAMLCookieDigest, cookieValue(r, "__Host-olp_saml_"+flow.ID))) {
+	if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.Auth.Digest(secrets.SAMLCookieDigest, CookieValue(r, "__Host-olp_saml_"+flow.ID))) {
 		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
 	}
 	c, err := loadSAML(r.Context(), tx)
@@ -320,7 +320,7 @@ func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
 		}
 		return httpkit.Reply{}, err
 	}
-	response.Cookies = append(response.Cookies, clearCookie("__Host-olp_saml_"+flow.ID))
+	response.Cookies = append(response.Cookies, ClearCookie("__Host-olp_saml_"+flow.ID))
 	return response, tx.Commit(r.Context())
 }
 

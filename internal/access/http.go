@@ -24,11 +24,11 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-const sessionCookie = "__Host-olp_session"
-const csrfCookie = "__Host-olp_csrf"
-const recentCookie = "__Host-olp_recent_auth"
+const SessionCookie = "__Host-olp_session"
+const CSRFCookie = "__Host-olp_csrf"
+const RecentCookie = "__Host-olp_recent_auth"
 const csrfHeader = "X-CSRF-Token"
-const sessionTTL = 24 * time.Hour
+const SessionTTL = 24 * time.Hour
 
 type Config struct {
 	RuntimePublisher     func(context.Context, pgx.Tx, string) error
@@ -120,6 +120,8 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 
 func (s *Server) LimitsEnforced() bool { return s.limitsEnforced }
 
+func (s *Server) LocalLoginDisabled() bool { return s.localLoginDisabled }
+
 func (s *Server) IdentityClient() *http.Client { return s.oidcClient }
 
 func (s *Server) guard(w http.ResponseWriter, r *http.Request, o routeOptions) (*http.Request, context.CancelFunc, error) {
@@ -134,7 +136,7 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, o routeOptions) (
 	}
 	// Resolve the client once so audit rows written by any package attribute
 	// the same trusted-proxy client address that admission uses.
-	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.clientIP(r)))
+	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.ClientIP(r)))
 	r.Body = http.MaxBytesReader(w, r.Body, o.maxBody)
 	if _, machine := managementBearer(r); machine || o.browser == anyOrigin {
 		return r, cancel, nil
@@ -238,18 +240,19 @@ func (w *streamWriter) Unwrap() http.ResponseWriter {
 func (s *Server) writeProblem(w http.ResponseWriter, err error) {
 	p, known := httpkit.ProblemFor(err)
 	if !known {
-		s.log.Error("management request failed", failure(err)...)
+		s.LogFailure("management request failed", err)
 	}
 	httpkit.RenderProblem(w, p)
 }
 
-// failure describes an unexpected error by category only, because driver and
+// LogFailure logs an unexpected error by category only, because driver and
 // wrapped errors can contain SQL values or credentials.
-func failure(err error) []any {
+func (s *Server) LogFailure(message string, err error) {
 	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return []any{"error_type", fmt.Sprintf("%T", err), "sqlstate", pg.Code}
+		s.log.Error(message, "error_type", fmt.Sprintf("%T", err), "sqlstate", pg.Code)
+		return
 	}
-	return []any{"error_type", fmt.Sprintf("%T", err)}
+	s.log.Error(message, "error_type", fmt.Sprintf("%T", err))
 }
 
 func checkCookies(r *http.Request) error {
@@ -264,17 +267,21 @@ func checkCookies(r *http.Request) error {
 	}
 	return nil
 }
-func cookieValue(r *http.Request, name string) string {
+func CookieValue(r *http.Request, name string) string {
 	c, err := r.Cookie(name)
 	if err != nil {
 		return ""
 	}
 	return c.Value
 }
-func cookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
+func NewCookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: httpOnly, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())}
 }
-func clearCookie(name string) *http.Cookie { c := cookie(name, "", 0, true); c.MaxAge = -1; return c }
+func ClearCookie(name string) *http.Cookie {
+	c := NewCookie(name, "", 0, true)
+	c.MaxAge = -1
+	return c
+}
 func email(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	a, err := mail.ParseAddress(value)
@@ -307,7 +314,7 @@ type clientIPKey struct{}
 
 // clientIP resolves the request's client address through the trusted-proxy
 // resolver when one is configured.
-func (s *Server) clientIP(r *http.Request) string {
+func (s *Server) ClientIP(r *http.Request) string {
 	if s.resolveClientIP != nil {
 		return s.resolveClientIP(r)
 	}

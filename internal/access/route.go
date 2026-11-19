@@ -152,6 +152,23 @@ func (s *Server) Stream(mux *http.ServeMux, pattern string, h StreamHandler, opt
 	}))
 }
 
+// Admit returns the admission step of a secured route for a handler that
+// writes its own response format. The step applies the transport guards and
+// authenticates the caller against the requirement the contract declares for
+// pattern. The caller must run the returned cancel function.
+func (s *Server) Admit(pattern string, opts ...RouteOption) func(http.ResponseWriter, *http.Request) (*http.Request, authz.Principal, context.CancelFunc, error) {
+	req := declared(pattern, false)
+	o := options(opts)
+	return func(w http.ResponseWriter, r *http.Request) (*http.Request, authz.Principal, context.CancelFunc, error) {
+		guarded, cancel, err := s.guard(w, r, o)
+		if err != nil {
+			return guarded, authz.Principal{}, cancel, err
+		}
+		admitted, p, err := s.admitRoute(guarded, req)
+		return admitted, p, cancel, err
+	}
+}
+
 // Public mounts h at a pattern the contract declares public.
 func (s *Server) Public(mux *http.ServeMux, pattern string, h PublicHandler, opts ...RouteOption) {
 	declared(pattern, true)

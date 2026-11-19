@@ -20,7 +20,7 @@ func (s *Server) sessionBody(r *http.Request, q database.Queryer, u authz.User, 
 	for _, op := range (authz.Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
 		operations = append(operations, op.String())
 	}
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "session_id": sessionID, "csrf_token": s.csrf(token), "operations": operations}, err
+	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "session_id": sessionID, "csrf_token": s.CSRF(token), "operations": operations}, err
 }
 
 type sessionAuth struct {
@@ -50,15 +50,15 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...s
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint,auth_method,mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent()), strength.Method, strength.MFA); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint,auth_method,mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(SessionTTL), browserHint(r.UserAgent()), strength.Method, strength.MFA); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
+	u, err := ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", userID))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	body, err := s.sessionBody(r, tx, u, token)
-	return httpkit.Reply{Status: 201, Body: body, CSRF: s.csrf(token), Cookies: []*http.Cookie{cookie(sessionCookie, token, sessionTTL, true), cookie(csrfCookie, s.csrf(token), sessionTTL, false), clearCookie(recentCookie)}}, err
+	return httpkit.Reply{Status: 201, Body: body, CSRF: s.CSRF(token), Cookies: []*http.Cookie{NewCookie(SessionCookie, token, SessionTTL, true), NewCookie(CSRFCookie, s.CSRF(token), SessionTTL, false), ClearCookie(RecentCookie)}}, err
 }
 func (s *Server) login(r *http.Request) (httpkit.Reply, error) {
 	if s.localLoginDisabled {
@@ -204,7 +204,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (httpkit.Reply, er
 	}
 	response := httpkit.Reply{Status: 204}
 	if session == p.SessionID {
-		response.Cookies = []*http.Cookie{clearCookie(sessionCookie), clearCookie(csrfCookie), clearCookie(recentCookie)}
+		response.Cookies = []*http.Cookie{ClearCookie(SessionCookie), ClearCookie(CSRFCookie), ClearCookie(RecentCookie)}
 	}
 	return response, tx.Commit(r.Context())
 }
@@ -269,7 +269,7 @@ func (s *Server) updateProfile(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.update", "user", p.ID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", p.ID))
+	u, err := ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -353,7 +353,7 @@ func (s *Server) writePassword(r *http.Request, p authz.Principal, enroll bool) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", p.ID))
+	u, err := ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -460,25 +460,7 @@ func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purp
 		return httpkit.Reply{}, err
 	}
 	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest(secrets.RecentAuthDigest, token), p.SessionID, purpose, target)
-	return httpkit.Reply{Status: 204, Cookies: []*http.Cookie{cookie(recentCookie, token, 5*time.Minute, true)}}, err
-}
-
-// ConsumeRecent spends the recent authentication the principal's session
-// holds for purpose and resource, refusing with 428 reauthentication_required
-// unless the session reauthenticated for them within five minutes.
-func (s *Server) ConsumeRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purpose, resource string) error {
-	var target any
-	if resource != "" {
-		target = resource
-	}
-	tag, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE digest=$1 AND session_id=$2 AND purpose=$3 AND resource_id IS NOT DISTINCT FROM $4::uuid AND expires_at>now()", s.Auth.Digest(secrets.RecentAuthDigest, cookieValue(r, recentCookie)), p.SessionID, purpose, target)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() != 1 {
-		return httpkit.Fail(428, "reauthentication_required", "Confirm your identity again before this operation.")
-	}
-	return nil
+	return httpkit.Reply{Status: 204, Cookies: []*http.Cookie{NewCookie(RecentCookie, token, 5*time.Minute, true)}}, err
 }
 
 func browserHint(agent string) string {

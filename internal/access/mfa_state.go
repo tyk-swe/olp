@@ -58,7 +58,7 @@ func (s *Server) webAuthn() (*webauthn.WebAuthn, error) {
 
 func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, error) {
 	var user mfaUser
-	u, err := scanUser(tx.QueryRow(ctx, "SELECT "+userColumns+" FROM olp.users u WHERE id=$1 AND active AND oidc_authorized", id))
+	u, err := ScanUser(tx.QueryRow(ctx, "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1 AND active AND oidc_authorized", id))
 	if err != nil {
 		return user, err
 	}

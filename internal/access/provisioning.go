@@ -109,7 +109,7 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
+	u, err := ScanUser(tx.QueryRow(r.Context(), "SELECT "+UserColumns+" FROM olp.users u WHERE id=$1", userID))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
