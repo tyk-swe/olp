@@ -847,6 +847,7 @@ type retainedUpstream struct {
 	calls   []upstreamCall
 	replies func(request string, nth int) map[string]string
 	headers func(*http.Request) map[string]string
+	status  func(request string) int
 }
 
 const providerOwned = "provider-owned"
@@ -880,6 +881,9 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for name, value := range u.headers(r) {
 			w.Header().Set(name, value)
 		}
+	}
+	if u.status != nil {
+		w.WriteHeader(cmp.Or(u.status(request), http.StatusOK))
 	}
 	_, _ = io.WriteString(w, reply)
 }
@@ -2504,5 +2508,193 @@ func TestVectorStoreRequestsNeedASubmissionKeyStayInsideTheirStoreAndLoseOnlyNew
 	refused("a store whose creation was never reconciled", "owner", "GET", inSecond, "", nil, 409, "submission_unknown")
 	if after := len(upstream.sent("GET /vector_stores/vs_" + providerOwned + "2")); after != before {
 		t.Fatalf("a refused read reached the provider %d times", after-before)
+	}
+}
+
+type storeProvider struct {
+	mu       sync.Mutex
+	issues   string
+	scripted map[string]string
+	statuses map[string]int
+}
+
+func providerStore(n string) string {
+	return `{"id":"vs_` + providerOwned + n + `","object":"vector_store","name":"notes","status":"completed","created_at":1,"file_counts":{"total":0}}`
+}
+
+func providerStorePath(n string) string { return "/vector_stores/vs_" + providerOwned + n }
+
+func (p *storeProvider) answers(request string, status int, body string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.scripted[request], p.statuses[request] = body, status
+}
+
+func (p *storeProvider) recovers(request string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.scripted, request)
+	delete(p.statuses, request)
+}
+
+func (p *storeProvider) creates(n string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.issues = n
+}
+
+func (p *storeProvider) replies(string, int) map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	replies := map[string]string{"POST /vector_stores": providerStore(p.issues)}
+	for _, n := range []string{"1", "2", "3"} {
+		replies["GET "+providerStorePath(n)], replies["POST "+providerStorePath(n)] = providerStore(n), providerStore(n)
+		replies["DELETE "+providerStorePath(n)] = `{"id":"vs_` + providerOwned + n + `","object":"vector_store.deleted","deleted":true}`
+	}
+	maps.Copy(replies, p.scripted)
+	return replies
+}
+
+func (p *storeProvider) status(request string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.statuses[request]
+}
+
+func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCallerMayRepeat(t *testing.T) {
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "stores", "stores-model"
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price:       rates.Price{ProviderKind: "azure_openai", Model: model, Operation: "vector_store", StoragePerGiBDay: new("0.10"), Currency: "USD"},
+		EffectiveAt: fixture.observedAt,
+	})
+	provider := &storeProvider{issues: "1", scripted: map[string]string{}, statuses: map[string]int{}}
+	upstream := &retainedUpstream{replies: provider.replies, status: provider.status}
+	sink := &terminals{}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch", "vector_store"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream, sink: sink,
+	})
+	g.key(t, "owner")
+	ask := func(method, path, body, submission string, status int, code, class string) (http.Header, retainedObject) {
+		t.Helper()
+		before := len(sink.all())
+		header, raw := g.send(t, method, path, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json", "Idempotency-Key": submission}, body, status)
+		var reply struct {
+			retainedObject
+			Error struct{ Code string }
+		}
+		if err := json.Unmarshal(raw, &reply); err != nil || reply.Error.Code != code {
+			t.Fatalf("%s %s answered %s (%v), want code %q", method, path, raw, err, code)
+		}
+		seen := sink.all()
+		if len(seen) != before+1 {
+			t.Fatalf("%s %s recorded %d requests, want one", method, path, len(seen)-before)
+		}
+		attempts := seen[before].Attempts
+		if class == "" && len(attempts) != 0 || class != "" && (len(attempts) != 1 || attempts[0].Class != class) {
+			t.Fatalf("%s %s recorded attempts %+v, want class %q", method, path, attempts, class)
+		}
+		return header, reply.retainedObject
+	}
+	kept := func(id string) string {
+		t.Helper()
+		var state string
+		if err := pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE 'vector_store_'||replace(id::text,'-','')=$1`, id).Scan(&state); err != nil {
+			t.Fatalf("read kept store %s: %v", id, err)
+		}
+		return state
+	}
+	change := func(id, submission string) string {
+		t.Helper()
+		var state string
+		if err := pool.QueryRow(t.Context(), `SELECT m.state FROM olp.retained_mutations m WHERE 'vector_store_'||replace(m.resource_id::text,'-','')=$1 AND m.submission_key=$2`, id, submission).Scan(&state); err != nil {
+			t.Fatalf("read change %s of %s: %v", submission, id, err)
+		}
+		return state
+	}
+	const stores, named, paid = "/v1/vector_stores", `{"name":"notes"}`, `{"expires_after":{"anchor":"last_active_at","days":1}}`
+	rejection, outage := `{"error":{"message":"The provider refused.","type":"invalid_request_error"}}`, `{"error":{"message":"The provider broke.","type":"server_error"}}`
+
+	provider.answers("POST /vector_stores", http.StatusBadRequest, rejection)
+	header, _ := ask("POST", stores, named, "refused", http.StatusBadRequest, "provider_resource_error", "upstream_client")
+	refused := header.Get("X-OLP-Resource-ID")
+	if header.Get("X-Should-Retry") != "false" || kept(refused) != "not_accepted" {
+		t.Fatalf("a refused creation answered retry %q and is kept as %q", header.Get("X-Should-Retry"), kept(refused))
+	}
+	provider.recovers("POST /vector_stores")
+	header, _ = ask("POST", stores, named, "refused", http.StatusConflict, "submission_exists", "")
+	if header.Get("X-OLP-Resource-ID") != refused || len(upstream.sent("POST /vector_stores")) != 1 {
+		t.Fatalf("repeating a refused creation named %q and reached the provider %d times", header.Get("X-OLP-Resource-ID"), len(upstream.sent("POST /vector_stores")))
+	}
+
+	provider.answers("POST /vector_stores", http.StatusInternalServerError, outage)
+	header, _ = ask("POST", stores, named, "unknown", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
+	unknown := header.Get("X-OLP-Resource-ID")
+	if kept(unknown) != "submission_unknown" {
+		t.Fatalf("a creation the provider may have run is kept as %q", kept(unknown))
+	}
+	provider.recovers("POST /vector_stores")
+	ask("GET", stores+"/"+unknown, "", "", http.StatusConflict, "submission_unknown", "")
+
+	_, store := ask("POST", stores, named, "first", http.StatusOK, "", "success")
+	for _, broken := range []struct {
+		name, body string
+		status     int
+		code       string
+		class      string
+		want       int
+	}{
+		{"another store", providerStore("2"), 0, "provider_protocol_error", "protocol", http.StatusBadGateway},
+		{"no object", `[]`, 0, "provider_protocol_error", "protocol", http.StatusBadGateway},
+		{"an outage", outage, http.StatusInternalServerError, "provider_resource_error", "upstream_server", http.StatusInternalServerError},
+	} {
+		provider.answers("GET "+providerStorePath("1"), broken.status, broken.body)
+		ask("GET", stores+"/"+store.ID, "", "", broken.want, broken.code, broken.class)
+		if kept(store.ID) != "completed" {
+			t.Fatalf("a read answered with %s left the store %q", broken.name, kept(store.ID))
+		}
+	}
+	provider.recovers("GET " + providerStorePath("1"))
+
+	ask("POST", stores+"/"+store.ID, paid, "accepted", http.StatusOK, "", "success")
+	ask("POST", stores+"/"+store.ID, paid, "accepted", http.StatusConflict, "idempotency_conflict", "")
+	provider.answers("POST "+providerStorePath("1"), http.StatusBadRequest, rejection)
+	ask("POST", stores+"/"+store.ID, paid, "rejected", http.StatusBadRequest, "provider_resource_error", "upstream_client")
+	provider.answers("POST "+providerStorePath("1"), http.StatusInternalServerError, outage)
+	ask("POST", stores+"/"+store.ID, paid, "uncertain", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
+	provider.recovers("POST " + providerStorePath("1"))
+	ask("POST", stores+"/"+store.ID, paid, "uncertain", http.StatusConflict, "idempotency_conflict", "")
+	for submission, want := range map[string]string{"accepted": "accepted", "rejected": "not_accepted", "uncertain": "submission_unknown"} {
+		if got := change(store.ID, submission); got != want {
+			t.Fatalf("paid change %q is kept as %q, want %q", submission, got, want)
+		}
+	}
+	if kept(store.ID) != "completed" {
+		t.Fatalf("failed paid changes left the store %q", kept(store.ID))
+	}
+
+	provider.answers("DELETE "+providerStorePath("1"), 0, `{"id":"vs_`+providerOwned+`2","object":"vector_store.deleted","deleted":true}`)
+	ask("DELETE", stores+"/"+store.ID, "", "", http.StatusBadGateway, "provider_protocol_error", "protocol")
+	if kept(store.ID) != "deleted" {
+		t.Fatalf("a deletion the provider accepted under another name left the store %q", kept(store.ID))
+	}
+
+	provider.creates("2")
+	_, second := ask("POST", stores, named, "second", http.StatusOK, "", "success")
+	ask("DELETE", stores+"/"+second.ID, "", "", http.StatusOK, "", "success")
+	if kept(second.ID) != "deleted" {
+		t.Fatalf("a deleted store is kept as %q", kept(second.ID))
+	}
+
+	provider.creates("3")
+	_, gone := ask("POST", stores, named, "third", http.StatusOK, "", "success")
+	provider.answers("GET "+providerStorePath("3"), http.StatusNotFound, rejection)
+	ask("GET", stores+"/"+gone.ID, "", "", http.StatusNotFound, "not_found", "upstream_client")
+	provider.recovers("GET " + providerStorePath("3"))
+	ask("GET", stores+"/"+gone.ID, "", "", http.StatusNotFound, "not_found", "")
+	if kept(gone.ID) != "deleted" || len(upstream.sent("GET "+providerStorePath("3"))) != 1 {
+		t.Fatalf("a store the provider no longer has is kept as %q after %d provider reads", kept(gone.ID), len(upstream.sent("GET "+providerStorePath("3"))))
 	}
 }
