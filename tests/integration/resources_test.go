@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,13 +14,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
@@ -305,12 +310,152 @@ func (r *listedRuntime) NetworkSecret(_ context.Context, _ *release.Release, _, 
 	return []byte("listed-secret"), nil
 }
 
+type storedPlan struct {
+	slug, model string
+	kind        string
+	operations  []string
+	prices      []rates.RoutingPrice
+	upstream    http.Handler
+}
+
+// storedGateway is a gateway over real stores whose one provider revision and
+// route revision exist in the database, as retained resources require.
+type storedGateway struct {
+	t       *testing.T
+	fixture usageFixture
+	plan    storedPlan
+	store   *resources.Store
+	runtime *listedRuntime
+	mux     *http.ServeMux
+	server  *httptest.Server
+
+	providerRevisionID, routeRevisionID, slotID, targetID, credentialID string
+}
+
+func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *storedGateway {
+	t.Helper()
+	ctx, pool := t.Context(), fixture.pool
+	upstream := httptest.NewServer(plan.upstream)
+	t.Cleanup(upstream.Close)
+	g := &storedGateway{
+		t: t, fixture: fixture, plan: plan, store: resources.New(pool),
+		providerRevisionID: uuid.NewString(), slotID: uuid.NewString(), targetID: uuid.NewString(), credentialID: uuid.NewString(),
+	}
+	credentialVersion := 1
+	slot := routing.Slot{ID: g.slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &g.credentialID, CredentialVersion: &credentialVersion}
+	kind, endpoint := cmp.Or(plan.kind, "openai"), upstream.URL+"/v1"
+	providerConfig := encoded(t, map[string]string{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key"})
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_credentials (id,provider_id,version) VALUES ($1,$2,1)`, g.credentialID, fixture.providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_revisions (id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
+		VALUES ($1,$2,1,'listed',$3,'[]',$4,1,$1,$5)`, g.providerRevisionID, fixture.providerID, providerConfig,
+		encoded(t, []routing.RevisionSlot{{Slot: slot, Default: true}}), fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	routeID, routeRevisionID := g.seedRoute(plan.slug)
+	g.routeRevisionID = routeRevisionID
+
+	capabilities := make([]routing.Capability, len(plan.operations))
+	for i, operation := range plan.operations {
+		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: "openai", Mode: "unary"}
+	}
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
+		Providers: map[string]routing.Provider{fixture.providerID: {
+			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true,
+			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
+			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot},
+		}},
+		Routes: map[string]routing.Route{plan.slug: {
+			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
+			RoutingID: routeID, RevisionID: g.routeRevisionID, Revision: 1, PublishedAt: time.Now(), ProjectID: &fixture.projectID,
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets:  []routing.Target{{ID: g.targetID, ProviderID: fixture.providerID, ProviderModel: plan.model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
+		}},
+	}
+	published, err := release.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{g.credentialID: []byte("listed-secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.runtime = &listedRuntime{
+		release: published,
+		keys:    map[string]keyauthority.Authority{},
+		inputs:  &routinginputs.Inputs{Prices: plan.prices, RefreshedAt: time.Now()},
+	}
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	runner := newRunner(t)
+	limiter := admission.NewDurable(runner, debits.NewSyncer(debits.NewStore(pool), runner))
+	server := gateway.New(gateway.Dependencies{
+		Runtime:   g.runtime,
+		Admission: quota.NewAdmission(limiter, fleet.New(runner), nil, nil),
+		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Getenv:    func(string) string { return "" },
+		Digester:  secrets.NewAuthKey(make([]byte, 32), "listed-resources"),
+		Resources: g.store,
+		Resolver:  resources.NewResolver(pool),
+		Batches:   batches.NewStore(pool),
+		Staging:   spool,
+		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
+	}, gateway.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+	g.mux = http.NewServeMux()
+	server.Register(g.mux)
+	g.server = httptest.NewServer(g.mux)
+	t.Cleanup(g.server.Close)
+	return g
+}
+
+func encoded(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func (g *storedGateway) seedRoute(slug string) (string, string) {
+	g.t.Helper()
+	ctx, pool, fixture := g.t.Context(), g.fixture.pool, g.fixture
+	routeID, revisionID := uuid.NewString(), uuid.NewString()
+	targets := encoded(g.t, []routing.PublishedTarget{{
+		ID: g.targetID, ProviderModelID: "listed-model-row", ProviderID: fixture.providerID,
+		ProviderModel: g.plan.model, Weight: 1, TimeoutMS: 2000,
+	}})
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.routes (id,slug,created_by,latest_revision,latest_revision_id,etag,project_id)
+		VALUES ($1,$2,$3,1,$4,$5,$6)`, routeID, slug, fixture.ownerID, revisionID, uuid.NewString(), fixture.projectID); err != nil {
+		g.t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior)
+		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,'{"mode":"transformed"}','{}')`,
+		revisionID, routeID, slug, encoded(g.t, g.plan.operations), targets, uuid.NewString(), fixture.ownerID); err != nil {
+		g.t.Fatal(err)
+	}
+	return routeID, revisionID
+}
+
+// key admits a new API key for the plan's route under the given secret.
+func (g *storedGateway) key(t *testing.T, secret string) string {
+	t.Helper()
+	keyID := uuid.NewString()
+	g.fixture.addKey(t, keyID)
+	g.runtime.keys[secret] = keyauthority.Authority{
+		ID: keyID, LookupID: "listed" + secret, ProjectID: &g.fixture.projectID,
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{g.plan.slug}, AllowProviderState: true},
+	}
+	return keyID
+}
+
 func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
-	store := resources.New(pool)
 
 	const (
 		slug          = "stored-listed"
@@ -320,133 +465,25 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		upstreamJob   = "ftjob-observed"
 		tuningPath    = "/v1/fine_tuning/jobs"
 	)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != tuningPath+"/"+upstreamJob {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"created_at":%d,"status":"succeeded","trained_tokens":12,"fine_tuned_model":%q,"training_file":"file-unbound"}`, upstreamJob, fixture.observedAt.Unix(), tunedModel)
-	}))
-	t.Cleanup(upstream.Close)
-	providerConfig, err := json.Marshal(map[string]string{"kind": "openai", "endpoint": upstream.URL + "/v1", "auth_mode": "api_key"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	credentialID := uuid.NewString()
-	slotID := uuid.NewString()
-	targetID := uuid.NewString()
-	providerRevisionID := uuid.NewString()
-	credentialVersion := 1
-
-	slots, err := json.Marshal([]routing.RevisionSlot{{Slot: routing.Slot{
-		ID: slotID, Name: "default", Enabled: true, Weight: 1,
-		CredentialID: &credentialID, CredentialVersion: &credentialVersion,
-	}, Default: true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	targets, err := json.Marshal([]routing.PublishedTarget{{
-		ID: targetID, ProviderModelID: "listed-model-row", ProviderID: fixture.providerID,
-		ProviderModel: model, Weight: 1, TimeoutMS: 2000,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	operations, err := json.Marshal([]string{"batch", "fine_tuning"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_credentials (id,provider_id,version) VALUES ($1,$2,1)`, credentialID, fixture.providerID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_revisions (id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
-		VALUES ($1,$2,1,'listed',$3,'[]',$4,1,$1,$5)`, providerRevisionID, fixture.providerID, providerConfig, slots, fixture.ownerID); err != nil {
-		t.Fatal(err)
-	}
-	seedRoute := func(routeSlug string) string {
-		t.Helper()
-		routeID, revisionID := uuid.NewString(), uuid.NewString()
-		if _, err := pool.Exec(ctx, `INSERT INTO olp.routes (id,slug,created_by,latest_revision,latest_revision_id,etag,project_id)
-			VALUES ($1,$2,$3,1,$4,$5,$6)`, routeID, routeSlug, fixture.ownerID, revisionID, uuid.NewString(), fixture.projectID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior)
-			VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,'{"mode":"transformed"}','{}')`,
-			revisionID, routeID, routeSlug, operations, targets, uuid.NewString(), fixture.ownerID); err != nil {
-			t.Fatal(err)
-		}
-		return revisionID
-	}
-	routeRevisionID := seedRoute(slug)
-	forbiddenRevisionID := seedRoute(forbiddenSlug)
-
-	snapshotRouteID := uuid.NewString()
-	snapshot := &routing.Snapshot{
-		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
-		Providers: map[string]routing.Provider{fixture.providerID: {
-			ID: fixture.providerID, Name: "listed", Kind: "openai_compatible", Enabled: true,
-			ActiveCredential: &credentialID, RevisionID: providerRevisionID,
-			Capabilities: []routing.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}},
-			Endpoint:     "https://example.com/v1", AuthMode: "api_key",
-			Slots: []routing.Slot{{ID: slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &credentialID, CredentialVersion: &credentialVersion}},
-		}},
-		Routes: map[string]routing.Route{slug: {
-			ID: snapshotRouteID, Slug: slug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3,
-			RoutingID: snapshotRouteID, RevisionID: routeRevisionID, Revision: 1, PublishedAt: time.Now(), ProjectID: &fixture.projectID,
-			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
-			Targets:  []routing.Target{{ID: targetID, ProviderID: fixture.providerID, ProviderModel: model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
-		}},
-	}
-	published, err := release.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{credentialID: []byte("listed-secret")})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = spool.Close() })
-
 	price := rates.NewRoutingPrice(rates.RoutingPrice{
 		Price:       rates.Price{ProviderKind: "openai", Model: model, Operation: "fine_tuning", PerRequest: new("0.60"), Currency: "USD"},
 		EffectiveAt: fixture.observedAt,
 	})
-	runtime := &listedRuntime{
-		release: published,
-		keys:    map[string]keyauthority.Authority{},
-		inputs:  &routinginputs.Inputs{Prices: []rates.RoutingPrice{*price}, RefreshedAt: time.Now()},
-	}
-	newKey := func(t *testing.T, secret string) string {
-		t.Helper()
-		keyID := uuid.NewString()
-		fixture.addKey(t, keyID)
-		runtime.keys[secret] = keyauthority.Authority{
-			ID: keyID, LookupID: "listed" + secret, ProjectID: &fixture.projectID,
-			Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{slug}, AllowProviderState: true},
-		}
-		return keyID
-	}
-	runner := newRunner(t)
-	limiter := admission.NewDurable(runner, debits.NewSyncer(debits.NewStore(pool), runner))
-	server := gateway.New(gateway.Dependencies{
-		Runtime:   runtime,
-		Admission: quota.NewAdmission(limiter, fleet.New(runner), nil, nil),
-		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Getenv:    func(string) string { return "" },
-		Digester:  secrets.NewAuthKey(make([]byte, 32), "listed-resources"),
-		Resources: store,
-		Resolver:  resources.NewResolver(pool),
-		Staging:   spool,
-		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
-	}, gateway.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
-	mux := http.NewServeMux()
-	server.Register(mux)
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
-
+	stored := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, operations: []string{"batch", "fine_tuning"}, prices: []rates.RoutingPrice{*price},
+		upstream: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != tuningPath+"/"+upstreamJob {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"id":%q,"created_at":%d,"status":"succeeded","trained_tokens":12,"fine_tuned_model":%q,"training_file":"file-unbound"}`, upstreamJob, fixture.observedAt.Unix(), tunedModel)
+		}),
+	})
+	store, runtime, mux, httpServer := stored.store, stored.runtime, stored.mux, stored.server
+	providerRevisionID, routeRevisionID, slotID, targetID, credentialID := stored.providerRevisionID, stored.routeRevisionID, stored.slotID, stored.targetID, stored.credentialID
+	_, forbiddenRevisionID := stored.seedRoute(forbiddenSlug)
+	newKey := stored.key
 	put := func(t *testing.T, keyID, kind, upstream string, revise func(*resources.Resource)) *resources.Resource {
 		t.Helper()
 		resource := fixture.resource(kind, keyID, upstream)
@@ -719,4 +756,162 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		expect(t, secret, tuningPath, http.StatusBadGateway, "provider_protocol_error")
 		expect(t, secret, tuningPath, http.StatusTooManyRequests, "budget_exhausted")
 	})
+}
+
+type upstreamCall struct {
+	request, key, authorization, body string
+}
+
+type retainedUpstream struct {
+	mu    sync.Mutex
+	calls []upstreamCall
+}
+
+func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	request := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/v1/openai")
+	u.mu.Lock()
+	u.calls = append(u.calls, upstreamCall{request, r.Header.Get("api-key"), r.Header.Get("Authorization"), string(body)})
+	u.mu.Unlock()
+	const file = `{"id":"file-up1","object":"file","bytes":7,"created_at":1700000000,"filename":"batch.jsonl","purpose":"batch"}`
+	batch := func(status string) string {
+		return `{"id":"batch_up1","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"file-up1","completion_window":"24h","status":"` + status + `","created_at":1700000000}`
+	}
+	replies := map[string]string{
+		"POST /files":                    file,
+		"GET /files/file-up1":            file,
+		"GET /files/file-up1/content":    "CONTENT",
+		"DELETE /files/file-up1":         `{"id":"file-up1","object":"file","deleted":true}`,
+		"POST /batches":                  batch("validating"),
+		"GET /batches/batch_up1":         batch("in_progress"),
+		"POST /batches/batch_up1/cancel": batch("cancelling"),
+	}
+	reply, known := replies[request]
+	if !known {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, reply)
+}
+
+func (u *retainedUpstream) sent(request string) []upstreamCall {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return slices.DeleteFunc(slices.Clone(u.calls), func(call upstreamCall) bool { return call.request != request })
+}
+
+func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCredential(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "stored-batch", "batch-model"
+	upstream := &retainedUpstream{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	type object struct {
+		ID, Status  string
+		InputFileID string `json:"input_file_id"`
+		Deleted     bool
+		Data        []struct{ ID string }
+	}
+	call := func(key, method, path, contentType, body string, want int) object {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), method, g.server.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("X-OLP-Route", slug)
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+		response, err := g.server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		if response.StatusCode != want {
+			t.Fatalf("%s %s as %s = %d, want %d: %s", method, path, key, response.StatusCode, want, raw)
+		}
+		if strings.Contains(string(raw), "file-up1") || strings.Contains(string(raw), "batch_up1") {
+			t.Fatalf("%s %s exposed a provider identifier: %s", method, path, raw)
+		}
+		var decoded object
+		_ = json.Unmarshal(raw, &decoded)
+		return decoded
+	}
+	identifiers := func(listed object) []string {
+		ids := make([]string, len(listed.Data))
+		for i, entry := range listed.Data {
+			ids[i] = entry.ID
+		}
+		return ids
+	}
+
+	line := `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}`
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" + line + "\n\r\n--b--\r\n"
+	file := call("owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if file.ID == "" {
+		t.Fatal("upload returned no file identifier")
+	}
+	uploads := upstream.sent("POST /files")
+	if len(uploads) != 1 || uploads[0].key != "listed-secret" || uploads[0].authorization != "" {
+		t.Fatalf("upload reached the provider as %+v, want one call carrying only the provider credential", uploads)
+	}
+	if !strings.Contains(uploads[0].body, `"model":"`+model+`"`) || strings.Contains(uploads[0].body, slug) {
+		t.Fatalf("uploaded lines must name the provider model instead of the route: %s", uploads[0].body)
+	}
+	if got := call("owner", "GET", "/v1/files/"+file.ID, "", "", 200); got.ID != file.ID {
+		t.Fatalf("file read returned %q, want %q", got.ID, file.ID)
+	}
+	if got := identifiers(call("owner", "GET", "/v1/files", "", "", 200)); !slices.Equal(got, []string{file.ID}) {
+		t.Fatalf("owner lists files %v, want only %s", got, file.ID)
+	}
+	call("owner", "GET", "/v1/files/"+file.ID+"/content", "", "", 200)
+
+	call("stranger", "GET", "/v1/files/"+file.ID, "", "", 404)
+	if got := identifiers(call("stranger", "GET", "/v1/files", "", "", 200)); len(got) != 0 {
+		t.Fatalf("another key lists files %v", got)
+	}
+	submission := `{"input_file_id":"` + file.ID + `","endpoint":"/v1/chat/completions","completion_window":"24h"}`
+	call("stranger", "POST", "/v1/batches", "application/json", submission, 404)
+	if sent := upstream.sent("POST /batches"); len(sent) != 0 {
+		t.Fatalf("a batch over another key's file reached the provider: %+v", sent)
+	}
+
+	batch := call("owner", "POST", "/v1/batches", "application/json", submission, 200)
+	if batch.ID == "" || batch.InputFileID != file.ID || batch.Status != "validating" {
+		t.Fatalf("batch = %+v, want a gateway identifier over file %s", batch, file.ID)
+	}
+	submissions := upstream.sent("POST /batches")
+	if len(submissions) != 1 || !strings.Contains(submissions[0].body, `"input_file_id":"file-up1"`) || submissions[0].key != "listed-secret" {
+		t.Fatalf("batch reached the provider as %+v, want the provider's file identifier and credential", submissions)
+	}
+	if got := call("owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.ID != batch.ID || got.InputFileID != file.ID || got.Status != "in_progress" {
+		t.Fatalf("batch read = %+v", got)
+	}
+	if got := identifiers(call("owner", "GET", "/v1/batches", "", "", 200)); !slices.Equal(got, []string{batch.ID}) {
+		t.Fatalf("owner lists batches %v, want only %s", got, batch.ID)
+	}
+	call("stranger", "GET", "/v1/batches/"+batch.ID, "", "", 404)
+	call("stranger", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 404)
+	if got := call("owner", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 200); got.ID != batch.ID || got.Status != "cancelling" {
+		t.Fatalf("batch cancel = %+v", got)
+	}
+	if sent := upstream.sent("POST /batches/batch_up1/cancel"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d cancels, want only the owner's", len(sent))
+	}
+
+	call("stranger", "DELETE", "/v1/files/"+file.ID, "", "", 404)
+	if got := call("owner", "DELETE", "/v1/files/"+file.ID, "", "", 200); !got.Deleted || got.ID != file.ID {
+		t.Fatalf("file delete = %+v", got)
+	}
+	if sent := upstream.sent("DELETE /files/file-up1"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
+	}
+	call("owner", "GET", "/v1/files/"+file.ID, "", "", 404)
 }
