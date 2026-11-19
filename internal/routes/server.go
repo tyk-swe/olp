@@ -34,9 +34,9 @@ import (
 
 // Server serves the route management surface.
 type Server struct {
-	Region string
-	Access *access.Server
-	Inputs func() *routinginputs.Inputs
+	Region          string
+	Access          *access.Server
+	Inputs          func() *routinginputs.Inputs
 	Workflows       mcp.WorkflowResolver
 	WorkflowRelease func() *release.Release
 	InlineMedia     protocols.InlineMediaLimits
