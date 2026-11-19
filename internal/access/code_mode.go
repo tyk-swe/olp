@@ -30,75 +30,48 @@ func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project strin
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
+	if r.PathValue("id") != "" {
+		return Transact(s, r, s.codeTarget(r, resource, projectID), func(tx pgx.Tx, p authz.Principal, id string) (httpkit.Reply, Event, error) {
+			etag := httpkit.NewID()
+			body, err := write(tx, p, id, etag, true)
+			return httpkit.Detail(body, etag), resource.written(id), err
+		})
 	}
-	defer tx.Rollback(r.Context())
-	if err := s.RequireProject(r.Context(), tx, p, &projectID); err != nil {
-		return httpkit.Reply{}, err
+	admitted := func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, s.RequireProject(r.Context(), tx, p, &projectID)
 	}
-	if r.PathValue("id") == "" {
-		return s.codeCreate(r, tx, p, resource, input, write)
-	}
-	return s.codeUpdate(r, tx, p, resource, projectID, write)
+	return Mutate(s, r, input, admitted, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		body, err := write(tx, p, id, etag, false)
+		return httpkit.Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}, resource.written(id), err
+	})
 }
 
-func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, input any, write CodeWriter) (httpkit.Reply, error) {
-	claim, replayed, err := s.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
+func (s *Server) codeTarget(r *http.Request, resource CodeResource, projectID string) func(pgx.Tx, authz.Principal) (string, error) {
+	return func(tx pgx.Tx, p authz.Principal) (string, error) {
+		if err := s.RequireProject(r.Context(), tx, p, &projectID); err != nil {
+			return "", err
+		}
+		id, err := httpkit.ParseUUID(r.PathValue("id"))
+		if err != nil {
+			return "", err
+		}
+		var oldProject, oldETag string
+		if err := tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+resource.table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
+			return "", err
+		}
+		if err := p.Project(&oldProject, authz.Change); err != nil {
+			return "", err
+		}
+		if oldProject != projectID {
+			return "", httpkit.Invalid("project_id", "The project is immutable.")
+		}
+		return id, httpkit.Match(r, oldETag)
 	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	body, err := codeSave(r, tx, p, resource, id, etag, false, write)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}
-	if err := s.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, projectID string, write CodeWriter) (httpkit.Reply, error) {
-	id, err := httpkit.ParseUUID(r.PathValue("id"))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var oldProject, oldETag string
-	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+resource.table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(&oldProject, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if oldProject != projectID {
-		return httpkit.Reply{}, httpkit.Invalid("project_id", "The project is immutable.")
-	}
-	if err := httpkit.Match(r, oldETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag := httpkit.NewID()
-	body, err := codeSave(r, tx, p, resource, id, etag, true, write)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(body, etag), tx.Commit(r.Context())
-}
-
-func codeSave(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, id, etag string, existing bool, write CodeWriter) (any, error) {
-	body, err := write(tx, p, id, etag, existing)
-	if err != nil {
-		return nil, err
-	}
-	if err := Audit(r.Context(), tx, r, p.Actor(), resource.audit+".write", resource.audit, id, "success"); err != nil {
-		return nil, err
-	}
-	return body, nil
+func (resource CodeResource) written(id string) Event {
+	return Event{Action: resource.audit + ".write", Resource: resource.audit, ID: id}
 }
 
 // CodeMatch matches a listing's rows to a query field by SQL other than its
