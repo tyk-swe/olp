@@ -17,6 +17,7 @@ import (
 
 func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testing.T) {
 	t.Setenv("PGPASSWORD", "")
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "unused"))
 	bundledURL := func(dir string) string {
 		query := url.Values{"passfile": {filepath.Join(dir, "pgpass")}}
 		return "postgres://olp@postgres:5432/olp?" + query.Encode()
@@ -69,42 +70,44 @@ func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testi
 		env := map[string]string{
 			"OLP_DATABASE_PASSWORD_FILE":     filepath.Join(dir, "postgres_password"),
 			"OLP_DATABASE_PASSWORD_FILE_URL": databaseURL,
-			"OLP_DATABASE_URL":               databaseURL,
 		}
-		c, err := parseWithFlags([]string{"all"}, func(key string) string { return env[key] }, io.Discard, nil)
-		if err != nil {
+		customPassfile := filepath.Join(t.TempDir(), "pgpass")
+		const customPassword = "external-password"
+		if err := os.WriteFile(customPassfile, []byte("*:5432:olp:olp:"+customPassword+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		database, err := pgconn.ParseConfig(c.DatabaseURL)
-		if err != nil {
-			t.Fatal("cannot parse the database URL")
-		}
-		if database.Password != password {
-			t.Fatal("OLP did not use the original password")
-		}
+		passfile := url.Values{"passfile": {customPassfile}}.Encode()
 
-		t.Run("honors a custom URL's passfile", func(t *testing.T) {
-			externalPassfile := filepath.Join(t.TempDir(), "pgpass")
-			const externalPassword = "external-password"
-			if err := os.WriteFile(externalPassfile, []byte("external:5432:olp:olp:"+externalPassword+"\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			query := url.Values{"passfile": {externalPassfile}}.Encode()
-			customURL := "postgres://olp@external:5432/olp?" + query
-			c, err := parseWithFlags([]string{"all"}, func(key string) string {
-				if key == "OLP_DATABASE_URL" {
-					return customURL
+		for _, tc := range []struct{ name, url, want string }{
+			{"bundled URL", databaseURL, password},
+			{"bundled URL with options", databaseURL + "?sslmode=disable&connect_timeout=5", password},
+			{"bundled URL with implicit database", "postgres://olp@postgres:5432?sslmode=disable", password},
+			{"query host and port select the bundled endpoint", "postgresql://olp@external:1234/olp?host=postgres&port=5432", password},
+			{"query host selects an external endpoint", databaseURL + "?host=external", ""},
+			{"query port selects a different endpoint", databaseURL + "?port=5433", ""},
+			{"query user selects another account", databaseURL + "?user=another", ""},
+			{"URL selects another database", "postgres://olp@postgres:5432/other", ""},
+			{"fallback selects an external endpoint", databaseURL + "?host=postgres,external", ""},
+			{"URL supplies its own password", databaseURL + "?password=" + customPassword, customPassword},
+			{"bundled URL supplies a passfile", databaseURL + "?" + passfile, customPassword},
+			{"external URL supplies a passfile", "postgres://olp@external:5432/olp?" + passfile, customPassword},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				c, err := parseWithFlags([]string{"all"}, func(key string) string {
+					if key == "OLP_DATABASE_URL" {
+						return tc.url
+					}
+					return env[key]
+				}, io.Discard, nil)
+				if err != nil {
+					t.Fatal(err)
 				}
-				return env[key]
-			}, io.Discard, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			database, err := pgconn.ParseConfig(c.DatabaseURL)
-			if err != nil || database.Password != externalPassword {
-				t.Fatal("the custom connection did not use its own passfile")
-			}
-		})
+				database, err := pgconn.ParseConfig(c.DatabaseURL)
+				if err != nil || database.Password != tc.want {
+					t.Fatal("the connection did not use the expected password")
+				}
+			})
+		}
 	})
 
 	t.Run("refuses a nonregular bootstrap token", func(t *testing.T) {

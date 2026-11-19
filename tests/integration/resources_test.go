@@ -602,39 +602,60 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		}
 	})
 
+	anthropicIDs := func(t *testing.T, body map[string]json.RawMessage) ([]string, bool) {
+		t.Helper()
+		var data []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(body["data"], &data); err != nil {
+			t.Fatalf("data %s: %v", body["data"], err)
+		}
+		var hasMore bool
+		if err := json.Unmarshal(body["has_more"], &hasMore); err != nil {
+			t.Fatalf("has_more %s: %v", body["has_more"], err)
+		}
+		ids := make([]string, len(data))
+		for i, entry := range data {
+			ids[i] = entry.ID
+		}
+		return ids, hasMore
+	}
 	t.Run("anthropic backward pages refill past stale rows", func(t *testing.T) {
 		keyID := newKey(t, "backward")
 		anchor := valid(t, keyID, resources.KindAnthropicFile, "backward-anchor")
 		next := valid(t, keyID, resources.KindAnthropicFile, "backward-next")
 		stale(t, keyID, resources.KindAnthropicFile, "backward-stale")
 		newest := valid(t, keyID, resources.KindAnthropicFile, "backward-newest")
-		listedIDs := func(body map[string]json.RawMessage) ([]string, bool) {
-			t.Helper()
-			var data []struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(body["data"], &data); err != nil {
-				t.Fatalf("data %s: %v", body["data"], err)
-			}
-			var hasMore bool
-			if err := json.Unmarshal(body["has_more"], &hasMore); err != nil {
-				t.Fatalf("has_more %s: %v", body["has_more"], err)
-			}
-			ids := make([]string, len(data))
-			for i, entry := range data {
-				ids[i] = entry.ID
-			}
-			return ids, hasMore
-		}
-		ids, hasMore := listedIDs(get(t, "backward", "/anthropic/v1/files?limit=1&before_id="+anchor.ID))
+		ids, hasMore := anthropicIDs(t, get(t, "backward", "/anthropic/v1/files?limit=1&before_id="+anchor.ID))
 		sameStrings(t, "first backward page", ids, next.ID)
 		if !hasMore {
 			t.Fatal("first backward page has_more = false, want true")
 		}
-		ids, hasMore = listedIDs(get(t, "backward", "/anthropic/v1/files?limit=1&before_id="+next.ID))
+		ids, hasMore = anthropicIDs(t, get(t, "backward", "/anthropic/v1/files?limit=1&before_id="+next.ID))
 		sameStrings(t, "second backward page", ids, newest.ID)
 		if hasMore {
 			t.Fatal("second backward page has_more = true, want false")
+		}
+	})
+
+	t.Run("anthropic batch pages skip a full scan of stale bindings", func(t *testing.T) {
+		const secret = "batch-pages"
+		keyID := newKey(t, secret)
+		oldest := valid(t, keyID, resources.KindAnthropicBatch, "batch-oldest")
+		for range 405 {
+			stale(t, keyID, resources.KindAnthropicBatch, uuid.NewString())
+		}
+		newest := valid(t, keyID, resources.KindAnthropicBatch, "batch-newest")
+		const path = "/anthropic/v1/messages/batches?limit=1"
+		for _, tc := range []struct{ cursorParam, anchor, want string }{
+			{"after_id", newest.ID, oldest.ID},
+			{"before_id", oldest.ID, newest.ID},
+		} {
+			ids, more := anthropicIDs(t, get(t, secret, path+"&"+tc.cursorParam+"="+tc.anchor))
+			sameStrings(t, tc.cursorParam, ids, tc.want)
+			if more {
+				t.Fatalf("%s has_more = true after the last batch", tc.cursorParam)
+			}
 		}
 	})
 

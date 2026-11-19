@@ -330,6 +330,9 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	if e.Action == "create" {
 		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{IDs: []string{nativeID}})
 		if prepareErr != nil || prepared.Commit(commitCtx) != nil {
+			if referenceErr == nil {
+				native.exchange.interrupt(classProtocol, true)
+			}
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
 			return
 		}

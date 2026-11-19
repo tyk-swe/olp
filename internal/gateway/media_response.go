@@ -186,7 +186,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 	w.WriteHeader(out.status)
 	out.committed = true
 	var attempt *events.AttemptFact
-	if n := len(x.facts); n > 0 && x.family != wire.VideoList {
+	if n := len(x.facts); n > 0 && out.result != nil {
 		attempt = &x.facts[n-1]
 		attempt.Committed = true
 	}

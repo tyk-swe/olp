@@ -20,8 +20,8 @@ configuration before binding any listener.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
-| `OLP_DATABASE_PASSWORD_FILE` | unset | Mounted PostgreSQL password for a URL with a username and no password. Compose sets this for its bundled database. |
-| `OLP_DATABASE_PASSWORD_FILE_URL` | unset | Apply `OLP_DATABASE_PASSWORD_FILE` only when the database URL exactly matches this value. |
+| `OLP_DATABASE_PASSWORD_FILE` | unset | Mounted PostgreSQL password for a connection without its own password or explicit passfile. Compose sets this for its bundled database. |
+| `OLP_DATABASE_PASSWORD_FILE_URL` | unset | Apply `OLP_DATABASE_PASSWORD_FILE` only when the resolved host, port, database, and user match this URL. Connection options such as `sslmode` can differ. Every fallback must use the same host and port. |
 | `OLP_DATABASE_READ_URL` | unset | Optional regional PostgreSQL replica for runtime release and key/credential authority reads. Writes and historical secret reads use the primary. Replica delay consumes the 60-second authority-age budget; see [regional deployment](deployment.md#regional-read-replicas). |
 | `OLP_DATABASE_READ_URL_FILE` | unset | Mounted read-replica URL, mutually exclusive with `OLP_DATABASE_READ_URL`. |
 | `OLP_REGION` | unset | Deployment region for key rate/concurrency overrides, regional cost-reconciliation leadership and provider locality. Set the same name on gateways and workers sharing a Valkey. See [regional fleets](deployment.md#regional-fleets). |
@@ -60,7 +60,7 @@ configuration before binding any listener.
 | `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
 | `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
 | `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
-| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB with a minimum of 256 MiB). The spool also limits uploads and pending cleanups to 4096 files in total. |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
 | `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](../use/plugins.md#unconfined-plugins-experimental); nothing else can. |
 | `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |

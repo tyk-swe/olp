@@ -11,9 +11,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -122,7 +124,7 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	f.StringVar(&c.DatabaseURL, "database-url", "", "PostgreSQL URL (OLP_DATABASE_URL)")
 	f.StringVar(&databaseFile, "database-url-file", "", "file containing PostgreSQL URL")
 	f.StringVar(&databasePasswordFile, "database-password-file", "", "mounted PostgreSQL password when the URL provides none")
-	f.StringVar(&databasePasswordFileURL, "database-password-file-url", "", "apply the mounted PostgreSQL password only to this URL")
+	f.StringVar(&databasePasswordFileURL, "database-password-file-url", "", "apply the mounted PostgreSQL password only to this PostgreSQL endpoint")
 	f.StringVar(&c.DatabaseReadURL, "database-read-url", "", "optional PostgreSQL replica for runtime release and authority reads")
 	f.StringVar(&c.Region, "region", "", "deployment region for regional limits and local provider preference")
 	f.StringVar(&databaseReadFile, "database-read-url-file", "", "file containing optional PostgreSQL read-replica URL")
@@ -223,8 +225,8 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	if c.DatabaseURL, err = secretURL(c.DatabaseURL, databaseFile, "OLP_DATABASE_URL"); err != nil {
 		return c, err
 	}
-	if databasePasswordFile != "" && getenv("PGPASSWORD") == "" && (databasePasswordFileURL == "" || c.DatabaseURL == databasePasswordFileURL) {
-		if c.DatabaseURL, err = applyDatabasePassword(c.DatabaseURL, databasePasswordFile); err != nil {
+	if databasePasswordFile != "" && getenv("PGPASSWORD") == "" {
+		if c.DatabaseURL, err = applyDatabasePassword(c.DatabaseURL, databasePasswordFile, databasePasswordFileURL); err != nil {
 			return c, err
 		}
 	}
@@ -282,16 +284,30 @@ func parseWithFlags(args []string, getenv func(string) string, output io.Writer,
 	return c, c.Validate()
 }
 
-func applyDatabasePassword(rawURL, path string) (string, error) {
+func applyDatabasePassword(rawURL, path, endpoint string) (string, error) {
 	databaseURL, err := url.Parse(rawURL)
-	if err != nil || databaseURL.User == nil {
+	if err != nil || (databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") || databaseURL.Hostname() == "" {
 		return rawURL, nil
 	}
-	if _, supplied := databaseURL.User.Password(); supplied || databaseURL.Query().Has("password") {
+	options := databaseURL.Query()
+	if _, supplied := databaseURL.User.Password(); supplied || options.Has("password") || options.Has("passfile") {
 		return rawURL, nil
 	}
-	if databaseURL.Query().Has("user") {
-		return rawURL, errors.New("OLP_DATABASE_PASSWORD_FILE requires a PostgreSQL username in the URL authority")
+	config, err := pgconn.ParseConfig(rawURL)
+	if err != nil {
+		return "", errors.New("invalid OLP_DATABASE_URL")
+	}
+	if config.Password != "" {
+		return rawURL, nil
+	}
+	if endpoint != "" {
+		target, err := pgconn.ParseConfig(endpoint)
+		if err != nil {
+			return "", errors.New("invalid OLP_DATABASE_PASSWORD_FILE_URL")
+		}
+		if !matchesDatabaseEndpoint(config, target) {
+			return rawURL, nil
+		}
 	}
 	data, err := secrets.ReadRawFile(path)
 	if err != nil {
@@ -302,8 +318,18 @@ func applyDatabasePassword(rawURL, path string) (string, error) {
 	if password == "" {
 		return "", errors.New("OLP_DATABASE_PASSWORD_FILE must contain a password")
 	}
-	databaseURL.User = url.UserPassword(databaseURL.User.Username(), password)
+	databaseURL.User = url.UserPassword(config.User, password)
 	return databaseURL.String(), nil
+}
+
+func matchesDatabaseEndpoint(config, target *pgconn.Config) bool {
+	if config.User != target.User || cmp.Or(config.Database, config.User) != cmp.Or(target.Database, target.User) ||
+		config.Host != target.Host || config.Port != target.Port {
+		return false
+	}
+	return !slices.ContainsFunc(config.Fallbacks, func(fallback *pgconn.FallbackConfig) bool {
+		return fallback.Host != target.Host || fallback.Port != target.Port
+	})
 }
 
 func parseCIDRs(name, raw string) ([]netip.Prefix, error) {

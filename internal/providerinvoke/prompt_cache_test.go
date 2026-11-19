@@ -112,6 +112,7 @@ func TestApplyPromptCacheLeavesCallerPolicyInCharge(t *testing.T) {
 		"different nested ttl":        `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"again"}]}`,
 		"different tool result ttl":   `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
 		"different search result ttl": `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"search_result","source":"https://example.com","title":"Result","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
+		"different MCP result ttl":    `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"mcp_tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
 		"non-object nested control":   `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":null}]},{"role":"user","content":"again"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {

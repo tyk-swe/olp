@@ -548,35 +548,59 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	}
 }
 
-func TestDeliveredVideoListKeepsFailedPollUncommitted(t *testing.T) {
-	h := newHarness(t, Config{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		x := &call{
-			family:  wire.VideoList,
-			request: h.gateway.begin(w, r),
+func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, method, body string
+		family             wire.Format
+		facts              []events.AttemptFact
+	}{
+		{
+			name: "list after a failed poll", method: http.MethodGet, family: wire.VideoList,
+			body: `{"data":[{"id":"stored-video"}]}`,
 			facts: []events.AttemptFact{
 				{Class: classSuccess, Status: http.StatusOK, Committed: true},
 				{Class: classUpstreamServer, Status: http.StatusServiceUnavailable},
 			},
-		}
-		x.notePolls()
-		out := &mediaOutcome{status: http.StatusOK}
-		h.gateway.deliverMediaJSON(w, x, out, []byte(`{"data":[{"id":"stored-video"}]}`))
-		h.gateway.finishMedia(x, out, out.status)
-	}))
-	defer server.Close()
-	response, err := server.Client().Get(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := io.ReadAll(response.Body)
-	_ = response.Body.Close()
-	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("stored-video")) {
-		t.Fatalf("list returned %d, %s, %v", response.StatusCode, body, err)
-	}
-	env := h.sink.last(t)
-	if !env.Committed || len(env.Attempts) != 2 || !env.Attempts[0].Committed || env.Attempts[1].Committed {
-		t.Fatalf("list commit evidence = %v, attempts = %+v", env.Committed, env.Attempts)
+		},
+		{
+			name: "transformed delete after upstream 404", method: http.MethodDelete, family: wire.VideoDelete,
+			body:  `{"id":"stored-video","deleted":true}`,
+			facts: []events.AttemptFact{{Class: classUpstreamClient, Status: http.StatusNotFound}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				x := &call{family: tc.family, request: h.gateway.begin(w, r), facts: slices.Clone(tc.facts)}
+				out := &mediaOutcome{status: http.StatusOK}
+				h.gateway.deliverMediaJSON(w, x, out, []byte(tc.body))
+				h.gateway.finishMedia(x, out, out.status)
+			}))
+			defer server.Close()
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if err != nil || response.StatusCode != http.StatusOK || string(body) != tc.body {
+				t.Fatalf("response = %d, %s, %v", response.StatusCode, body, err)
+			}
+			env := h.sink.last(t)
+			if !env.Committed || len(env.Attempts) != len(tc.facts) {
+				t.Fatalf("response committed = %v, attempts = %+v", env.Committed, env.Attempts)
+			}
+			for i, want := range tc.facts {
+				if got := env.Attempts[i]; got.Committed != want.Committed || got.Status != want.Status || got.Class != want.Class {
+					t.Fatalf("attempt %d changed after delivery: %+v", i, got)
+				}
+			}
+		})
 	}
 }
 

@@ -606,6 +606,9 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 	observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.now())
 	if creation != nil {
 		if err := creation.Commit(commitCtx); err != nil {
+			if referenceErr == nil && observeErr == nil {
+				native.exchange.interrupt(classProtocol, true)
+			}
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
 		}
@@ -619,6 +622,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		return 503
 	}
 	if s.persistRetainedResult(commitCtx, resource, e, parsed) != nil {
+		native.exchange.interrupt(classProtocol, true)
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 		return 503
 	}

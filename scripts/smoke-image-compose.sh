@@ -32,6 +32,6 @@ status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
   -H 'Content-Type: application/json' -H "Origin: $OLP_PUBLIC_ORIGIN" -H "X-OLP-Setup-Token: $token" \
   -d '{"email":"owner@example.test","display_name":"Owner","password":"a long compose smoke password","installation_name":"Compose smoke"}')
 [[ $status == 201 ]] || { echo "setup returned $status" >&2; exit 1; }
-OLP_DATABASE_URL=postgres://olp@postgres:5432/olp "${compose[@]}" up -d --force-recreate
+OLP_DATABASE_URL='postgres://olp@postgres:5432/olp?sslmode=disable' "${compose[@]}" up -d --force-recreate
 [[ $(setup_required) == False ]]
-echo 'Compose quickstart created an owner and kept it across a restart with the explicit bundled database URL'
+echo 'Compose quickstart created an owner and kept it across a restart with options in the bundled database URL'

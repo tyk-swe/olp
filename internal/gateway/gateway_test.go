@@ -1511,6 +1511,54 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 	}
 }
 
+func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"store-native","status":"completed"}`)
+	})
+	p := testPinnedTarget(h, 0)
+	probed, granted := openTestProbe(t, h, p.provider.ID)
+	if !granted || !probed {
+		t.Fatal("could not claim half-open probe")
+	}
+	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
+	x := &call{
+		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
+		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		retainedAdmission: &retainedAdmissionPlan{attempt: p.attempt, billing: retainedPriced},
+	}
+	id := uuid.New()
+	resource := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native"}
+	e := retainedapi.Endpoint{
+		Family: retainedapi.Family{Operation: "vector_store", Kind: resource.Kind, Identity: "id"},
+		Method: http.MethodGet, Action: "get",
+	}
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+resource.ID, nil)
+	w := httptest.NewRecorder()
+	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native"
+	status := h.gateway.retainedDispatch(w, r, x, p, e, resource, nil, endpoint, nil, "", nil, func(e *fault.Error) {
+		h.gateway.refuse(x, w, e)
+	})
+	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	env := h.sink.last(t)
+	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
+		t.Fatalf("local persistence failure returned %d, %s", status, w.Body.String())
+	}
+	if len(env.Attempts) != 1 || env.Attempts[0].Status != http.StatusOK || !env.Attempts[0].LocalRefusal || !env.Attempts[0].BillingUncertain {
+		t.Fatalf("local persistence failure changed acceptance or billing evidence: %+v", env.Attempts)
+	}
+	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+		t.Fatalf("a local persistence failure changed provider health: probe=%v granted=%v", probed, granted)
+	}
+}
+
 func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	t.Parallel()
 	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")

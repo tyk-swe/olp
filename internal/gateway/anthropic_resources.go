@@ -323,43 +323,49 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		s.refuse(x, w, err)
 		return
 	}
-	listFailure := func(err error) *fault.Error {
+	ctx := r.Context()
+	if kind == resources.KindAnthropicBatch {
+		scanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		ctx = scanCtx
+	}
+	backwards := before != ""
+	param := "after_id"
+	if backwards {
+		param = "before_id"
+	}
+	fetch := func(anchor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.deps.Resources.ListKindsPage(ctx, []string{kind}, authority.ID, count, anchor, backwards)
 		if errors.Is(err, resources.ErrNotFound) {
-			param := "after_id"
-			if before != "" {
-				param = "before_id"
-			}
-			return fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param)
+			return nil, fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param)
 		}
-		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
+		if err != nil {
+			return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
+		}
+		return batch, nil
 	}
 	authorize := func(row *resources.Resource) *fault.Error {
-		return s.authorizeListedResource(r.Context(), authority, row)
+		return s.authorizeListedResource(ctx, authority, row)
 	}
 	var rows []*resources.Resource
 	var continuation string
 	var listErr *fault.Error
-	if before != "" {
-		rows, continuation, listErr = s.listedResourcePage(authority.ID, "before_id", limit, before, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-			batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{kind}, authority.ID, count, cursor, true)
-			if err != nil {
-				return nil, listFailure(err)
-			}
-			return batch, nil
-		}, authorize)
-		slices.Reverse(rows)
-	} else {
-		rows, continuation, listErr = s.listedResourcePage(authority.ID, "after_id", limit, cursor, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-			batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{kind}, authority.ID, count, cursor, false)
-			if err != nil {
-				return nil, listFailure(err)
-			}
-			return batch, nil
-		}, authorize)
+	for token := cursor; ; token = continuation {
+		rows, continuation, listErr = s.listedResourcePage(authority.ID, param, limit, token, fetch, authorize)
+		if kind != resources.KindAnthropicBatch || len(rows) != 0 || continuation == "" || listErr != nil || ctx.Err() != nil {
+			break
+		}
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		s.refuse(x, w, fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The resource list could not be read within the deadline."))
+		return
 	}
 	if listErr != nil {
 		s.refuse(x, w, listErr)
 		return
+	}
+	if backwards {
+		slices.Reverse(rows)
 	}
 	items, ids := make([]json.RawMessage, 0, len(rows)), make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -370,7 +376,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		}
 		items, ids = append(items, object), append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, anthropicListBody(items, ids, continuation, before != ""))
+	s.writeStateJSON(w, x, anthropicListBody(items, ids, continuation, backwards))
 }
 
 func anthropicListBody(items []json.RawMessage, ids []string, continuation string, backwards bool) []byte {
