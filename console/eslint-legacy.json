@@ -1,8 +1,4 @@
 {
-  "sharedImportsFeature": [
-    "src/lib/components/entityOptions.svelte.ts",
-    "src/lib/shell/Sidebar.svelte"
-  ],
   "crossFeatureDeepImport": [
     "src/lib/features/access/api-keys/ApiKeyInventory.svelte",
     "src/lib/features/access/api-keys/ApiKeyPolicyForm.svelte",

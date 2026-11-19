@@ -1,6 +1,7 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -334,7 +335,7 @@
         <div class="form-field">
           <label for="provider-id">Only for provider</label><EntityPicker
             id="provider-id"
-            kind="provider"
+            source={providerOptions}
             bind:value={providerId}
             emptyLabel="Every provider of this kind"
             disabled={!canEditPricing}

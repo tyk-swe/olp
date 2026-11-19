@@ -1,7 +1,12 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import type { EntityKind } from '#lib/components/entityOptions.svelte.js';
+  import type { EntitySource } from '#lib/components/entityOptions.js';
+  import {
+    budgetGroupOptions,
+    organizationOptions,
+    projectOptions
+  } from '#lib/features/access/entityOptions.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
@@ -40,15 +45,15 @@
   );
   let kind = $state<IncreaseInput['target']['kind']>('api_key');
   let resourceId = $state('');
-  const targetPicker = $derived<{ kind: EntityKind; label: string } | null>(
+  const targetPicker = $derived<{ source: EntitySource; label: string } | null>(
     kind === 'budget_group'
-      ? { kind: 'budget-group', label: 'Budget group' }
+      ? { source: budgetGroupOptions, label: 'Budget group' }
       : kind === 'organization'
-        ? { kind: 'organization', label: 'Organization' }
+        ? { source: organizationOptions, label: 'Organization' }
         : kind === 'project' ||
             kind === 'project_end_user' ||
             kind === 'attribution'
-          ? { kind: 'project', label: 'Project' }
+          ? { source: projectOptions, label: 'Project' }
           : null
   );
   let route = $state('');
@@ -225,9 +230,9 @@
           </div>
           {#if targetPicker}<div class="form-field">
               <label for="increase-resource">{targetPicker.label}</label>
-              {#key targetPicker.kind}<EntityPicker
+              {#key targetPicker.source}<EntityPicker
                   id="increase-resource"
-                  kind={targetPicker.kind}
+                  source={targetPicker.source}
                   bind:value={resourceId}
                   emptyLabel="Choose one"
                   required

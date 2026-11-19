@@ -149,7 +149,7 @@ export default [
       ]
     }
   },
-  ...importBoundary(sharedLayers, legacy.sharedImportsFeature, noFeatures),
+  ...importBoundary(sharedLayers, [], noFeatures),
   ...featureNames.flatMap((feature) =>
     importBoundary(
       [`src/lib/features/${feature}/**/*.{ts,svelte}`],

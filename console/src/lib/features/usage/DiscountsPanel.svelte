@@ -3,6 +3,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -154,7 +155,7 @@
       <div class="form-field">
         <label for="discount-provider">Provider</label><EntityPicker
           id="discount-provider"
-          kind="provider"
+          source={providerOptions}
           bind:value={providerId}
           emptyLabel="Every provider of this kind"
           disabled={!canEdit}
