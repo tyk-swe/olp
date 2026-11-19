@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -108,44 +109,20 @@ func (s *Server) createBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	input.ProjectID = projectID
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created budget group, so the caller
-		// must still reach its project to receive it.
-		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return httpkit.Reply{}, err
+	return Mutate(s, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, s.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+		if err := validateAndNormalizeBudgetGroup(&input); err != nil {
+			return httpkit.Reply{}, Event{}, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err := validateAndNormalizeBudgetGroup(&input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by,limit_template,requests_per_minute,tokens_per_minute,max_concurrency,weekly_cost_limit,cost_basis) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID(), input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.create", "budget_group", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		if err := CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		_, err := tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by,limit_template,requests_per_minute,tokens_per_minute,max_concurrency,weekly_cost_limit,cost_basis) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID(), input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis)
+		reply := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
+		return reply, Event{Action: "budget_group.create", Resource: "budget_group", ID: id}, err
+	})
 }
 
 func (s *Server) updateBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -169,53 +146,53 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var etag string
-	var projectID *string
-	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text,'cost_basis',cost_basis) FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", id).Scan(&etag, &projectID, &data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(projectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
+	return Transact(s, r, func(tx pgx.Tx, p authz.Principal) (budgetGroupState, error) {
+		var etag string
+		var current budgetGroupState
+		if err := tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text,'cost_basis',cost_basis) FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", id).Scan(&etag, &current.projectID, &current.fields); err != nil {
+			return budgetGroupState{}, err
+		}
+		if err := p.Project(current.projectID, authz.Change); err != nil {
+			return budgetGroupState{}, err
+		}
+		return current, httpkit.Match(r, etag)
+	}, func(tx pgx.Tx, _ authz.Principal, current budgetGroupState) (httpkit.Reply, Event, error) {
+		input, err := current.patched(patch)
+		if err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		if err := CheckLimitTemplates(r.Context(), tx, current.projectID, input.LimitTemplate); err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		etag := httpkit.NewID()
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now(),limit_template=$6,requests_per_minute=$7,tokens_per_minute=$8,max_concurrency=$9,weekly_cost_limit=$10,cost_basis=$11 WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id, input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		_, err = AdvanceAuthority(r.Context(), tx)
+		return httpkit.Detail(map[string]any{"etag": etag}, etag), Event{Action: "budget_group.update", Resource: "budget_group", ID: id}, err
+	})
+}
+
+type budgetGroupState struct {
+	projectID *string
+	fields    []byte
+}
+
+func (g budgetGroupState) patched(patch map[string]json.RawMessage) (budgetGroupInput, error) {
 	var merged map[string]json.RawMessage
-	if err = json.Unmarshal(data, &merged); err != nil {
-		return httpkit.Reply{}, err
+	if err := json.Unmarshal(g.fields, &merged); err != nil {
+		return budgetGroupInput{}, err
 	}
 	maps.Copy(merged, patch)
-	data, err = json.Marshal(merged)
+	data, err := json.Marshal(merged)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return budgetGroupInput{}, err
 	}
 	var input budgetGroupInput
-	if err = json.Unmarshal(data, &input); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("budget_group", "Invalid budget group value.")
+	if err := json.Unmarshal(data, &input); err != nil {
+		return budgetGroupInput{}, httpkit.Invalid("budget_group", "Invalid budget group value.")
 	}
-	if err = validateAndNormalizeBudgetGroup(&input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = CheckLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now(),limit_template=$6,requests_per_minute=$7,tokens_per_minute=$8,max_concurrency=$9,weekly_cost_limit=$10,cost_basis=$11 WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id, input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.update", "budget_group", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
+	return input, validateAndNormalizeBudgetGroup(&input)
 }
 
 func checkBudgetGroup(ctx context.Context, q database.Queryer, groupID, projectID *string) error {
