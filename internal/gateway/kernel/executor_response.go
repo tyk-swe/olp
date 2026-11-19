@@ -21,122 +21,145 @@ func (s *Server) Finish(x *Call, out *Outcome, status int) {
 		s.storeCache(x, out, status)
 		completedAt := s.Now()
 		x.finalizePinned()
-		env := events.Envelope{
-			RequestID:            x.request.id,
-			AccountingID:         x.request.accountingID(),
-			ClientIP:             x.request.clientIP,
-			Actor:                x.actor,
-			KeyID:                x.keyID,
-			AgentPrincipalID:     x.authority.DelegationAgentID,
-			MemberPrincipalID:    x.authority.DelegationMemberID,
-			DelegationPairDigest: x.authority.DelegationPairDigest,
-			EndUserDigest:        x.endUserDigest,
-			BudgetGroupID:        x.budgetGroupID,
-			Attribution:          x.attribution,
-			EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions,
-			UserID:      x.userID,
-			Family:      string(x.family),
-			Mode:        x.mode,
-			Operation:   x.operationName(),
-			Surface:     x.surfaceName(),
-			Outcome:     "failure",
-			Status:      status,
-			StartedAt:   x.request.startedAt,
-			CompletedAt: completedAt,
-			Duration:    completedAt.Sub(x.request.startedAt),
-			FirstByte:   x.firstByte,
-			Attempts:    x.facts,
-		}
-		if x.request.release != nil {
-			env.ReleaseSequence = x.request.release.Sequence
-			if x.request.release.Snapshot() != nil {
-				env.RuntimeGenerationID = x.request.release.Snapshot().Generation().ID
-			}
-		}
-		if x.Route != nil {
-			env.Route = x.named().Slug
-			env.RouteRevisionID = x.named().RevisionID
-		}
-		if x.origin != "" {
-			env.Origin, env.ParentRequestID = x.origin, x.parent
-			if x.origin.Keyless() {
-				env.KeyID = ""
-				env.EndUserDigest = ""
-				env.AgentPrincipalID = ""
-				env.MemberPrincipalID = ""
-				env.DelegationPairDigest = ""
-			}
-		}
-		if x.cache != nil {
-			env.CacheResult = x.cache.result
-		}
-		env.Usage = x.usage()
-		switch {
-		case out != nil && out.Err != nil:
-			env.ErrorClass = out.Err.Code
-			env.BudgetBoundary = quota.BudgetBoundary(out.Err)
-		case out == nil && x.Failure != nil:
-			env.ErrorClass = x.Failure.Code
-			env.BudgetBoundary = quota.BudgetBoundary(x.Failure)
-		}
-		if out != nil {
-			env.Committed = out.Committed
-			switch {
-			case out.Cancelled:
-				env.Outcome = "cancelled"
-				env.Status = 0
-			case out.Err == nil:
-				env.Outcome = "success"
-			}
-		}
-		if x.request.trace != nil {
-			var firstByte, total time.Duration
-			if x.firstByte != nil {
-				firstByte = *x.firstByte
-			}
-			total = env.Duration
-			x.request.trace.RecordInferenceContext(env.Surface, env.Operation, env.Family, env.Route, env.KeyID, env.RuntimeGenerationID)
-			if len(x.facts) != 0 {
-				serving := &x.facts[len(x.facts)-1]
-				var providerKind string
-				var snapshot *routing.View
-				if x.historicalSnapshot != nil {
-					snapshot = x.historicalSnapshot
-				} else if x.request.release != nil {
-					snapshot = x.request.release.Snapshot()
-				}
-				if snapshot != nil {
-					if provider, ok := snapshot.FindProvider(serving.ProviderID); ok {
-						providerKind = string(provider.Kind)
-					}
-				}
-				var inputTokens, outputTokens *int64
-				if u := serving.Usage; u != nil {
-					inputTokens, outputTokens = &u.InputTokens, &u.OutputTokens
-				}
-				x.request.trace.RecordResponse(providerKind, serving.ResponseModel, inputTokens, outputTokens, serving.FinishReasons)
-			}
-			x.request.trace.RecordTerminal(env.Status, env.ErrorClass, len(x.facts), firstByte, total)
-		}
-		if x.capture != nil {
-			x.capture.CaptureDocument(x.captureInputDocument())
-			streaming := x.generation.parsed != nil && x.generation.parsed.Stream
-			if !streaming {
-				x.capture.CaptureResponse(x.family, completionBody(out))
-			}
-			var traceID, spanID string
-			if context := x.request.trace.SpanContext(); context.IsValid() {
-				traceID, spanID = context.TraceID().String(), context.SpanID().String()
-			}
-			env.PayloadCaptured = x.capture.Finish(x.captureContext, capture.Identity{
-				Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
-				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: capture.ModeOf(streaming),
-			}, completedAt)
-		}
+		env := x.envelope(out, status, completedAt)
+		x.traceTerminal(env)
+		env.PayloadCaptured = x.captureTerminal(out, env, completedAt)
 		s.finalizeGenerationHTTP(x, env)
 		s.recordBusiness(env, x)
 		s.Deps.Sink.Terminal(env)
 	})
+}
+
+func (x *Call) envelope(out *Outcome, status int, completedAt time.Time) events.Envelope {
+	env := events.Envelope{
+		RequestID:            x.request.id,
+		AccountingID:         x.request.accountingID(),
+		ClientIP:             x.request.clientIP,
+		Actor:                x.actor,
+		KeyID:                x.keyID,
+		AgentPrincipalID:     x.authority.DelegationAgentID,
+		MemberPrincipalID:    x.authority.DelegationMemberID,
+		DelegationPairDigest: x.authority.DelegationPairDigest,
+		EndUserDigest:        x.endUserDigest,
+		BudgetGroupID:        x.budgetGroupID,
+		Attribution:          x.attribution,
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions,
+		UserID:      x.userID,
+		Family:      string(x.family),
+		Mode:        x.mode,
+		Operation:   x.operationName(),
+		Surface:     x.surfaceName(),
+		Outcome:     "failure",
+		Status:      status,
+		StartedAt:   x.request.startedAt,
+		CompletedAt: completedAt,
+		Duration:    completedAt.Sub(x.request.startedAt),
+		FirstByte:   x.firstByte,
+		Attempts:    x.facts,
+	}
+	x.scopeEnvelope(&env)
+	x.resolveEnvelope(&env, out)
+	return env
+}
+
+func (x *Call) scopeEnvelope(env *events.Envelope) {
+	if x.request.release != nil {
+		env.ReleaseSequence = x.request.release.Sequence
+		if x.request.release.Snapshot() != nil {
+			env.RuntimeGenerationID = x.request.release.Snapshot().Generation().ID
+		}
+	}
+	if x.Route != nil {
+		env.Route = x.named().Slug
+		env.RouteRevisionID = x.named().RevisionID
+	}
+	if x.origin != "" {
+		env.Origin, env.ParentRequestID = x.origin, x.parent
+		if x.origin.Keyless() {
+			env.KeyID = ""
+			env.EndUserDigest = ""
+			env.AgentPrincipalID = ""
+			env.MemberPrincipalID = ""
+			env.DelegationPairDigest = ""
+		}
+	}
+	if x.cache != nil {
+		env.CacheResult = x.cache.result
+	}
+}
+
+func (x *Call) resolveEnvelope(env *events.Envelope, out *Outcome) {
+	env.Usage = x.usage()
+	switch {
+	case out != nil && out.Err != nil:
+		env.ErrorClass = out.Err.Code
+		env.BudgetBoundary = quota.BudgetBoundary(out.Err)
+	case out == nil && x.Failure != nil:
+		env.ErrorClass = x.Failure.Code
+		env.BudgetBoundary = quota.BudgetBoundary(x.Failure)
+	}
+	if out != nil {
+		env.Committed = out.Committed
+		switch {
+		case out.Cancelled:
+			env.Outcome = "cancelled"
+			env.Status = 0
+		case out.Err == nil:
+			env.Outcome = "success"
+		}
+	}
+}
+
+func (x *Call) traceTerminal(env events.Envelope) {
+	if x.request.trace == nil {
+		return
+	}
+	var firstByte, total time.Duration
+	if x.firstByte != nil {
+		firstByte = *x.firstByte
+	}
+	total = env.Duration
+	x.request.trace.RecordInferenceContext(env.Surface, env.Operation, env.Family, env.Route, env.KeyID, env.RuntimeGenerationID)
+	if len(x.facts) != 0 {
+		serving := &x.facts[len(x.facts)-1]
+		var providerKind string
+		var snapshot *routing.View
+		if x.historicalSnapshot != nil {
+			snapshot = x.historicalSnapshot
+		} else if x.request.release != nil {
+			snapshot = x.request.release.Snapshot()
+		}
+		if snapshot != nil {
+			if provider, ok := snapshot.FindProvider(serving.ProviderID); ok {
+				providerKind = string(provider.Kind)
+			}
+		}
+		var inputTokens, outputTokens *int64
+		if u := serving.Usage; u != nil {
+			inputTokens, outputTokens = &u.InputTokens, &u.OutputTokens
+		}
+		x.request.trace.RecordResponse(providerKind, serving.ResponseModel, inputTokens, outputTokens, serving.FinishReasons)
+	}
+	x.request.trace.RecordTerminal(env.Status, env.ErrorClass, len(x.facts), firstByte, total)
+}
+
+func (x *Call) captureTerminal(out *Outcome, env events.Envelope, completedAt time.Time) bool {
+	if x.capture == nil {
+		return false
+	}
+	x.capture.CaptureDocument(x.captureInputDocument())
+	streaming := x.generation.parsed != nil && x.generation.parsed.Stream
+	if !streaming {
+		x.capture.CaptureResponse(x.family, completionBody(out))
+	}
+	var traceID, spanID string
+	if context := x.request.trace.SpanContext(); context.IsValid() {
+		traceID, spanID = context.TraceID().String(), context.SpanID().String()
+	}
+	return x.capture.Finish(x.captureContext, capture.Identity{
+		Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
+		TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: capture.ModeOf(streaming),
+	}, completedAt)
 }
 
 func (x *Call) captureInputDocument() map[string]json.RawMessage {

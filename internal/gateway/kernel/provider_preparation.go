@@ -119,45 +119,53 @@ func (x *Call) preparedGuardrailInput(format wire.Format, document oif.Document)
 
 func (x *Call) buildProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
 	if x.strict() {
-		template, _ := x.snapshot().InteractionTemplate(x.Route.Slug, targetID)
-		if template == nil {
-			return preparedProvider{}, &oif.Incompatibility{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
-		}
-		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState, ResolvedResources: x.resolvedGenerationResources()}
-		if x.generation.continuation != nil {
-			binding.ContinuationVersion = x.generation.continuation.version
-			binding.DurableContinuation = true
-			binding.Continuation = x.generation.continuation.prior
-		}
-		plan, err := template.Bind(x.generation.parsed, binding)
-		if err != nil {
-			return preparedProvider{}, err
-		}
-		decisions, err := plan.CheckInput()
-		var input guardrailInput
-		if err == nil && x.guard.engine != nil {
-			document := plan.EffectiveRequest().OIF().Document()
-			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guard.engine.OnlyTypeSafe()) {
-				result, failure := x.guard.engine.Unavailable()
-				x.guard.record(result.Decisions)
-				if failure != nil {
-					return preparedProvider{guardrailDecisions: result.Decisions}, failure
-				}
-				input = guardrailInput{decisions: result.Decisions}
-			} else {
-				input, err = x.evaluateGuardrailInput(x.guard.ctx, document, true)
-				x.guard.record(input.decisions)
-			}
-		}
-		effective := x.summarize(plan.EffectiveRequest())
-		receipt := plan.Receipt()
-		admitted, demand := x.preparedEstimate(model, effective)
-		return preparedProvider{
-			plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()},
-			parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: input.segments,
-			guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
-		}, err
+		return x.buildStrict(targetID, model)
 	}
+	return x.buildTransformed(provider, model)
+}
+
+func (x *Call) buildStrict(targetID, model string) (preparedProvider, error) {
+	template, _ := x.snapshot().InteractionTemplate(x.Route.Slug, targetID)
+	if template == nil {
+		return preparedProvider{}, &oif.Incompatibility{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
+	}
+	binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState, ResolvedResources: x.resolvedGenerationResources()}
+	if x.generation.continuation != nil {
+		binding.ContinuationVersion = x.generation.continuation.version
+		binding.DurableContinuation = true
+		binding.Continuation = x.generation.continuation.prior
+	}
+	plan, err := template.Bind(x.generation.parsed, binding)
+	if err != nil {
+		return preparedProvider{}, err
+	}
+	decisions, err := plan.CheckInput()
+	var input guardrailInput
+	if err == nil && x.guard.engine != nil {
+		document := plan.EffectiveRequest().OIF().Document()
+		if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guard.engine.OnlyTypeSafe()) {
+			result, failure := x.guard.engine.Unavailable()
+			x.guard.record(result.Decisions)
+			if failure != nil {
+				return preparedProvider{guardrailDecisions: result.Decisions}, failure
+			}
+			input = guardrailInput{decisions: result.Decisions}
+		} else {
+			input, err = x.evaluateGuardrailInput(x.guard.ctx, document, true)
+			x.guard.record(input.decisions)
+		}
+	}
+	effective := x.summarize(plan.EffectiveRequest())
+	receipt := plan.Receipt()
+	admitted, demand := x.preparedEstimate(model, effective)
+	return preparedProvider{
+		plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()},
+		parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: input.segments,
+		guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
+	}, err
+}
+
+func (x *Call) buildTransformed(provider *routing.Provider, model string) (preparedProvider, error) {
 	invocation, err := x.prepareTransformed(provider, provider.Connector(), model)
 	if err != nil {
 		return preparedProvider{}, err
