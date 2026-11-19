@@ -6,7 +6,6 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -38,7 +37,7 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
 	req := declared(pattern, false)
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, scim.MaxBody, 15*time.Second)
+		r, cancel, err := s.guard(w, r, options([]RouteOption{MaxBody(scim.MaxBody), AnyOrigin()}))
 		defer cancel()
 		var reply httpkit.Reply
 		if err == nil {

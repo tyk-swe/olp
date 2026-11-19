@@ -28,7 +28,7 @@ func TestManagementNativeJSONFitsPlaygroundEnvelope(t *testing.T) {
 	t.Parallel()
 	native := `{"text":"` + strings.Repeat("&", 3<<20) + `"}`
 	s := &Server{}
-	handler := s.serve(65536, time.Second, func(*http.Request) (httpkit.Reply, error) {
+	handler := s.serve(routeOptions{maxBody: 65536, timeout: time.Second}, func(*http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{
 			Status:              http.StatusOK,
 			Body:                map[string]any{"response": json.RawMessage(native), "response_raw": native},

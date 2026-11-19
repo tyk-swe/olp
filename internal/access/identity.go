@@ -19,8 +19,8 @@ import (
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerSCIM(mux)
 	s.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
-	s.Public(mux, "POST /api/v1/saml/acs", s.samlACS, MaxBody(2<<20))
-	s.Public(mux, "GET /api/v1/saml/complete", s.completeSAML)
+	s.Public(mux, "POST /api/v1/saml/acs", s.samlACS, MaxBody(2<<20), AnyOrigin())
+	s.Public(mux, "GET /api/v1/saml/complete", s.completeSAML, CrossSiteNavigation())
 	s.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
 	s.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, MaxBody(2<<20))
 	s.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
@@ -39,8 +39,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"POST /api/v1/sessions":           s.login,
 		"POST /api/v1/invitations/accept": s.acceptInvitation,
 		"GET /api/v1/oidc/login":          s.beginOIDCLogin, "POST /api/v1/oidc/login": s.beginOIDCLogin,
-		"GET /api/v1/oidc/callback": s.oidcCallback,
 	}
+	s.Public(mux, "GET /api/v1/oidc/callback", s.oidcCallback, CrossSiteNavigation())
 	for pattern, fn := range public {
 		s.Public(mux, pattern, fn)
 	}

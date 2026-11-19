@@ -122,11 +122,11 @@ func (s *Server) LimitsEnforced() bool { return s.limitsEnforced }
 
 func (s *Server) IdentityClient() *http.Client { return s.oidcClient }
 
-func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+func (s *Server) guard(w http.ResponseWriter, r *http.Request, o routeOptions) (*http.Request, context.CancelFunc, error) {
 	// Management responses carry credentials and member data; the public
 	// perimeter adds the rest of the API's security headers.
 	w.Header().Set("Cache-Control", "no-store")
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), o.timeout)
 	deadline, _ := ctx.Deadline()
 	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
 		cancel()
@@ -135,35 +135,31 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	// Resolve the client once so audit rows written by any package attribute
 	// the same trusted-proxy client address that admission uses.
 	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.clientIP(r)))
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	_, machine := managementBearer(r)
-	// SCIM declares only bearer-token alternatives; cookie origins cannot
-	// grant access there. Unauthenticated SCIM writes still receive a 401.
-	if machine || strings.HasPrefix(r.URL.Path, "/scim/") {
+	r.Body = http.MaxBytesReader(w, r.Body, o.maxBody)
+	if _, machine := managementBearer(r); machine || o.browser == anyOrigin {
 		return r, cancel, nil
 	}
-	// The SAML POST receiver verifies a signed, solicited response and redirects
-	// to a same-origin completion that requires the initiating browser cookie.
-	if r.Method == "POST" && r.URL.Path == "/api/v1/saml/acs" {
-		return r, cancel, nil
-	}
+	return r, cancel, s.checkBrowser(r, o.browser)
+}
+
+func (s *Server) checkBrowser(r *http.Request, policy browserPolicy) error {
 	if err := checkCookies(r); err != nil {
-		return r, cancel, err
+		return err
 	}
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-		return r, cancel, httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
+		return httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
 	}
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" && r.URL.Path != "/api/v1/saml/complete" {
-		return r, cancel, httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && policy != crossSiteNavigation {
+		return httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
-	return r, cancel, nil
+	return nil
 }
 
 // serve applies the management transport guards, runs fn, and writes its
 // Reply or problem.
-func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Request) (httpkit.Reply, error)) http.HandlerFunc {
+func (s *Server) serve(o routeOptions, fn func(*http.Request) (httpkit.Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, maxBody, timeout)
+		r, cancel, err := s.guard(w, r, o)
 		defer cancel()
 		var result httpkit.Reply
 		if err == nil {
@@ -206,9 +202,9 @@ func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Reque
 
 // serveStream is serve for a handler that writes its own response; a problem
 // is written only while nothing has been committed.
-func (s *Server) serveStream(maxBody int64, timeout time.Duration, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
+func (s *Server) serveStream(o routeOptions, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, maxBody, timeout)
+		r, cancel, err := s.guard(w, r, o)
 		defer cancel()
 		tracker := &streamWriter{ResponseWriter: w}
 		if err == nil {
