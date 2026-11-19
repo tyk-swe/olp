@@ -32,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -2003,7 +2004,7 @@ func probePass(t *testing.T, g *storedGateway) int {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	total := -1
-	g.kernel.RunHealthProbes(ctx, func(_ context.Context, probed int, err error) {
+	healthprobes.Run(ctx, g.kernel, func(_ context.Context, probed int, err error) {
 		if err != nil {
 			t.Error(err)
 		}

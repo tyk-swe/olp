@@ -1,4 +1,4 @@
-package kernel
+package healthprobes
 
 import (
 	"context"
@@ -11,12 +11,14 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/gateway/health"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
 const (
+	generation = "generation"
 	// probeTick is how often the probe worker looks for targets due a probe.
 	probeTick = 15 * time.Second
 	// probeDeadline bounds one probe, below any route deadline.
@@ -42,23 +44,23 @@ var probeRequests = map[string]struct {
 	family wire.Format
 	body   string
 }{
-	operationGeneration: {wire.Chat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
-	"embeddings":        {wire.Embeddings, `{"model":%q,"input":"embedding probe"}`},
-	"rerank":            {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
+	generation:   {wire.Chat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
+	"embeddings": {wire.Embeddings, `{"model":%q,"input":"embedding probe"}`},
+	"rerank":     {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
 }
 
-// RunHealthProbes probes every target whose connection enables probing, each
+// Run probes every target whose connection enables probing, each
 // once per its interval across the fleet, until ctx ends. Every pass is
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
-func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
+func Run(ctx context.Context, s *kernel.Server, checkpoint func(ctx context.Context, probed int, err error)) {
 	if !s.Deps.Admission.Ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
 	defer ticker.Stop()
 	for {
-		probed, err := s.probeDue(ctx)
+		probed, err := probeDue(ctx, s)
 		if ctx.Err() != nil {
 			return
 		}
@@ -72,7 +74,7 @@ func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx contex
 }
 
 // probeDue probes the targets whose fleet-wide claim this replica wins.
-func (s *Server) probeDue(ctx context.Context) (int, error) {
+func probeDue(ctx context.Context, s *kernel.Server) (int, error) {
 	release := s.Deps.Runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
@@ -89,12 +91,12 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 		if !claimed {
 			continue
 		}
-		result, ok := s.probe(ctx, release, target)
+		result, ok := probe(ctx, s, release, target)
 		if !ok {
 			continue
 		}
 		probed++
-		if err := s.shareProbe(ctx, limiter, target, result); err != nil {
+		if err := shareProbe(ctx, s, limiter, target, result); err != nil {
 			return probed, err
 		}
 	}
@@ -110,7 +112,7 @@ func probeTargets(snapshot *routing.View) []probeTarget {
 	for _, slug := range snapshot.RouteSlugs() {
 		route := snapshot.Route(slug)
 		operation := ""
-		for _, candidate := range []string{operationGeneration, "embeddings", "rerank"} {
+		for _, candidate := range []string{generation, "embeddings", "rerank"} {
 			if slices.Contains(route.Operations, candidate) {
 				operation = candidate
 				break
@@ -138,9 +140,9 @@ func probeTargets(snapshot *routing.View) []probeTarget {
 // planning and execution, so it is gated, priced and recorded like any
 // attempt, and accounted to the installation as a probe. It reports false
 // when no attempt reached the provider, which says nothing about its health.
-func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (fleet.ProbeResult, bool) {
+func probe(ctx context.Context, s *kernel.Server, release *release.Release, target probeTarget) (fleet.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
-	if target.operation == operationGeneration {
+	if target.operation == generation {
 		provider := release.Snapshot().Provider(target.provider)
 		if family, err := provider.Connector().TargetFamily(wire.Chat); err == nil && family == wire.Completions {
 			shape.family = wire.Completions
@@ -182,7 +184,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 // shareProbe publishes a probe result: an unhealthy one opens the provider's
 // fleet circuit until the next probe can decide again, a healthy one closes
 // it.
-func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
+func shareProbe(ctx context.Context, s *kernel.Server, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
 	call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
 	if err := limiter.RecordProbe(call, target.provider, result); err != nil {
@@ -199,7 +201,7 @@ func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target pr
 // as opposed to the request, its credential or its quota.
 func unhealthyClass(class string) bool {
 	switch class {
-	case ClassUpstreamServer, ClassConnect, ClassTimeout, ClassProtocol:
+	case kernel.ClassUpstreamServer, kernel.ClassConnect, kernel.ClassTimeout, kernel.ClassProtocol:
 		return true
 	}
 	return false
