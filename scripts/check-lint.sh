@@ -49,6 +49,7 @@ declare -A gateway_imports=(
   [surface/cloudbatches]="fault ingress kernel"
   [surface/geminiinteractions]="fault kernel"
   [surface/geministate]="fault kernel"
+  [surface/playground]="fault kernel publishedprompt"
   [kernel]="codeforward delegation events fault guardstream health ingress models publishedprompt quota realtimeresponses traceingest"
 )
 while read -r package imports; do
