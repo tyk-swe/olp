@@ -804,6 +804,7 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 
 type upstreamCall struct {
 	request, key, authorization, body string
+	beta, accept                      string
 }
 
 type retainedUpstream struct {
@@ -821,7 +822,11 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	request := r.Method + " " + providerPrefix.ReplaceAllString(r.URL.Path, "")
 	u.mu.Lock()
-	u.calls = append(u.calls, upstreamCall{request, cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")), r.Header.Get("Authorization"), string(body)})
+	u.calls = append(u.calls, upstreamCall{
+		request: request, key: cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")),
+		authorization: r.Header.Get("Authorization"), body: string(body),
+		beta: r.Header.Get("Anthropic-Beta"), accept: r.Header.Get("Accept"),
+	})
 	nth := 0
 	for _, call := range u.calls {
 		if call.request == request {
@@ -1148,6 +1153,22 @@ func TestAnthropicFilesAndBatchesHideProviderIdentifiersIsolateKeysAndKeepUnsett
 	} {
 		if sent := upstream.sent(request); len(sent) != want {
 			t.Fatalf("the provider saw %d of %q, want %d", len(sent), request, want)
+		}
+	}
+	fileBeta := uploaded[0].beta
+	if fileBeta == "" {
+		t.Fatal("the upload did not opt into the provider's file API")
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	for _, sent := range upstream.calls {
+		onFile := strings.Contains(sent.request, " /files")
+		if onFile && sent.beta != fileBeta || !onFile && sent.beta != "" {
+			t.Fatalf("%q reached the provider with beta %q, want the file API opt-in on file requests only", sent.request, sent.beta)
+		}
+		download := strings.HasSuffix(sent.request, "/content")
+		if binary := sent.accept == "application/binary"; binary != download {
+			t.Fatalf("%q asked the provider for %q, want binary for a file download only", sent.request, sent.accept)
 		}
 	}
 }
