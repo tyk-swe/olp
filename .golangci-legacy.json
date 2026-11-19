@@ -95,7 +95,6 @@
     "internal/gateway/kernel/responses_stream.go Server.streamStoredResponse",
     "internal/gateway/kernel/retained_generic.go Server.listRetainedGeneric",
     "internal/gateway/kernel/retained_generic.go Server.retainedDispatch",
-    "internal/gateway/kernel/retained_generic.go Server.retainedGeneric",
     "internal/gateway/kernel/retained_generic.go Server.retainedProxy",
     "internal/gateway/kernel/retained_lifecycle.go Server.listRetainedLifecycle",
     "internal/gateway/kernel/retained_lifecycle.go Server.retainedLifecycle",
