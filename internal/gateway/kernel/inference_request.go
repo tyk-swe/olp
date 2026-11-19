@@ -251,9 +251,6 @@ func (q *inferenceRequest) plan() *fault.Error {
 func (q *inferenceRequest) prepareWorkflow() *fault.Error {
 	s, x, ctx := q.server, q.x, q.r.Context()
 	if x.named().ToolExecution != "gateway" {
-		if len(x.generation.approval) > 0 {
-			return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
-		}
 		return nil
 	}
 	if e := s.prepareWorkflow(ctx, x, q.token); e != nil {
