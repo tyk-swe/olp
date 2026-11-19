@@ -264,3 +264,23 @@ func TestSinkWritesReplayGuardRetainedHistoryAndAuditOnce(t *testing.T) {
 		t.Fatalf("audit actions = %v, want %v", actions, want)
 	}
 }
+
+func TestCachePurgeRequiresOneScopeAndAgreesWithStatistics(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "cached"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	for name, scope := range map[string]map[string]any{"no scope": {}, "two scopes": {"project_id": project, "route_id": uuid.NewString()}} {
+		if status, raw := s.Do(owner, "POST", "/api/v1/cache/purge", scope, nil); status != http.StatusUnprocessableEntity {
+			t.Fatalf("purge with %s: %s", name, describe(status, raw))
+		}
+	}
+	statistics := s.Want(owner, "GET", "/api/v1/cache/statistics", nil, nil, http.StatusOK)
+	if statistics["requests"] != float64(0) {
+		t.Fatalf("statistics = %v, want no cached requests on a new installation", statistics)
+	}
+	status, raw := s.Do(owner, "POST", "/api/v1/cache/purge", map[string]any{"project_id": project}, nil)
+	if purged, configured := status == http.StatusOK, statistics["configured"] == true; purged != configured || !purged && status != http.StatusServiceUnavailable {
+		t.Fatalf("purge with configured=%v: %s", configured, describe(status, raw))
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 
 	"github.com/tyk-swe/olp/internal/gateway/quota"
@@ -109,7 +110,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
-	(&gateway.CacheManagement{Access: m.Access, Cache: m.ResponseCache}).Register(mux)
+	cacheadmin.NewAPI(m.Access, m.ResponseCache).Register(mux)
 	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := release.Publish(ctx, tx, actor)
 		return err
@@ -166,7 +167,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	providerServer.Register(mux)
 	codeaccounts.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
+	playground := &gateway.Playground{Gateway: m.Gateway}
+	playgroundLimits := []access.RouteOption{access.MaxBody(gateway.PlaygroundBodyLimit), access.Deadline(gateway.PlaygroundTimeout)}
+	m.Access.Route(mux, "POST /api/v1/playground", playground.Handle, playgroundLimits...)
+	m.Access.Stream(mux, "POST /api/v1/playground/stream", playground.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
