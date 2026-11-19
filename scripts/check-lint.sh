@@ -46,6 +46,7 @@ declare -A gateway_imports=(
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""
   [surface/anthropicstate]="fault kernel"
+  [surface/cloudbatches]="fault ingress kernel"
   [kernel]="codeforward delegation events fault guardstream health ingress models quota realtimeresponses traceingest"
 )
 while read -r package imports; do
