@@ -66,7 +66,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 	}
 	bound := s.bindExchange(x, provider, slot, a.UpstreamModel, plan.Config(), state)
 	if err := bound.validateEndpoint(submit); err != nil {
-		return fail(classConnect, nil)
+		return fail(ClassConnect, nil)
 	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)

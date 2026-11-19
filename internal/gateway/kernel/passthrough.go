@@ -283,7 +283,7 @@ slots:
 			fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 			return
 		}
-		factP.Class = classConnect
+		factP.Class = ClassConnect
 		if ctx.Err() != nil {
 			factP.Class = ClassTimeout
 		}

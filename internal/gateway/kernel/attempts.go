@@ -244,7 +244,7 @@ func failoverAllowed(class string, committed bool) bool {
 		return false
 	}
 	switch class {
-	case classConnect, ClassTimeout, classRateLimit, ClassUpstreamServer, classCredential, classContextWindow:
+	case ClassConnect, ClassTimeout, classRateLimit, ClassUpstreamServer, classCredential, classContextWindow:
 		return true
 	}
 	return false

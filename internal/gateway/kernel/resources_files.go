@@ -379,7 +379,7 @@ func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint,
 	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pipeR)
 	if err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")

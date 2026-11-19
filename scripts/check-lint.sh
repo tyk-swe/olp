@@ -45,6 +45,7 @@ declare -A gateway_imports=(
   [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""
+  [healthprobes]="health kernel quota"
   [surface/anthropicstate]="fault kernel"
   [surface/cloudbatches]="fault ingress kernel"
   [surface/geminiinteractions]="fault kernel"

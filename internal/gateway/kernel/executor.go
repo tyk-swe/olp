@@ -33,7 +33,7 @@ import (
 // exchanges are classified by internal/upstream.
 const (
 	ClassSuccess        = events.ClassSuccess
-	classConnect        = string(upstream.Connect)
+	ClassConnect        = string(upstream.Connect)
 	ClassTimeout        = string(upstream.Timeout)
 	classRateLimit      = string(upstream.RateLimit)
 	ClassUpstreamServer = string(upstream.ServerError)
@@ -228,7 +228,7 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 		return &fault.Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
 	case ClassTimeout:
 		return fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The upstream provider did not respond within the configured deadline.")
-	case classConnect:
+	case ClassConnect:
 		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
 	case classRateLimit:
 		// A quota this gateway enforces was never the upstream's decision, and
@@ -463,7 +463,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	}
 
 	if err := s.bindExchange(x, provider, slot, a.UpstreamModel, cfg, st).validateBaseEndpoint(provider.Endpoint); err != nil {
-		return fail(classConnect, nil)
+		return fail(ClassConnect, nil)
 	}
 	prepared, err := x.generationRequest(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
@@ -501,7 +501,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	exchange := s.bindExchange(x, provider, slot, a.UpstreamModel, cfg, st)
 	req, err := exchange.request(actx, http.MethodPost, endpoint, bytes.NewReader(body), make(http.Header))
 	if err != nil {
-		return fail(classConnect, nil)
+		return fail(ClassConnect, nil)
 	}
 	atr.InjectUpstream(req.Header)
 	req.Header.Set("Content-Type", "application/json")
@@ -519,7 +519,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 			// The plugin couldn't sign the request, which says nothing
 			// about the credential: the upstream is out of reach from
 			// here, like one the gateway can't connect to.
-			return fail(classConnect, nil)
+			return fail(ClassConnect, nil)
 		}
 		return fail(classCredential, nil)
 	}
@@ -539,7 +539,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 	}
 	if x.workflow != nil {
 		if e := s.markSessionDispatched(actx, x); e != nil {
-			return fail(classConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
+			return fail(ClassConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
 		}
 	}
 	resp, err := exchange.do(client, req)

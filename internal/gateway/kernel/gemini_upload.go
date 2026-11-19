@@ -65,7 +65,7 @@ func ValidateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
 	endpoint, err := GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.Egress)
 	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(classConnect, false)
+		return nil, "", nil, geminiManagedUploadFailure(ClassConnect, false)
 	}
 	startHeaders := http.Header{
 		"X-Goog-Upload-Protocol":              {"resumable"},
@@ -135,16 +135,16 @@ func (s *Server) GeminiPinnedRequest(ctx context.Context, x *Call, p *Pin, metho
 	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.User != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	validationURL := *parsed
 	validationURL.RawQuery, validationURL.ForceQuery = "", false
 	if _, err := s.Egress.ValidateEndpoint(validationURL.String()); err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
 	if err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	if accept != "" {

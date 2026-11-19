@@ -50,7 +50,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 	}
 	req, err := e.bound.request(e.ctx, method, target, reader, make(http.Header))
 	if err != nil {
-		return nil, &unaryFailure{class: classConnect}
+		return nil, &unaryFailure{class: ClassConnect}
 	}
 	e.inject(req.Header)
 	if body != nil {
@@ -66,7 +66,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 	}
 	if e.x.workflow != nil && e.x.sessionDebit != nil && !e.x.sessionDebit.dispatched {
 		if failure := e.dispatched(e.ctx, e.x); failure != nil {
-			return nil, &unaryFailure{class: classConnect, failure: &AttemptFailure{contractCode: failure.Code, noRetry: true}}
+			return nil, &unaryFailure{class: ClassConnect, failure: &AttemptFailure{contractCode: failure.Code, noRetry: true}}
 		}
 	}
 	response, err := e.bound.do(e.client, req)

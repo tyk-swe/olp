@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
@@ -201,7 +202,7 @@ func (r *running) startWorkers() {
 		r.probesStopped = stopped
 		go r.supervise(func() {
 			defer close(stopped)
-			prober.RunHealthProbes(r.probes, probeCheckpoint(stores.pool, r.log, c.Region))
+			healthprobes.Run(r.probes, prober, probeCheckpoint(stores.pool, r.log, c.Region))
 		})()
 	}
 }

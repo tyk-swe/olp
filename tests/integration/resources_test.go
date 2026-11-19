@@ -31,6 +31,8 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -46,6 +48,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -327,6 +330,8 @@ type storedPlan struct {
 	tools       kernel.WorkflowToolRunner
 	secure      bool
 	streams     bool
+	probe       *routing.HealthProbe
+	sink        events.Sink
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
@@ -340,6 +345,8 @@ type storedGateway struct {
 	runtime *listedRuntime
 	mux     *http.ServeMux
 	server  *httptest.Server
+	kernel  *kernel.Server
+	fleet   *fleet.State
 
 	providerRevisionID, routeRevisionID, slotID, targetID, modelID, credentialID string
 }
@@ -405,7 +412,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Providers: map[string]routing.Provider{fixture.providerID: {
 			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
-			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model,
+			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe,
 		}},
 		Routes: map[string]routing.Route{plan.slug: {
 			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
@@ -441,10 +448,12 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	if plan.tools != nil {
 		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
 	}
+	g.fleet = fleet.New(runner)
 	server := kernel.New(kernel.Dependencies{
 		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
-		Admission: quota.NewAdmission(limiter, fleet.New(runner), nil, nil),
+		Sink:      plan.sink,
+		Admission: quota.NewAdmission(limiter, g.fleet, nil, nil),
 		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Getenv:    func(string) string { return "" },
@@ -455,6 +464,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Staging:   spool,
 		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
 	}, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+	g.kernel = server
 	g.mux = http.NewServeMux()
 	gateway.Register(server, g.mux)
 	g.server = httptest.NewServer(g.mux)
@@ -1969,5 +1979,140 @@ func TestGeminiBatchesBindTheirInputAndOutputFilesHideProviderIdentifiersAndIsol
 	g.send(t, "DELETE", batch, owner, "", 409)
 	if cancelled, deleted := upstream.sent("POST /"+native+":cancel"), upstream.sent("DELETE /"+native); len(cancelled) != 1 || len(deleted) != 0 {
 		t.Fatalf("provider saw %d cancels and %d deletes, want one cancel and no delete while the batch is unsettled", len(cancelled), len(deleted))
+	}
+}
+
+type terminals struct {
+	mu   sync.Mutex
+	seen []events.Envelope
+}
+
+func (s *terminals) Terminal(e events.Envelope) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seen = append(s.seen, e)
+}
+
+func (s *terminals) all() []events.Envelope {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.seen)
+}
+
+func probePass(t *testing.T, g *storedGateway) int {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	total := -1
+	healthprobes.Run(ctx, g.kernel, func(_ context.Context, probed int, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+		total = probed
+		cancel()
+	})
+	return total
+}
+
+func TestHealthProbesAskEachOptedInProviderOncePerIntervalAndOpenItsCircuitOnlyWhenTheProviderFails(t *testing.T) {
+	t.Parallel()
+	const slug, model = "probed", "probe-model"
+	interval := &routing.HealthProbe{IntervalSeconds: 60}
+	for _, test := range []struct {
+		name           string
+		probe          *routing.HealthProbe
+		upstream       int
+		probed         int
+		status         fleet.ProbeStatus
+		class          string
+		circuit        bool
+		terminalStatus int
+	}{
+		{name: "healthy provider", probe: interval, upstream: http.StatusOK, probed: 1, status: fleet.ProbeHealthy, terminalStatus: http.StatusOK},
+		{name: "failing provider", probe: interval, upstream: http.StatusInternalServerError, probed: 1, status: fleet.ProbeUnhealthy, class: "upstream_server", circuit: true, terminalStatus: http.StatusBadGateway},
+		{name: "refused credential", probe: interval, upstream: http.StatusUnauthorized, probed: 1, status: fleet.ProbeHealthy, class: "credential", terminalStatus: http.StatusBadGateway},
+		{name: "provider that did not opt in", upstream: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			fixture := newUsageFixture(t, pool)
+			var mu sync.Mutex
+			var asked []string
+			upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				mu.Lock()
+				asked = append(asked, string(raw))
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				if test.upstream != http.StatusOK {
+					w.WriteHeader(test.upstream)
+					_, _ = io.WriteString(w, `{"error":{"message":"refused","type":"error"}}`)
+					return
+				}
+				_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
+			})
+			sink := &terminals{}
+			g := newStoredGateway(t, fixture, storedPlan{slug: slug, model: model, kind: "openai_compatible", operations: []string{"generation"},
+				probe: test.probe, sink: sink, upstream: upstream})
+			started := time.Now()
+			if probed := probePass(t, g); probed != test.probed {
+				t.Fatalf("first pass probed %d targets, want %d", probed, test.probed)
+			}
+			if probed := probePass(t, g); probed != 0 {
+				t.Fatalf("a pass inside the interval probed %d targets", probed)
+			}
+			mu.Lock()
+			requests := slices.Clone(asked)
+			mu.Unlock()
+			if len(requests) != test.probed {
+				t.Fatalf("provider received %d requests, want %d: %v", len(requests), test.probed, requests)
+			}
+			results, err := g.fleet.Probes(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			circuits, err := g.fleet.Circuits(t.Context(), time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := sink.all()
+			if test.probed == 0 {
+				if len(results) != 0 || len(circuits) != 0 || len(seen) != 0 {
+					t.Fatalf("an unprobed provider left results %v, circuits %v, records %d", results, circuits, len(seen))
+				}
+				return
+			}
+			var sent struct {
+				Model     string `json:"model"`
+				MaxTokens int64  `json:"max_tokens"`
+				Messages  []any  `json:"messages"`
+			}
+			if err := json.Unmarshal([]byte(requests[0]), &sent); err != nil {
+				t.Fatal(err)
+			}
+			if sent.Model != model || sent.MaxTokens <= 0 || len(sent.Messages) != 1 {
+				t.Fatalf("probe request = %s", requests[0])
+			}
+			result, ok := results[fixture.providerID]
+			if !ok || len(results) != 1 || result.Status != test.status || result.Class != test.class || result.Model != model || result.ObservedAt.Before(started) {
+				t.Fatalf("shared probe results = %+v", results)
+			}
+			until, open := circuits[fixture.providerID]
+			if open != test.circuit || (open && until.Before(started.Add(test.probe.Interval()))) {
+				t.Fatalf("fleet circuits = %v, want open %t for at least the probe interval", circuits, test.circuit)
+			}
+			if len(seen) != 1 {
+				t.Fatalf("probe wrote %d usage records", len(seen))
+			}
+			record := seen[0]
+			if record.Actor != "system" || record.Origin != usage.OriginProbe || record.KeyID != "" || record.Route != slug ||
+				record.Status != test.terminalStatus || len(record.Attempts) != 1 || record.Attempts[0].ProviderID != fixture.providerID {
+				t.Fatalf("probe usage record = %+v", record)
+			}
+		})
 	}
 }
