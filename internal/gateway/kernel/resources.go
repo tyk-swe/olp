@@ -38,7 +38,6 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	s.registerRetrieval(mux)
 	s.registerCloudBatchState(mux)
 	if s.Deps.Staging != nil {
-		s.registerAnthropicState(mux)
 		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)

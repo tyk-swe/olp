@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -449,7 +450,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
 	}, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 	g.mux = http.NewServeMux()
-	server.Register(g.mux)
+	gateway.Register(server, g.mux)
 	g.server = httptest.NewServer(g.mux)
 	t.Cleanup(g.server.Close)
 	return g

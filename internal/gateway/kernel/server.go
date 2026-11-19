@@ -244,7 +244,7 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
-func (s *Server) Register(mux *http.ServeMux) {
+func (s *Server) RegisterKernel(mux *http.ServeMux) {
 	if s.code != nil {
 		s.code.Register(mux)
 	}

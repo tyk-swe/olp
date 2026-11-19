@@ -216,7 +216,7 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		h.rt.keys[secret] = authority
 	}
 	mux := http.NewServeMux()
-	h.gateway.Register(mux)
+	RegisterGateway(h.gateway, mux)
 	returned := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() { returned <- struct{}{} }()

@@ -260,7 +260,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	fallback, fallbackSeen := scripted(t, tc.fallbackReplies, func() string { return h.upstream.URL })
 	h.mock.set("b", fallback)
 	mux := http.NewServeMux()
-	h.gateway.Register(mux)
+	RegisterGateway(h.gateway, mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tc.failWriteDeadline {
 			mux.ServeHTTP(mediaDeadlineFailure{w}, r)

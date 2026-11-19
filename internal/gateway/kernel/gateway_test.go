@@ -230,6 +230,9 @@ func status(code int, body string) http.HandlerFunc {
 	}
 }
 
+// RegisterGateway is set from assembly_test.go, which may import the assembly while this package may not.
+var RegisterGateway func(*Server, *http.ServeMux)
+
 type harness struct {
 	t        *testing.T
 	rt       *fakeRuntime
@@ -337,7 +340,7 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 	dependencies.Getenv = func(string) string { return "" }
 	gw := New(dependencies, cfg)
 	mux := http.NewServeMux()
-	gw.Register(mux)
+	RegisterGateway(gw, mux)
 	server := httptest.NewServer(wrap(mux))
 	t.Cleanup(server.Close)
 	return &harness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, keyID: keyID, slotA: slotA, credA: credA, upstream: upstream}
@@ -729,7 +732,7 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 		snapshot.Routes[routeSlug] = route
 	})
 	mux := http.NewServeMux()
-	h.gateway.Register(mux)
+	RegisterGateway(h.gateway, mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 

@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/grants/personal"
@@ -86,7 +87,7 @@ func newServing(f foundation) (serving, error) {
 	}
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
-		gw.Register(f.public)
+		gateway.Register(gw, f.public)
 	}
 	return built, nil
 }

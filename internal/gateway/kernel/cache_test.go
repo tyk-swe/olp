@@ -308,7 +308,7 @@ func serveBedrock(t *testing.T, h *harness) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	h.gateway.Register(mux)
+	RegisterGateway(h.gateway, mux)
 	mux.HandleFunc("POST /bedrock/model/{model}/converse", h.gateway.bedrockConverse)
 	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", h.gateway.bedrockConverseStream)
 	h.server = httptest.NewServer(mux)
