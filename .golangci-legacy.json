@@ -62,7 +62,6 @@
     "cmd/olp/config.go Config.Validate",
     "cmd/olp/config.go parseWithFlags",
     "cmd/olp/maintenance.go Maintenance",
-    "cmd/olp/run.go Run",
     "internal/identity/mfa_manage.go Server.beginMFAEnrollment",
     "internal/identity/mfa_verify.go Server.mfaVerify",
     "internal/identity/oidc.go Server.beginOIDC",
