@@ -423,7 +423,8 @@ docker run --rm -v "$PWD/deploy/secrets:/old:ro" \
 docker compose -f deploy/compose.yaml up -d
 ```
 
-init-secrets keeps the copied files and adds the setup token and `pgpass`.
+The initializer keeps the copied files and adds the setup token, a password
+file for the application, and `pgpass` for PostgreSQL clients.
 
 The image includes SPDX attestations for the runtime plus Go and console build
 stages. Inspect them with

@@ -117,19 +117,16 @@ func breakpointBudget(root oif.Value, ttl string) (int, bool) {
 	if _, automatic := root.Lookup("cache_control"); automatic {
 		return 0, false
 	}
-	return cacheControls(root, ttl)
-}
-func cacheControls(value oif.Value, ttl string) (int, bool) {
-	count := 0
-	for _, member := range value.Members() {
-		n, ok := memberCacheControls(member, ttl)
-		if !ok {
-			return 0, false
-		}
-		count += n
+	tools, _ := root.Lookup("tools")
+	system, _ := root.Lookup("system")
+	count, ok := cacheControls(slices.Concat(tools.Elements(), system.Elements()), ttl)
+	if !ok {
+		return 0, false
 	}
-	for _, element := range value.Elements() {
-		n, ok := cacheControls(element, ttl)
+	messages, _ := root.Lookup("messages")
+	for _, message := range messages.Elements() {
+		content, _ := message.Lookup("content")
+		n, ok := cacheControls(content.Elements(), ttl)
 		if !ok {
 			return 0, false
 		}
@@ -137,14 +134,33 @@ func cacheControls(value oif.Value, ttl string) (int, bool) {
 	}
 	return count, true
 }
-func memberCacheControls(member oif.Member, ttl string) (int, bool) {
-	if member.Name != "cache_control" {
-		return cacheControls(member.Value, ttl)
+
+func cacheControls(blocks []oif.Value, ttl string) (int, bool) {
+	count := 0
+	for _, block := range blocks {
+		control, exists := block.Lookup("cache_control")
+		if exists {
+			callerTTL, _ := control.Lookup("ttl")
+			text, _ := callerTTL.Chars()
+			if control.Kind() != oif.Object || cmp.Or(text, "5m") != ttl {
+				return 0, false
+			}
+			count++
+		}
+		kind, _ := block.Lookup("type")
+		switch text, _ := kind.Chars(); text {
+		case "tool_result", "search_result", "mcp_tool_result":
+			content, _ := block.Lookup("content")
+			nested, ok := cacheControls(content.Elements(), ttl)
+			if !ok {
+				return 0, false
+			}
+			count += nested
+		}
 	}
-	callerTTL, _ := member.Value.Lookup("ttl")
-	text, _ := callerTTL.Chars()
-	return 1, member.Value.Kind() == oif.Object && cmp.Or(text, "5m") == ttl
+	return count, true
 }
+
 func markLast(blocks []map[string]json.RawMessage, control json.RawMessage) bool {
 	if len(blocks) == 0 {
 		return false

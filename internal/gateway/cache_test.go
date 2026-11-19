@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/release"
@@ -50,6 +51,10 @@ type cacheMemory struct {
 	values   map[string]string
 	fail     bool
 	commands int
+}
+
+func (*cacheMemory) Search(context.Context, ...string) ([]coordination.SearchDocument, error) {
+	return nil, cache.ErrUnavailable
 }
 
 func (m *cacheMemory) Do(_ context.Context, a ...string) (any, error) {

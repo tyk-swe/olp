@@ -234,12 +234,11 @@ func vertexUsage(u *geminilifecycle.LiveUsage) *wire.Usage {
 
 func modalityShares(details []geminilifecycle.LiveUsageDetail) (audio, image *int64) {
 	for _, detail := range details {
+		v := detail.TokenCount
 		switch detail.Modality {
 		case "AUDIO":
-			v := detail.TokenCount
-			audio = &v
+			mergeShare(&audio, &v)
 		case "IMAGE", "VIDEO":
-			v := detail.TokenCount
 			mergeShare(&image, &v)
 		}
 	}

@@ -49,6 +49,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -240,6 +241,30 @@ type harness struct {
 	slotA    string
 	credA    string
 	upstream *httptest.Server
+}
+
+func TestBrowserDelegationPreflightAllowsConsent(t *testing.T) {
+	const origin = "https://client.example"
+	h := newHarness(t, Config{CORSAllowedOrigins: []string{origin}})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, h.server.URL+"/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "x-olp-delegation-consent")
+	resp, err := h.server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	allowed := strings.Split(resp.Header.Get("Access-Control-Allow-Headers"), ",")
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("Access-Control-Allow-Origin") != origin ||
+		!slices.ContainsFunc(allowed, func(value string) bool {
+			return strings.EqualFold(strings.TrimSpace(value), "X-OLP-Delegation-Consent")
+		}) {
+		t.Fatalf("delegated request cannot pass preflight: %d, %v", resp.StatusCode, resp.Header)
+	}
 }
 
 func newHarness(t *testing.T, cfg Config, extra ...Dependencies) *harness {
@@ -1486,6 +1511,169 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 	}
 }
 
+func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"store-native","status":"completed"}`)
+	})
+	p := testPinnedTarget(h, 0)
+	probed, granted := openTestProbe(t, h, p.provider.ID)
+	if !granted || !probed {
+		t.Fatal("could not claim half-open probe")
+	}
+	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
+	x := &call{
+		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
+		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		retainedAdmission: &retainedAdmissionPlan{attempt: p.attempt, billing: retainedPriced},
+	}
+	id := uuid.New()
+	resource := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native"}
+	e := retainedapi.Endpoint{
+		Family: retainedapi.Family{Operation: "vector_store", Kind: resource.Kind, Identity: "id"},
+		Method: http.MethodGet, Action: "get",
+	}
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+resource.ID, nil)
+	w := httptest.NewRecorder()
+	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native"
+	status := h.gateway.retainedDispatch(w, r, x, p, e, resource, nil, endpoint, nil, "", nil, func(e *fault.Error) {
+		h.gateway.refuse(x, w, e)
+	})
+	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	env := h.sink.last(t)
+	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
+		t.Fatalf("local persistence failure returned %d, %s", status, w.Body.String())
+	}
+	if len(env.Attempts) != 1 || env.Attempts[0].Status != http.StatusOK || !env.Attempts[0].LocalRefusal || !env.Attempts[0].BillingUncertain {
+		t.Fatalf("local persistence failure changed acceptance or billing evidence: %+v", env.Attempts)
+	}
+	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+		t.Fatalf("a local persistence failure changed provider health: probe=%v granted=%v", probed, granted)
+	}
+}
+
+func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"file-native","vector_store_id":"store-other"}]}`)
+	})
+	p := testPinnedTarget(h, 0)
+	probed, granted := openTestProbe(t, h, p.provider.ID)
+	if !granted || !probed {
+		t.Fatal("could not claim half-open probe")
+	}
+	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
+	x := &call{
+		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
+		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		retainedAdmission: &retainedAdmissionPlan{billing: retainedPriced},
+	}
+	id := uuid.New()
+	parent := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native", TargetID: p.target.ID}
+	e := retainedapi.Endpoint{
+		Family:    retainedapi.Family{Operation: "vector_store", Kind: "vector_store_file", Identity: "id", Collection: "data"},
+		Method:    http.MethodGet,
+		Action:    "list",
+		Ancestors: []string{"vector_store"},
+	}
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+parent.ID+"/files", nil)
+	w := httptest.NewRecorder()
+	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native/files"
+	status := h.gateway.retainedDispatch(w, r, x, p, e, parent, parent, endpoint, nil, "", nil, func(e *fault.Error) {
+		h.gateway.refuse(x, w, e)
+	})
+	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	env := h.sink.last(t)
+	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
+		t.Fatalf("binding store failure was not reported as unavailable: %d, %s", status, w.Body.String())
+	}
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
+		t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
+	}
+	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+		t.Fatalf("a local binding failure changed provider health: probe=%v granted=%v", probed, granted)
+	}
+}
+
+func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused:unused@localhost/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool)})
+	h.reissue(func(provider *routing.Provider) { provider.Kind = "openai" }, nil)
+	h.rt.inputs = &routinginputs.Inputs{RefreshedAt: time.Now()}
+	authority := h.rt.keys[fullKey]
+	authority.Policy.AllowProviderState = true
+	h.rt.keys[fullKey] = authority
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"object":"response.compaction","id":"cmp-native","output":[{"type":"compaction","id":"item-native","file_id":"file-native"}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses/compact", fullKey, []byte(`{"input":"compact this"}`), map[string]string{stateRouteHeader: routeSlug})
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := h.sink.last(t)
+	if response.StatusCode != http.StatusServiceUnavailable || env.ErrorClass != "provider_state_unavailable" || env.Outcome != "failure" {
+		t.Fatalf("compaction binding failure = %d %s, outcome = %s", response.StatusCode, body, env.Outcome)
+	}
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts = %+v", env.Attempts)
+	}
+	attempt := env.Attempts[0]
+	if attempt.Class != classProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
+		attempt.Usage == nil || attempt.Usage.InputTokens != 10 || attempt.Usage.OutputTokens != 5 || attempt.Usage.TotalTokens != 15 {
+		t.Fatalf("compaction accounting after binding failure = %+v, usage = %+v", attempt, attempt.Usage)
+	}
+}
+
+func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
+	t.Parallel()
+	const exact = `{"count":9007199254740993}`
+	playground := Playground{Gateway: &Server{now: time.Now}}
+	x := &call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{route: &routing.Route{Slug: routeSlug}}}
+	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
+	for _, test := range []struct{ text, structured string }{
+		{exact, exact},
+		{`{"count":0,"count":9007199254740993}`, exact},
+		{exact + ` {"extra":true}`, ""},
+	} {
+		out := &outcome{completion: &wire.Completion{OutputText: test.text}}
+		body, err := json.Marshal(playground.response(x, out, in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			Text       string          `json:"output_text"`
+			Structured json.RawMessage `json:"structured_output"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Text != test.text || string(response.Structured) != test.structured {
+			t.Fatalf("unexpected Playground result for %q: %s", test.text, body)
+		}
+	}
+}
+
 func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -1725,13 +1913,13 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 	all := []*resources.Resource{
 		{ID: "stale-1"}, {ID: "hidden-1"}, {ID: "valid-1"}, {ID: "valid-2"}, {ID: "stale-2"}, {ID: "valid-3"},
 	}
-	fetchFrom := func(rows []*resources.Resource) func(string, int) ([]*resources.Resource, *fault.Error) {
-		return func(cursor string, count int) ([]*resources.Resource, *fault.Error) {
+	fetchFrom := func(rows []*resources.Resource) func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error) {
+		return func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
 			start := 0
-			if cursor != "" {
+			if cursor.ID != "" {
 				start = len(rows)
 				for i, row := range rows {
-					if row.ID == cursor {
+					if row.ID == cursor.ID {
 						start = i + 1
 						break
 					}
@@ -1762,47 +1950,67 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 		return got
 	}
 
-	page, hasMore, err := listedResourcePage(10, "", fetchFrom(all), authorize)
+	page, continuation, err := listedResourcePage(10, resources.ListCursor{}, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("mixed page error: %v", err)
 	}
-	if hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
-		t.Fatalf("mixed page = %v hasMore=%v, want only the valid rows and no continuation", ids(page), hasMore)
+	if continuation.ID != "" || !slices.Equal(ids(page), []string{"valid-1", "valid-2", "valid-3"}) {
+		t.Fatalf("mixed page = %v continuation=%q, want only the valid rows and no continuation", ids(page), continuation.ID)
 	}
 
-	page, hasMore, err = listedResourcePage(2, "", fetchFrom(all), authorize)
+	page, continuation, err = listedResourcePage(2, resources.ListCursor{}, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("refilled page error: %v", err)
 	}
-	if !hasMore || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
-		t.Fatalf("refilled page = %v hasMore=%v, want [valid-1 valid-2] with a continuation", ids(page), hasMore)
+	if continuation.ID != "valid-2" || !slices.Equal(ids(page), []string{"valid-1", "valid-2"}) {
+		t.Fatalf("refilled page = %v continuation=%q, want [valid-1 valid-2] with a continuation", ids(page), continuation.ID)
 	}
-	page, hasMore, err = listedResourcePage(2, "valid-2", fetchFrom(all), authorize)
+	page, continuation, err = listedResourcePage(2, continuation, fetchFrom(all), authorize)
 	if err != nil {
 		t.Fatalf("following page error: %v", err)
 	}
-	if hasMore || !slices.Equal(ids(page), []string{"valid-3"}) {
-		t.Fatalf("following page = %v hasMore=%v, want [valid-3] and no continuation", ids(page), hasMore)
+	if continuation.ID != "" || !slices.Equal(ids(page), []string{"valid-3"}) {
+		t.Fatalf("following page = %v continuation=%q, want [valid-3] and no continuation", ids(page), continuation.ID)
 	}
 
 	staleOnly := []*resources.Resource{{ID: "stale-1"}, {ID: "stale-2"}, {ID: "stale-3"}}
-	page, hasMore, err = listedResourcePage(2, "", fetchFrom(staleOnly), authorize)
+	page, continuation, err = listedResourcePage(2, resources.ListCursor{}, fetchFrom(staleOnly), authorize)
 	if err != nil {
 		t.Fatalf("all-stale page error: %v", err)
 	}
-	if hasMore || len(page) != 0 {
-		t.Fatalf("all-stale page = %v hasMore=%v, want empty with no continuation", ids(page), hasMore)
+	if continuation.ID != "" || len(page) != 0 {
+		t.Fatalf("all-stale page = %v continuation=%q, want empty with no continuation", ids(page), continuation.ID)
 	}
 
 	broken := []*resources.Resource{{ID: "valid-1"}, {ID: "broken-1"}}
-	if _, _, err := listedResourcePage(2, "", fetchFrom(broken), authorize); err == nil || err.Status != http.StatusInternalServerError {
+	if _, _, err := listedResourcePage(2, resources.ListCursor{}, fetchFrom(broken), authorize); err == nil || err.Status != http.StatusInternalServerError {
 		t.Fatalf("broken row error = %v, want the request to fail with 500", err)
 	}
 	fetchErr := fault.ServerError(http.StatusInternalServerError, "internal_error", "The resource list could not be read.")
-	failingFetch := func(string, int) ([]*resources.Resource, *fault.Error) { return nil, fetchErr }
-	if _, _, err := listedResourcePage(2, "", failingFetch, authorize); err != fetchErr {
+	failingFetch := func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error) { return nil, fetchErr }
+	if _, _, err := listedResourcePage(2, resources.ListCursor{}, failingFetch, authorize); err != fetchErr {
 		t.Fatalf("fetch error = %v, want %v", err, fetchErr)
 	}
+
+	t.Run("bounded scan can continue without exposing denied IDs", func(t *testing.T) {
+		denied := make([]*resources.Resource, 500)
+		for i := range denied {
+			denied[i] = &resources.Resource{ID: fmt.Sprintf("stale-%d", i)}
+		}
+		fetch := fetchFrom(append(denied, &resources.Resource{ID: "valid-1"}))
+		server := Server{deps: Dependencies{Digester: secrets.NewAuthKey(make([]byte, 32), "test-installation")}}
+		page, cursor, err := server.listedResourcePage("key-a", "pageToken", 2, "", fetch, authorize)
+		if err != nil || len(page) != 0 || cursor == "" || strings.Contains(cursor, "stale-") {
+			t.Fatalf("first page = %v cursor=%q err=%v, want empty page with an opaque continuation", ids(page), cursor, err)
+		}
+		if _, _, err := server.listedResourcePage("key-b", "pageToken", 2, cursor, fetch, authorize); err == nil || err.Status != http.StatusBadRequest {
+			t.Fatalf("another key's continuation error = %v, want 400", err)
+		}
+		page, cursor, err = server.listedResourcePage("key-a", "pageToken", 2, cursor, fetch, authorize)
+		if err != nil || cursor != "" || !slices.Equal(ids(page), []string{"valid-1"}) {
+			t.Fatalf("next page = %v cursor=%q err=%v, want visible row and no continuation", ids(page), cursor, err)
+		}
+	})
 }
 
 func TestFileDownloadHeadersForceAttachmentForHTML(t *testing.T) {

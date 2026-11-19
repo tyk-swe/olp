@@ -16,13 +16,16 @@ type ResponseCodec struct {
 }
 
 func PrepareResponse(native, caller *wire.Request, route, encoding string) ResponseCodec {
-	candidates := int64(1)
-	if native.Family == wire.Gemini {
-		value, ok := native.OIF().Document().Lookup("/generationConfig/candidateCount")
-		if ok {
-			if count, valid := count(value.Bytes()); valid && count > 0 {
-				candidates = count
-			}
+	candidates, path := int64(0), ""
+	switch native.Family {
+	case wire.Gemini:
+		candidates, path = 1, "/generationConfig/candidateCount"
+	case wire.Chat, wire.Completions:
+		path = "/n"
+	}
+	if value, ok := native.OIF().Document().Lookup(path); path != "" && ok {
+		if count, valid := count(value.Bytes()); valid && count > 0 {
+			candidates = count
 		}
 	}
 	return ResponseCodec{native: native, caller: caller, route: route, encoding: encoding, candidates: candidates}

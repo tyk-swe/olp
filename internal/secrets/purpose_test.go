@@ -135,5 +135,5 @@ func TestPurposeDocumentation(t *testing.T) {
 
 func digestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, RetainedListCursorDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
 }

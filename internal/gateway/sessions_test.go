@@ -262,6 +262,25 @@ func TestVertexNativeVideoUsage(t *testing.T) {
 			t.Errorf("%s cost = %s, want image-equivalent cost %s", test.name, cost.String(), expectedCost.String())
 		}
 	}
+	observer := template.Observer(1 << 20)
+	audio := `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":12,"responseTokenCount":5,"totalTokenCount":17,"cachedContentTokenCount":5,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":2},{"modality":"AUDIO","tokenCount":7}],"cacheTokensDetails":[{"modality":"AUDIO","tokenCount":1},{"modality":"AUDIO","tokenCount":4}],"responseTokensDetails":[{"modality":"AUDIO","tokenCount":3},{"modality":"AUDIO","tokenCount":2}]}}`
+	if _, err := observer.ServerFrame([]byte(audio)); err != nil {
+		t.Fatal(err)
+	}
+	got := observer.Usage()
+	for _, check := range []struct {
+		name string
+		got  *int64
+		want int64
+	}{
+		{"input", got.AudioInputTokens, 9},
+		{"cached", got.CachedAudioInputTokens, 5},
+		{"output", got.AudioOutputTokens, 5},
+	} {
+		if check.got == nil || *check.got != check.want {
+			t.Errorf("%s audio usage = %v, want %d", check.name, check.got, check.want)
+		}
+	}
 }
 
 func settledSessionUsage(t *testing.T, record sessionRecord) *wire.Usage {

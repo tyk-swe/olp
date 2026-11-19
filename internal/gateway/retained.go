@@ -2,16 +2,21 @@ package gateway
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"errors"
 	"math/big"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // Retained resources are provider objects a key created earlier and may use
@@ -47,39 +52,89 @@ func (s *Server) authorizeListedResource(ctx context.Context, authority keyautho
 	return nil
 }
 
-func listedResourcePage(limit int, cursor string, fetch func(cursor string, count int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, bool, *fault.Error) {
-	page := make([]*resources.Resource, 0, limit+1)
-	for len(page) <= limit {
-		count := max(limit+1-len(page), 101)
-		rows, fetchErr := fetch(cursor, count)
+const retainedListCursorPrefix = "cursor_"
+
+func (s *Server) retainedListCursorCipher(owner string) (cipher.AEAD, error) {
+	if s.deps.Digester == nil {
+		return nil, errors.New("retained cursor key is unavailable")
+	}
+	block, err := aes.NewCipher(s.deps.Digester.Digest(secrets.RetainedListCursorDigest, owner))
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCMWithRandomNonce(block)
+}
+
+func (s *Server) listedResourcePage(owner, param string, limit int, token string, fetch func(resources.ListCursor, int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, string, *fault.Error) {
+	anchor := resources.ListCursor{ID: token}
+	if encoded, ok := strings.CutPrefix(token, retainedListCursorPrefix); ok {
+		if len(encoded) > 160 {
+			return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
+		}
+		codec, err := s.retainedListCursorCipher(owner)
+		if err != nil {
+			return nil, "", fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The continuation cursor is unavailable.")
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
+		}
+		decoded, err := codec.Open(nil, nil, raw, nil)
+		if err != nil {
+			return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
+		}
+		stamp, id, ok := strings.Cut(string(decoded), "|")
+		if !ok {
+			anchor = resources.ListCursor{ID: stamp}
+		} else {
+			createdAt, err := time.Parse(time.RFC3339Nano, stamp)
+			if err != nil || id == "" {
+				return nil, "", fault.InvalidRequest("invalid_value", "The continuation cursor is invalid.", &param)
+			}
+			anchor = resources.ListCursor{ID: id, CreatedAt: &createdAt}
+		}
+	}
+	page, next, pageErr := listedResourcePage(limit, anchor, fetch, authorize)
+	if pageErr != nil || next.ID == "" || len(page) > 0 && page[len(page)-1].ID == next.ID {
+		return page, next.ID, pageErr
+	}
+	codec, err := s.retainedListCursorCipher(owner)
+	if err != nil {
+		return nil, "", fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The continuation cursor is unavailable.")
+	}
+	payload := next.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + next.ID
+	return page, retainedListCursorPrefix + base64.RawURLEncoding.EncodeToString(codec.Seal(nil, nil, []byte(payload), nil)), nil
+}
+
+func listedResourcePage(limit int, anchor resources.ListCursor, fetch func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error), authorize func(*resources.Resource) *fault.Error) ([]*resources.Resource, resources.ListCursor, *fault.Error) {
+	page := make([]*resources.Resource, 0, limit)
+	cursor := anchor
+	for remaining := limit + 400; remaining > 0; {
+		count := min(remaining, max(limit+1-len(page), 101))
+		rows, fetchErr := fetch(cursor, count+1)
 		if fetchErr != nil {
-			return nil, false, fetchErr
+			return nil, resources.ListCursor{}, fetchErr
 		}
-		if len(rows) == 0 {
-			break
-		}
-		for _, row := range rows {
-			cursor = row.ID
+		for _, row := range rows[:min(len(rows), count)] {
+			cursor = resources.ListCursor{ID: row.ID, CreatedAt: &row.CreatedAt}
 			if authErr := authorize(row); authErr != nil {
 				if authErr.Status != http.StatusNotFound && authErr.Status != http.StatusConflict {
-					return nil, false, authErr
+					return nil, resources.ListCursor{}, authErr
 				}
 				continue
 			}
-			page = append(page, row)
-			if len(page) > limit {
-				break
+			if len(page) == limit {
+				last := page[len(page)-1]
+				return page, resources.ListCursor{ID: last.ID, CreatedAt: &last.CreatedAt}, nil
 			}
+			page = append(page, row)
 		}
-		if len(rows) < count {
-			break
+		if len(rows) <= count {
+			return page, resources.ListCursor{}, nil
 		}
+		remaining -= count
 	}
-	hasMore := len(page) > limit
-	if hasMore {
-		page = page[:limit]
-	}
-	return page, hasMore, nil
+	return page, cursor, nil
 }
 
 // retainedUse is what a request does with a retained resource.

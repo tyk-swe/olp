@@ -192,7 +192,9 @@ func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Reque
 		}
 		w.WriteHeader(result.Status)
 		if result.Body != nil {
-			json.NewEncoder(w).Encode(result.Body)
+			encoder := json.NewEncoder(w)
+			encoder.SetEscapeHTML(!result.DisableHTMLEscaping)
+			encoder.Encode(result.Body)
 		}
 	}
 }

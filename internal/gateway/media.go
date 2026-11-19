@@ -360,7 +360,6 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *cal
 		cancelled: attempted.cancelled,
 	}
 	if out.err == nil {
-		out.committed = true
 		out.status = http.StatusOK
 	}
 	return out
@@ -459,7 +458,6 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	fact.FirstByte = &fb
 	fact.Class = "success"
 	fact.Usage = mediaUsage(effective, result)
-	fact.Committed = true
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = upstream.Terminal
 	}

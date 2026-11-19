@@ -25,7 +25,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = 0"); err != nil {
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
@@ -42,49 +42,89 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	known := make([]string, 0, len(entries))
-	missingSeen := false
+	applied, latest, err := appliedMigrations(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, googleBillingApplied := applied["0125_google_billing.sql"]
 	for _, entry := range entries {
 		name := entry.Name()
-		known = append(known, name)
+		if _, ok := applied[name]; ok {
+			continue
+		}
+		superseded := name == "0124_aws_cur.sql" && googleBillingApplied
+		if name < latest && !superseded && !canBackfillDelegation(name, applied) {
+			return fmt.Errorf("olp migration history is not a sequential prefix: missing %s before %s", name, latest)
+		}
 		sql, err := migrations.ReadFile("migrations/" + name)
 		if err != nil {
 			return err
 		}
 		checksum := sha256.Sum256(sql)
-		var stored []byte
-		err = tx.QueryRow(ctx, "SELECT checksum FROM olp.migrations WHERE version=$1", name).Scan(&stored)
-		if err == nil {
-			if missingSeen {
-				return errors.New("olp migration history is not a sequential prefix")
+		if !superseded {
+			if _, err := tx.Exec(ctx, string(sql)); err != nil {
+				return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
 			}
-			if !slices.Equal(stored, checksum[:]) {
-				return fmt.Errorf("migration checksum mismatch: %s", name)
-			}
-			continue
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		missingSeen = true
-		if _, err = tx.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
 			return err
 		}
 	}
-	var unknown bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.migrations WHERE NOT(version=ANY($1)))", known).Scan(&unknown); err != nil {
-		return err
-	}
-	if unknown {
-		return errors.New("database requires a newer olp binary")
-	}
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.installation(singleton,id,authority_id) VALUES(true,$1,$2) ON CONFLICT DO NOTHING", uuid.NewString(), uuid.NewString()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func appliedMigrations(ctx context.Context, tx pgx.Tx) (map[string]struct{}, string, error) {
+	rows, err := tx.Query(ctx, "SELECT version,checksum FROM olp.migrations")
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	applied := make(map[string]struct{})
+	var latest string
+	for rows.Next() {
+		var name string
+		var stored []byte
+		if err := rows.Scan(&name, &stored); err != nil {
+			return nil, "", err
+		}
+		sql, err := migrations.ReadFile("migrations/" + name)
+		if err != nil {
+			return nil, "", errors.New("database requires a newer olp binary")
+		}
+		checksum := sha256.Sum256(sql)
+		if !slices.Equal(stored, checksum[:]) {
+			return nil, "", fmt.Errorf("migration checksum mismatch: %s", name)
+		}
+		applied[name] = struct{}{}
+		latest = max(latest, name)
+	}
+	return applied, latest, rows.Err()
+}
+
+func canBackfillDelegation(name string, applied map[string]struct{}) bool {
+	switch name {
+	case "0104_agent_delegation.sql", "0105_a2a_tasks.sql", "0106_delegation_consent.sql", "0107_agent_route_runs.sql",
+		"0108_trace_spans.sql", "0109_a2a_task_bounds.sql", "0110_delegation_retention.sql", "0111_agent_delegated_tools.sql",
+		"0112_mcp_delegation_attribution.sql", "0113_agent_oauth_grants.sql":
+	default:
+		return false
+	}
+	for later := range applied {
+		if later <= name {
+			continue
+		}
+		switch later {
+		case "0104_code_pool_weights.sql", "0105_code_health_observations.sql", "0106_code_initial_recovery.sql",
+			"0107_code_alias_pins.sql", "0108_code_reference_owners.sql", "0109_code_portable_recovery.sql",
+			"0110_code_model_pools.sql", "0111_code_paid_targets.sql", "0112_code_paid_fallback.sql", "0113_code_definite_availability.sql":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Installation returns the installation identity once the database holds

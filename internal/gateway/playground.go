@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -360,7 +361,11 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (httpki
 		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	s.finish(x, out, http.StatusOK)
-	return httpkit.OK(p.response(x, out, in)), nil
+	return httpkit.Reply{
+		Status:              http.StatusOK,
+		Body:                p.response(x, out, in),
+		DisableHTMLEscaping: in.operation() != "generation",
+	}, nil
 }
 
 func routingEvidence(x *call) []map[string]any {
@@ -437,8 +442,10 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 		res["usage"] = c.Usage
 	}
 	if in.ResponseFormat != nil && in.ResponseFormat.Type != "text" && c.OutputText != "" {
+		decoder := json.NewDecoder(strings.NewReader(c.OutputText))
+		decoder.UseNumber()
 		var structured any
-		if json.Unmarshal([]byte(c.OutputText), &structured) == nil {
+		if decoder.Decode(&structured) == nil && decoder.Decode(new(any)) == io.EOF {
 			res["structured_output"] = structured
 		}
 	}

@@ -78,7 +78,7 @@ func TestCommandDeadlineUsesConfiguredTimeout(t *testing.T) {
 	configuration.option.DialCtxFn = func(context.Context, string, *net.Dialer, *tls.Config) (net.Conn, error) {
 		client, server := net.Pipe()
 		t.Cleanup(func() { client.Close(); server.Close() })
-		go answerValkey(server)
+		go answerValkey(server, "")
 		return deadlineConnection{Conn: client, deadlines: deadlines}, nil
 	}
 	client, err := Open(t.Context(), configuration)
@@ -115,7 +115,45 @@ func (c deadlineConnection) SetDeadline(deadline time.Time) error {
 	return c.Conn.SetDeadline(deadline)
 }
 
-func answerValkey(conn net.Conn) {
+func TestSearchRejectsPartialResultsOnTimeout(t *testing.T) {
+	t.Parallel()
+	const result = "+total_results\r\n:1\r\n+results\r\n*1\r\n%2\r\n+id\r\n+entry\r\n+extra_attributes\r\n%1\r\n+distance\r\n+0\r\n"
+	for name, tc := range map[string]struct {
+		reply string
+		fails bool
+	}{
+		"RESP2":   {reply: "*3\r\n:1\r\n+entry\r\n*2\r\n+distance\r\n+0\r\n"},
+		"RESP3":   {reply: "%3\r\n" + result + "+error\r\n*0\r\n"},
+		"timeout": {reply: "%3\r\n" + result + "+error\r\n*1\r\n-Timeout limit was reached\r\n", fails: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config, err := Configuration("redis://localhost:6379", "", time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.option.DialCtxFn = func(context.Context, string, *net.Dialer, *tls.Config) (net.Conn, error) {
+				client, server := net.Pipe()
+				go answerValkey(server, tc.reply)
+				return client, nil
+			}
+			client, err := Open(t.Context(), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			docs, err := client.Search(t.Context(), "fixtures", "*", "RETURN", "1", "distance")
+			if tc.fails {
+				if err == nil || len(docs) != 0 {
+					t.Fatalf("timed-out search returned %v, %v", docs, err)
+				}
+			} else if err != nil || len(docs) != 1 || docs[0].Key != "entry" || docs[0].Doc["distance"] != "0" {
+				t.Fatalf("successful search returned %v, %v", docs, err)
+			}
+		})
+	}
+}
+
+func answerValkey(conn net.Conn, searchReply string) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	for {
@@ -151,6 +189,9 @@ func answerValkey(conn net.Conn) {
 		}
 		if command == "PING" {
 			response = "+PONG\r\n"
+		}
+		if command == "FT.SEARCH" {
+			response = searchReply
 		}
 		if _, err := io.WriteString(conn, response); err != nil {
 			return

@@ -87,13 +87,14 @@ func RenderProblem(w http.ResponseWriter, p *Problem) {
 }
 
 type Reply struct {
-	Status         int             `json:"status"`
-	Body           any             `json:"body"`
-	ETag           string          `json:"etag,omitempty"`
-	Location       string          `json:"location,omitempty"`
-	Cookies        []*http.Cookie  `json:"-"`
-	CSRF           string          `json:"-"`
-	ParentMutation *ParentMutation `json:"parent_mutation,omitempty"`
+	Status              int             `json:"status"`
+	Body                any             `json:"body"`
+	ETag                string          `json:"etag,omitempty"`
+	Location            string          `json:"location,omitempty"`
+	Cookies             []*http.Cookie  `json:"-"`
+	CSRF                string          `json:"-"`
+	DisableHTMLEscaping bool            `json:"-"`
+	ParentMutation      *ParentMutation `json:"parent_mutation,omitempty"`
 }
 
 // ParentMutation records the atomic parent transition caused by a child edit.

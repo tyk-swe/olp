@@ -2,7 +2,6 @@ package staging
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -83,9 +83,14 @@ func TestSpoolGivesBackEveryByteItDoesNotKeep(t *testing.T) {
 	}
 }
 
-type brokenSource struct{}
+type brokenSource struct{ beforeRead func() }
 
-func (brokenSource) Read([]byte) (int, error) { return 0, errors.New("source closed") }
+func (s brokenSource) Read([]byte) (int, error) {
+	if s.beforeRead != nil {
+		s.beforeRead()
+	}
+	return 0, io.ErrUnexpectedEOF
+}
 
 func TestSpoolRefusesHandlesAndNamesThatCouldLeaveIt(t *testing.T) {
 	spool := newSpool(t)
@@ -191,15 +196,29 @@ func unremovablePath(t *testing.T, root, name string) string {
 	return dir
 }
 
-func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
-	outside := t.TempDir()
-
-	retrying := newSpool(t)
-	stuck := unremovablePath(t, outside, "stuck")
-	if !retrying.tryReserve(10) {
-		t.Fatal("could not reserve bytes for a cleanup job")
+func blockSpoolRemoval(t *testing.T, spool *Spool, name string) string {
+	t.Helper()
+	if err := os.Remove(filepath.Join(spool.root, name)); err != nil {
+		t.Fatal(err)
 	}
-	retrying.enqueueCleanup(&cleanupJob{path: stuck, bytes: 10})
+	return unremovablePath(t, spool.root, name)
+}
+
+func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
+	removeStuck := func(spool *Spool) string {
+		t.Helper()
+		artifact, err := stage(t, spool, strings.NewReader("1234567890"), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := blockSpoolRemoval(t, spool, string(artifact.Handle))
+		if err := spool.Remove(artifact.Handle); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("Remove returned %v for an artifact it could not remove", err)
+		}
+		return dir
+	}
+	retrying := newSpool(t)
+	stuck := removeStuck(retrying)
 	deadline := time.Now().Add(3 * time.Second)
 	for retrying.UsedBytes() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -217,12 +236,8 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 	before := runtime.NumGoroutine()
 	spool := newSpool(t)
 	settled := runtime.NumGoroutine()
-	for i := range 24 {
-		path := unremovablePath(t, outside, fmt.Sprintf("job-%d", i))
-		if !spool.tryReserve(10) {
-			t.Fatal("could not reserve bytes for a cleanup job")
-		}
-		spool.enqueueCleanup(&cleanupJob{path: path, bytes: 10})
+	for range 24 {
+		removeStuck(spool)
 	}
 	growth := 0
 	until := time.Now().Add(200 * time.Millisecond)
@@ -246,4 +261,100 @@ func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
 	if got := runtime.NumGoroutine(); got > before+4 {
 		t.Fatalf("got %d goroutines after closing, want the cleanup workers stopped (started from %d)", got, before)
 	}
+}
+
+func TestSaturatedSpoolCleanupReturnsBeforeRetryingArtifacts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		spool := newSpool(t)
+		const failedRemovals = 40
+		artifacts := make([]Handle, failedRemovals)
+		for i := range artifacts {
+			artifact, err := stage(t, spool, strings.NewReader("x"), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blockSpoolRemoval(t, spool, string(artifact.Handle))
+			artifacts[i] = artifact.Handle
+		}
+		removed := make(chan error, failedRemovals)
+		go func() {
+			for _, handle := range artifacts {
+				removed <- spool.Remove(handle)
+			}
+			close(removed)
+		}()
+		synctest.Wait()
+		if len(removed) != failedRemovals {
+			t.Error("Remove waited for cleanup retries")
+		}
+		if spool.UsedBytes() != failedRemovals {
+			t.Error("spool released a reservation while artifacts still existed")
+		}
+		for _, handle := range artifacts {
+			if err := os.Remove(filepath.Join(spool.root, string(handle), "kept")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for err := range removed {
+			if !errors.Is(err, ErrUnavailable) {
+				t.Errorf("Remove returned %v for an artifact it could not remove", err)
+			}
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if spool.UsedBytes() != 0 {
+			t.Errorf("cleanup left %d bytes reserved", spool.UsedBytes())
+		}
+		for _, handle := range artifacts {
+			if _, err := os.Stat(filepath.Join(spool.root, string(handle))); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("cleanup left an artifact behind: %v", err)
+			}
+		}
+	})
+}
+
+func TestAbortedEmptyUploadsConsumeSpoolSlotsUntilCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const slots = 8
+		spool := newSpool(t)
+		spool.fileSlots = make(chan struct{}, slots)
+		var blocked []string
+		source := brokenSource{beforeRead: func() {
+			entries, err := os.ReadDir(spool.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() && entry.Name() != spoolOwnerFile {
+					blocked = append(blocked, blockSpoolRemoval(t, spool, entry.Name()))
+					return
+				}
+			}
+			t.Fatal("the incomplete upload file was not found")
+		}}
+		for range slots {
+			if _, err := stage(t, spool, source, 1); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("upload abort returned %v, want unexpected EOF", err)
+			}
+		}
+		synctest.Wait()
+		if spool.UsedBytes() != 0 {
+			t.Fatal("the aborted uploads reserved payload bytes")
+		}
+		if _, err := stage(t, spool, strings.NewReader(""), 1); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("the spool accepted another file with all cleanup slots occupied: %v", err)
+		}
+		for _, dir := range blocked {
+			if err := os.Remove(filepath.Join(dir, "kept")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		for range slots {
+			if _, err := stage(t, spool, strings.NewReader(""), 1); err != nil {
+				t.Fatalf("a file slot was still unavailable after cleanup: %v", err)
+			}
+		}
+	})
 }

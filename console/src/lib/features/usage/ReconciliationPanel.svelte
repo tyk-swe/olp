@@ -92,9 +92,9 @@
   }
 
   function invoice(item: ReconciliationItem, currency?: string): string {
-    if (item.invoiced_cost == null) return '—';
     if (item.invoiced_currency?.includes(','))
       return `Multiple currencies (${item.invoiced_currency.split(',').join(', ')})`;
+    if (item.invoiced_cost == null) return '—';
     return formatCost(item.invoiced_cost, item.invoiced_currency ?? currency);
   }
 

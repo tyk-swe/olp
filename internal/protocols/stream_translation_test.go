@@ -3,6 +3,7 @@ package protocols
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -460,5 +461,48 @@ func TestPreparedStreamRequiresEveryDispatchedCandidate(t *testing.T) {
 	result, err = codec.Stream(strings.NewReader("data: "+complete+"\n\n"), 8192, func([]byte) error { return nil }, nil)
 	if err != nil || result == nil || !result.UsageComplete {
 		t.Fatalf("complete dispatched candidate set refused: %+v %v", result, err)
+	}
+}
+
+func TestPreparedChatStreamRequiresEveryDispatchedChoice(t *testing.T) {
+	native, err := Parse(wire.Chat, []byte(`{"model":"route","n":2,"messages":[{"role":"user","content":"hello"}],"stream":true}`), "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec := PrepareResponse(native, native, "route", "")
+	first := "data: " + `{"choices":[{"index":0,"delta":{"content":"one"},"finish_reason":"stop"}]}` + "\n\n"
+	second := "data: " + `{"choices":[{"index":1,"delta":{"content":"two"},"finish_reason":"stop"}]}` + "\n\n"
+	usage := "data: " + `{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}` + "\n\n"
+	done := "data: [DONE]\n\n"
+	for _, test := range []struct {
+		name, frames            string
+		complete, usageComplete bool
+	}{
+		{"missing choice", first + usage + done, false, false},
+		{"all choices", first + second + usage + done, true, true},
+		{"missing terminator", first + second + usage, false, true},
+		{"missing choice and terminator", first + usage, false, false},
+		{"usage precedes the last finish without a terminator", first + usage + second, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			result, err := codec.Stream(strings.NewReader(test.frames), 8192, func(frame []byte) error {
+				_, err := output.Write(frame)
+				return err
+			}, nil)
+			if test.complete && err != nil {
+				t.Fatal(err)
+			}
+			if !test.complete {
+				var protocolErr *wire.ProtocolError
+				if !errors.As(err, &protocolErr) || !protocolErr.Truncated {
+					t.Fatalf("missing output did not report truncation: %v", err)
+				}
+			}
+			if result == nil || result.Usage == nil || result.Usage.TotalTokens != 3 ||
+				result.UsageComplete != test.usageComplete || strings.Contains(output.String(), done) != test.complete {
+				t.Fatalf("completion = %+v, stream = %q", result, output.String())
+			}
+		})
 	}
 }

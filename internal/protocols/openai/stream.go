@@ -40,14 +40,18 @@ func IsResponseProjectionError(err error) bool {
 // rewrites model names, and reports the completion summary.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string) (*wire.Completion, error) {
-	return stream(family, family, r, maxEventBytes, route, true, true, func([]byte) error { return nil }, nil)
+	return stream(family, family, r, maxEventBytes, route, true, true, func([]byte) error { return nil }, nil, 0)
 }
 
-func StreamMetadataEvents(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
-	return stream(family, target, r, maxEventBytes, route, includeUsage, false, emit, observe)
+func StreamMetadataEvents(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error, expectedChoices ...int64) (*wire.Completion, error) {
+	expected := int64(0)
+	if len(expectedChoices) != 0 {
+		expected = expectedChoices[0]
+	}
+	return stream(family, target, r, maxEventBytes, route, includeUsage, false, emit, observe, expected)
 }
 
-func stream(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
+func stream(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit wire.Emit, observe func(oif.Event) error, expected int64) (*wire.Completion, error) {
 	var s streamer
 	var encoded []byte
 	retain := func(frame []byte) error { encoded = frame; return nil }
@@ -55,7 +59,7 @@ func stream(family, target wire.Format, r io.Reader, maxEventBytes int, route st
 	case wire.Completions, wire.Chat, wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
-		s = &chatStream{legacy: family == wire.Completions, exactUsage: target == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
+		s = &chatStream{legacy: family == wire.Completions, exactUsage: target == wire.Completions, route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), expected: expected, emit: retain}
 	case wire.Responses:
 		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
@@ -123,6 +127,7 @@ type chatStream struct {
 	includeUsage bool
 	collect      bool
 	maxChoices   int
+	expected     int64
 	route        string
 	emit         wire.Emit
 	done         bool
@@ -136,14 +141,10 @@ type chatStream struct {
 
 func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Data == "[DONE]" {
-		if !s.finished[0] {
-			return &wire.ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
+		if err := s.checkFinishedChoices(); err != nil {
+			return err
 		}
-		for index, finished := range s.finished {
-			if !finished {
-				return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
-			}
-		}
+		s.c.UsageComplete = s.c.Usage != nil
 		s.done = true
 		if err := s.emit([]byte("data: [DONE]\n\n")); err != nil {
 			return err
@@ -187,7 +188,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	}
 	if usage != nil {
 		s.c.Usage = usage
-		s.c.UsageComplete = true
+		s.c.UsageComplete = s.expected <= 1 || s.checkFinishedChoices() == nil
 	}
 	if !s.includeUsage {
 		if usage != nil && len(choices) == 0 {
@@ -283,6 +284,26 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 	return nil
 }
 
+func (s *chatStream) checkFinishedChoices() error {
+	if int64(len(s.finished)) < s.expected {
+		return &wire.ProtocolError{Detail: "[DONE] arrived before all requested choices", Truncated: true}
+	}
+	for index := range s.expected {
+		if !s.finished[index] {
+			return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
+		}
+	}
+	if !s.finished[0] {
+		return &wire.ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
+	}
+	for index, finished := range s.finished {
+		if !finished {
+			return &wire.ProtocolError{Detail: fmt.Sprintf("[DONE] arrived before choice %d finished", index), Truncated: true}
+		}
+	}
+	return nil
+}
+
 func (s *chatStream) finish() (*wire.Completion, error) {
 	s.c.OutputText = s.text.String()
 	s.c.Refusal = s.refusal.String()
@@ -291,6 +312,9 @@ func (s *chatStream) finish() (*wire.Completion, error) {
 		s.c.ToolCalls = append(s.c.ToolCalls, wire.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments.String()})
 	}
 	if !s.done {
+		if s.expected > 1 && s.c.UsageComplete && s.checkFinishedChoices() != nil {
+			s.c.UsageComplete = false
+		}
 		return &s.c, &wire.ProtocolError{Detail: "stream ended before [DONE]", Truncated: true}
 	}
 	return &s.c, nil

@@ -26,8 +26,13 @@ type Commander interface {
 	Do(context.Context, ...string) (any, error)
 }
 
+type cacheClient interface {
+	Commander
+	Search(context.Context, ...string) ([]coordination.SearchDocument, error)
+}
+
 type Store struct {
-	Client       Commander
+	Client       cacheClient
 	Keys         *secrets.KeyRing
 	Auth         *secrets.AuthKey
 	Installation string

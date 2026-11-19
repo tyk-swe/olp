@@ -882,6 +882,16 @@ Native Anthropic and Gemini resource APIs and cloud batch jobs require the key's
 `allow_provider_state` permission. Existing OpenAI-shaped file/batch permissions
 remain unchanged.
 
+Anthropic file lists, Gemini file and batch lists, and cloud batch lists can
+return an empty page with a continuation after checking a limited number of
+resource bindings. Anthropic batch lists scan past empty pages until they find
+a visible batch, reach the end of the list, or return a timeout error.
+
+Use `nextPageToken` as `pageToken` for Gemini. When `has_more` is true, pass
+`last_id` as `after` for cloud batch jobs or as `after_id` for Anthropic. For an
+Anthropic request with `before_id`, pass `first_id` as `before_id` to continue in
+the same direction.
+
 Managed Anthropic, Vertex and Bedrock OpenAI-shaped batches are refused with
 `422 target_capability`; only the listed managed adapters translate through the
 OpenAI file/batch shape.

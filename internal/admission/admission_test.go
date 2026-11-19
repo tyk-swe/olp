@@ -85,6 +85,25 @@ func TestReleasedSlotPassesToTheWaitingRequest(t *testing.T) {
 }
 
 func TestWaitingRequestGivesUpAtTheEarliestLimit(t *testing.T) {
+	t.Run("slot already free", func(t *testing.T) {
+		for _, canceled := range []bool{false, true} {
+			pool := NewPool(1).Queue(1, time.Minute)
+			holder, waiter := pool.Enter(), pool.Enter()
+			holder.Release()
+			ctx, cancel := context.WithCancel(t.Context())
+			deadline := time.Now().Add(-time.Second)
+			if canceled {
+				cancel()
+				deadline = time.Time{}
+			}
+			admitted := waiter.Await(ctx, Normal, deadline)
+			cancel()
+			waiter.Release()
+			if admitted || pool.AcquirePermit() == nil {
+				t.Errorf("expired waiter acquired or held the idle slot (canceled=%v)", canceled)
+			}
+		}
+	})
 	const queueTimeout = 10 * time.Second
 	for name, c := range map[string]struct {
 		deadline, cancel, want time.Duration

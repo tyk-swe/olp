@@ -49,7 +49,7 @@ func lastBlockControl(t *testing.T, value any) any {
 
 func TestApplyPromptCacheAnthropicBreakpoints(t *testing.T) {
 	ephemeral := map[string]any{"type": "ephemeral", "ttl": "5m"}
-	tools := `"tools":[{"name":"a","input_schema":{"type":"object"}},{"name":"b","input_schema":{"type":"object"}}]`
+	tools := `"tools":[{"name":"a","input_schema":{"type":"object"}},{"name":"b","input_schema":{"type":"object","properties":{"cache_control":{"type":"string"}}}}]`
 	cached := func(ttl string) string { return `,"cache_control":{"type":"ephemeral","ttl":"` + ttl + `"}` }
 	userTurn := func(extra string) string {
 		return `{"role":"user","content":[{"type":"text","text":"first"` + extra + `}]}`
@@ -80,7 +80,7 @@ func TestApplyPromptCacheAnthropicBreakpoints(t *testing.T) {
 		},
 		{
 			name: "caller breakpoints count toward the limit of four",
-			body: `{"max_tokens":16,"system":[{"type":"text","text":"s"},{"type":"text","text":"t"}],` + tools + `,"messages":[` + userTurn(cached("5m")) + `,{"role":"assistant","content":[{"type":"text","text":"x"` + cached("5m") + `}]},` + userTurn(cached("5m")) + `,{"role":"user","content":"again"}]}`,
+			body: `{"max_tokens":16,"system":[{"type":"text","text":"s"},{"type":"text","text":"t"}],` + tools + `,"messages":[` + userTurn(cached("5m")) + `,{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"a","input":{}` + cached("5m") + `}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"result"` + cached("5m") + `}]}]},{"role":"user","content":"again"}]}`,
 			want: func(t *testing.T, body map[string]any) {
 				if got := lastBlockControl(t, body["tools"]); !reflect.DeepEqual(got, ephemeral) {
 					t.Fatalf("tools breakpoint = %#v", got)
@@ -108,9 +108,12 @@ func TestApplyPromptCacheAnthropicBreakpoints(t *testing.T) {
 
 func TestApplyPromptCacheLeavesCallerPolicyInCharge(t *testing.T) {
 	for name, body := range map[string]string{
-		"top-level automatic policy": `{"max_tokens":16,"cache_control":{"type":"ephemeral"},"system":"s","messages":[{"role":"user","content":"hi"}]}`,
-		"different nested ttl":       `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"again"}]}`,
-		"non-object nested control":  `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":null}]},{"role":"user","content":"again"}]}`,
+		"top-level automatic policy":  `{"max_tokens":16,"cache_control":{"type":"ephemeral"},"system":"s","messages":[{"role":"user","content":"hi"}]}`,
+		"different nested ttl":        `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"again"}]}`,
+		"different tool result ttl":   `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
+		"different search result ttl": `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"search_result","source":"https://example.com","title":"Result","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
+		"different MCP result ttl":    `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"mcp_tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}]}`,
+		"non-object nested control":   `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":null}]},{"role":"user","content":"again"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			inv, config := preparedPromptCache(t, wire.Anthropic, "anthropic", body)

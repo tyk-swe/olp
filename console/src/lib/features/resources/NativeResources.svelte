@@ -81,8 +81,10 @@
     available.find((item) => key(item) === endpointKey)
   );
   const eligibleRoutes = $derived(
-    (routes.data ?? []).filter((item) =>
-      item.latest_revision.operations.includes(operation)
+    (routes.data ?? []).filter(
+      (item) =>
+        (item.state === 'active' || endpoint?.action === 'list') &&
+        item.latest_revision.operations.includes(operation)
     )
   );
   const writesBody = $derived(

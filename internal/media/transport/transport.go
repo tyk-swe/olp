@@ -187,7 +187,7 @@ func (t *Transport) do(ctx context.Context, target Target, sensitive *egress.Sen
 	if failure != nil {
 		dispatched := *failure
 		dispatched.Dispatched = true
-		dispatched.Ambiguous = call.Ambiguous && failure.Class != upstream.ClientError
+		dispatched.Ambiguous = call.Ambiguous && failure.Class != upstream.ClientError && failure.Class != upstream.ContentFilter
 		return nil, &dispatched
 	}
 	return &Result{Status: resp.StatusCode, FirstByte: firstByte, Source: source, Payload: payload}, nil

@@ -31,11 +31,15 @@ func Stream(encodedWire, target wire.Format, r io.Reader, maxEvent int, route st
 // Native accounting is interpreted before the observer can refuse projection;
 // structurally valid events remain observable on dialect grammar failures.
 // Actionability still requires the admitted projection and durable-state barrier.
-// expectedCandidates, when present, is the effective dispatched Gemini request's
+// expectedCandidates, when present, is the effective dispatched request's
 // candidate count. Without that request proof, Gemini totals await clean EOF.
 func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error, expectedCandidates ...int64) (*wire.Completion, error) {
+	expected := int64(0)
+	if len(expectedCandidates) != 0 {
+		expected = expectedCandidates[0]
+	}
 	if encodedWire == wire.Chat && target == wire.Completions {
-		return streamCompletionChat(r, maxEvent, route, includeUsage, emit, observe)
+		return streamCompletionChat(r, maxEvent, route, includeUsage, emit, observe, expected)
 	}
 	native := encodedWire == target || encodedWire == wire.Gemini && target == wire.GeminiStream
 	if encodedWire.Surface() == "native" && !native {
@@ -57,7 +61,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	var err error
 	switch encodedWire {
 	case wire.Completions, wire.Chat, wire.Responses:
-		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, includeUsage || !native, upstreamEmit, observe)
+		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, includeUsage || !native, upstreamEmit, observe, expected)
 	case wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		c, err = openai.StreamMetadataEvents(wire.MistralFIM, target, r, maxEvent, route, true, upstreamEmit, observe)
@@ -66,10 +70,6 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	case wire.Anthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case wire.Gemini:
-		expected := int64(0)
-		if len(expectedCandidates) != 0 {
-			expected = expectedCandidates[0]
-		}
 		c, err = streamGeminiEvents(r, maxEvent, route, upstreamEmit, observe, expected)
 	case "bedrock":
 		c, err = streamBedrockEvents(r, maxEvent, route, upstreamEmit, observe, native)

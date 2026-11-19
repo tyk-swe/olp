@@ -34,6 +34,7 @@ var (
 	InstallationDigest       = DigestPurpose{"installation"}
 	BatchSubmissionDigest    = DigestPurpose{"batch_submission"}
 	RetainedSubmissionDigest = DigestPurpose{"retained_submission"}
+	RetainedListCursorDigest = DigestPurpose{"retained_list_cursor"}
 	ApprovalDigest           = DigestPurpose{"agent_approval"}
 	AgentPrincipalDigest     = DigestPurpose{"agent_principal"}
 	DelegationTokenDigest    = DigestPurpose{"delegation_token"}
