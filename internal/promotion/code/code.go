@@ -11,6 +11,8 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -39,7 +41,7 @@ type bindings struct {
 
 type change struct {
 	item  promotion.Item
-	write func(context.Context, pgx.Tx, access.Principal) error
+	write func(context.Context, pgx.Tx, authz.Principal) error
 }
 
 type resolution struct {
@@ -116,7 +118,7 @@ func onlyDeclared(values bindings, code Code) error {
 	return nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Code, error) {
+func Read(ctx context.Context, q database.Queryer) (Code, error) {
 	accounts, err := readAccounts(ctx, q)
 	if err != nil {
 		return Code{}, err
@@ -161,10 +163,10 @@ func Render(code Code) (*contract.ConfigurationCode, error) {
 
 func Planner(desired Desired, deps provider.Deps) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(ctx context.Context, q access.Queryer, p access.Principal) error {
+		Authorize: func(ctx context.Context, q database.Queryer, p authz.Principal) error {
 			return authorize(ctx, q, p, desired.Code)
 		},
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			changes, err := plan(ctx, q, desired, deps)
 			if err != nil {
 				return nil, err
@@ -175,7 +177,7 @@ func Planner(desired Desired, deps provider.Deps) promotion.Planner {
 }
 
 func Applier(desired Desired, deps provider.Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		changes, err := plan(ctx, tx, desired, deps)
 		if err != nil {
 			return err
@@ -200,7 +202,7 @@ func Applier(desired Desired, deps provider.Deps) promotion.Applier {
 	}
 }
 
-func authorize(ctx context.Context, q access.Queryer, p access.Principal, code Code) error {
+func authorize(ctx context.Context, q database.Queryer, p authz.Principal, code Code) error {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return err
@@ -216,14 +218,14 @@ func authorize(ctx context.Context, q access.Queryer, p access.Principal, code C
 		if err != nil {
 			return err
 		}
-		if err := p.Project(&id, access.Change); err != nil {
+		if err := p.Project(&id, authz.Change); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.Deps) ([]change, error) {
+func plan(ctx context.Context, q database.Queryer, desired Desired, deps provider.Deps) ([]change, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err
@@ -251,7 +253,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	return slices.Concat(accounts, pools, routes, budgets), nil
 }
 
-func resolve(ctx context.Context, q access.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
+func resolve(ctx context.Context, q database.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
 	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[codeaccounts.Input], error) {
 		return resolveAccount(ctx, q, a, directory, desired.bindings.credentials)
 	})

@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -83,7 +84,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	})
 }
 
-func readTemplates(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]Template, error) {
+func readTemplates(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]Template, error) {
 	stored, err := routes.ReadTemplateInputs(ctx, q)
 	if err != nil {
 		return nil, err
@@ -147,7 +148,7 @@ func sameTemplate(desired, current Template) (bool, error) {
 }
 
 func TemplateApplier(desired Desired) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err

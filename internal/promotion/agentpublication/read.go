@@ -6,15 +6,15 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
-func Read(ctx context.Context, q access.Queryer) ([]Publication, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Publication, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err

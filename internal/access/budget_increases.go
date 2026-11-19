@@ -8,12 +8,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
 const increaseJSON = `to_jsonb(i)||jsonb_build_object('amount',i.amount::text)`
 
-func (s *Server) budgetIncreases(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) budgetIncreases(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -26,7 +27,7 @@ func (s *Server) budgetIncreases(r *http.Request, p Principal) (httpkit.Reply, e
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) createBudgetIncrease(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) createBudgetIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in struct {
 		Target    BudgetTarget `json:"target"`
 		Window    string       `json:"window"`
@@ -124,7 +125,7 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ Principal) (httpkit.Rep
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) revokeBudgetIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "increase_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -140,15 +141,15 @@ func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (httpkit.Rep
 	if err = tx.QueryRow(r.Context(), "SELECT target,project_id::text,etag::text FROM olp.budget_increases WHERE id=$1 FOR UPDATE", id).Scan(&target, &project, &etag); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = budgetIncreaseScope(p, target, project, Change); err != nil {
+	if err = budgetIncreaseScope(p, target, project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
-	op := Keys
+	op := authz.Keys
 	if target.Kind == "installation" {
-		op = Settings
+		op = authz.Settings
 	}
 	if target.Kind == "organization" {
-		op = ManageOrganization
+		op = authz.ManageOrganization
 	}
 	if err = p.Authorize(op); err != nil {
 		return httpkit.Reply{}, err
@@ -168,7 +169,7 @@ func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (httpkit.Rep
 	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }
 
-func (s *Server) budgetIncrease(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) budgetIncrease(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "increase_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -180,13 +181,13 @@ func (s *Server) budgetIncrease(r *http.Request, p Principal) (httpkit.Reply, er
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+increaseJSON+",project_id::text,etag::text,target FROM olp.budget_increases i WHERE id=$1", id).Scan(&data, &project, &etag, &target); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = budgetIncreaseScope(p, target, project, View); err != nil {
+	if err = budgetIncreaseScope(p, target, project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(data, etag), nil
 }
 
-func budgetIncreaseScope(p Principal, target BudgetTarget, project *string, need Need) error {
+func budgetIncreaseScope(p authz.Principal, target BudgetTarget, project *string, need authz.Need) error {
 	if target.Kind == "organization" {
 		return p.Organization(target.ID, need)
 	}

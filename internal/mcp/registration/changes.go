@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -73,7 +73,7 @@ func (s *Server) certifyChange(ctx context.Context, in Input, previous *Definiti
 	return material, catalog, nil
 }
 
-func (s *Server) loadForWrite(ctx context.Context, tx pgx.Tx, principal access.Principal, in Input, id string) (*Definition, error) {
+func (s *Server) loadForWrite(ctx context.Context, tx pgx.Tx, principal authz.Principal, in Input, id string) (*Definition, error) {
 	if id == "" {
 		return nil, s.access.RequireProject(ctx, tx, principal, in.ProjectID)
 	}
@@ -81,7 +81,7 @@ func (s *Server) loadForWrite(ctx context.Context, tx pgx.Tx, principal access.P
 	if err != nil {
 		return nil, err
 	}
-	if err := principal.Project(&current.ProjectID, access.Change); err != nil {
+	if err := principal.Project(&current.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	return current, nil

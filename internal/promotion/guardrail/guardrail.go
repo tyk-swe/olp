@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
@@ -106,7 +107,7 @@ func claim(r reference) promotion.Claim {
 	})}
 }
 
-func planGuardrails(ctx context.Context, q access.Queryer, desired []Guardrail, names promotion.Names) ([]promotion.Item, error) {
+func planGuardrails(ctx context.Context, q database.Queryer, desired []Guardrail, names promotion.Names) ([]promotion.Item, error) {
 	if len(desired) == 0 {
 		return nil, nil
 	}
@@ -125,7 +126,7 @@ func planGuardrails(ctx context.Context, q access.Queryer, desired []Guardrail, 
 	return slices.Concat(planned...), err
 }
 
-func planPlugin(ctx context.Context, q access.Queryer, g Guardrail) ([]promotion.Item, error) {
+func planPlugin(ctx context.Context, q database.Queryer, g Guardrail) ([]promotion.Item, error) {
 	c, ok := g.spec.(guardrails.PluginSpec)
 	if !ok {
 		return nil, nil
@@ -144,7 +145,7 @@ func planPlugin(ctx context.Context, q access.Queryer, g Guardrail) ([]promotion
 	return nil, nil
 }
 
-func planDefinition(ctx context.Context, q access.Queryer, directory promotion.Directory, names promotion.Names, g Guardrail) (promotion.Item, error) {
+func planDefinition(ctx context.Context, q database.Queryer, directory promotion.Directory, names promotion.Names, g Guardrail) (promotion.Item, error) {
 	key := g.Project + "/" + g.Name
 	id, present := owner(directory, g.Project)
 	if !present && !names.Project(g.Project) {
@@ -175,7 +176,7 @@ func planDefinition(ctx context.Context, q access.Queryer, directory promotion.D
 }
 
 func GuardrailApplier(desired Section) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -184,12 +185,12 @@ func GuardrailApplier(desired Section) promotion.Applier {
 	}
 }
 
-func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, g Guardrail) error {
+func applyGuardrail(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, g Guardrail) error {
 	project, err := projectID(directory, g.Project)
 	if err != nil {
 		return err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	configuration, err := guardrails.RenameCredentials(g.Configuration, credentialID(ctx, tx, project))

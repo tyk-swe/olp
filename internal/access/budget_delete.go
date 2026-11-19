@@ -6,9 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
-func (s *Server) deleteBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) deleteBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "budget_group_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -28,7 +29,7 @@ func (s *Server) deleteBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 		if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.budget_groups WHERE id=$1", id).Scan(&projectID); err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err := p.Project(projectID, Change); err != nil {
+		if err := p.Project(projectID, authz.Change); err != nil {
 			return httpkit.Reply{}, err
 		}
 
@@ -39,7 +40,7 @@ func (s *Server) deleteBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL FOR UPDATE", id).Scan(&etag, &projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(projectID, Change); err != nil {
+	if err = p.Project(projectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, etag); err != nil {

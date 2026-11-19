@@ -16,6 +16,8 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"golang.org/x/oauth2"
 )
@@ -54,7 +56,7 @@ type oidcConfiguration struct {
 	UpdatedByEmail   string        `json:"updated_by_email"`
 }
 
-func loadOIDC(ctx context.Context, q Queryer) (oidcConfiguration, error) {
+func loadOIDC(ctx context.Context, q database.Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
 	err := q.QueryRow(ctx, "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
@@ -64,7 +66,7 @@ func loadOIDC(ctx context.Context, q Queryer) (oidcConfiguration, error) {
 	err = json.Unmarshal(data, &c)
 	return c, err
 }
-func (s *Server) oidcConfiguration(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, err := loadOIDC(r.Context(), s.Pool)
 	c.DiscoveryBinding = ""
 	return httpkit.Detail(c, c.ETag), err
@@ -127,7 +129,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 	c.DiscoveryBinding = binding
 	return provider, oauth, nil
 }
-func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		DiscoveryURL  string        `json:"discovery_url"`
 		Issuer        string        `json:"issuer"`
@@ -176,7 +178,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (httpkit.Rep
 			return httpkit.Reply{}, err
 		}
 	}
-	if c.DefaultRole != nil && !validRole(*c.DefaultRole) {
+	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
 		return httpkit.Reply{}, httpkit.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
 	}
 	for field, mappings := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
@@ -188,7 +190,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (httpkit.Rep
 				return previous.ClaimValue == m.ClaimValue ||
 					(field == "email_role_mappings" && strings.EqualFold(previous.ClaimValue, m.ClaimValue))
 			})
-			if !validRole(m.Role) || httpkit.ValidText("claim_value", m.ClaimValue, 254) != nil || duplicate {
+			if !authz.ValidRole(m.Role) || httpkit.ValidText("claim_value", m.ClaimValue, 254) != nil || duplicate {
 				return httpkit.Reply{}, httpkit.Invalid("role_mappings", "Use unique claim values and valid roles.")
 			}
 		}
@@ -279,10 +281,10 @@ type oidcFlow struct {
 func (s *Server) beginOIDCLogin(r *http.Request) (httpkit.Reply, error) {
 	return s.beginOIDC(r, "login")
 }
-func (s *Server) beginOIDCLink(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) beginOIDCLink(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginOIDC(r, "link")
 }
-func (s *Server) beginOIDCReauthentication(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) beginOIDCReauthentication(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginOIDC(r, "reauthenticate")
 }
 func (s *Server) beginOIDC(r *http.Request, kind string) (httpkit.Reply, error) {
@@ -540,11 +542,11 @@ func (s *Server) oidcCallback(r *http.Request) (reply httpkit.Reply, callbackErr
 	}
 	// Check the initiating session and exact identity before applying a
 	// reauthentication result. Ordinary login is never a recent-auth proof.
-	var p Principal
+	var p authz.Principal
 	if flow.Kind != "login" {
 		p, err = s.Authenticate(r, tx)
 		if err == nil {
-			err = p.Authorize(Self)
+			err = p.Authorize(authz.Self)
 		}
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -658,7 +660,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply httpkit.Reply, callbackErr
 		response.Cookies = append(response.Cookies, session.Cookies...)
 		response.CSRF = session.CSRF
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(userID), "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(userID), "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return response, tx.Commit(r.Context())
@@ -716,7 +718,7 @@ func oidcSignInRole(c oidcConfiguration, locallyManaged bool, role string, data 
 	return mappedRole(c, claims.Email, claims.Groups), nil
 }
 
-func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (map[string]bool, error) {
+func usableOIDCIdentities(r *http.Request, q database.Queryer, p authz.Principal, local bool) (map[string]bool, error) {
 	c, err := loadOIDC(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil
@@ -747,7 +749,7 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 	return usable, rows.Err()
 }
 
-func (s *Server) oidcIdentities(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) oidcIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	var local, localEnabled, enabled, locallyManaged bool
 	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management<>'oidc' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
@@ -781,7 +783,7 @@ func (s *Server) oidcIdentities(r *http.Request, p Principal) (httpkit.Reply, er
 	}
 	return httpkit.OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
-func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "identity_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -852,7 +854,7 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, s
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := Audit(r.Context(), tx, r, UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
+	if err := Audit(r.Context(), tx, r, authz.UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.newSession(r, tx, userID, strength)
@@ -887,14 +889,14 @@ func syncFederatedAuthority(r *http.Request, tx pgx.Tx, userID, mapped, source s
 		return false, false, err
 	}
 	if !allowed || mapped != "owner" {
-		if err = retireIssuedInvitations(r, tx, userID, System, ""); err != nil {
+		if err = retireIssuedInvitations(r, tx, userID, authz.System, ""); err != nil {
 			return false, false, err
 		}
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return false, false, err
 	}
-	err = Audit(r.Context(), tx, r, System, "user.role_sync_"+source, "user", userID, "success")
+	err = Audit(r.Context(), tx, r, authz.System, "user.role_sync_"+source, "user", userID, "success")
 	return true, allowed, err
 }
 

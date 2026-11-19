@@ -8,12 +8,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
 const scimGroupJSON = `jsonb_build_object('id',g.id,'display_name',g.document->>'displayName','external_id',g.document->>'externalId','mapping',g.document->'` + scim.GroupExtension + `','etag',g.etag,'member_count',(SELECT count(*) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id WHERE m.group_id=g.id AND u.role_management='provisioned'))`
 
-func (s *Server) scimGroups(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -26,7 +27,7 @@ func (s *Server) scimGroups(r *http.Request, _ Principal) (httpkit.Reply, error)
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -107,8 +108,8 @@ func keepSCIMManagers(r *http.Request, tx pgx.Tx, projects []string) error {
 
 // StoreSCIMMapping promotes policy only. Directory identities and memberships
 // stay local; an absent named group is created with no members.
-func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p Principal, name string, mapping map[string]any) error {
-	if err := p.Authorize(Access); err != nil {
+func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
+	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
 	if httpkit.ValidText("name", name, 100) != nil {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -137,7 +137,7 @@ func scan(row pgx.Row) (*Definition, error) {
 	return d, err
 }
 
-func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
+func Load(ctx context.Context, q database.Queryer, id string, lock bool) (*Definition, error) {
 	query := "SELECT " + columns + joined + " WHERE s.id=$1"
 	if lock {
 		query += " FOR UPDATE OF s"
@@ -145,11 +145,11 @@ func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definit
 	return scan(q.QueryRow(ctx, query, id))
 }
 
-func FindActive(ctx context.Context, q access.Queryer, project, name string) (*Definition, error) {
+func FindActive(ctx context.Context, q database.Queryer, project, name string) (*Definition, error) {
 	return scan(q.QueryRow(ctx, "SELECT "+columns+joined+" WHERE s.project_id=$1 AND lower(s.name)=lower($2) AND s.retired_at IS NULL", project, name))
 }
 
-func ListActive(ctx context.Context, q access.Queryer) ([]Definition, error) {
+func ListActive(ctx context.Context, q database.Queryer) ([]Definition, error) {
 	rows, err := q.Query(ctx, "SELECT "+columns+joined+" WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err

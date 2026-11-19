@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -165,14 +166,14 @@ func TestManagementIsolationSweep(t *testing.T) {
 	fixture := s.seedCanary(owner, newVendor(t).URL)
 	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "isolated"}, harness.Idempotent(), http.StatusCreated)
 
-	member := s.Invite(owner, "isolated-operator@example.com", access.RoleOperator)
+	member := s.Invite(owner, "isolated-operator@example.com", authz.RoleOperator)
 	profile := s.Want(member, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
 	userID := profile["id"].(string)
 	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
 	s.Want(owner, "PUT", "/api/v1/projects/"+project["id"].(string)+"/members/"+userID, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
 
-	scopes := make([]string, 0, len(access.TokenScopes()))
-	for _, operation := range access.TokenScopes() {
+	scopes := make([]string, 0, len(authz.TokenScopes()))
+	for _, operation := range authz.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
 	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{

@@ -6,12 +6,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
 
 func Applier(desired Desired) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(desired.Bindings) == 0 {
 			return nil
 		}
@@ -29,15 +30,15 @@ func Applier(desired Desired) promotion.Applier {
 	}
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, lookup installed, binding Binding) error {
+func apply(ctx context.Context, tx pgx.Tx, p authz.Principal, lookup installed, binding Binding) error {
 	in, err := resolve(ctx, tx, lookup, binding)
 	if err != nil {
 		return err
 	}
-	if err := p.Authorize(access.Configure); err != nil {
+	if err := p.Authorize(authz.Configure); err != nil {
 		return err
 	}
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return err
 	}
 	current, err := locked(ctx, tx, in)

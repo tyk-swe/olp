@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -90,7 +90,7 @@ func epochPageQuery(state *EpochState, cursor *usage.Cursor, limit int) (string,
 }
 
 // ListGatewayEpochs pages process epochs by their last durable checkpoint.
-func ListGatewayEpochs(ctx context.Context, q access.Queryer, state *EpochState, cursor *usage.Cursor, limit int) ([]GatewayEpoch, *string, error) {
+func ListGatewayEpochs(ctx context.Context, q database.Queryer, state *EpochState, cursor *usage.Cursor, limit int) ([]GatewayEpoch, *string, error) {
 	text, args := epochPageQuery(state, cursor, limit)
 	rows, err := q.Query(ctx, text, args...)
 	if err != nil {

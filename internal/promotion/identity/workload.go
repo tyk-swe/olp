@@ -11,6 +11,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -56,7 +58,7 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	return access.ValidateWorkloadConfig(config)
 }
 
-func readWorkload(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
+func readWorkload(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
 	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
@@ -72,7 +74,7 @@ func renderWorkload(issuers []contract.ConfigurationWorkloadIssuer) []contract.C
 	})
 }
 
-func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Item, error) {
+func planWorkload(ctx context.Context, q database.Queryer, d Desired) ([]promotion.Item, error) {
 	if len(d.issuers) == 0 {
 		return nil, nil
 	}
@@ -102,7 +104,7 @@ func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion
 	})
 }
 
-func planIssuer(ctx context.Context, q access.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
+func planIssuer(ctx context.Context, q database.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
 	current, exists, err := access.FindWorkloadIssuer(ctx, q, issuer.Issuer)
 	if err != nil {
 		return promotion.Item{}, err
@@ -165,7 +167,7 @@ func effective(stored catalog, entry contract.ConfigurationProjectEntry, declare
 	return catalog{templates: slices.Collect(maps.Keys(templates)), groups: groups}
 }
 
-func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, error) {
+func readCatalogs(ctx context.Context, q database.Queryer) (map[string]catalog, error) {
 	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return nil, err
@@ -180,7 +182,7 @@ func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, er
 
 func (d Desired) NeedsPrepare() bool { return len(d.issuers) > 0 }
 
-func Prepare(ctx context.Context, desired Desired, principal access.Principal, deps Deps) (Prepared, error) {
+func Prepare(ctx context.Context, desired Desired, principal authz.Principal, deps Deps) (Prepared, error) {
 	if err := Authorize(desired, principal); err != nil {
 		return Prepared{}, err
 	}
@@ -209,7 +211,7 @@ func prepareIssuer(ctx context.Context, deps Deps, issuer contract.Configuration
 }
 
 func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(desired.issuers) == 0 {
 			return nil
 		}
@@ -224,7 +226,7 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 	}
 }
 
-func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
+func applyIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
 	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err

@@ -6,9 +6,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -19,7 +19,7 @@ import (
 )
 
 type Authorizer struct {
-	Pool        access.Queryer
+	Pool        database.Queryer
 	Credentials release.Credentials
 	Plugins     *plugins.Host
 }

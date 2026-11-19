@@ -6,12 +6,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
 
-func Read(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]Binding, error) {
+func Read(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]Binding, error) {
 	stored, err := retrieval.List(ctx, q)
 	if err != nil {
 		return nil, err
@@ -25,7 +26,7 @@ func Read(ctx context.Context, q access.Queryer, directory promotion.Directory) 
 	})
 }
 
-func exported(ctx context.Context, q access.Queryer, directory promotion.Directory, providerNames map[string]string, binding retrieval.Binding) (Binding, error) {
+func exported(ctx context.Context, q database.Queryer, directory promotion.Directory, providerNames map[string]string, binding retrieval.Binding) (Binding, error) {
 	projectName, ok := directory.Name(binding.ProjectID)
 	if !ok {
 		return Binding{}, fmt.Errorf("retrieval binding %s belongs to an unknown project", binding.ID)

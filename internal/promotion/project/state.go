@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -25,7 +25,7 @@ type State struct {
 	byName   map[string]Current
 }
 
-func Read(ctx context.Context, q access.Queryer) (State, error) {
+func Read(ctx context.Context, q database.Queryer) (State, error) {
 	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return State{}, err

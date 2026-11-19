@@ -7,11 +7,11 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -281,7 +281,7 @@ func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidAdmission, conv
 	return binding, err
 }
 
-func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidAdmission, lock bool) error {
+func paidCodeTarget(ctx context.Context, db database.Queryer, in PaidAdmission, lock bool) error {
 	locking := func() string {
 		if lock {
 			return " FOR SHARE OF p,s,c"

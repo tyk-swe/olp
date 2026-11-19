@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
@@ -21,7 +21,7 @@ type windowInvoice struct {
 	Amount     decimal.Decimal
 }
 
-func CaptureRates(ctx context.Context, q access.Queryer, now time.Time) ([]prometheus.Metric, error) {
+func CaptureRates(ctx context.Context, q database.Queryer, now time.Time) ([]prometheus.Metric, error) {
 	end := now.UTC().Truncate(24 * time.Hour)
 	window := Range{Start: end.AddDate(0, 0, -7), End: end}
 	currency, err := pricebook.InstallationCurrency(ctx, q)
@@ -52,7 +52,7 @@ func CaptureRates(ctx context.Context, q access.Queryer, now time.Time) ([]prome
 	return samples, nil
 }
 
-func windowInvoices(ctx context.Context, q access.Queryer, window Range, currency string) ([]windowInvoice, error) {
+func windowInvoices(ctx context.Context, q database.Queryer, window Range, currency string) ([]windowInvoice, error) {
 	rows, err := q.Query(ctx, `SELECT ic.provider_id, sum(ic.amount)
 		FROM olp.provider_invoiced_costs ic
 		JOIN olp.provider_billing_imports bi ON bi.provider_id=ic.provider_id

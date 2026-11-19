@@ -13,9 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -126,7 +126,7 @@ func scanSnapshot(row pgx.Row) (SourceSnapshot, error) {
 	return snapshot, nil
 }
 
-func loadSource(ctx context.Context, q access.Queryer, id string) (Source, error) {
+func loadSource(ctx context.Context, q database.Queryer, id string) (Source, error) {
 	return scanSource(q.QueryRow(ctx, sourceColumns+" WHERE id=$1", id))
 }
 

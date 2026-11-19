@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -22,7 +22,7 @@ var listableStatuses = map[contract.NotificationDeliveryStatus]bool{
 	contract.NotificationDeliveryStatusFailed:    true,
 }
 
-func (s *Server) notificationDeliveries(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) notificationDeliveries(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err

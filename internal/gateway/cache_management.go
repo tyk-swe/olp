@@ -4,8 +4,10 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
@@ -19,7 +21,7 @@ func (s *CacheManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/cache/purge", s.purge)
 	s.Access.Route(mux, "GET /api/v1/cache/statistics", s.statistics)
 }
-func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *CacheManagement) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in struct {
 		RouteID   *string `json:"route_id"`
 		ProjectID *string `json:"project_id"`
@@ -33,46 +35,40 @@ func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (httpkit.Re
 	if s.Cache == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "cache_unavailable", "The response cache is unavailable.")
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	kind, id := "project", in.ProjectID
-	project := in.ProjectID
-	if in.RouteID != nil {
-		kind, id = "route", in.RouteID
-	}
-	parsed, err := uuid.Parse(*id)
-	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid(kind+"_id", "Use a "+kind+" UUID.")
-	}
-	canonical := parsed.String()
-	id = &canonical
-	if kind == "route" {
-		if err = tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.routes WHERE id=$1", *id).Scan(&project); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		kind, id := "project", in.ProjectID
+		project := in.ProjectID
+		if in.RouteID != nil {
+			kind, id = "route", in.RouteID
 		}
-	}
-	if kind == "project" {
-		project = id
-		if err = s.Access.RequireProject(r.Context(), tx, p, project); err != nil {
-			return httpkit.Reply{}, err
+		parsed, err := uuid.Parse(*id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid(kind+"_id", "Use a "+kind+" UUID.")
 		}
-	}
-	if err = p.Project(project, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.Cache.Purge(r.Context(), kind, *id); err != nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "cache_unavailable", "The response cache is unavailable.")
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "cache.purge", kind, *id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.OK(map[string]bool{"purged": true}), tx.Commit(r.Context())
+		canonical := parsed.String()
+		id = &canonical
+		if kind == "route" {
+			if err = tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.routes WHERE id=$1", *id).Scan(&project); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if kind == "project" {
+			project = id
+			if err = s.Access.RequireProject(r.Context(), tx, p, project); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if err = p.Project(project, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = s.Cache.Purge(r.Context(), kind, *id); err != nil {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(503, "cache_unavailable", "The response cache is unavailable.")
+		}
+		return httpkit.OK(map[string]bool{"purged": true}), access.Event{Action: "cache.purge", Resource: kind, ID: *id}, nil
+	})
 }
 
-func (s *CacheManagement) statistics(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *CacheManagement) statistics(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	route := r.URL.Query().Get("route")
 	if route != "" && !routeidentity.ValidSlug(route) {
 		return httpkit.Reply{}, httpkit.Invalid("route", "Use a route slug.")

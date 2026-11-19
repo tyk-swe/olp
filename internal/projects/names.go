@@ -5,24 +5,24 @@ import (
 	"maps"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
-func ReadProjectNames(ctx context.Context, q access.Queryer) (map[string]string, error) {
+func ReadProjectNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
 	return readNames(ctx, q, "SELECT id::text,name FROM olp.projects")
 }
 
-func ReadOrganizationNames(ctx context.Context, q access.Queryer) (map[string]string, error) {
+func ReadOrganizationNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
 	return readNames(ctx, q, "SELECT id::text,name FROM olp.organizations")
 }
 
-func OrganizationName(ctx context.Context, q access.Queryer, id string) (string, error) {
+func OrganizationName(ctx context.Context, q database.Queryer, id string) (string, error) {
 	var name string
 	err := q.QueryRow(ctx, "SELECT name FROM olp.organizations WHERE id=$1", id).Scan(&name)
 	return name, err
 }
 
-func readNames(ctx context.Context, q access.Queryer, query string) (map[string]string, error) {
+func readNames(ctx context.Context, q database.Queryer, query string) (map[string]string, error) {
 	rows, err := q.Query(ctx, query)
 	if err != nil {
 		return nil, err

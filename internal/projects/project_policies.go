@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type ProjectPolicies struct {
@@ -14,7 +14,7 @@ type ProjectPolicies struct {
 	Policies     Policies
 }
 
-func ReadProjectPolicies(ctx context.Context, q access.Queryer) ([]ProjectPolicies, error) {
+func ReadProjectPolicies(ctx context.Context, q database.Queryer) ([]ProjectPolicies, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,name,(SELECT name FROM olp.organizations WHERE id=organization_id),"+policyColumns+" FROM olp.projects")
 	if err != nil {
 		return nil, err

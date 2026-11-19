@@ -3,8 +3,8 @@ package plugins
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 )
@@ -12,7 +12,7 @@ import (
 // index lists the reviewed plugins with whether each reviewed digest is
 // installed and approved here. It installs nothing: the digest of a module an
 // owner uploads is what ties it to an index entry.
-func (s *Management) index(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) index(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if s.Index == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "plugin_index_unavailable", "This process holds no verified plugin index.")
 	}

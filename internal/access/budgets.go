@@ -10,6 +10,8 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -66,7 +68,7 @@ func (s *Server) budgetGroupJSON() string {
 		`||jsonb_build_object('enforcement_active',` + enforcement + `)))`
 }
 
-func (s *Server) budgetGroups(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) budgetGroups(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -79,7 +81,7 @@ func (s *Server) budgetGroups(r *http.Request, p Principal) (httpkit.Reply, erro
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) budgetGroup(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) budgetGroup(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "budget_group_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -90,13 +92,13 @@ func (s *Server) budgetGroup(r *http.Request, p Principal) (httpkit.Reply, error
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.budgetGroupJSON()+",g.etag::text,g.project_id::text"+budgetGroupFrom+" WHERE g.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, View); err != nil {
+	if err := p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) createBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input budgetGroupInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -146,7 +148,7 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateBudgetGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := httpkit.Decode(r, &patch); err != nil {
 		return httpkit.Reply{}, err
@@ -178,7 +180,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text,'cost_basis',cost_basis) FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", id).Scan(&etag, &projectID, &data); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, Change); err != nil {
+	if err := p.Project(projectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = httpkit.Match(r, etag); err != nil {
@@ -216,7 +218,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 	return httpkit.Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
 }
 
-func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string) error {
+func checkBudgetGroup(ctx context.Context, q database.Queryer, groupID, projectID *string) error {
 	if groupID == nil {
 		return nil
 	}

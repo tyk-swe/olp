@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
@@ -26,11 +27,11 @@ func (a API) Register(mux *http.ServeMux) {
 	a.access.Route(mux, "POST /api/v1/code/accounts/{id}/allowance-reads", a.requestAllowanceRead)
 }
 
-func (a API) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return a.access.CodeList(r, p, accountJSON)
 }
 
-func (a API) write(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a API) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input Input
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -39,7 +40,7 @@ func (a API) write(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return a.access.CodeWrite(r, access.CodeAccounts, in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
+	return a.access.CodeWrite(r, access.CodeAccounts, in.ProjectID, in, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return save(r.Context(), tx, p, id, etag, in, existing)
 	})
 }
@@ -50,33 +51,30 @@ type connectionProfile struct {
 	id       string
 }
 
-func (a API) requestAllowanceRead(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (a API) requestAllowanceRead(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(a.access, r, id, func(tx pgx.Tx, p access.Principal) (connectionProfile, error) {
+	return access.Mutate(a.access, r, id, func(tx pgx.Tx, p authz.Principal) (connectionProfile, error) {
 		var project string
 		var kind, authMode, profileID *string
 		if err := tx.QueryRow(r.Context(), `SELECT a.project_id::text,p.configuration->>'kind',p.configuration->>'auth_mode',p.configuration->>'profile_id' FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &kind, &authMode, &profileID); err != nil {
 			return connectionProfile{}, err
 		}
-		return connectionProfile{kind: connectors.Kind(providerconfig.Value(kind)), authMode: connectors.AuthMode(providerconfig.Value(authMode)), id: providerconfig.Value(profileID)}, p.Project(&project, access.Change)
-	}, func(tx pgx.Tx, p access.Principal, profile connectionProfile) (httpkit.Reply, error) {
+		return connectionProfile{kind: connectors.Kind(providerconfig.Value(kind)), authMode: connectors.AuthMode(providerconfig.Value(authMode)), id: providerconfig.Value(profileID)}, p.Project(&project, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, profile connectionProfile) (httpkit.Reply, access.Event, error) {
 		signal, known := codeadapter.AllowanceSignalForProfile(profile.kind, profile.authMode, profile.id)
 		if !known || !signal.ActiveQualified {
-			return httpkit.Reply{}, httpkit.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "code_account.allowance_read", "code_account", id, "success"); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		var body json.RawMessage
 		if err := tx.QueryRow(r.Context(), accountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.OK(body), nil
+		return httpkit.OK(body), access.Event{Action: "code_account.allowance_read", Resource: "code_account", ID: id}, nil
 	})
 }

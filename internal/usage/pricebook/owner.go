@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type ownerKind string
@@ -58,7 +58,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 	}
 }
 
-func ownerExists(ctx context.Context, q access.Queryer, owner Owner) error {
+func ownerExists(ctx context.Context, q database.Queryer, owner Owner) error {
 	query := ""
 	switch owner.kind {
 	case ownerOrganization:

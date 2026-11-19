@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -19,7 +19,7 @@ type listedVendor struct {
 
 func TestVendorListingPublishesEveryVendorWithItsAuthentication(t *testing.T) {
 	t.Parallel()
-	reply, err := (&Server{}).listVendors(httptest.NewRequest(http.MethodGet, "/api/v1/provider-vendors", nil), access.Principal{})
+	reply, err := (&Server{}).listVendors(httptest.NewRequest(http.MethodGet, "/api/v1/provider-vendors", nil), authz.Principal{})
 	if err != nil {
 		t.Fatal(err)
 	}

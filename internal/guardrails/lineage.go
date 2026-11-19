@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type Publisher func(ctx context.Context, tx pgx.Tx, actor string) error
@@ -23,8 +24,8 @@ type Lineage interface {
 	Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error
 }
 
-func Activation(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, access.Principal) (httpkit.Reply, error) {
-	return func(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func Activation(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, authz.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, param)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -36,29 +37,26 @@ func Activation(server *access.Server, publish Publisher, lineage Lineage, param
 			return httpkit.Reply{}, err
 		}
 		ctx := r.Context()
-		return access.Mutate(server, r, in, func(tx pgx.Tx, p access.Principal) (Head, error) {
+		return access.Mutate(server, r, in, func(tx pgx.Tx, p authz.Principal) (Head, error) {
 			head, err := lineage.Lock(ctx, tx, id)
 			if err != nil {
 				return Head{}, err
 			}
-			return head, p.Project(ProjectPointer(head.Project), access.Change)
-		}, func(tx pgx.Tx, p access.Principal, head Head) (httpkit.Reply, error) {
+			return head, p.Project(ProjectPointer(head.Project), authz.Change)
+		}, func(tx pgx.Tx, p authz.Principal, head Head) (httpkit.Reply, access.Event, error) {
 			if err := httpkit.Match(r, head.ETag); err != nil {
-				return httpkit.Reply{}, err
+				return httpkit.Reply{}, access.Event{}, err
 			}
 			if head.Retired {
-				return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "guardrail_retired", "A retired resource cannot be activated.")
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "guardrail_retired", "A retired resource cannot be activated.")
 			}
 			if err := lineage.Activate(ctx, tx, p.UserID(), id, in.RevisionID); err != nil {
-				return httpkit.Reply{}, err
+				return httpkit.Reply{}, access.Event{}, err
 			}
 			if err := publish(ctx, tx, p.UserID()); err != nil {
-				return httpkit.Reply{}, httpkit.Invalid("revision_id", "This activation is incompatible with a published route or attachment.")
+				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("revision_id", "This activation is incompatible with a published route or attachment.")
 			}
-			if err := access.Audit(ctx, tx, r, p.Actor(), "guardrail.activate", resource, id, "success"); err != nil {
-				return httpkit.Reply{}, err
-			}
-			return httpkit.Reply{Status: http.StatusNoContent}, nil
+			return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "guardrail.activate", Resource: resource, ID: id}, nil
 		})
 	}
 }

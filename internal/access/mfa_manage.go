@@ -12,10 +12,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pquerna/otp/totp"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func (s *Server) mfaStatus(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'kind',kind,'name',name,'created_at',created_at,'last_used_at',last_used_at) FROM olp.mfa_factors WHERE user_id=$1 ORDER BY created_at", p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -34,7 +35,7 @@ func (s *Server) mfaStatus(r *http.Request, p Principal) (httpkit.Reply, error) 
 	return httpkit.Detail(map[string]any{"factors": factors, "recovery_codes_remaining": remaining, "required": required, "etag": revision, "webauthn_available": webErr == nil}, revision), err
 }
 
-func (s *Server) mfaManageChallenge(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) mfaManageChallenge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -60,7 +61,7 @@ type mfaEnrollInput struct {
 	Challenge string `json:"challenge,omitempty"`
 }
 
-func (s *Server) mfaEnroll(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) mfaEnroll(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginMFAEnrollment(r, false)
 }
 
@@ -177,7 +178,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	return httpkit.OK(response), tx.Commit(r.Context())
 }
 
-func (s *Server) mfaRemove(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "factor_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -234,7 +235,7 @@ func (s *Server) mfaRemove(r *http.Request, _ Principal) (httpkit.Reply, error) 
 	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
-func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p Principal) error {
+func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal) error {
 	var revision string
 	if err := tx.QueryRow(r.Context(), "SELECT mfa_revision::text FROM olp.users WHERE id=$1", p.ID).Scan(&revision); err != nil {
 		return err
@@ -242,7 +243,7 @@ func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p Principal) error
 	return httpkit.Match(r, revision)
 }
 
-func (s *Server) mfaRecovery(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err

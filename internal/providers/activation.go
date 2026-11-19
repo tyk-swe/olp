@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/release"
@@ -85,8 +85,8 @@ func (row slotRow) published(authMode connectors.AuthMode) routing.RevisionSlot 
 	return routing.RevisionSlot{Slot: slot, Default: row.Default, ObservedPrincipal: principal}
 }
 
-func (s *Server) activateProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.activate", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) activateProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.activate", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		activated, err := s.activateDraft(ctx, tx, p, current)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -95,8 +95,8 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (httpkit.
 	})
 }
 
-func (s *Server) disableProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.disable", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) disableProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.disable", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		disabled, err := s.disable(ctx, tx, p, current)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -110,7 +110,7 @@ type activatedProvider struct {
 	Generation release.Published
 }
 
-func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
 	// The plugin a draft pinned may since have become unusable, such as
 	// an unconfined plugin in a deployment that no longer enables them.
 	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), current.Connection.Document())
@@ -196,7 +196,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principa
 	return activatedProvider{ETag: etag, Generation: generation}, nil
 }
 
-func (s *Server) disable(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+func (s *Server) disable(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
 	if current.State != stateActive {
 		return activatedProvider{}, httpkit.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}

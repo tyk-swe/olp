@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -119,7 +120,7 @@ func boundOr(ref *string, values map[string]string) string {
 	return values[*ref]
 }
 
-func owner(ctx context.Context, q access.Queryer, ref *string, project string, users map[string]string) (*string, error) {
+func owner(ctx context.Context, q database.Queryer, ref *string, project string, users map[string]string) (*string, error) {
 	if ref == nil {
 		return nil, nil
 	}
@@ -137,7 +138,7 @@ func owner(ctx context.Context, q access.Queryer, ref *string, project string, u
 	return &id, nil
 }
 
-func key(ctx context.Context, q access.Queryer, ref, project string, owner *string, keys map[string]string) (string, error) {
+func key(ctx context.Context, q database.Queryer, ref, project string, owner *string, keys map[string]string) (string, error) {
 	id, err := bound(ref, keys)
 	if err != nil {
 		return "", err
@@ -152,11 +153,11 @@ func key(ctx context.Context, q access.Queryer, ref, project string, owner *stri
 	return id, nil
 }
 
-func keysOf(ctx context.Context, q access.Queryer, refs []string, project string, owner *string, keys map[string]string) ([]string, error) {
+func keysOf(ctx context.Context, q database.Queryer, refs []string, project string, owner *string, keys map[string]string) ([]string, error) {
 	return promotion.TryMapIndex(refs, func(_ int, ref string) (string, error) { return key(ctx, q, ref, project, owner, keys) })
 }
 
-func compared[T any](ctx context.Context, q access.Queryer, r resolved[T], read func(context.Context, access.Queryer, string) (T, error)) (contract.ConfigurationPlanItemAction, error) {
+func compared[T any](ctx context.Context, q database.Queryer, r resolved[T], read func(context.Context, database.Queryer, string) (T, error)) (contract.ConfigurationPlanItemAction, error) {
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, nil
 	}

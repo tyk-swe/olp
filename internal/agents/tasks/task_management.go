@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type TaskView struct {
@@ -72,7 +72,7 @@ const taskColumns = `id::text AS id, project_id::text AS project_id, api_key_id:
  delegation_agent_id::text AS agent_principal_id, delegation_member_id::text AS member_principal_id,
  NULLIF(delegation_pair_digest,'') AS delegation_pair_id, state, callback_attempts, created_at, deadline_at`
 
-func projectFilter(r *http.Request, p access.Principal) (string, error) {
+func projectFilter(r *http.Request, p authz.Principal) (string, error) {
 	project := r.URL.Query().Get("project_id")
 	if project == "" {
 		return "", nil
@@ -81,13 +81,13 @@ func projectFilter(r *http.Request, p access.Principal) (string, error) {
 	if err != nil || id == uuid.Nil || id.String() != project {
 		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
 	}
-	if err := p.Project(&project, access.View); err != nil {
+	if err := p.Project(&project, authz.View); err != nil {
 		return "", err
 	}
 	return project, nil
 }
 
-func (s *Management) listTasks(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) listTasks(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -109,7 +109,7 @@ func (s *Management) listTasks(r *http.Request, p access.Principal) (httpkit.Rep
 	return httpkit.ListReplyBy(items, page, func(item TaskView) string { return item.ID }), nil
 }
 
-func (s *Management) getTask(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) getTask(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "task_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -122,7 +122,7 @@ func (s *Management) getTask(r *http.Request, p access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&task.ProjectID, access.View); err != nil {
+	if err := p.Project(&task.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	feeRows, err := s.access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,d.currency,

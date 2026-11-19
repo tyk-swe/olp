@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -85,7 +85,7 @@ func grantProviders(snapshot *routing.View) map[string]string {
 // database snapshot. Unchanged generations borrow the live cache's immutable
 // bytes. Installation borrows that cache too, and builds a complete seed for
 // its own membership without decrypting unchanged tokens.
-func (m *Manager) readGrants(ctx context.Context, q access.Queryer, providers map[string]string, known map[string]servedGrant) (map[string]servedGrant, error) {
+func (m *Manager) readGrants(ctx context.Context, q database.Queryer, providers map[string]string, known map[string]servedGrant) (map[string]servedGrant, error) {
 	generations, err := ReadGrantGenerations(ctx, q, slices.Collect(maps.Keys(providers)))
 	if err != nil {
 		return nil, fmt.Errorf("grants: %w", err)
@@ -189,7 +189,7 @@ func (m *Manager) GrantGeneration(credentialID string) int64 {
 
 // ReadGrantGenerations reads the generations of the named credentials' grants.
 // Static credentials are absent and therefore have generation zero.
-func ReadGrantGenerations(ctx context.Context, q access.Queryer, credentials []string) (map[string]int64, error) {
+func ReadGrantGenerations(ctx context.Context, q database.Queryer, credentials []string) (map[string]int64, error) {
 	generations := map[string]int64{}
 	if len(credentials) == 0 {
 		return generations, nil

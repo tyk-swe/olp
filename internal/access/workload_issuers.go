@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -17,7 +19,7 @@ func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
 
 const workloadIssuerJSON = `i.document||jsonb_build_object('id',i.id,'etag',i.etag,'created_at',i.created_at,'updated_at',i.updated_at,'created_by',i.created_by)`
 
-func (s *Server) workloadIssuers(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) workloadIssuers(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, e := httpkit.Page(r)
 	if e != nil {
 		return httpkit.Reply{}, e
@@ -30,7 +32,7 @@ func (s *Server) workloadIssuers(r *http.Request, _ Principal) (httpkit.Reply, e
 	items, e := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, page), e
 }
-func (s *Server) workloadIssuer(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) workloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, e := httpkit.IDParam(r, "issuer_id")
 	if e != nil {
 		return httpkit.Reply{}, e
@@ -40,13 +42,13 @@ func (s *Server) workloadIssuer(r *http.Request, _ Principal) (httpkit.Reply, er
 	e = s.Pool.QueryRow(r.Context(), "SELECT "+workloadIssuerJSON+",i.etag::text FROM olp.workload_issuers i WHERE id=$1", id).Scan(&data, &etag)
 	return httpkit.Detail(data, etag), e
 }
-func (s *Server) createWorkloadIssuer(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) createWorkloadIssuer(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeWorkloadIssuer(r, p, true)
 }
-func (s *Server) putWorkloadIssuer(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) putWorkloadIssuer(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeWorkloadIssuer(r, p, false)
 }
-func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) (httpkit.Reply, error) {
+func (s *Server) writeWorkloadIssuer(r *http.Request, _ authz.Principal, create bool) (httpkit.Reply, error) {
 	var input workload.Config
 	if e := httpkit.DecodeUnique(r, &input, 65536); e != nil {
 		return httpkit.Reply{}, e
@@ -159,8 +161,8 @@ func ValidateWorkloadConfig(input workload.Config) error {
 
 // StoreWorkloadIssuer writes validated identity state in an authorized mutation
 // transaction. Callers validate new/enabled endpoints before acquiring the lock.
-func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal, id string, input workload.Config, create bool) (string, error) {
-	if err := p.Authorize(Access); err != nil {
+func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, id string, input workload.Config, create bool) (string, error) {
+	if err := p.Authorize(authz.Access); err != nil {
 		return "", err
 	}
 	if err := ValidateWorkloadConfig(input); err != nil {
@@ -241,7 +243,7 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 }
 
 // ValidateWorkloadBindings preserves enrolled subjects during planning and writes.
-func ValidateWorkloadBindings(ctx context.Context, q Queryer, id string, input workload.Config) error {
+func ValidateWorkloadBindings(ctx context.Context, q database.Queryer, id string, input workload.Config) error {
 	rows, err := q.Query(ctx, "SELECT DISTINCT workload_mapping,project_id::text FROM olp.api_keys WHERE workload_issuer_id=$1", id)
 	if err != nil {
 		return err

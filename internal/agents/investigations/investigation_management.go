@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type InvestigationFilters struct {
@@ -113,7 +114,7 @@ func validateInvestigationEvidence(ctx context.Context, tx pgx.Tx, project strin
 	return nil
 }
 
-func (s *Management) listInvestigations(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) listInvestigations(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -124,7 +125,7 @@ func (s *Management) listInvestigations(r *http.Request, p access.Principal) (ht
 		if err != nil || id == uuid.Nil || id.String() != project {
 			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
-		if err := p.Project(&project, access.View); err != nil {
+		if err := p.Project(&project, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -141,7 +142,7 @@ func (s *Management) listInvestigations(r *http.Request, p access.Principal) (ht
 	return httpkit.ListReplyBy(items, page, func(item Investigation) string { return item.ID }), nil
 }
 
-func (s *Management) getInvestigation(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) getInvestigation(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "investigation_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -154,7 +155,7 @@ func (s *Management) getInvestigation(r *http.Request, p access.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&item.ProjectID, access.View); err != nil {
+	if err := p.Project(&item.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT ref.value->>'kind' AS kind,ref.value->>'id' AS id,
@@ -178,7 +179,7 @@ func (s *Management) getInvestigation(r *http.Request, p access.Principal) (http
 	}{Investigation: item, Evidence: evidence}), nil
 }
 
-func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) createInvestigation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input InvestigationInput
 	if err := httpkit.DecodeUnique(r, &input, 32<<10); err != nil {
 		return httpkit.Reply{}, err
@@ -186,46 +187,29 @@ func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (h
 	if err := input.Validate(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := s.access.RequireProject(r.Context(), tx, p, &input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replay, err := s.access.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	if input.Filters.RunID != nil {
-		if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, InvestigationEvidence{Kind: "run", ID: *input.Filters.RunID}); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, s.access.RequireProject(r.Context(), tx, p, &input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if input.Filters.RunID != nil {
+			if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, InvestigationEvidence{Kind: "run", ID: *input.Filters.RunID}); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
 		}
-	}
-	for _, evidence := range input.Evidence {
-		if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, evidence); err != nil {
-			return httpkit.Reply{}, err
+		for _, evidence := range input.Evidence {
+			if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, evidence); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
 		}
-	}
-	itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
- RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, httpkit.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "investigation.create", "investigation", item.ID, "success", &item.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Reply{Status: http.StatusCreated, Body: item, Location: "/api/v1/investigations/" + item.ID}
-	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+		itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
+	 RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, httpkit.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Reply{Status: http.StatusCreated, Body: item, Location: "/api/v1/investigations/" + item.ID}
+		return reply, access.Event{Action: "investigation.create", Resource: "investigation", ID: item.ID, Project: &item.ProjectID}, nil
+	})
 }

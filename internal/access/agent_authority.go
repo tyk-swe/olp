@@ -8,6 +8,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerscope"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 func addedKeyAgentResources(policy, previous keyauthority.KeyPolicy) keyauthority.KeyPolicy {
@@ -16,7 +17,7 @@ func addedKeyAgentResources(policy, previous keyauthority.KeyPolicy) keyauthorit
 	return policy
 }
 
-func checkKeyAgentResources(ctx context.Context, q Queryer, policy keyauthority.KeyPolicy, project *string) error {
+func checkKeyAgentResources(ctx context.Context, q database.Queryer, policy keyauthority.KeyPolicy, project *string) error {
 	for field, ids := range map[string][]string{"allowed_toolsets": policy.AllowedToolsets, "allowed_agents": policy.AllowedAgents} {
 		if len(ids) == 0 {
 			continue

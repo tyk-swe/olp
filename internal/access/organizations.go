@@ -3,34 +3,11 @@ package access
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
-// Organization membership widens project scope, never installation roles or
-// token scopes. Explicitly project-scoped tokens cannot administer an organization.
-func (p Principal) Organization(id string, need Need) error {
-	if p.AllProjects && (need == View || p.Authorize(Access) == nil) {
-		return nil
-	}
-	role, ok := p.Organizations[id]
-	if !ok {
-		return NotFound
-	}
-	if need == Change && role != "manager" {
-		return httpkit.Forbidden()
-	}
-	return nil
-}
-
-func (p Principal) OrganizationIDs() []string {
-	ids := make([]string, 0, len(p.Organizations))
-	for id := range p.Organizations {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-func (p *Principal) loadOrganizations(ctx context.Context, q Queryer, user string) error {
+func loadOrganizations(ctx context.Context, q database.Queryer, p *authz.Principal, user string) error {
 	rows, err := q.Query(ctx, "SELECT organization_id::text,role FROM olp.organization_members WHERE user_id=$1", user)
 	if err != nil {
 		return err

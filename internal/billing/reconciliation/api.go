@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
@@ -64,7 +65,7 @@ func providerFilter(raw string) (uuid.NullUUID, error) {
 	return uuid.NullUUID{UUID: id, Valid: true}, nil
 }
 
-func (a *API) report(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) report(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	window, err := ParseRange(query)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -21,7 +22,7 @@ type installed struct {
 	providers promotion.Directory
 }
 
-func readInstalled(ctx context.Context, q access.Queryer) (installed, error) {
+func readInstalled(ctx context.Context, q database.Queryer) (installed, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return installed{}, err
@@ -33,7 +34,7 @@ func readInstalled(ctx context.Context, q access.Queryer) (installed, error) {
 	return installed{projects: directory, providers: promotion.DirectoryOf(names)}, nil
 }
 
-func resolve(ctx context.Context, q access.Queryer, lookup installed, binding Binding) (retrieval.Input, error) {
+func resolve(ctx context.Context, q database.Queryer, lookup installed, binding Binding) (retrieval.Input, error) {
 	projectID, ok := lookup.projects.ID(binding.Project)
 	if !ok {
 		return retrieval.Input{}, errProjectAbsent
@@ -62,7 +63,7 @@ func resolve(ctx context.Context, q access.Queryer, lookup installed, binding Bi
 	}, nil
 }
 
-func targetIDs(ctx context.Context, q access.Queryer, lookup installed, binding Binding, projectID string) ([]string, error) {
+func targetIDs(ctx context.Context, q database.Queryer, lookup installed, binding Binding, projectID string) ([]string, error) {
 	providerID, ok := lookup.providers.ID(binding.TargetProvider)
 	if !ok {
 		return nil, nil
@@ -70,7 +71,7 @@ func targetIDs(ctx context.Context, q access.Queryer, lookup installed, binding 
 	return routes.CurrentTargetIDs(ctx, q, binding.Route, projectID, providerID, binding.Resource)
 }
 
-func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []string) ([]string, error) {
+func keyIDs(ctx context.Context, q database.Queryer, projectID string, names []string) ([]string, error) {
 	return promotion.TryMap(names, func(name string) (string, error) {
 		ids, err := usableKeys(ctx, q, projectID, name)
 		if err != nil {
@@ -83,7 +84,7 @@ func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []str
 	})
 }
 
-func usableKeys(ctx context.Context, q access.Queryer, projectID, name string) ([]access.NamedKey, error) {
+func usableKeys(ctx context.Context, q database.Queryer, projectID, name string) ([]access.NamedKey, error) {
 	keys, err := access.ReadKeysNamed(ctx, q, &projectID, name)
 	if err != nil {
 		return nil, err

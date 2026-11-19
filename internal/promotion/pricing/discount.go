@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -63,7 +64,7 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 	}
 }
 
-func readDiscounts(ctx context.Context, q access.Queryer, providers promotion.Directory) ([]Discount, error) {
+func readDiscounts(ctx context.Context, q database.Queryer, providers promotion.Directory) ([]Discount, error) {
 	stored, err := pricebook.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func discountAction(discount Discount, inForce map[scope]string) contract.Config
 	return contract.ConfigurationPlanItemActionCreate
 }
 
-func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
+func planDiscounts(ctx context.Context, q database.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
 	current, err := readDiscounts(ctx, q, providers)
 	if err != nil {
 		return nil, err
@@ -110,7 +111,7 @@ func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, pr
 	}), nil
 }
 
-func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
+func applyDiscounts(ctx context.Context, tx pgx.Tx, principal authz.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !resolves(providers, discount.Provider) }); i >= 0 {
 		return undeclaredDiscount(i)
 	}
@@ -123,7 +124,7 @@ func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, 
 		if discountAction(discount, inForce) == contract.ConfigurationPlanItemActionNoop {
 			continue
 		}
-		if err := principal.Authorize(access.Settings); err != nil {
+		if err := principal.Authorize(authz.Settings); err != nil {
 			return err
 		}
 		normalized, normalizeErr := pricebook.NormalizeDiscount(ctx, tx, pricebook.DiscountInput{

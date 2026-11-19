@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -60,7 +60,7 @@ func (m *Manager) Eligibility(credentialID string) routing.Eligibility {
 // not serve, and why, as key authority records it: an operator revoked them,
 // which prevails, or a credential version's grant lapsed. It reads those among
 // ids, or all of them when ids is nil.
-func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[string]routing.Eligibility, error) {
+func ReadIneligible(ctx context.Context, q database.Queryer, ids []string) (map[string]routing.Eligibility, error) {
 	rows, err := q.Query(ctx, `SELECT c.id::text,CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' ELSE 'lapsed' END
 		FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
 		WHERE (c.revoked_at IS NOT NULL OR g.lapsed_at IS NOT NULL OR c.plugin_digest IS NOT NULL AND c.profile_id IS NULL)
@@ -174,7 +174,7 @@ func (m *Manager) NetworkSecret(ctx context.Context, release *Release, providerI
 // be the provider's and eligible, as key authority records it
 // (ReadIneligible). A gateway reads so what its release does not name; a
 // worker, which serves no release, reads so every network credential.
-func ReadNetworkSecret(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, providerID, credentialID string) ([]byte, error) {
+func ReadNetworkSecret(ctx context.Context, q database.Queryer, keys *secrets.KeyRing, installation, providerID, credentialID string) ([]byte, error) {
 	unavailable := func(err error) error {
 		return fmt.Errorf("network credential %s of provider %s: %w: %w", credentialID, providerID, ErrCredentialUnavailable, err)
 	}

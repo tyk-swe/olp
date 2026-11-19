@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -21,7 +22,7 @@ type ReplayClaim struct {
 // Call only after current authorization, inside the feature's mutation
 // transaction. The actor, operation, target, precondition, and canonical input
 // bind a replay; its encrypted response lives for at most 24 hours.
-func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (ReplayClaim, *httpkit.Reply, error) {
+func (s *Server) Replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any) (ReplayClaim, *httpkit.Reply, error) {
 	c := ReplayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
 	if len(c.Key) < 1 || len(c.Key) > 200 {
 		return c, nil, httpkit.Fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")

@@ -10,6 +10,8 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -53,7 +55,7 @@ func (b Budget) keyRefs() []string {
 	return []string{*b.APIKeyRef}
 }
 
-func readBudgets(ctx context.Context, q access.Queryer) ([]Budget, error) {
+func readBudgets(ctx context.Context, q database.Queryer) ([]Budget, error) {
 	budgets, err := access.ReadCodeBudgets(ctx, q)
 	if err != nil {
 		return nil, err
@@ -83,7 +85,7 @@ func parsedOf(value *string) (*openapi_types.UUID, error) {
 	return &id, err
 }
 
-func resolveBudget(ctx context.Context, q access.Queryer, b Budget, desired Desired, directory promotion.Directory, routeIDs map[string]string) (resolved[access.CodeBudgetInput], error) {
+func resolveBudget(ctx context.Context, q database.Queryer, b Budget, desired Desired, directory promotion.Directory, routeIDs map[string]string) (resolved[access.CodeBudgetInput], error) {
 	projectID, err := projectOf(directory, b.Project)
 	if err != nil {
 		return resolved[access.CodeBudgetInput]{}, err
@@ -108,7 +110,7 @@ func resolveBudget(ctx context.Context, q access.Queryer, b Budget, desired Desi
 	return resolved[access.CodeBudgetInput]{ref: b.ID, to: to, input: b.input(projectID, routeID, keyID)}, err
 }
 
-func optionalKey(ctx context.Context, q access.Queryer, ref *string, project string, keys map[string]string) (*string, error) {
+func optionalKey(ctx context.Context, q database.Queryer, ref *string, project string, keys map[string]string) (*string, error) {
 	if ref == nil {
 		return nil, nil
 	}
@@ -123,11 +125,11 @@ func destinationOf(ref *string, ids map[string]string) *string {
 	return new(ids[*ref])
 }
 
-func budgetChange(ctx context.Context, q access.Queryer, b resolved[access.CodeBudgetInput]) (change, error) {
+func budgetChange(ctx context.Context, q database.Queryer, b resolved[access.CodeBudgetInput]) (change, error) {
 	action, err := compared(ctx, q, b, access.ReadCodeBudgetInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeBudget, Key: b.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 			_, err := access.SaveCodeBudget(ctx, tx, p, b.to.id, httpkit.NewID(), b.input, b.to.existing)
 			return err
 		},
