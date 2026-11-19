@@ -319,8 +319,6 @@ type storedPlan struct {
 	upstream    http.Handler
 }
 
-// storedGateway is a gateway over real stores whose one provider revision and
-// route revision exist in the database, as retained resources require.
 type storedGateway struct {
 	t       *testing.T
 	fixture usageFixture
@@ -445,7 +443,6 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 	return routeID, revisionID
 }
 
-// key admits a new API key for the plan's route under the given secret.
 func (g *storedGateway) key(t *testing.T, secret string) string {
 	t.Helper()
 	keyID := uuid.NewString()
@@ -768,8 +765,6 @@ type upstreamCall struct {
 	request, key, authorization, body string
 }
 
-// retainedUpstream is a provider that owns files, batches and responses under
-// identifiers carrying providerOwned, which no gateway reply may contain.
 type retainedUpstream struct {
 	mu        sync.Mutex
 	calls     []upstreamCall
