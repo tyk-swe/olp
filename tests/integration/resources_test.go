@@ -1725,3 +1725,52 @@ func TestGeminiInteractionStreamsBindTheirResourceResumeFromACursorCancelAndRefu
 		t.Fatalf("stored interactions = %d, %v, want only the one whose stream opened correctly", stored, err)
 	}
 }
+
+func TestFailedGeminiInteractionsReachTheCallerWithoutTheProviderCredentialOrARetryHint(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, native = "gemini-failures", "interaction-" + providerOwned + "-1"
+	failure := `"status":"failed","model":"gemini-model","error":{"code":"internal","message":"credential listed-secret was rejected"}`
+	upstream := &retainedUpstream{
+		replies: func(string, int) map[string]string {
+			return map[string]string{"POST /interactions": `{"id":"` + native + `",` + failure + `,"steps":[]}`}
+		},
+		headers: func(*http.Request) map[string]string { return nil },
+	}
+	streamed := &retainedUpstream{
+		replies: func(string, int) map[string]string {
+			return map[string]string{"POST /interactions": interactionEvent(1, `{"event_type":"interaction.created","interaction":{"id":"`+native+`","status":"in_progress","model":"gemini-model"}}`) +
+				interactionEvent(2, `{"event_type":"interaction.completed","interaction":{"id":"`+native+`",`+failure+`}}`)}
+		},
+		headers: func(*http.Request) map[string]string { return map[string]string{"Content-Type": "text/event-stream"} },
+	}
+	plan := storedPlan{
+		model: "gemini-model", kind: "gemini", surface: "gemini", profile: "gemini-interactions", version: "/v1beta", secure: true, streams: true,
+		operations: []string{"generation"},
+	}
+	headers := geminiKey("owner", map[string]string{"Content-Type": "application/json"})
+
+	plan.slug, plan.upstream = slug, upstream
+	whole := newStoredGateway(t, newUsageFixture(t, pool), plan)
+	whole.key(t, "owner")
+	header, raw := whole.send(t, "POST", "/gemini/v1beta/interactions", headers, `{"model":"`+slug+`","input":"hi"}`, 200)
+	var failed struct{ ID, Model, Status string }
+	if err := json.Unmarshal(raw, &failed); err != nil || failed.Status != "failed" || failed.Model != slug || failed.ID == "" {
+		t.Fatalf("failed interaction = %s, want the provider's failure under the route name", raw)
+	}
+	if strings.Contains(string(raw), "listed-secret") || header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("failed interaction = %s with retry hint %q, want no credential and no retry", raw, header.Get("X-Should-Retry"))
+	}
+
+	plan.slug, plan.upstream = slug+"-stream", streamed
+	live := newStoredGateway(t, newUsageFixture(t, pool), plan)
+	live.key(t, "owner")
+	header, raw = live.send(t, "POST", "/gemini/v1beta/interactions", headers, `{"model":"`+slug+`-stream","input":"hi","stream":true}`, 200)
+	stream := readInteractionStream(t, header, raw)
+	if len(stream.events) != 2 || stream.events[1].Interaction.Status != "failed" || stream.events[1].Interaction.Model != slug+"-stream" {
+		t.Fatalf("failed stream = %s, want the provider's terminal failure under the route name", raw)
+	}
+	if strings.Contains(string(raw), "listed-secret") || header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("failed stream = %s with retry hint %q, want no credential and no retry", raw, header.Get("X-Should-Retry"))
+	}
+}
