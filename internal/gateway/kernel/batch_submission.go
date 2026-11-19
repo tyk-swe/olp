@@ -1,9 +1,11 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -141,7 +143,7 @@ func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p 
 	if err != nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
-	canonical, err := canonicalBatchJSON(intent.Canonical)
+	canonical, err := CanonicalBatchJSON(intent.Canonical)
 	if err != nil {
 		return batchSubmission{}, fault.InvalidRequest("invalid_json", "The batch submission must be valid JSON.", nil)
 	}
@@ -222,14 +224,14 @@ func (s *Server) abandonBatch(ctx context.Context, resourceID uuid.UUID) {
 	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
 	if err := s.Deps.Batches.DeleteSubmission(commitCtx, resourceID); err != nil {
-		s.log.Warn("batch submission intent could not be removed", "resource_id", resourceID, "error", err)
+		s.Log.Warn("batch submission intent could not be removed", "resource_id", resourceID, "error", err)
 	}
 }
 
 func (s *Server) SendBatch(ctx context.Context, x *Call, p *Pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *PinnedExchange, *fault.Error) {
 	resp, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
-		if failure.acceptance.Unresolved() {
+		if failure.Acceptance.Unresolved() {
 			return nil, nil, s.BatchSubmissionUnknown(ctx, resourceID, "The provider may have accepted this batch, but its outcome is unknown.")
 		}
 		s.abandonBatch(ctx, resourceID)
@@ -252,7 +254,7 @@ func (s *Server) ActivateBatch(ctx context.Context, submission batchSubmission, 
 		return stored, nil
 	}
 	if markErr := s.Deps.Batches.MarkUnknown(commitCtx, submission.Resource.UUID, batches.ErrorSubmissionCommitUnavailable, s.Now()); markErr != nil {
-		s.log.Warn("accepted batch intent could not be marked unknown", "resource_id", submission.Resource.UUID, "error", markErr)
+		s.Log.Warn("accepted batch intent could not be marked unknown", "resource_id", submission.Resource.UUID, "error", markErr)
 	}
 	return nil, fault.ServerError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed.")
 }
@@ -428,7 +430,20 @@ func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, fai
 	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
 	if err := s.Deps.Batches.MarkUnknown(commitCtx, resourceID, batches.ErrorSubmissionUnknown, s.Now()); err != nil {
-		s.log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
+		s.Log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
 	}
 	return failure
+}
+
+func CanonicalBatchJSON(body []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("trailing JSON")
+	}
+	return json.Marshal(value)
 }

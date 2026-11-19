@@ -20,11 +20,11 @@ func retainedSubmissionFields() [2]string {
 }
 
 func retainedGeminiFileID(raw string) (string, error) {
-	if validGeminiFileID(raw) {
+	if ValidGeminiFileID(raw) {
 		return raw, nil
 	}
 	local := strings.TrimPrefix(raw, "files/")
-	if local != raw && validGeminiFileID(local) {
+	if local != raw && ValidGeminiFileID(local) {
 		return local, nil
 	}
 	uri, err := url.Parse(raw)
@@ -32,7 +32,7 @@ func retainedGeminiFileID(raw string) (string, error) {
 		return "", resources.ErrNotFound
 	}
 	local = strings.TrimPrefix(uri.Path, "/gemini/v1beta/files/")
-	if local == uri.Path || !validGeminiFileID(local) {
+	if local == uri.Path || !ValidGeminiFileID(local) {
 		return "", resources.ErrNotFound
 	}
 	return local, nil

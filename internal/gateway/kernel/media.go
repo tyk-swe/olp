@@ -59,7 +59,7 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 			return
 		}
 		rc := http.NewResponseController(w)
-		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
+		if err := rc.SetReadDeadline(time.Now().Add(RequestBodyTimeout)); err != nil {
 			s.Gate.Release(r.Context())
 			s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
 			return
@@ -208,7 +208,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 	}
 	for _, handle := range request.Uploads() {
 		if err := s.Deps.Staging.Remove(handle); err != nil {
-			s.log.Warn("media upload cleanup failed", "error", err)
+			s.Log.Warn("media upload cleanup failed", "error", err)
 		}
 	}
 }
@@ -384,9 +384,9 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Cal
 		fact.Class = class
 		fact.Committed = f.committed
 		f.accepted = fact.Status == http.StatusOK
-		f.acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.Status, Accepted: f.accepted}.Acceptance()
+		f.Acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.Status, Accepted: f.accepted}.Acceptance()
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = f.acceptance
+			fact.Interaction.UpstreamState = f.Acceptance
 			if f.committed {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}

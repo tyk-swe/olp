@@ -170,9 +170,9 @@ type Dependencies struct {
 type Server struct {
 	Deps Dependencies
 
-	log         *slog.Logger
+	Log         *slog.Logger
 	Config      Config
-	egress      *egress.Policy
+	Egress      *egress.Policy
 	client      *http.Client
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
@@ -210,9 +210,9 @@ func New(deps Dependencies, cfg Config) *Server {
 	normalized := normalizedDependencies(deps)
 	gate := ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now)
 	return &Server{
-		log:         log,
+		Log:         log,
 		Config:      config,
-		egress:      policy,
+		Egress:      policy,
 		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
@@ -237,14 +237,18 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 	if !s.Deps.Admission.Ready() {
 		return
 	}
-	s.fleet.Follow(ctx, s.health, s.Deps.Admission.Fleet(), quota.ReserveTimeout, s.log)
+	s.fleet.Follow(ctx, s.health, s.Deps.Admission.Fleet(), quota.ReserveTimeout, s.Log)
 }
 
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
-func (s *Server) RegisterKernel(mux *http.ServeMux) {
+// GeminiActions are the Gemini model actions a surface serves, keyed by the
+// name after the colon in /models/{model}:{action}.
+type GeminiActions map[string]http.HandlerFunc
+
+func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
 	if s.code != nil {
 		s.code.Register(mux)
 	}
@@ -257,7 +261,7 @@ func (s *Server) RegisterKernel(mux *http.ServeMux) {
 		Now:      s.Now,
 		Workflow: s.workflowCapability,
 	})
-	s.registerNative(mux, catalog)
+	s.registerNative(mux, catalog, actions)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
@@ -266,8 +270,8 @@ func (s *Server) RegisterKernel(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", catalog.List)
 	mux.HandleFunc("GET /v1/models/{model}", catalog.Get)
-	mux.HandleFunc("OPTIONS /v1/", s.preflight)
-	mux.HandleFunc("OPTIONS /bedrock/", s.preflight)
+	mux.HandleFunc("OPTIONS /v1/", s.Preflight)
+	mux.HandleFunc("OPTIONS /bedrock/", s.Preflight)
 	mux.HandleFunc("/v1/", s.unknown)
 	mux.HandleFunc("/bedrock/", s.unknown)
 }
@@ -363,7 +367,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h.Set("Access-Control-Expose-Headers", expose)
 }
 
-func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -504,7 +508,7 @@ func selectionError(err error, model string) *fault.Error {
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
 }
 
-const requestBodyTimeout = 15 * time.Second
+const RequestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family wire.Format) http.HandlerFunc {
 	return s.inferenceOperation(family, "")
@@ -544,7 +548,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
-		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
+		if err := rc.SetReadDeadline(time.Now().Add(RequestBodyTimeout)); err != nil {
 			e := fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
 			x.Failure, status = e, e.Status
 			writeError(w, e)

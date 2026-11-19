@@ -27,7 +27,7 @@ func (s *Server) ObserveInteraction(ctx context.Context, owner, localID, status 
 		return ingest.Persisted{}, err
 	}
 	if err := s.Deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
-		s.log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
+		s.Log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
 	}
 	return result, nil
 }

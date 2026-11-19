@@ -126,7 +126,7 @@ func (s *Server) settleCaps(ctx context.Context, x *Call) {
 			actual := x.costOf(hold.owner).String()
 			hold.lease.SetActualCost(actual, actual)
 		}
-		quota.SettleKey(ctx, hold.lease, hold.dispatched, nil, s.log)
+		quota.SettleKey(ctx, hold.lease, hold.dispatched, nil, s.Log)
 	}
 	x.caps = nil
 }

@@ -177,7 +177,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Cal
 			return
 		}
 	}
-	base, err := s.egress.ValidateEndpoint(provider.Endpoint)
+	base, err := s.Egress.ValidateEndpoint(provider.Endpoint)
 	if err != nil {
 		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection endpoint is unavailable."))
 		return

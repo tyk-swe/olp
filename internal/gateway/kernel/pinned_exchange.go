@@ -66,7 +66,7 @@ func (e *PinnedExchange) fail(class string, failure *AttemptFailure) *AttemptFai
 	}
 	failure.class, failure.dispatched = class, e.state.dispatched.Load()
 	failure.credentialRefused = e.state.credentialRefused
-	failure.acceptance = e.state.evidence().Acceptance()
+	failure.Acceptance = e.state.evidence().Acceptance()
 	failure.accepted = e.state.accepted
 	fact := e.fact()
 	fact.Class = class
@@ -266,9 +266,9 @@ func (r *PinnedResponse) StageBody(ctx context.Context, spool *staging.Spool, fi
 
 var errPinnedUploadRead = errors.New("staged upload read failed")
 
-type pinnedUploadSource struct{ io.Reader }
+type PinnedUploadSource struct{ io.Reader }
 
-func (r pinnedUploadSource) Read(buffer []byte) (int, error) {
+func (r PinnedUploadSource) Read(buffer []byte) (int, error) {
 	n, err := r.Reader.Read(buffer)
 	if err != nil && err != io.EOF {
 		return n, fmt.Errorf("%w: %w", errPinnedUploadRead, err)

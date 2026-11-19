@@ -40,7 +40,7 @@ type batchPlan struct {
 	expected       *int64
 	serving        oif.ServingIdentity
 	submission     batches.Submission
-	manifest       batchManifest
+	manifest       BatchManifest
 	clientMetadata json.RawMessage
 }
 
@@ -211,29 +211,29 @@ func (s *Server) strictBatchAdmission(ctx context.Context, x *Call, authority ke
 }
 
 type storedFileManifest struct {
-	batchManifest
-	Qualified *batchManifest `json:"batch_manifest"`
+	BatchManifest
+	Qualified *BatchManifest `json:"batch_manifest"`
 }
 
-func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (batchManifest, *fault.Error) {
+func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (BatchManifest, *fault.Error) {
 	if strict || adapter != connectors.BatchOpenAI && !adapter.Managed() {
-		return batchManifest{}, nil
+		return BatchManifest{}, nil
 	}
 	var stored storedFileManifest
 	decodeErr := json.Unmarshal(file.Metadata, &stored)
 	if adapter == connectors.BatchOpenAI {
 		if decodeErr != nil || stored.Qualified == nil || !stored.Qualified.usable(adapter) || stored.Qualified.Endpoint != endpoint {
-			return batchManifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
+			return BatchManifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
 		}
 		return *stored.Qualified, nil
 	}
-	if decodeErr != nil || !stored.batchManifest.usable(adapter) {
-		return batchManifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
+	if decodeErr != nil || !stored.BatchManifest.usable(adapter) {
+		return BatchManifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
 	}
-	return stored.batchManifest, nil
+	return stored.BatchManifest, nil
 }
 
-func (m batchManifest) usable(adapter connectors.BatchAdapter) bool {
+func (m BatchManifest) usable(adapter connectors.BatchAdapter) bool {
 	return m.Adapter == adapter && m.Endpoint != "" && m.LineCount >= 1 && m.ManifestDigest != ""
 }
 

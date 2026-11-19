@@ -300,7 +300,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *Call, authority ke
 		return nil, nil, e
 	}
 	return ctx, func() {
-		quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.Log)
 		cancel()
 	}, nil
 }
@@ -406,7 +406,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 			retryAfter: failure.RetryAfter,
 			upstream:   failure.Upstream,
 			dispatched: failure.Dispatched,
-			acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
+			Acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
 		}
 		fact.RecordEvidence(f.billingUncertain())
 		s.health.Record(record.ProviderID, fact, false)
@@ -439,7 +439,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 		if contractErr != nil {
 			if artifact := mediaArtifact(result.Payload); artifact != nil {
 				if err := s.Deps.Staging.Remove(artifact.Handle); err != nil {
-					s.log.Warn("staged video content cleanup failed", "error", err)
+					s.Log.Warn("staged video content cleanup failed", "error", err)
 				}
 			}
 			fact.Class = ClassProtocol

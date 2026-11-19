@@ -802,7 +802,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			if read != nil && !read.fact().BillingUncertain {
 				lease.SetActualCost(routeActual[slug].String(), routeActualCharge[slug].String())
 			}
-			quota.SettleKey(ctx, lease, read != nil, &zero, s.log)
+			quota.SettleKey(ctx, lease, read != nil, &zero, s.Log)
 		}
 	}()
 	admitRoute := func(entry retainedListEntry) int {
@@ -1251,10 +1251,10 @@ func retainedRejectedWithoutWork(failure *AttemptFailure) bool {
 	if failure == nil {
 		return false
 	}
-	if failure.acceptance == upstream.NotSent {
+	if failure.Acceptance == upstream.NotSent {
 		return true
 	}
-	if failure.acceptance != upstream.Terminal || failure.accepted {
+	if failure.Acceptance != upstream.Terminal || failure.accepted {
 		return false
 	}
 	switch failure.Status {

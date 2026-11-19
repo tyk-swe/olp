@@ -52,8 +52,8 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *Call, fact e
 
 func (s *Server) workflowSettlementFailure(ctx context.Context, x *Call, err error) *fault.Error {
 	s.markSessionUnknown(ctx, x)
-	if s.log != nil {
-		s.log.Warn("workflow model attempt settlement failed", "error", err.Error())
+	if s.Log != nil {
+		s.Log.Warn("workflow model attempt settlement failed", "error", err.Error())
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "debit_ledger_unavailable", "The workflow model attempt could not be settled.")
 }

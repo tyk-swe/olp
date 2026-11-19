@@ -37,7 +37,6 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
 	if s.Deps.Staging != nil {
-		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -77,7 +76,7 @@ func (s *Server) settleFence(ctx context.Context, settle func(context.Context) e
 	commit, cancel := ResourceCommitContext(ctx)
 	defer cancel()
 	if err := settle(commit); err != nil {
-		s.log.Warn("retained resource fence not settled", "error", err.Error())
+		s.Log.Warn("retained resource fence not settled", "error", err.Error())
 	}
 }
 
@@ -385,7 +384,7 @@ func (s *Server) ResourceSettle(ctx context.Context, x *Call, p *Pin) {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
 	s.settleCaps(ctx, x)
-	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.Log)
 }
 
 func upstreamString(body json.RawMessage, name string) (string, bool) {
@@ -520,7 +519,7 @@ func managedGeminiFilePath(res *resources.Resource) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := geminiFileID(name)
+	id, err := GeminiFileID(name)
 	if err != nil {
 		return "", err
 	}
@@ -814,7 +813,7 @@ func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage
 	if adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
 		return metadata, nil
 	}
-	return managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
+	return managedFileMetadata(metadata, nil, adapter, BatchManifest{}, role)
 }
 
 type refreshedFile struct {
@@ -846,7 +845,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	}
 	base := metadata
 	if adapter.Managed() {
-		managed, err := managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, prior.Role)
+		managed, err := managedFileMetadata(res.Metadata, body, adapter, BatchManifest{}, prior.Role)
 		if err != nil {
 			return nil, err
 		}

@@ -91,7 +91,7 @@ func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
-	quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.Log)
 }
 
 func ClassFailure(class string) *fault.Error {

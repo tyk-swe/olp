@@ -128,7 +128,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		limit = 1 << 20
 	}
 	client.SetReadLimit(limit)
-	setupCtx, stopSetup := context.WithTimeout(ctx, requestBodyTimeout)
+	setupCtx, stopSetup := context.WithTimeout(ctx, RequestBodyTimeout)
 	messageType, initial, err := client.Read(setupCtx)
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
@@ -335,7 +335,7 @@ func (s *Server) duplexDial(ctx context.Context, x *Call, p *Pin, template *dupl
 			parsed.RawQuery = ""
 			check = parsed.String()
 		}
-		if _, err := s.egress.ValidateEndpoint(check); err != nil {
+		if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 			return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex provider address is not permitted.")
 		}
 		dialCtx, cancel := context.WithCancel(ctx)
@@ -411,7 +411,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *Call, p *Pin, client,
 	}
 	done := make(chan relayEnd, 2)
 	relay := func(dst, src duplexPeer, fromProvider bool) {
-		defer panics.Recover(s.log, "duplex relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "duplex relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, fromProvider)
 	}
 	go relay(upstream, client, false)

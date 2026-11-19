@@ -658,7 +658,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *Call, fact *
 	settleErr := s.applyResponseObservation(commitCtx, local, observation)
 	stopCommit()
 	if settleErr != nil {
-		s.log.Warn("retained response observation persistence failed", "error", settleErr)
+		s.Log.Warn("retained response observation persistence failed", "error", settleErr)
 		return &responseLocalRefusal{cause: settleErr}
 	}
 	return nil

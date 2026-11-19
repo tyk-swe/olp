@@ -132,7 +132,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		actual := x.settledTokens()
 		s.settlePinnedHold(r.Context(), p.Hold)
 		s.recordCost(x)
-		quota.SettleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
+		quota.SettleKey(r.Context(), x.lease, x.dispatched, actual, s.Log)
 	}()
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(r.Context(), x, authority, overall); e != nil {
@@ -146,7 +146,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		return
 	}
 	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/model/" + url.PathEscape(p.Provider.Connector().Model(p.Model)) + "/" + upstreamOp
-	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}

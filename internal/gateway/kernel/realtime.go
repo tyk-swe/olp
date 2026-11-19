@@ -166,7 +166,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		u.RawQuery, u.Fragment = "", ""
 		check = u.String()
 	}
-	if _, err := s.egress.ValidateEndpoint(check); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}
@@ -550,7 +550,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *Call, p *Pin, client, con
 	done := make(chan relayEnd, 2)
 	remaining := 2
 	relay := func(dst, src duplexPeer, inspect bool) {
-		defer panics.Recover(s.log, "realtime relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "realtime relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, inspect)
 	}
 	go relay(conn, client, false)

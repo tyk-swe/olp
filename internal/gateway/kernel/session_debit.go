@@ -98,7 +98,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 	}
 	go func() {
 		defer close(done)
-		defer panics.Recover(s.log, "workflow model lease renewal", func(error) {
+		defer panics.Recover(s.Log, "workflow model lease renewal", func(error) {
 			result <- fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 			cancel()
 		})
@@ -307,8 +307,8 @@ func (s *Server) abandonSessionDebit(ctx context.Context, x *Call) {
 		return
 	}
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.Deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
-		s.log.Warn("session debit release failed", "error", err.Error())
+	if err := s.Deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.Log != nil {
+		s.Log.Warn("session debit release failed", "error", err.Error())
 	}
 	cancel()
 	for i := range x.facts {
@@ -322,8 +322,8 @@ func (s *Server) markSessionUnknown(ctx context.Context, x *Call) {
 		return
 	}
 	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.Deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
-		s.log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
+	if err := s.Deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.Log != nil {
+		s.Log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
 	}
 	cancel()
 }

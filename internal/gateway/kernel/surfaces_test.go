@@ -201,8 +201,8 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	}
 	t.Cleanup(func() { _ = spool.Close() })
 	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
-		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
+		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.Egress,
+		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.Log,
 	})}
 	h.gateway.Deps.Staging = spool
 	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())

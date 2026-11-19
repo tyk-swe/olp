@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -810,7 +811,7 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 
 type upstreamCall struct {
 	request, query, key, authorization, body string
-	beta, accept                             string
+	beta, accept, upload                     string
 }
 
 type retainedUpstream struct {
@@ -832,6 +833,7 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		request: request, key: cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")),
 		authorization: r.Header.Get("Authorization"), body: string(body), query: r.URL.RawQuery,
 		beta: r.Header.Get("Anthropic-Beta"), accept: r.Header.Get("Accept"),
+		upload: r.Header.Get("X-Goog-Upload-Command") + "@" + r.Header.Get("X-Goog-Upload-Offset"),
 	})
 	nth := 0
 	for _, call := range u.calls {
@@ -1290,6 +1292,68 @@ func TestGeminiFilesUploadThroughAGatewaySessionHideProviderIdentifiersAndIsolat
 	if sent := upstream.sent("DELETE /files/" + providerOwned); len(sent) != 1 || sent[0].key != "listed-secret" {
 		t.Fatalf("the provider saw deletes %+v, want one under the provider credential", sent)
 	}
+}
+
+func TestGeminiUploadsResumeInChunksFromTheStoredOffsetAndFailTheSessionOnAProviderMismatch(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	upstream := &retainedUpstream{replies: geminiReplies, headers: func(r *http.Request) map[string]string {
+		if r.Header.Get("X-Goog-Upload-Command") == "upload" && r.ContentLength == 3 {
+			return map[string]string{"X-Goog-Upload-Size-Received": "9"}
+		}
+		return geminiUploadHeaders(r)
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "gemini-chunks", model: "gemini-model", kind: "gemini", surface: "gemini", version: "/v1beta", secure: true,
+		operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	start := func() string {
+		t.Helper()
+		started, _ := g.send(t, "POST", "/gemini/upload/v1beta/files", geminiKey("owner", map[string]string{
+			"Content-Type": "application/json", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+			"X-Goog-Upload-Header-Content-Length": "10", "X-Goog-Upload-Header-Content-Type": "text/plain",
+		}), `{"file":{"display_name":"notes"}}`, 200)
+		session, _ := strings.CutPrefix(started.Get("X-Goog-Upload-URL"), g.server.URL)
+		return session
+	}
+	command := func(session, command, offset, body string, want int) http.Header {
+		t.Helper()
+		reply, _ := g.send(t, "POST", session, geminiKey("owner", map[string]string{"X-Goog-Upload-Command": command, "X-Goog-Upload-Offset": offset}), body, want)
+		return reply
+	}
+	received := func(session, want, status string) {
+		t.Helper()
+		reply := command(session, "query", "", "", 200)
+		if got := reply.Get("X-Goog-Upload-Size-Received"); got != want || reply.Get("X-Goog-Upload-Status") != status {
+			t.Fatalf("session reports %q bytes with status %q, want %q and %q", got, reply.Get("X-Goog-Upload-Status"), want, status)
+		}
+	}
+
+	session := start()
+	received(session, "0", "active")
+	command(session, "append", "0", "hello", 400)
+	command(session, "query", "", "hello", 400)
+	if reply := command(session, "upload", "0", "hello", 200); reply.Get("X-Goog-Upload-Size-Received") != "5" || reply.Get("X-Goog-Upload-Status") != "active" {
+		t.Fatalf("first chunk acknowledged as %v, want five bytes on an active session", reply)
+	}
+	received(session, "5", "active")
+	command(session, "upload", "0", "hello", 400)
+	command(session, "upload", "5", "far too long", 400)
+	command(session, "upload, finalize", "5", "wor", 400)
+	received(session, "5", "active")
+	if reply := command(session, "upload, finalize", "5", "world", 200); reply.Get("X-Goog-Upload-Size-Received") != "10" || reply.Get("X-Goog-Upload-Status") != "final" {
+		t.Fatalf("last chunk acknowledged as %v, want ten bytes on a final session", reply)
+	}
+	sent := upstream.sent("POST /upload/session-" + providerOwned)
+	if len(sent) != 2 || sent[0].body != "hello" || sent[0].upload != "upload@0" || sent[1].body != "world" || sent[1].upload != "upload, finalize@5" {
+		t.Fatalf("the provider session received %+v, want the two accepted chunks at offsets 0 and 5", sent)
+	}
+
+	broken := start()
+	command(broken, "upload", "0", "abc", 502)
+	command(broken, "query", "", "", 409)
+	command(broken, "upload", "0", "hello", 409)
 }
 
 func TestGeminiInteractionsHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
@@ -1772,5 +1836,138 @@ func TestFailedGeminiInteractionsReachTheCallerWithoutTheProviderCredentialOrARe
 	}
 	if strings.Contains(string(raw), "listed-secret") || header.Get("X-Should-Retry") != "false" {
 		t.Fatalf("failed stream = %s with retry hint %q, want no credential and no retry", raw, header.Get("X-Should-Retry"))
+	}
+}
+
+func geminiBatchReplies(request string, nth int) map[string]string {
+	const native = "batches/batch-" + providerOwned
+	batch := func(state, extra string) string {
+		return `{"name":"` + native + `","metadata":{"state":"` + state + `","model":"models/gemini-model","displayName":"nightly","createTime":"2026-01-01T00:00:00Z","batchStats":{"requestCount":"2"},"inputConfig":{"fileName":"files/` + providerOwned + `-2"}` + extra + `}}`
+	}
+	replies := geminiReplies(request, nth)
+	const finalize = "POST /upload/session-" + providerOwned
+	replies[finalize] = strings.Replace(replies[finalize], "files/"+providerOwned, fmt.Sprintf("files/%s-%d", providerOwned, nth), 1)
+	replies["POST /models/gemini-model:batchGenerateContent"] = batch("BATCH_STATE_PENDING", "")
+	replies["GET /"+native] = batch("BATCH_STATE_SUCCEEDED", `,"output":{"responsesFile":"files/output-`+providerOwned+`"}`)
+	replies["POST /"+native+":cancel"] = `{}`
+	replies["DELETE /"+native] = `{}`
+	return replies
+}
+
+type geminiBatch struct {
+	Name     string
+	Metadata struct {
+		Model, State string
+		InputConfig  struct{ FileName string }
+		Output       struct{ ResponsesFile string }
+	}
+}
+
+func geminiBatchLine(key string) string {
+	return `{"key":"` + key + `","request":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`
+}
+
+func (g *storedGateway) uploadGeminiFile(t *testing.T, key, contentType, content string) geminiFile {
+	t.Helper()
+	started, _ := g.send(t, "POST", "/gemini/upload/v1beta/files", geminiKey(key, map[string]string{
+		"Content-Type": "application/json", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+		"X-Goog-Upload-Header-Content-Length": strconv.Itoa(len(content)), "X-Goog-Upload-Header-Content-Type": contentType,
+	}), `{"file":{"display_name":"notes"}}`, 200)
+	session, found := strings.CutPrefix(started.Get("X-Goog-Upload-URL"), g.server.URL)
+	if !found {
+		t.Fatalf("upload session is %q, want a session on the gateway", started.Get("X-Goog-Upload-URL"))
+	}
+	_, raw := g.send(t, "POST", session, geminiKey(key, map[string]string{"X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"}), content, 200)
+	var uploaded struct{ File geminiFile }
+	if err := json.Unmarshal(raw, &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	return uploaded.File
+}
+
+func TestGeminiBatchesBindTheirInputAndOutputFilesHideProviderIdentifiersAndIsolateKeys(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug = "gemini-batches"
+	const create = "/gemini/v1beta/models/" + slug + ":batchGenerateContent"
+	const native = "batches/batch-" + providerOwned
+	upstream := &retainedUpstream{replies: geminiBatchReplies, headers: geminiUploadHeaders}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: "gemini-model", kind: "gemini", surface: "gemini", version: "/v1beta", secure: true,
+		operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	owner := geminiKey("owner", map[string]string{"Content-Type": "application/json"})
+	stranger := geminiKey("stranger", map[string]string{"Content-Type": "application/json"})
+	fromFile := func(name string) string {
+		return `{"batch":{"display_name":"nightly","input_config":{"file_name":"` + name + `"}}}`
+	}
+	inline := func(first, second string) string {
+		item := func(key string) string {
+			return `{"request":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]},"metadata":{"key":"` + key + `"}}`
+		}
+		return `{"batch":{"display_name":"nightly","input_config":{"requests":{"requests":[` + item(first) + `,` + item(second) + `]}}}}`
+	}
+
+	g.send(t, "POST", create, owner, inline("a", "a"), 400)
+	g.send(t, "POST", create, geminiKey("owner", map[string]string{"X-OLP-Route": "another-route"}), inline("a", "b"), 400)
+	prose := g.uploadGeminiFile(t, "owner", "text/plain", "hello")
+	g.send(t, "POST", create, owner, fromFile(prose.Name), 422)
+	input := g.uploadGeminiFile(t, "owner", "application/jsonl", geminiBatchLine("a")+"\n"+geminiBatchLine("b")+"\n")
+	g.send(t, "POST", create, stranger, fromFile(input.Name), 404)
+	repeated := g.uploadGeminiFile(t, "owner", "application/jsonl", geminiBatchLine("a")+"\n"+geminiBatchLine("a")+"\n")
+	g.send(t, "POST", create, owner, fromFile(repeated.Name), 422)
+	if sent := upstream.sent("POST /models/gemini-model:batchGenerateContent"); len(sent) != 0 {
+		t.Fatalf("refused batches reached the provider: %+v", sent)
+	}
+
+	var created geminiBatch
+	_, raw := g.send(t, "POST", create, owner, fromFile(input.Name), 200)
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(created.Name, "batches/gemini_batch_") || created.Metadata.Model != "models/"+slug || created.Metadata.InputConfig.FileName != input.Name {
+		t.Fatalf("created batch is %s, want a gateway batch on the route naming the caller's input file", raw)
+	}
+	sent := upstream.sent("POST /models/gemini-model:batchGenerateContent")
+	if len(sent) != 1 || sent[0].key != "listed-secret" || !strings.Contains(sent[0].body, `"fileName":"files/`+providerOwned+`-2"`) || strings.Contains(sent[0].body, input.Name) {
+		t.Fatalf("provider received %+v, want one batch under the provider credential naming the provider's file", sent)
+	}
+
+	batch := "/gemini/v1beta/" + created.Name
+	g.send(t, "GET", batch, stranger, "", 404)
+	g.send(t, "POST", batch+":cancel", stranger, "", 404)
+	g.send(t, "DELETE", batch, stranger, "", 404)
+	if _, listed := g.send(t, "GET", "/gemini/v1beta/batches", stranger, "", 200); strings.Contains(string(listed), created.Name) {
+		t.Fatalf("another key listed the batch: %s", listed)
+	}
+
+	var finished geminiBatch
+	_, raw = g.send(t, "GET", batch, owner, "", 200)
+	if err := json.Unmarshal(raw, &finished); err != nil {
+		t.Fatal(err)
+	}
+	output := finished.Metadata.Output.ResponsesFile
+	if finished.Name != created.Name || finished.Metadata.State != "BATCH_STATE_SUCCEEDED" || !strings.HasPrefix(output, "files/gemini_file_") || output == input.Name {
+		t.Fatalf("finished batch is %s, want the same batch with a gateway output file of its own", raw)
+	}
+	var again geminiBatch
+	_, raw = g.send(t, "GET", batch, owner, "", 200)
+	if err := json.Unmarshal(raw, &again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Metadata.Output.ResponsesFile != output {
+		t.Fatalf("output file changed from %q to %q between reads", output, again.Metadata.Output.ResponsesFile)
+	}
+	g.send(t, "GET", "/gemini/v1beta/"+output, stranger, "", 404)
+	if _, listed := g.send(t, "GET", "/gemini/v1beta/batches", owner, "", 200); !strings.Contains(string(listed), created.Name) || !strings.Contains(string(listed), output) {
+		t.Fatalf("owner listing is %s, want the batch and its output file", listed)
+	}
+
+	g.send(t, "POST", batch+":cancel", owner, "", 200)
+	g.send(t, "DELETE", batch, owner, "", 409)
+	if cancelled, deleted := upstream.sent("POST /"+native+":cancel"), upstream.sent("DELETE /"+native); len(cancelled) != 1 || len(deleted) != 0 {
+		t.Fatalf("provider saw %d cancels and %d deletes, want one cancel and no delete while the batch is unsettled", len(cancelled), len(deleted))
 	}
 }

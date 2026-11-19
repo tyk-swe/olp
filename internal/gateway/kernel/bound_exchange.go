@@ -26,7 +26,7 @@ type boundExchange struct {
 }
 
 func (s *Server) bindExchange(x *Call, provider *routing.Provider, slot routing.Slot, model string, config connectors.Config, state *attemptState) *boundExchange {
-	return &boundExchange{egress: s.egress, auth: s.auth, plugins: s.Config.Carrier, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
+	return &boundExchange{egress: s.Egress, auth: s.auth, plugins: s.Config.Carrier, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
 }
 
 func (e *boundExchange) validateBaseEndpoint(endpoint string) error {
