@@ -172,6 +172,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
+| `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
@@ -183,6 +184,11 @@ flag for one. A surface that needs something from a shared step sets a general
 field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
 kernel's tests register the same assembly, so the refusal matrix in
 `kernel/surfaces_test.go` covers a surface's routes after it moves.
+
+The kernel owns the `/gemini/{version}/models/{model}:{action}` route because
+generation lives there. A surface that serves one of those actions returns it
+from an `Actions` function, as `surface/geministate` does for
+`batchGenerateContent`, and the assembly passes the map to `RegisterKernel`.
 
 A handler in a surface reads as a list of steps. `surface/geminiinteractions`
 is the example for a request that admits, pins, sends and answers. Its handler
