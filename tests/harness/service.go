@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -26,6 +27,7 @@ const (
 
 type Environment struct {
 	Values    map[string]string
+	Mode      string
 	Bootstrap string
 	Master    string
 	label     string
@@ -132,7 +134,7 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(Required(t, "OLP_TEST_BINARY"), "all")
+	command := exec.Command(Required(t, "OLP_TEST_BINARY"), cmp.Or(env.Mode, "all"))
 	command.Env = env.List(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin, "OLP_LOG_LEVEL": "info"})
 	command.Stdout, command.Stderr = logFile, logFile
 	if err = command.Start(); err != nil {
@@ -154,7 +156,10 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 		}
 		_ = command.Process.Signal(syscall.SIGTERM)
 		select {
-		case <-exited:
+		case err := <-exited:
+			if err != nil {
+				t.Errorf("olp did not exit cleanly: %v\n%s", err, dumpLog())
+			}
 		case <-time.After(10 * time.Second):
 			_ = command.Process.Kill()
 			<-exited
