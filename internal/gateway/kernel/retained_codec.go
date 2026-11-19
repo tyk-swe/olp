@@ -1,0 +1,736 @@
+package kernel
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routing"
+)
+
+var errRetainedBindingUnavailable = errors.New("retained resource binding unavailable")
+
+func retainedBindingStoreError(err error) error {
+	if errors.Is(err, resources.ErrNotFound) || errors.Is(err, resources.ErrContract) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errRetainedBindingUnavailable, err)
+}
+
+func retainedProjectionError(exchange *pinnedExchange, err error) *fault.Error {
+	if errors.Is(err, errRetainedBindingUnavailable) {
+		exchange.interrupt(classProtocol, true)
+		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Resource identity bindings are unavailable.")
+	}
+	exchange.invalidNative()
+	return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider response contained an unbound resource identity.")
+}
+
+// Decoding follows the endpoint contract, not just its HTTP verb. Multipart
+// bodies remain byte-for-byte intact (including boundaries and file content).
+func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]byte, oif.Document, string, *fault.Error) {
+	var source oif.Document
+	if e.Method != http.MethodPost && e.Method != http.MethodPatch {
+		return nil, source, "", nil
+	}
+	if e.Action == "cancel" && (r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0) {
+		return nil, source, "", nil
+	}
+	if e.Action == "create" && (e.Operation == "skill" || e.Kind == "container_file" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")) {
+		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
+			return nil, source, "", fault.ServerError(415, "unsupported_media_type", "Resource uploads require multipart/form-data.")
+		}
+		if encoding := r.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
+			return nil, source, "", fault.ServerError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
+		}
+		body, err := readBounded(r.Body, s.Config.MaxBodyBytes)
+		if errors.Is(err, errResponseTooLarge) {
+			return nil, source, "", ingress.BodyTooLarge()
+		}
+		if err != nil {
+			return nil, source, "", ingress.BodyReadError(err)
+		}
+		if measured, ok := r.Body.(*ingress.MeasuredBody); ok {
+			measured.Decoded = int64(len(body))
+		}
+		reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+		parts := 0
+		var fileID string
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+			}
+			name := part.FormName()
+			parts++
+			if e.Kind == "container_file" && name == "file_id" {
+				value, err := readBounded(part, 512)
+				if err != nil || part.FileName() != "" || len(value) == 0 {
+					return nil, source, "", fault.InvalidRequest("invalid_resource_reference", "A multipart file_id must name one owned file.", nil)
+				}
+				fileID = string(value)
+				continue
+			}
+			if strings.HasSuffix(name, "_id") || strings.HasSuffix(name, "_ids") || e.Kind == "container_file" && name != "file" {
+				return nil, source, "", fault.InvalidRequest("invalid_resource_reference", "Multipart resource references are not supported.", nil)
+			}
+			if _, err = io.Copy(io.Discard, part); err != nil {
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+			}
+		}
+		if e.Kind == "container_file" {
+			if parts != 1 {
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Container uploads require exactly one file or file_id.", nil)
+			}
+			if fileID != "" {
+				source, _ = oif.ParseJSON([]byte(`{"file_id":`+strconv.Quote(fileID)+`}`), oif.Limits{})
+			}
+		}
+		return body, source, r.Header.Get("Content-Type"), nil
+	}
+	body, failure := s.Gate.ReadBody(r)
+	if failure != nil {
+		return nil, source, "", failure
+	}
+	var err error
+	source, err = oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
+	if err != nil || source.Root().Kind() != oif.Object {
+		return nil, source, "", fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
+	}
+	return body, source, "application/json", nil
+}
+
+func encodeRetainedRequestBody(e retainedapi.Endpoint, source oif.Document, contentType string) ([]byte, string, error) {
+	if e.Kind != "container_file" || !strings.HasPrefix(contentType, "multipart/") {
+		return source.Bytes(), contentType, nil
+	}
+	value, _ := source.Root().Lookup("file_id")
+	id, ok := value.Text()
+	if !ok || id == "" {
+		return nil, "", resources.ErrContract
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("file_id", id); err != nil {
+		return nil, "", err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return body.Bytes(), writer.FormDataContentType(), nil
+}
+
+func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []byte, contentType string) ([]byte, *fault.Error) {
+	if !strings.HasPrefix(contentType, "multipart/") {
+		return s.retainedSubmissionDigest(e, slug, body)
+	}
+	digester := s.Deps.Digester
+	if digester == nil {
+		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
+	}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	type partContent struct {
+		Header map[string][]string
+		Body   []byte
+	}
+	var parts []partContent
+	for {
+		part, err := reader.NextRawPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+		}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return nil, ingress.BodyReadError(err)
+		}
+		parts = append(parts, partContent{Header: part.Header, Body: data})
+	}
+	canonical, err := json.Marshal(parts)
+	if err != nil {
+		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+	}
+	return digester.Digest(secrets.RetainedSubmissionDigest, e.Operation+"\x00"+e.Kind+"\x00"+slug+"\x00"+string(canonical)), nil
+}
+
+func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *Pin) (oif.Document, error) {
+	if e.Operation == "eval" {
+		var changes []oif.Change
+		err := walkRetainedEvalModels(source.Root(), "", func(pointer, model string) error {
+			changes = append(changes, oif.Change{Pointer: pointer, Value: strconv.Quote(p.Provider.Connector().Model(model)), Origin: oif.ResourceBinding, Reason: "authorized evaluation serving model"})
+			return nil
+		})
+		if err != nil {
+			return oif.Document{}, err
+		}
+		return oif.Apply(source, changes)
+	}
+	field := "model"
+	if e.Kind == "vertex_tuning_job" {
+		field = "baseModel"
+	} else if e.Operation != "compaction" && e.Operation != "context_cache" && e.Kind != "fine_tuning_job" {
+		return source, nil
+	}
+	if e.Action != "create" && e.Operation != "compaction" {
+		return source, nil
+	}
+	model := p.Provider.Connector().Model(p.Model)
+	if e.Kind == "context_cache" {
+		model = "models/" + strings.TrimPrefix(model, "models/")
+	}
+	return oif.Apply(source, []oif.Change{{Pointer: "/" + field, Value: strconv.Quote(model), Origin: oif.ResourceBinding, Reason: "selected route model"}})
+}
+
+// hasItemReference reports whether any nested input item references
+// provider-held content by native ID. Such IDs name another caller's
+// retained items under the shared provider credential, so the variant
+// is refused until it can be resolved through owner-scoped bindings.
+func hasItemReference(v oif.Value) bool {
+	switch v.Kind() {
+	case oif.Array:
+		for _, child := range v.Elements() {
+			if hasItemReference(child) {
+				return true
+			}
+		}
+	case oif.Object:
+		// Item references permit type to be omitted or null; an
+		// untyped item carrying an id is still a provider reference.
+		kind := ""
+		if t, ok := v.Lookup("type"); ok {
+			if text, isText := t.Text(); isText {
+				kind = text
+			}
+		}
+		if _, hasID := v.Lookup("id"); hasID && (kind == "" || kind == "item_reference") {
+			return true
+		}
+		for _, field := range v.Members() {
+			switch field.Name {
+			case "metadata", "attributes", "schema", "json_schema", "parameters", "input_schema", "item_schema":
+				continue
+			}
+			if hasItemReference(field.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// retainedFileIDs collects the file handles a request body references,
+// in first-seen order, so pin selection can bind to their owner.
+func retainedFileIDs(v oif.Value) []string {
+	var out []string
+	seen := map[string]bool{}
+	var walk func(oif.Value)
+	walk = func(value oif.Value) {
+		switch value.Kind() {
+		case oif.Array:
+			for _, child := range value.Elements() {
+				walk(child)
+			}
+		case oif.Object:
+			for _, field := range value.Members() {
+				if field.Name == "file_id" {
+					if id, ok := field.Value.Text(); ok && id != "" && !seen[id] {
+						seen[id] = true
+						out = append(out, id)
+					}
+					continue
+				}
+				walk(field.Value)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
+// referencedResources resolves the retained resources a request body
+// names through the endpoint's declared references, so pin selection
+// can bind to their serving identity before dispatch.
+func (s *Server) referencedResources(ctx context.Context, x *Call, source oif.Document, e retainedapi.Endpoint) ([]*resources.Resource, error) {
+	var out []*resources.Resource
+	seen := map[string]bool{}
+	resolve := func(kind, id string) error {
+		key := kind + "\x00" + id
+		if seen[key] {
+			return nil
+		}
+		seen[key] = true
+		var bound *resources.Resource
+		var err error
+		switch kind {
+		case resources.KindResponse:
+			bound, _, err = s.readResponseResource(ctx, x.keyID, id)
+		case resources.KindFile:
+			bound, _, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+		case resources.KindGeminiFile:
+			local, localErr := retainedGeminiFileID(id)
+			if localErr != nil {
+				return localErr
+			}
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, local)
+		default:
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, id)
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, bound)
+		return nil
+	}
+	_, err := retainedapi.Rewrite(source, retainedRequestRefsForSource(e, source), func(kind, id string) (string, error) {
+		if err := resolve(kind, id); err != nil {
+			return "", err
+		}
+		return id, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// samePin reports whether two resources share one serving pin.
+func samePin(a, b *resources.Resource) bool {
+	return a.ProviderID == b.ProviderID && a.ProviderRevisionID == b.ProviderRevisionID && a.TargetID == b.TargetID && a.SlotID == b.SlotID && sameCredential(a.CredentialID, b.CredentialID)
+}
+
+func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyauthority.Authority, p *Pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
+	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
+		return oif.Document{}, errors.New("item_reference inputs are not supported")
+	}
+	rewritten, err := retainedapi.Rewrite(source, retainedRequestRefsForSource(e, source), func(kind, id string) (string, error) {
+		if s.Deps.Resources == nil {
+			return "", resources.ErrNotFound
+		}
+		var bound *resources.Resource
+		var err error
+		if kind == resources.KindResponse {
+			var contract *storedResponseContract
+			bound, contract, err = s.readResponseResource(ctx, x.keyID, id)
+			if err == nil {
+				_, _, failure := s.admitStoredResponse(ctx, x, a, bound, contract, RetainedNewWork)
+				if failure != nil {
+					err = resources.ErrNotFound
+				}
+			}
+		} else if kind == resources.KindFile {
+			// A file handle may name either the transformed or the
+			// strict durable kind; resolve it through the durable
+			// contract so strict handles keep their checks.
+			var contract *durableDocument
+			bound, contract, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+			if err == nil {
+				var failure *fault.Error
+				if contract != nil {
+					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), RetainedNewWork)
+				} else {
+					_, _, failure = s.ResolveResource(ctx, x, a, bound, x.operationName(), RetainedNewWork)
+				}
+				if failure != nil {
+					err = resources.ErrNotFound
+				}
+			}
+		} else {
+			local := id
+			if kind == resources.KindGeminiFile {
+				local, err = retainedGeminiFileID(id)
+				if err != nil {
+					return "", err
+				}
+			}
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, local)
+			if err == nil {
+				_, _, failure := s.ResolveResource(ctx, x, a, bound, x.operationName(), RetainedNewWork)
+				if failure != nil {
+					err = resources.ErrNotFound
+				}
+			}
+		}
+		if err != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" || bound.State == "not_accepted" {
+			return "", resources.ErrNotFound
+		}
+		if kind == resources.KindGeminiFile {
+			return retainedGeminiFileURI(bound, p)
+		}
+		return bound.UpstreamID, nil
+	})
+	if err != nil {
+		return oif.Document{}, err
+	}
+	return bindRetainedModel(rewritten, e, p)
+}
+
+// Only declared pagination/filter fields reach the provider. ID cursors have
+// exactly the same owner, parent and serving affinity checks as path IDs.
+func (s *Server) retainedQuery(ctx context.Context, x *Call, e retainedapi.Endpoint, resource *resources.Resource, raw url.Values) (url.Values, *fault.Error) {
+	out := url.Values{}
+	for name, values := range raw {
+		if len(values) != 1 {
+			return nil, fault.InvalidRequest("invalid_parameter", "Repeated query parameters are not supported.", &name)
+		}
+		v := values[0]
+		switch name {
+		case "key":
+			if e.Surface != "gemini" || v == "" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+			continue
+		case "limit", "page_size", "pageSize":
+			n, err := strconv.Atoi(v)
+			if e.Action != "list" || err != nil || n < 1 || n > 100 {
+				return nil, fault.InvalidRequest("invalid_parameter", "Page size must be between 1 and 100.", &name)
+			}
+		case "order":
+			if e.Action != "list" || (v != "asc" && v != "desc") {
+				return nil, fault.InvalidRequest("invalid_parameter", "order must be asc or desc.", &name)
+			}
+		case "filter":
+			if e.Action != "list" || e.Kind != "vector_store_file" || !strings.Contains("|in_progress|completed|failed|cancelled|", "|"+v+"|") {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported list filter.", &name)
+			}
+		case "after", "before", "after_id", "before_id":
+			if e.Action != "list" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
+			}
+			bound, err := s.Deps.Resources.Get(ctx, e.Kind, x.keyID, v)
+			if err != nil || resource == nil || bound.ParentID == nil || *bound.ParentID != resource.UUID || bound.RouteRevisionID != resource.RouteRevisionID || !samePin(bound, resource) {
+				return nil, fault.InvalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
+			}
+			v = bound.UpstreamID
+		case "beta":
+			// The pinned Anthropic SDK appends ?beta=true to every
+			// Skills and Skill Versions request; forward it unchanged.
+			if e.Operation != "skill" || v != "true" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+		case "page":
+			// Skills lists paginate with the provider's opaque page
+			// token (the previous response's next_page), not a gateway
+			// resource ID, so it passes through without a binding lookup.
+			if e.Operation != "skill" || e.Action != "list" || v == "" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+		case "updateMask":
+			if e.Kind != "context_cache" || e.Action != "patch" {
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			}
+			for _, field := range strings.Split(v, ",") {
+				if field != "ttl" && field != "expire_time" && field != "expireTime" {
+					return nil, fault.InvalidRequest("invalid_parameter", "Only cache expiration can be updated.", &name)
+				}
+			}
+		default:
+			return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+		}
+		out.Set(name, v)
+	}
+	return out, nil
+}
+
+func retainedRequestRefs(e retainedapi.Endpoint) map[string]string {
+	refs := map[string]string{}
+	switch e.Operation {
+	case "fine_tuning":
+		refs["training_file"] = resources.KindFile
+		refs["validation_file"] = resources.KindFile
+	case "vector_store", "container":
+		refs["file_ids"] = resources.KindFile
+		refs["file_id"] = resources.KindFile
+	case "eval":
+		refs["file_id"] = resources.KindFile
+	case "conversation", "compaction":
+		refs["vector_store_id"] = "vector_store"
+		refs["file_id"] = resources.KindFile
+		refs["previous_response_id"] = resources.KindResponse
+		refs["call_id"] = retainedapi.Literal
+		refs["item_id"] = retainedapi.Literal
+		refs["id"] = retainedapi.Literal
+	case "retrieval":
+		refs["file_id"] = resources.KindFile
+	case "context_cache":
+		refs["file_uri"] = resources.KindGeminiFile
+		refs["fileUri"] = resources.KindGeminiFile
+	}
+	return refs
+}
+
+func retainedRequestRefsForSource(e retainedapi.Endpoint, source oif.Document) map[string]string {
+	refs := retainedRequestRefs(e)
+	if e.Operation == "eval" {
+		add := func(root oif.Value, path string) {
+			data, _ := root.Lookup("data_source")
+			value, _ := data.Lookup("source")
+			kind, _ := value.Lookup("type")
+			switch text, _ := kind.Text(); text {
+			case "file_id":
+				refs[path+"/data_source/source/id"] = resources.KindFile
+			case "file_content":
+				refs[path+"/data_source/source/content"] = retainedapi.Opaque
+			}
+		}
+		add(source.Root(), "")
+		if e.Action == "list" {
+			items, _ := source.Root().Lookup(e.Collection)
+			for i, item := range items.Elements() {
+				add(item, "/"+e.Collection+"/"+strconv.Itoa(i))
+			}
+		}
+	}
+	return refs
+}
+
+func retainedResponseRefs(e retainedapi.Endpoint, source oif.Document) map[string]string {
+	refs := retainedRequestRefsForSource(e, source)
+	// Request references are also echoed in native responses. Response-only
+	// literals and references are declared per family, never by suffix alone.
+	switch e.Operation {
+	case "fine_tuning":
+		refs["organization_id"] = retainedapi.Literal
+		refs["fine_tuning_job_id"] = "fine_tuning_job"
+		refs["result_files"] = resources.KindFile
+		refs["run_id"] = retainedapi.Literal // external experiment tracker
+	case "vector_store":
+		refs["vector_store_id"] = "vector_store"
+	case "container":
+		refs["container_id"] = "container"
+	case "eval":
+		refs["eval_id"] = "eval"
+		refs["run_id"] = "eval_run"
+		refs["datasource_item_id"] = retainedapi.Literal
+		addCriteria := func(root oif.Value, path string) {
+			criteria, _ := root.Lookup("testing_criteria")
+			for i := range criteria.Elements() {
+				refs[path+"/testing_criteria/"+strconv.Itoa(i)+"/id"] = retainedapi.Literal
+			}
+		}
+		addCriteria(source.Root(), "")
+		if e.Action == "list" {
+			items, _ := source.Root().Lookup(e.Collection)
+			for i, item := range items.Elements() {
+				addCriteria(item, "/"+e.Collection+"/"+strconv.Itoa(i))
+			}
+		}
+	case "conversation":
+		refs["conversation_id"] = "conversation"
+		refs["id"] = retainedapi.Literal // message/content item identity
+	case "skill":
+		refs["skill_id"] = "skill"
+		refs["latest_version_id"] = "skill_version"
+	case "compaction":
+		refs["id"] = retainedapi.Literal  // transient output items
+		refs["/id"] = retainedapi.Literal // stateless compaction receipt
+	}
+	if e.Operation != "compaction" && e.Operation != "retrieval" {
+		if e.Action == "list" || e.Kind == "conversation_item" && e.Action == "create" {
+			items, _ := source.Root().Lookup(e.Collection)
+			for i := range items.Elements() {
+				refs["/"+e.Collection+"/"+strconv.Itoa(i)+"/"+e.Identity] = e.Kind
+			}
+			refs["first_id"], refs["last_id"] = e.Kind, e.Kind
+		} else if e.Kind == "conversation_item" && e.Action == "delete" {
+			// Deleting a conversation item returns the parent
+			// Conversation, so the root identity is the parent's.
+			refs["/"+e.Identity] = "conversation"
+		} else {
+			refs["/"+e.Identity] = e.Kind
+		}
+	}
+	return refs
+}
+
+func retainedCreateIDs(e retainedapi.Endpoint, body []byte) ([]string, error) {
+	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
+	if err != nil || source.Root().Kind() != oif.Object {
+		return nil, resources.ErrContract
+	}
+	objects := []oif.Value{source.Root()}
+	if e.Kind == "conversation_item" && e.Action == "create" {
+		items, ok := source.Root().Lookup(e.Collection)
+		if !ok || items.Kind() != oif.Array {
+			return nil, resources.ErrContract
+		}
+		objects = items.Elements()
+	}
+	ids := make([]string, 0, len(objects))
+	seen := map[string]bool{}
+	for _, object := range objects {
+		value, _ := object.Lookup(e.Identity)
+		id, ok := value.Text()
+		if !ok || id == "" || len(id) > 512 || seen[id] {
+			return nil, resources.ErrContract
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// Children inherit serving authority, while lifecycle facts belong to the
+// native child observed under that parent.
+func retainedDiscoveredChild(parent *resources.Resource, kind, id string, item oif.Value, e retainedapi.Endpoint, now time.Time) (*resources.Resource, error) {
+	child := *parent
+	child.UUID, child.ID = [16]byte{}, ""
+	child.Kind, child.UpstreamID, child.State = kind, id, "active"
+	child.ParentID, child.SubmissionID = &parent.UUID, nil
+	child.ExpiresAt, child.RetainedAccounting = nil, nil
+	child.CreatedAt, child.UpdatedAt = time.Time{}, time.Time{}
+	var inherited map[string]json.RawMessage
+	if json.Unmarshal(parent.Metadata, &inherited) != nil {
+		return nil, resources.ErrContract
+	}
+	metadata := map[string]json.RawMessage{}
+	for _, field := range []string{"upstream_model", "contract_revision", "authorized_models", "serving_models", "memory_tier"} {
+		if value, present := inherited[field]; present {
+			metadata[field] = value
+		}
+	}
+	child.Metadata, _ = json.Marshal(metadata)
+	if item.Kind() == oif.Object {
+		document, err := oif.ParseJSON([]byte(item.Raw()), oif.Limits{MaxBytes: retainedBodyLimit})
+		if err != nil {
+			return nil, err
+		}
+		if err := resources.EnrichRetained(&child, e, document, now); err != nil {
+			return nil, err
+		}
+	}
+	return &child, nil
+}
+
+// Project only declared identities. Primary children observed under an
+// authorized parent may be discovered; unrelated references must already exist.
+func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources.Resource, e retainedapi.Endpoint, source oif.Document, rewrite retainedapi.PreparedRewrite) ([]byte, error) {
+	nativeItems := map[string]oif.Value{}
+	if e.Action == "list" {
+		items, _ := source.Root().Lookup(e.Collection)
+		for _, item := range items.Elements() {
+			identity, _ := item.Lookup(e.Identity)
+			if id, valid := identity.Text(); valid {
+				nativeItems[id] = item
+			}
+		}
+	}
+	resultFiles := map[string]bool{}
+	if e.Operation == "fine_tuning" {
+		if files, present := source.Root().Lookup("result_files"); present && files.Kind() == oif.Array {
+			for _, file := range files.Elements() {
+				if id, ok := file.Text(); ok {
+					resultFiles[id] = true
+				}
+			}
+		}
+	}
+	projected, err := rewrite.Bind(func(kind, id string) (string, error) {
+		if resource == nil {
+			return "", resources.ErrNotFound
+		}
+		if kind == resource.Kind && id == resource.UpstreamID {
+			return resource.ID, nil
+		}
+		identity := resource.NativeIdentity()
+		identity.Kind, identity.UpstreamID = kind, id
+		identity.ParentID = nil
+		if kind == e.Kind {
+			if e.Action == "list" {
+				identity.ParentID = &resource.UUID
+			} else {
+				identity.ParentID = resource.ParentID
+			}
+		} else if kind == "skill_version" && resource.Kind == "skill" {
+			// A Skill response names its latest version, a child
+			// observed through the authorized parent Skill.
+			identity.ParentID = &resource.UUID
+		} else if resource.ParentID != nil && len(e.Ancestors) > 0 && kind == e.Ancestors[len(e.Ancestors)-1] {
+			// The parent's own parent may not be nil (eval runs, for example).
+			parent, findErr := s.Deps.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
+			if findErr != nil {
+				return "", retainedBindingStoreError(findErr)
+			}
+			if parent.Kind != kind || parent.UpstreamID != id {
+				return "", resources.ErrNotFound
+			}
+			return parent.ID, nil
+		}
+		bound, findErr := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
+			// An echoed file reference may name the strict durable
+			// kind under the same serving identity.
+			strictIdentity := identity
+			strictIdentity.Kind = resources.KindStrictFile
+			bound, findErr = s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
+		}
+		resultFile := kind == resources.KindFile && resultFiles[id]
+		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {
+			child, childErr := retainedDiscoveredChild(resource, kind, id, nativeItems[id], e, s.Now())
+			if childErr != nil {
+				return "", childErr
+			}
+			if resultFile {
+				child.ContractVersion = nil
+				child.Metadata, _ = json.Marshal(map[string]string{"upstream_model": ResourceModel(resource), "file_operation": "fine_tuning", "purpose": "fine-tune-results"})
+			}
+			var submission []uuid.UUID
+			if kind == "eval_run" {
+				metadata, _ := nativeItems[id].Lookup("metadata")
+				if marker, present := metadata.Lookup(resources.RetainedSubmissionMarkerField); present && marker.Kind() != oif.Null {
+					text, valid := marker.Text()
+					original, err := uuid.Parse(text)
+					if !valid || err != nil || original == uuid.Nil || original.String() != text {
+						return "", resources.ErrContract
+					}
+					submission = append(submission, original)
+				}
+			}
+			bound, findErr = s.Deps.Resources.BindDiscovered(ctx, child, submission...)
+		}
+		if findErr != nil {
+			return "", retainedBindingStoreError(findErr)
+		}
+		if kind == "fine_tuning_checkpoint" && nativeItems[id].Kind() == oif.Object {
+			checkpoint, err := oif.ParseJSON([]byte(nativeItems[id].Raw()), oif.Limits{MaxBytes: retainedBodyLimit})
+			if err != nil {
+				return "", err
+			}
+			if err := s.Deps.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
+				return "", retainedBindingStoreError(err)
+			}
+		}
+		return bound.ID, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return projected.Bytes(), nil
+}

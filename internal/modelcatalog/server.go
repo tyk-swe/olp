@@ -12,7 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -21,7 +21,7 @@ import (
 type Server struct {
 	Access  *access.Server
 	Runtime *release.Manager
-	Gateway *gateway.Server
+	Gateway *kernel.Server
 	Origin  string
 }
 

@@ -45,6 +45,8 @@ declare -A gateway_imports=(
   [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""
+  [surface/anthropicstate]="fault kernel"
+  [kernel]="codeforward delegation events fault guardstream health ingress models quota realtimeresponses traceingest"
 )
 while read -r package imports; do
   [[ $package == "$gateway" ]] && continue

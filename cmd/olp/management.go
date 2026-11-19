@@ -51,7 +51,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -89,7 +89,7 @@ type Management struct {
 	Egress         *egress.Policy
 	Limits         *sharedLimits
 	Runtime        *release.Manager
-	Gateway        *gateway.Server
+	Gateway        *kernel.Server
 	ResponseCache  *cache.Store
 	Media          *jobs.Service
 	Spool          *staging.Spool
@@ -172,8 +172,8 @@ func (m Management) Register(mux *http.ServeMux) {
 	apikeys.NewAPI(m.Access).Register(mux)
 	auditlog.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	playground := &gateway.Playground{Gateway: m.Gateway}
-	playgroundLimits := []access.RouteOption{access.MaxBody(gateway.PlaygroundBodyLimit), access.Deadline(gateway.PlaygroundTimeout)}
+	playground := &kernel.Playground{Gateway: m.Gateway}
+	playgroundLimits := []access.RouteOption{access.MaxBody(kernel.PlaygroundBodyLimit), access.Deadline(kernel.PlaygroundTimeout)}
 	m.Access.Route(mux, "POST /api/v1/playground", playground.Handle, playgroundLimits...)
 	m.Access.Stream(mux, "POST /api/v1/playground/stream", playground.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
@@ -223,7 +223,7 @@ type managementInputs struct {
 	core         runtimeCore
 	limiter      *admission.Limiter
 	shared       *sharedLimits
-	gateway      *gateway.Server
+	gateway      *kernel.Server
 	agentTasks   *tasks.Store
 	agentPeers   *a2a.Peers
 	agentGrants  *personal.Store

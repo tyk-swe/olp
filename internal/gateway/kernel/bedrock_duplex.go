@@ -1,0 +1,119 @@
+package kernel
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/upstream"
+
+	"github.com/coder/websocket"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+)
+
+type bedrockPeer struct {
+	stream *connectors.BedrockStream
+}
+
+type streamContextPeer struct {
+	duplexPeer
+	cancel context.CancelFunc
+}
+
+func (p *streamContextPeer) Close(code websocket.StatusCode, reason string) error {
+	defer p.cancel()
+	return p.duplexPeer.Close(code, reason)
+}
+
+func (p *streamContextPeer) CloseNow() error {
+	defer p.cancel()
+	return p.duplexPeer.CloseNow()
+}
+
+func (p *bedrockPeer) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
+	payload, err := p.stream.Receive(ctx)
+	if errors.Is(err, connectors.ErrBedrockStreamClosed) {
+		return 0, nil, websocket.CloseError{Code: websocket.StatusNormalClosure}
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return websocket.MessageText, payload, nil
+}
+
+func (p *bedrockPeer) Write(ctx context.Context, _ websocket.MessageType, payload []byte) error {
+	return p.stream.Send(ctx, payload)
+}
+
+func (*bedrockPeer) Ping(context.Context) error { return nil }
+
+func (p *bedrockPeer) Close(websocket.StatusCode, string) error { return p.stream.Close() }
+func (p *bedrockPeer) CloseNow() error                          { return p.stream.Close() }
+
+func (s *Server) openBedrockStream(ctx context.Context, x *Call, p *Pin) (duplexPeer, error) {
+	secret, err := s.slotSecret(ctx, x, p.Slot, &p.Provider, p.Model)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.providerClient(ctx, x.request.release, &p.Provider, p.Slot)
+	if err != nil {
+		return nil, err
+	}
+	stream, applied, err := s.auth.OpenBedrockDuplex(ctx, p.Provider.Connector(), secret, p.Model, client)
+	x.sensitive.Include(applied)
+	if err != nil {
+		return nil, err
+	}
+	return &bedrockPeer{stream: stream}, nil
+}
+
+func (s *Server) bedrockDuplexDial(ctx context.Context, x *Call, p *Pin) (duplexPeer, *fault.Error) {
+	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
+	fact.Mode = "realtime"
+	if p.Hold != nil {
+		fact.Budgets = p.Hold.budgets
+	}
+	finish := func(class string, e *fault.Error) (duplexPeer, *fault.Error) {
+		fact.Class = class
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		x.facts = append(x.facts, fact)
+		return nil, e
+	}
+	endpoint, err := p.Provider.Connector().BedrockDuplexEndpoint()
+	if err != nil {
+		return finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock duplex profile cannot address this model."))
+	}
+	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
+		return finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
+	}
+	dialCtx, cancel := context.WithCancel(ctx)
+	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
+	peer, err := s.openBedrockStream(dialCtx, x, p)
+	dialTimer.Stop()
+	if err != nil {
+		cancel()
+		class := classConnect
+		if errors.Is(err, connectors.ErrCredentialRejected) {
+			class = classCredential
+		}
+		return finish(class, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock bidirectional stream could not be opened."))
+	}
+	fact.Class = "success"
+	fact.Status = http.StatusOK
+	fact.Committed = true
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = upstream.Accepted
+	}
+	fact.Duration = s.Now().Sub(fact.StartedAt)
+	fact.RecordEvidence(true)
+	x.facts = append(x.facts, fact)
+	x.dispatched = true
+	if p.Hold != nil {
+		x.spendCaps(p.Hold.budgets, p.attempt)
+	}
+	return &streamContextPeer{duplexPeer: peer, cancel: cancel}, nil
+}

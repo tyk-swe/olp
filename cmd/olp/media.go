@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -30,7 +30,7 @@ func newMediaPlane(c Config, pool *pgxpool.Pool, policy *egress.Policy, credenti
 		return mediaPlane{}, err
 	}
 	mediaTransport := transport.New(transport.Deps{
-		Client:           policy.Client(gateway.UpstreamHeaderTimeout),
+		Client:           policy.Client(kernel.UpstreamHeaderTimeout),
 		Auth:             connectors.NewAuth(policy, os.Getenv),
 		Egress:           policy,
 		Spool:            spool,

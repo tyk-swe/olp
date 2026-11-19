@@ -130,7 +130,7 @@ Completions, Responses, Anthropic and Gemini, including bounds, target
 certification, approval, authority changes, `typesafe` pruning and compression
 recovery. The caller-filtered discovery fixture is
 `TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
-`internal/gateway/tool_loop_test.go`.
+`internal/gateway/kernel/tool_loop_test.go`.
 A former process test checked same-key simulation authorization and request bounds for draft and
 published routes, a run and its durable settlement, and rollback with local
 services.
@@ -241,7 +241,7 @@ counting is unary, video creation is asynchronous, and realtime uses WebSockets.
 `refused` means no mode of that operation can be certified for the provider.
 
 Endpoint registration lives in
-[`internal/gateway/server.go`](../../internal/gateway/server.go); certification
+[`internal/gateway/kernel/server.go`](../../internal/gateway/kernel/server.go); certification
 policy lives in [`internal/providers/probe/operations.go`](../../internal/providers/probe/operations.go).
 The conformance corpus and SDK suites exercise these behaviors.
 

@@ -8,8 +8,8 @@ import (
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -27,22 +27,22 @@ type gatewayInputs struct {
 }
 
 type gatewayAssembly struct {
-	deps        gateway.Dependencies
-	probeDeps   gateway.Dependencies
-	config      gateway.Config
-	probeConfig gateway.Config
+	deps        kernel.Dependencies
+	probeDeps   kernel.Dependencies
+	config      kernel.Config
+	probeConfig kernel.Config
 }
 
 func gatewayTemplates(in gatewayInputs) gatewayAssembly {
 	c, core, log := in.config, in.core, in.log
-	deps := gateway.Dependencies{
+	deps := kernel.Dependencies{
 		Runtime: core.rt, Egress: core.policy, Getenv: os.Getenv, Log: log, Sink: events.LogSink{Log: log},
 		Digester: core.rt, BudgetAuthority: core.rt, TaskAttemptAdmitter: core.rt,
 		TaskCapabilityAuthenticator: core.rt, DelegationReauthenticator: core.rt,
 	}
 	assembly := gatewayAssembly{deps: deps, probeDeps: deps}
 	if c.Mode.Management() || c.Mode.Inference() {
-		assembly.config = gateway.Config{
+		assembly.config = kernel.Config{
 			Region:             c.Region,
 			MaxInFlight:        c.MaxInFlightInference,
 			MaxShadowInFlight:  c.MaxInFlightShadow,
@@ -75,7 +75,7 @@ func gatewayTemplates(in gatewayInputs) gatewayAssembly {
 	if in.limiter != nil && (c.Mode == Worker || c.Mode == All) {
 		// The worker plane's health probes run through a gateway of their
 		// own: planned, gated, priced and emitted like any request.
-		assembly.probeConfig = gateway.Config{
+		assembly.probeConfig = kernel.Config{
 			Region:            c.Region,
 			MaxInFlight:       1,
 			MaxResponseBytes:  c.ProviderMaxResponseBytes,

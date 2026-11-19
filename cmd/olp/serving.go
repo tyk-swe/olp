@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -60,8 +61,8 @@ type agentPlane struct {
 }
 
 type serving struct {
-	gateway    *gateway.Server
-	prober     *gateway.Server
+	gateway    *kernel.Server
+	prober     *kernel.Server
 	accounting *delivery.Delivery
 	agents     agentPlane
 	monitor    *agents.TaskMonitor
@@ -73,7 +74,7 @@ func newServing(f foundation) (serving, error) {
 	c, stores := f.config, f.stores
 	assembly := gatewayTemplates(gatewayInputs{config: c, pool: stores.pool, core: f.core, inferencePool: f.inferencePool, limiter: stores.limiter, shared: stores.shared, outage: stores.outage, log: f.log})
 	plane := f.agentPlane()
-	var gw *gateway.Server
+	var gw *kernel.Server
 	inference, err := f.inference(plane, assembly.deps, func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
 		return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
 	})
@@ -82,20 +83,20 @@ func newServing(f foundation) (serving, error) {
 	}
 	accounting := f.accounting()
 	if c.Mode.Management() || c.Mode.Inference() {
-		gw = gateway.New(f.accounted(inference.deps, accounting), assembly.config)
+		gw = kernel.New(f.accounted(inference.deps, accounting), assembly.config)
 	}
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
-		gw.Register(f.public)
+		gateway.Register(gw, f.public)
 	}
 	return built, nil
 }
 
-func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *gateway.Server {
+func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *kernel.Server {
 	if assembly.probeDeps.Admission == nil {
 		return nil
 	}
-	return gateway.New(f.accounted(assembly.probeDeps, accounting), assembly.probeConfig)
+	return kernel.New(f.accounted(assembly.probeDeps, accounting), assembly.probeConfig)
 }
 
 func (f foundation) agentPlane() agentPlane {
@@ -120,11 +121,11 @@ func (f foundation) taskLimits() tasks.Limits {
 }
 
 type inferencePlane struct {
-	deps    gateway.Dependencies
+	deps    kernel.Dependencies
 	monitor *agents.TaskMonitor
 }
 
-func (f foundation) inference(plane agentPlane, templates gateway.Dependencies, guard toolGuardrails) (inferencePlane, error) {
+func (f foundation) inference(plane agentPlane, templates kernel.Dependencies, guard toolGuardrails) (inferencePlane, error) {
 	c, stores, core := f.config, f.stores, f.core
 	if !c.Mode.Inference() {
 		return inferencePlane{deps: templates}, nil
@@ -154,11 +155,11 @@ func (f foundation) inference(plane agentPlane, templates gateway.Dependencies, 
 	return inferencePlane{deps: deps, monitor: monitor}, nil
 }
 
-func (f foundation) inferenceDependencies(templates gateway.Dependencies) gateway.Dependencies {
+func (f foundation) inferenceDependencies(templates kernel.Dependencies) kernel.Dependencies {
 	pool, core, media := f.stores.pool, f.core, f.media
 	deps := templates
 	deps.Capture = core.capturer
-	deps.Media = &gateway.MediaDeps{Transport: media.transport, Jobs: media.service, Store: jobs.NewStore(pool)}
+	deps.Media = &kernel.MediaDeps{Transport: media.transport, Jobs: media.service, Store: jobs.NewStore(pool)}
 	deps.Staging = media.spool
 	deps.Uploads = staging.NewAdmission(media.spool.CapacityBytes())
 	if pool == nil {
@@ -205,13 +206,13 @@ func (f foundation) accounting() *delivery.Delivery {
 	return delivery.NewDelivery(f.stores.pool, completeness.GatewayInstance(f.config.Hostname), metadataBuffer, f.loss, f.log)
 }
 
-func (f foundation) accounted(templates gateway.Dependencies, accounting *delivery.Delivery) gateway.Dependencies {
+func (f foundation) accounted(templates kernel.Dependencies, accounting *delivery.Delivery) kernel.Dependencies {
 	if accounting == nil || templates.Admission == nil {
 		return templates
 	}
 	pool, syncer := f.stores.pool, f.stores.shared.Syncer
 	deps := templates
-	deps.Debits = gateway.DurableSessionDebits(pool, f.stores.debitStore, syncer)
+	deps.Debits = kernel.DurableSessionDebits(pool, f.stores.debitStore, syncer)
 	deps.Admission.PendingCostAccountingReady = syncer.CheckOwnerAccounting
 	deps.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 	deps.Admission.CostAccountingReady = accounting.Check

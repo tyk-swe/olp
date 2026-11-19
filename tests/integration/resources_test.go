@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -322,7 +323,7 @@ type storedPlan struct {
 	profile     string
 	version     string
 	toolsets    []string
-	tools       gateway.WorkflowToolRunner
+	tools       kernel.WorkflowToolRunner
 	secure      bool
 	operations  []string
 	prices      []rates.RoutingPrice
@@ -430,11 +431,11 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	debitStore := debits.NewStore(pool)
 	syncer := debits.NewSyncer(debitStore, runner)
 	limiter := admission.NewDurable(runner, syncer)
-	workflow := gateway.Dependencies{}
+	workflow := kernel.Dependencies{}
 	if plan.tools != nil {
-		workflow = gateway.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: gateway.DurableSessionDebits(pool, debitStore, syncer)}
+		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
 	}
-	server := gateway.New(gateway.Dependencies{
+	server := kernel.New(kernel.Dependencies{
 		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
 		Admission: quota.NewAdmission(limiter, fleet.New(runner), nil, nil),
@@ -447,9 +448,9 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Batches:   batches.NewStore(pool),
 		Staging:   spool,
 		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
-	}, gateway.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+	}, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 	g.mux = http.NewServeMux()
-	server.Register(g.mux)
+	gateway.Register(server, g.mux)
 	g.server = httptest.NewServer(g.mux)
 	t.Cleanup(g.server.Close)
 	return g
@@ -804,6 +805,7 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 
 type upstreamCall struct {
 	request, key, authorization, body string
+	beta, accept                      string
 }
 
 type retainedUpstream struct {
@@ -821,7 +823,11 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	request := r.Method + " " + providerPrefix.ReplaceAllString(r.URL.Path, "")
 	u.mu.Lock()
-	u.calls = append(u.calls, upstreamCall{request, cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")), r.Header.Get("Authorization"), string(body)})
+	u.calls = append(u.calls, upstreamCall{
+		request: request, key: cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")),
+		authorization: r.Header.Get("Authorization"), body: string(body),
+		beta: r.Header.Get("Anthropic-Beta"), accept: r.Header.Get("Accept"),
+	})
 	nth := 0
 	for _, call := range u.calls {
 		if call.request == request {
@@ -1150,6 +1156,22 @@ func TestAnthropicFilesAndBatchesHideProviderIdentifiersIsolateKeysAndKeepUnsett
 			t.Fatalf("the provider saw %d of %q, want %d", len(sent), request, want)
 		}
 	}
+	fileBeta := uploaded[0].beta
+	if fileBeta == "" {
+		t.Fatal("the upload did not opt into the provider's file API")
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	for _, sent := range upstream.calls {
+		onFile := strings.Contains(sent.request, " /files")
+		if onFile && sent.beta != fileBeta || !onFile && sent.beta != "" {
+			t.Fatalf("%q reached the provider with beta %q, want the file API opt-in on file requests only", sent.request, sent.beta)
+		}
+		download := strings.HasSuffix(sent.request, "/content")
+		if binary := sent.accept == "application/binary"; binary != download {
+			t.Fatalf("%q asked the provider for %q, want binary for a file download only", sent.request, sent.accept)
+		}
+	}
 }
 
 func geminiReplies(_ string, nth int) map[string]string {
@@ -1437,26 +1459,26 @@ type toolCall struct {
 	arguments string
 }
 
-func (*routeTools) Resolve(_ context.Context, _ keyauthority.Authority, _ *release.Release, toolsets []string) ([]gateway.WorkflowTool, error) {
+func (*routeTools) Resolve(_ context.Context, _ keyauthority.Authority, _ *release.Release, toolsets []string) ([]kernel.WorkflowTool, error) {
 	price := "0.01"
-	return []gateway.WorkflowTool{{ToolsetID: toolsets[0], RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+	return []kernel.WorkflowTool{{ToolsetID: toolsets[0], RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
 		Classification: "read_only", Alias: "lookup", Name: "lookup", Description: "Look up a fact.", UnitPrice: &price,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q"],"additionalProperties":false}`),
 	}}}, nil
 }
 
-func (*routeTools) AuthorizeWorkflowTool(keyauthority.Authority, gateway.WorkflowTool) error {
+func (*routeTools) AuthorizeWorkflowTool(keyauthority.Authority, kernel.WorkflowTool) error {
 	return nil
 }
 
-func (r *routeTools) Call(_ context.Context, _ keyauthority.Authority, _ *release.Release, _ gateway.WorkflowTool, run string, _ int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
+func (r *routeTools) Call(_ context.Context, _ keyauthority.Authority, _ *release.Release, _ kernel.WorkflowTool, run string, _ int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, toolCall{run: run, arguments: string(arguments)})
 	return json.RawMessage(`{"content":[{"type":"text","text":"forty-two"}]}`), nil
 }
 
-func (*routeTools) CallApproved(context.Context, keyauthority.Authority, *release.Release, gateway.WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error) {
+func (*routeTools) CallApproved(context.Context, keyauthority.Authority, *release.Release, kernel.WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error) {
 	return nil, errors.New("the route tool needs no approval")
 }
 

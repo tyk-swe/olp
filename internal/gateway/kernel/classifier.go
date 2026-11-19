@@ -1,0 +1,259 @@
+package kernel
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
+
+	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/plugin/abi"
+)
+
+const (
+	// classifierText bounds the request text a classifier predicate sends.
+	classifierText = 32 << 10
+	// pluginPredicateTimeout bounds one plugin predicate call.
+	pluginPredicateTimeout = 250 * time.Millisecond
+)
+
+// Outcomes of a classifier or plugin predicate that could not decide. Either
+// way the selector does not match and the next one is evaluated.
+const (
+	classifierFailed    = "classifier_failed"
+	classifierForbidden = "classifier_forbidden"
+	pluginFailed        = "plugin_failed"
+)
+
+// classification is a classifier route's answer to one request.
+type classification struct {
+	label   string
+	score   *float64
+	failure string
+}
+
+// RoutePredicates runs the route_predicate hooks of confined plugins.
+type RoutePredicates interface {
+	RoutePredicate(ctx context.Context, digest string, input abi.RoutePredicate) (bool, error)
+}
+
+// evaluator answers the dynamic predicates of a request's route selectors,
+// over the features the selectors already see. A classifier is asked before a
+// plugin, and both must match.
+func (s *Server) evaluator(ctx context.Context, x *Call, features *routing.Features) func(routing.Selector) routing.PredicateResult {
+	return func(selector routing.Selector) routing.PredicateResult {
+		var result routing.PredicateResult
+		if c := selector.When.Classifier; c != nil {
+			answer := s.classify(ctx, x, c)
+			if answer.failure != "" {
+				return routing.PredicateResult{Failure: answer.failure}
+			}
+			result = routing.PredicateResult{Matched: c.Accepts(answer.label, answer.score), Label: answer.label}
+			if !result.Matched {
+				return result
+			}
+		}
+		if p := selector.When.Plugin; p != nil {
+			verdict := s.pluginPredicate(ctx, x.Route.Slug, selector.ID, p, features)
+			verdict.Label = result.Label
+			return verdict
+		}
+		return result
+	}
+}
+
+// pluginPredicate asks a confined plugin whether the selector applies. A
+// failure, including a missing or unconfined plugin, falls through to the
+// next selector.
+func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p *routing.PluginPredicate, features *routing.Features) routing.PredicateResult {
+	if s.Config.Predicates == nil || features == nil {
+		return routing.PredicateResult{Failure: pluginFailed}
+	}
+	ctx, cancel := context.WithTimeout(ctx, pluginPredicateTimeout)
+	defer cancel()
+	match, err := s.Config.Predicates.RoutePredicate(ctx, p.Digest, abi.RoutePredicate{
+		Route: route, Selector: selector, Operation: features.Operation,
+		InputTokens: features.InputTokens, OutputTokens: features.OutputTokens,
+		Streaming: features.Streaming, Tools: features.Tools, Modalities: features.Modalities,
+		StructuredOutput: features.StructuredOutput, ReasoningEffort: features.ReasoningEffort,
+	})
+	if err != nil {
+		return routing.PredicateResult{Failure: pluginFailed}
+	}
+	return routing.PredicateResult{Matched: match}
+}
+
+// classify asks a classifier route about the caller's request, once per
+// route and request however many selectors consult it.
+func (s *Server) classify(ctx context.Context, x *Call, c *routing.ClassifierPredicate) classification {
+	if answer, ok := x.classified[c.Route]; ok {
+		return answer
+	}
+	answer := s.callClassifier(ctx, x, c)
+	if x.classified == nil {
+		x.classified = map[string]classification{}
+	}
+	x.classified[c.Route] = answer
+	return answer
+}
+
+// callClassifier sends the text of the caller's last user turn to the
+// classifier route as a request of its own: accounted to the caller's key
+// with the classifier origin and its own key reservation, bounded by the
+// predicate's deadline. The caller is still being planned and has no lease. A
+// classification route answers with its highest-scoring label, a generation
+// route with its trimmed reply.
+func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.ClassifierPredicate) classification {
+	route, ok := parent.snapshot().FindRoute(c.Route)
+	switch {
+	case !ok || parent.generation.parsed == nil:
+		return classification{failure: classifierFailed}
+	case parent.authorize != nil && parent.authorize(&route) != nil:
+		return classification{failure: classifierForbidden}
+	}
+	text := protocols.RequestText(parent.generation.parsed, classifierText)
+	if text == "" {
+		return classification{failure: classifierFailed}
+	}
+	timeout := time.Duration(min(c.TimeoutMS, route.OverallTimeout)) * time.Millisecond
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	x := &Call{
+		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
+		actor:          parent.actor,
+		keyID:          parent.keyID,
+		budgetGroupID:  parent.budgetGroupID,
+		attribution:    parent.attribution,
+		endUserDigest:  parent.endUserDigest,
+		userID:         parent.userID,
+		authority:      parent.authority,
+		cardPinned:     parent.cardPinned,
+		cardRevisionID: parent.cardRevisionID,
+		cardRev:        parent.cardRev,
+		routingInputs:  parent.routingInputs,
+
+		origin:   usage.OriginClassifier,
+		parent:   parent.request.accountingID(),
+		priority: parent.priority, routeLeg: routeLeg{affinity: []byte(parent.keyID),
+
+			Route: &route},
+	}
+	defer s.settleAdmission(ctx, x)
+	var answer classification
+	var out *Outcome
+	if slices.Contains(route.Operations, "classification") {
+		answer, out = s.predict(ctx, x, route.Slug, text)
+	} else {
+		answer, out = s.generateLabel(ctx, x, route.Slug, text)
+	}
+	s.Finish(x, out, cmp.Or(errorStatus(out.Err), 200))
+	return answer
+}
+
+// prediction is one label of a TEI classification result.
+type prediction struct {
+	Label string  `json:"label"`
+	Score float64 `json:"score"`
+}
+
+// predict asks a strict classification route, in the TEI dialect, for the
+// labels of the text.
+func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (classification, *Outcome) {
+	failed := classification{failure: classifierFailed}
+	codec, _ := operationregistry.Lookup("tei-classification")
+	body, _ := json.Marshal(map[string]string{"inputs": text})
+	if x.snapshot().HasBodyLimits() {
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
+	}
+	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
+	x.mode = "unary"
+	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.Config.MaxBodyBytes))
+	if err != nil {
+		return failed, &Outcome{Err: requestError(err)}
+	}
+	x.unary.source = source
+	if e := s.prepareUnary(ctx, x); e != nil {
+		return failed, &Outcome{Err: e}
+	}
+	if e := s.admitClassifier(ctx, x); e != nil {
+		return failed, &Outcome{Err: e}
+	}
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+		return s.unaryAttempt(ctx, x, a, p, slot, fact)
+	}})
+	if result.err != nil {
+		return failed, &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}
+	}
+	x.facts[len(x.facts)-1].Committed = true
+	var predictions []prediction
+	if json.Unmarshal(result.result.Body, &predictions) != nil || len(predictions) == 0 {
+		return failed, &Outcome{Committed: true}
+	}
+	top := slices.MaxFunc(predictions, func(a, b prediction) int { return cmp.Compare(a.Score, b.Score) })
+	return classification{label: top.Label, score: &top.Score}, &Outcome{Committed: true}
+}
+
+// generateLabel asks a generation route for a reply to the text and takes the
+// reply as the label.
+func (s *Server) generateLabel(ctx context.Context, x *Call, slug, text string) (classification, *Outcome) {
+	failed := classification{failure: classifierFailed}
+	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
+	if x.snapshot().HasBodyLimits() {
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
+	}
+	parsed, err := protocols.Parse(wire.Chat, body, "")
+	if err != nil {
+		return failed, &Outcome{Err: requestError(err)}
+	}
+	x.family, x.generation.parsed = wire.Chat, parsed
+	if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
+		return failed, &Outcome{Err: e}
+	}
+	if e := s.admitClassifier(ctx, x); e != nil {
+		return failed, &Outcome{Err: e}
+	}
+	out := s.execute(ctx, x)
+	if out.Err != nil || out.completion == nil {
+		return failed, out
+	}
+	out.Committed = true
+	x.facts[len(x.facts)-1].Committed = true
+	label := strings.TrimSpace(out.completion.OutputText)
+	if label == "" {
+		return failed, out
+	}
+	return classification{label: label}, out
+}
+
+// admitClassifier budgets the classifier independently of its caller, which
+// cannot finish planning until the label is known. It shares the caller's
+// admission permit, awaiting it before any upstream work.
+// Keyless evaluations share the installation, organization and project budgets.
+func (s *Server) admitClassifier(ctx context.Context, x *Call) *fault.Error {
+	if e := s.Gate.AwaitAdmission(ctx, x.priority); e != nil {
+		return e
+	}
+	x.estimate = requestEstimate(x)
+	if x.keyID == "" {
+		return s.reserveSystemBudgets(ctx, x)
+	}
+	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
+	var e *fault.Error
+	admitted := x.AdmissionAuthority(x.authority)
+	x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	return e
+}

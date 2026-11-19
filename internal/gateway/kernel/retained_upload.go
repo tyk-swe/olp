@@ -1,0 +1,179 @@
+package kernel
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/textproto"
+	"slices"
+
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
+)
+
+func retainedFileOperation(r *resources.Resource) string {
+	var meta struct {
+		Operation string `json:"file_operation"`
+	}
+	if r != nil && json.Unmarshal(r.Metadata, &meta) == nil && slices.Contains([]string{"fine_tuning", "vector_store", "eval", "generation"}, meta.Operation) {
+		return meta.Operation
+	}
+	return "batch"
+}
+
+func retainedFilePurposeOperation(purpose string) string {
+	switch purpose {
+	case "fine-tune":
+		return "fine_tuning"
+	case "assistants":
+		return "vector_store"
+	case "evals":
+		return "eval"
+	case "user_data":
+		return "generation"
+	}
+	return ""
+}
+
+// Native retained-family uploads keep file bytes in the existing bounded spool
+// and persist their at-most-once submission identity before the provider sees it.
+func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
+	status := http.StatusInternalServerError
+	var p *Pin
+	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	fail := func(err *fault.Error) {
+		copy := *err
+		copy.NoRetry = true
+		x.Failure = &copy
+		status = err.Status
+		fault.WriteSurfaceError(w, &copy, "openai")
+	}
+	operation := retainedFilePurposeOperation(purpose)
+	if !a.Policy.AllowProviderState {
+		fail(providerStateForbidden())
+		return
+	}
+	if operation == "" || !slices.Contains(route.Operations, operation) {
+		fail(fault.InvalidRequest("unsupported_parameter", "This file purpose requires a route which permits the corresponding native operation.", nil))
+		return
+	}
+	if len(extra) > 0 || file.Size > s.Config.MaxBodyBytes {
+		fail(fault.InvalidRequest("unsupported_parameter", "Native retained uploads require one bounded file and a supported purpose.", nil))
+		return
+	}
+	idempotency := r.Header.Get("Idempotency-Key")
+	if idempotency == "" || len(idempotency) > 128 {
+		fail(fault.InvalidRequest("missing_required_parameter", "Idempotency-Key is required for native file uploads.", nil))
+		return
+	}
+	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
+	x.retained = retainedOperation{use: RetainedNewWork, usage: retainedTokenlessUsage}
+	ctx, cancel := s.StateDeadline(r.Context(), route)
+	defer cancel()
+	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
+	if encodeErr != nil {
+		fail(fault.InvalidRequest("invalid_request", "The bounded native upload could not be read.", nil))
+		return
+	}
+	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
+	digest, digestErr := s.retainedBodyDigest(e, route.Slug, body, contentType)
+	if digestErr != nil {
+		fail(digestErr)
+		return
+	}
+	prior, lookupErr := s.Deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
+	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
+		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
+		return
+	}
+	if lookupErr == nil {
+		w.Header().Set("X-OLP-Resource-ID", prior.ID)
+		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+		return
+	}
+	if !errors.Is(lookupErr, resources.ErrNotFound) {
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be read."))
+		return
+	}
+	var err *fault.Error
+	p, err = s.selectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
+		return (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
+	})
+	if err != nil {
+		fail(err)
+		return
+	}
+	if err := s.admitRetainedRequest(ctx, x, a, p, route, false); err != nil {
+		fail(err)
+		return
+	}
+	version := retainedapi.Revision
+	meta, _ := json.Marshal(map[string]any{"upstream_model": p.Model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
+	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, ContractVersion: &version, Metadata: meta}
+	lifecycle, prepareErr := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
+	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
+		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
+		return
+	}
+	if prepareErr != nil {
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be committed."))
+		return
+	}
+	resource := lifecycle.Resource()
+	w.Header().Set("X-OLP-Resource-ID", resource.ID)
+	if lifecycle.Existing() {
+		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+		return
+	}
+	endpoint, endpointErr := p.Provider.Connector().ResourceURL(p.Model, "files", nil)
+	if endpointErr != nil {
+		fail(pinUnavailable())
+		return
+	}
+	if err := lifecycle.Dispatch(ctx); err != nil {
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be fenced."))
+		return
+	}
+	defer s.settleFence(r.Context(), lifecycle.Close)
+	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, nil, endpoint, body, contentType, lifecycle, fail)
+}
+
+func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {
+	opened, err := s.Deps.Staging.Open(file.Handle)
+	if err != nil {
+		return nil, "", err
+	}
+	defer opened.File.Close()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("purpose", purpose); err != nil {
+		return nil, "", err
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": file.Filename}))
+	contentType := file.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return nil, "", err
+	}
+	n, err := io.Copy(part, io.LimitReader(opened.File, s.Config.MaxBodyBytes+1))
+	if err != nil || n != file.Size || n > s.Config.MaxBodyBytes {
+		return nil, "", resources.ErrContract
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return body.Bytes(), writer.FormDataContentType(), nil
+}
