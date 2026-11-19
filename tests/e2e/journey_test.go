@@ -394,3 +394,60 @@ func TestBudgetGroupAndIncreaseWritesReplayGuardStaleAndAudit(t *testing.T) {
 		t.Fatalf("increase audit = %v, want %v", actions, want)
 	}
 }
+
+func TestAPIKeyWritesReplayGuardStaleRotateRevokeAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "keys"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	expect := func(method, path string, body any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, method, path, body, headers); status != want {
+			t.Fatalf("%s %s: %s", method, path, describe(status, raw))
+		}
+	}
+
+	create := harness.Idempotent()
+	input := map[string]any{"name": "service", "scopes": []string{"inference"}, "project_id": project}
+	key := s.Want(owner, "POST", "/api/v1/api-keys", input, create, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/api-keys", input, create, http.StatusCreated); replayed["id"] != key["id"] || replayed["secret"] != key["secret"] {
+		t.Fatalf("replayed create returned another key")
+	}
+	id := key["id"].(string)
+	path := "/api/v1/api-keys/" + id
+	stored := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+
+	rename := map[string]any{"name": "renamed"}
+	expect("PATCH", path, map[string]any{"secret": "x"}, harness.Idempotent(harness.ETag(stored)), http.StatusUnprocessableEntity)
+	expect("PATCH", path, rename, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	updated := s.Want(owner, "PATCH", path, rename, harness.Idempotent(harness.ETag(stored)), http.StatusOK)
+
+	overlap := map[string]any{"overlap_seconds": 60}
+	expect("POST", path+"/rotate", map[string]any{"name": "x"}, harness.Idempotent(harness.ETag(updated)), http.StatusUnprocessableEntity)
+	expect("POST", path+"/rotate", overlap, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	rotate := harness.Idempotent(harness.ETag(updated))
+	rotated := s.Want(owner, "POST", path+"/rotate", overlap, rotate, http.StatusOK)
+	if rotated["secret"] == key["secret"] || rotated["overlap_expires_at"] == nil {
+		t.Fatalf("rotation = %v", rotated)
+	}
+	if replayed := s.Want(owner, "POST", path+"/rotate", overlap, rotate, http.StatusOK); replayed["secret"] != rotated["secret"] {
+		t.Fatalf("replayed rotation returned another secret")
+	}
+	if current := s.Want(owner, "GET", path, nil, nil, http.StatusOK); current["name"] != "renamed" || current["etag"] != rotated["etag"] {
+		t.Fatalf("stored key = %v", current)
+	}
+
+	expect("POST", path+"/revoke", nil, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	revoke := harness.Idempotent(harness.ETag(rotated))
+	expect("POST", path+"/revoke", nil, revoke, http.StatusOK)
+	expect("POST", path+"/revoke", nil, revoke, http.StatusOK)
+	revoked := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+	expect("POST", path+"/revoke", nil, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+	expect("POST", path+"/rotate", overlap, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+	expect("PATCH", path, rename, harness.Idempotent(harness.ETag(revoked)), http.StatusConflict)
+
+	if actions, want := auditActions(t, s, id), []string{"api_key.create", "api_key.revoke", "api_key.rotate", "api_key.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("key audit = %v, want %v", actions, want)
+	}
+}
