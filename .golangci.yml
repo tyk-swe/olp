@@ -1,0 +1,53 @@
+version: "2"
+run:
+  build-tags: [integration, e2e, qualification, qualificationlive]
+linters:
+  default: none
+  enable: [depguard, forbidigo, funlen, revive, staticcheck, unused]
+  settings:
+    staticcheck:
+      checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1023]
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: \.(BeginMutation|CompleteReplay)$
+          pkg: ^github\.com/tyk-swe/olp/internal/access$
+          msg: Return access.Mutate, access.Remove or access.Transact instead of opening the management transaction by hand.
+    funlen:
+      lines: 100
+      statements: -1
+      ignore-comments: true
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments: [{ max: 500, skipComments: true, skipBlankLines: true }]
+    depguard:
+      rules:
+        serving:
+          files: ["**/internal/gateway/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/access$
+              desc: The gateway serves inference and must not depend on the management kit. Pass what it needs in through cmd/olp.
+        management:
+          files: ["**/internal/access/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/gateway
+              desc: The management kit must not depend on the gateway. Wire the two together in cmd/olp.
+        library:
+          files: ["**/internal/**"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/cmd
+              desc: Only cmd packages wire the process. Move shared code into internal.
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters: [funlen, revive]
+      - path: \.gen\.go$
+        linters: [funlen, revive]
+      - path: (^|/)internal/access/
+        linters: [forbidigo]
+      - path: _test\.go$
+        linters: [forbidigo]
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

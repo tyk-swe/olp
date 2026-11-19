@@ -165,11 +165,7 @@ The packages beneath it hold what the kernel uses and never import it back.
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
-The same gate compares every production import edge between project packages against
-`scripts/project-imports.txt`, so a new dependency anywhere is a reviewed
-change to that file rather than an accident. Run
-`./scripts/check-imports.sh update` after deliberately adding or removing an
-edge. Put new code in the kernel only when it needs a `call`. A handler that can be
+Put new code in the kernel only when it needs a `call`. A handler that can be
 built from its own collaborators belongs in its own package, as
 `codeforward.Forwarder`, `traceingest.Ingester`, `delegation.Handler` and
 `models.Handler` are. The
@@ -193,8 +189,27 @@ selection, listeners and shutdown ordering. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
 vocabulary, as `internal/routeidentity` and `internal/access/authority` do. A
 wrapper whose only job is forwarding to another package belongs in that
-package instead. The baseline measurements and the reasoning behind the
-current layout are recorded in [Codebase structure](codebase-structure.md).
+package instead.
+
+## Structure rules
+
+`make lint` enforces the structure through `.golangci.yml` and
+`scripts/check-lint.sh`. Read the failure message and fix the code.
+
+- Nothing under `internal/gateway` imports `internal/access`, and nothing under
+  `internal/access` imports the gateway. The gateway serves inference and the
+  management kit serves the control plane. `cmd/olp` is the only place that
+  knows both, so pass a collaborator in there instead of importing across.
+- Nothing under `internal` imports `cmd`.
+- A function holds at most 100 lines and a file at most 500 lines of code.
+  Tests and generated files are exempt. Split by behavior, not by line count.
+- A management write returns `access.Mutate`, `access.Remove` or
+  `access.Transact`.
+
+Code that broke a rule before it existed is listed in `.golangci-legacy.json`.
+Never add an entry there. The gate fails on a violation that is not listed and
+on a listed entry that no longer violates, so remove an entry in the change
+that fixes it.
 
 ## Adding a management endpoint
 
@@ -225,9 +240,10 @@ management endpoint, and it shows the whole shape in one file.
 The helper owns the transaction, the replay record, the audit row and the
 commit, so a handler never calls `BeginMutation`, `Replay`, `CompleteReplay` or
 `tx.Commit`. Call `access.Audit` directly only for a second audit row in the same
-change. `scripts/check-lint.sh` fails when a new file opens a management
-transaction by hand. The files it still lists run a provider call between two
-transactions or re-authorize a read, and they are the exception.
+change. Lint fails when a new file opens a management transaction by hand. The
+files still listed under `handRolledTransaction` in `.golangci-legacy.json` run
+a provider call between two transactions or re-authorize a read, and they are
+the exception.
 
 ## Ordinary execution
 

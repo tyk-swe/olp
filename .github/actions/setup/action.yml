@@ -53,7 +53,7 @@ runs:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-          ~/.cache/staticcheck
+          ~/.cache/golangci-lint
         key: ${{ steps.go-cache.outputs.key }}
         restore-keys: ${{ steps.go-cache.outputs.restore-keys }}
     - shell: bash
