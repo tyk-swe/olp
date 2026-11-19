@@ -93,7 +93,6 @@
     "internal/gateway/kernel/realtime_calls.go Server.createWebRTCCall",
     "internal/gateway/kernel/realtime_calls.go Server.realtimeCallsCreate",
     "internal/gateway/kernel/resources_files.go Server.uploadFile",
-    "internal/gateway/kernel/responses.go Server.mapStoredResponse",
     "internal/gateway/kernel/responses_stream.go Server.streamStoredResponse",
     "internal/gateway/kernel/retained_generic.go Server.listRetainedGeneric",
     "internal/gateway/kernel/retained_generic.go Server.retainedDispatch",
