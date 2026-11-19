@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -45,7 +45,7 @@ type Handoff struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 
-func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Binding, error) {
+func liveBinding(ctx context.Context, q database.Queryer, expected Binding) (Binding, error) {
 	if expected.AgentID != "" {
 		return liveAgentBinding(ctx, q, expected)
 	}
@@ -65,12 +65,12 @@ func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Bindi
 	return current, nil
 }
 
-func liveAgentBinding(ctx context.Context, q access.Queryer, expected Binding) (Binding, error) {
+func liveAgentBinding(ctx context.Context, q database.Queryer, expected Binding) (Binding, error) {
 	row := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, expected.AgentID)
 	return scanAgentBinding(row, expected)
 }
 
-func revisionAgentBinding(ctx context.Context, q access.Queryer, expected Binding, revisionID string) (Binding, error) {
+func revisionAgentBinding(ctx context.Context, q database.Queryer, expected Binding, revisionID string) (Binding, error) {
 	row := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id WHERE p.id=$1 AND p.kind='agent' AND v.id=$2`, expected.AgentID, revisionID)
 	return scanAgentBinding(row, expected)
 }

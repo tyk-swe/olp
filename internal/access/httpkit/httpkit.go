@@ -35,6 +35,15 @@ func Forbidden() error {
 	return Fail(403, "permission_denied", "The current role cannot perform this operation.")
 }
 
+var NotFound = Fail(404, "not_found", "The resource was not found.")
+
+func NotFoundOr(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotFound
+	}
+	return err
+}
+
 func ProblemFor(err error) (*Problem, bool) {
 	if known, ok := errors.AsType[*Problem](err); ok {
 		return known, true

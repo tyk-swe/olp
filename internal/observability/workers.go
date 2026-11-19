@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 )
 
@@ -93,7 +93,7 @@ func (w *WorkerTaskHealth) status(task workerhealth.Task) WorkerTaskStatus {
 // Ages are computed by the database against clock_timestamp(), the same clock
 // workers stamp checkpoints with, so replica clock skew cannot falsify
 // staleness.
-func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region string) (*WorkerTaskHealth, error) {
+func ReadRegionalWorkerTaskHealth(ctx context.Context, q database.Queryer, region string) (*WorkerTaskHealth, error) {
 	rows, err := q.Query(ctx, `SELECT task, checked_at, last_success_at, last_progress_at,
 			successes_total, failures_total, skipped_total,
 			GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint AS heartbeat_age_seconds,
@@ -159,7 +159,7 @@ type WorkerRecoveryCounters struct {
 }
 
 // ReadWorkerRecoveryCounters loads the durable async worker counters.
-func ReadWorkerRecoveryCounters(ctx context.Context, q access.Queryer) (WorkerRecoveryCounters, error) {
+func ReadWorkerRecoveryCounters(ctx context.Context, q database.Queryer) (WorkerRecoveryCounters, error) {
 	var c WorkerRecoveryCounters
 	err := q.QueryRow(ctx, `SELECT request_metadata_reclaimed_total, request_metadata_recovered_total,
 			request_metadata_duplicates_total, request_metadata_processed_total,

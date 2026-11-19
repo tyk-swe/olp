@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -18,12 +19,12 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 	for _, kind := range []string{"Users", "Groups"} {
 		group := kind == "Groups"
 		path := "/scim/v2/" + kind
-		s.scimRoute(mux, "GET "+path, func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
-		s.scimRoute(mux, "POST "+path+"/.search", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
-		s.scimRoute(mux, "POST "+path, func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
-		s.scimRoute(mux, "GET "+path+"/{scim_id}", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimGet(r, p, group) })
+		s.scimRoute(mux, "GET "+path, func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
+		s.scimRoute(mux, "POST "+path+"/.search", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.scimList(r, p, group) })
+		s.scimRoute(mux, "POST "+path, func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
+		s.scimRoute(mux, "GET "+path+"/{scim_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.scimGet(r, p, group) })
 		for _, method := range []string{"PUT", "PATCH", "DELETE"} {
-			s.scimRoute(mux, method+" "+path+"/{scim_id}", func(r *http.Request, p Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
+			s.scimRoute(mux, method+" "+path+"/{scim_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.scimWrite(r, p, group) })
 		}
 	}
 	for _, path := range []string{"/scim/v2/ServiceProviderConfig", "/scim/v2/ResourceTypes", "/scim/v2/ResourceTypes/{scim_type}", "/scim/v2/Schemas", "/scim/v2/Schemas/{schema_id}"} {
@@ -41,7 +42,7 @@ func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
 		defer cancel()
 		var reply httpkit.Reply
 		if err == nil {
-			var p Principal
+			var p authz.Principal
 			r, p, err = s.admitRoute(r, req)
 			if err == nil {
 				if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {

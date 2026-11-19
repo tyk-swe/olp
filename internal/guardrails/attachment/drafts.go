@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -32,7 +32,7 @@ func Stage(ctx context.Context, tx pgx.Tx, actor, draftID, revisionID string, po
 	return err
 }
 
-func Drafts(ctx context.Context, q access.Queryer) ([]Draft, error) {
+func Drafts(ctx context.Context, q database.Queryer) ([]Draft, error) {
 	rows, err := q.Query(ctx, "SELECT d.slug,a.policy_revision_id::text,a.position FROM olp.guardrail_draft_attachments a JOIN olp.route_drafts d ON d.id=a.draft_id ORDER BY d.updated_at,a.position")
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func Drafts(ctx context.Context, q access.Queryer) ([]Draft, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[Draft])
 }
 
-func Staged(ctx context.Context, q access.Queryer, draftID, routeID string) ([]guardrails.Attachment, error) {
+func Staged(ctx context.Context, q database.Queryer, draftID, routeID string) ([]guardrails.Attachment, error) {
 	rows, err := q.Query(ctx, "SELECT policy_revision_id::text,$2,$3::text,policy_revision_id::text,position FROM olp.guardrail_draft_attachments WHERE draft_id=$1 ORDER BY position", draftID, guardrails.RouteScope, routeID)
 	if err != nil {
 		return nil, err

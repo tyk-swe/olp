@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -33,7 +34,7 @@ type slot struct {
 
 type namer func(string) (string, error)
 
-func readStored(ctx context.Context, q access.Queryer, projectName namer) (Section, error) {
+func readStored(ctx context.Context, q database.Queryer, projectName namer) (Section, error) {
 	active, err := guardrails.ReadUnmanagedActiveRevisions(ctx, q)
 	if err != nil {
 		return Section{}, err
@@ -62,7 +63,7 @@ func fromRevision(projectName namer, name string, r guardrails.Revision) (Guardr
 	return Guardrail{Project: owner, Name: name, Type: r.Type, Configuration: r.Configuration, TimeoutMS: r.TimeoutMS, OnError: r.OnError}, err
 }
 
-func readPlatform(ctx context.Context, q access.Queryer, registry *guardrails.Registry, projectName namer, activeRevisions []guardrails.Revision) (Section, error) {
+func readPlatform(ctx context.Context, q database.Queryer, registry *guardrails.Registry, projectName namer, activeRevisions []guardrails.Revision) (Section, error) {
 	if registry == nil {
 		return Section{}, nil
 	}
@@ -163,12 +164,12 @@ func projectNamer(directory promotion.Directory) namer {
 	}
 }
 
-func readProjectNamer(ctx context.Context, q access.Queryer) (namer, error) {
+func readProjectNamer(ctx context.Context, q database.Queryer) (namer, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	return projectNamer(directory), err
 }
 
-func readAttachment(ctx context.Context, q access.Queryer, projectName namer, reference func(string) (PolicyRef, error), a guardrails.Attachment) (Attachment, error) {
+func readAttachment(ctx context.Context, q database.Queryer, projectName namer, reference func(string) (PolicyRef, error), a guardrails.Attachment) (Attachment, error) {
 	policy, err := reference(a.PolicyRevisionID)
 	if err != nil {
 		return Attachment{}, err
@@ -184,7 +185,7 @@ func readAttachment(ctx context.Context, q access.Queryer, projectName namer, re
 	return Attachment{Scope: scope, Policy: policy, Order: a.Order}, nil
 }
 
-func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guardrails.Attachment) (string, string, error) {
+func scopeName(ctx context.Context, q database.Queryer, projectName namer, a guardrails.Attachment) (string, string, error) {
 	unowned := func(name string, err error) (string, string, error) { return name, "", err }
 	switch contract.ConfigurationGuardrailAttachmentScope(a.Scope) {
 	case contract.ConfigurationGuardrailAttachmentScopeProject:
@@ -212,7 +213,7 @@ func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guard
 	return "", "", nil
 }
 
-func readDrafts(ctx context.Context, q access.Queryer, policies map[string]string, reference func(string) (PolicyRef, error)) (map[slot]Attachment, error) {
+func readDrafts(ctx context.Context, q database.Queryer, policies map[string]string, reference func(string) (PolicyRef, error)) (map[slot]Attachment, error) {
 	drafts, err := guardrailattachment.Drafts(ctx, q)
 	if err != nil {
 		return nil, err
@@ -235,7 +236,7 @@ func routeSlot(a Attachment) slot {
 	return slot{route.Slug, a.Order}
 }
 
-func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) ([]Section, error) {
+func readLegacyRoutes(ctx context.Context, q database.Queryer, projectName namer) ([]Section, error) {
 	legacy, err := routes.ReadLegacyContentPolicies(ctx, q)
 	if err != nil {
 		return nil, err

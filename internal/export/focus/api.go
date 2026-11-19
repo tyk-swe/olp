@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -33,13 +34,13 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/focus-datasets", a.datasets)
 }
 
-func (a *API) datasets(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (a *API) datasets(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	sinkID := r.PathValue("export_sink_id")
 	projectID, err := destination.SinkProject(r.Context(), a.server.Pool, sinkID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(projectID, access.View); err != nil {
+	if err := p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	page, err := httpkit.PageBy(r, "9999-12-31", func(raw string) (string, error) {

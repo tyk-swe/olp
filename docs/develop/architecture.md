@@ -196,6 +196,39 @@ wrapper whose only job is forwarding to another package belongs in that
 package instead. The baseline measurements and the reasoning behind the
 current layout are recorded in [Codebase structure](codebase-structure.md).
 
+## Adding a management endpoint
+
+Copy `internal/guardrails/credential/api.go`. It is the reference for every
+management endpoint, and it shows the whole shape in one file.
+
+1. Describe the operation in `management/management.json` and run `make api`.
+   `Route` refuses to start when a registered pattern is missing from the
+   contract, and it reads the permission the route needs from there.
+2. Register the handler in the feature's `Register(mux)` with
+   `server.Route(mux, "METHOD /api/v1/...", handler)`.
+3. A read handler queries the pool, checks the caller's scope with
+   `p.Project(&projectID, authz.View)` and returns `httpkit.OK`,
+   `httpkit.Detail` or a list reply.
+4. A write handler decodes and validates the body, then returns one of the
+   three helpers in `internal/access/mutation.go`.
+   - `access.Mutate` is for a change that carries an `Idempotency-Key`. It
+     replays the stored reply when the same key and input arrive again.
+   - `access.Remove` is the same for a delete, where the replay has to be
+     checked before the row is locked because the row may already be gone.
+   - `access.Transact` is for a change guarded only by `If-Match`.
+5. Each helper takes a lock step and an apply step. The lock step loads the
+   current row `FOR UPDATE` and authorizes the caller against it, or calls
+   `RequireProject` for a create. Use `access.Unlocked` when there is nothing to
+   load. The apply step checks `httpkit.Match`, writes, and returns the reply
+   together with the `access.Event` to audit.
+
+The helper owns the transaction, the replay record, the audit row and the
+commit, so a handler never calls `BeginMutation`, `Replay`, `CompleteReplay` or
+`tx.Commit`. Call `access.Audit` directly only for a second audit row in the same
+change. `scripts/check-lint.sh` fails when a new file opens a management
+transaction by hand. The files it still lists run a provider call between two
+transactions or re-authorize a read, and they are the exception.
+
 ## Ordinary execution
 
 `routing.Select(..., routing.Options)` owns selection policy, constraints, stable

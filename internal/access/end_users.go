@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -17,7 +18,7 @@ func DigestEndUser(auth *secrets.AuthKey, projectID *string, identifier string) 
 	return hex.EncodeToString(auth.Digest(secrets.EndUserDigest, string(value)))
 }
 
-func (s *Server) lookupEndUser(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) lookupEndUser(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -26,7 +27,7 @@ func (s *Server) lookupEndUser(r *http.Request, p Principal) (httpkit.Reply, err
 	if err = s.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(projectID, View); err != nil {
+	if err = p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var input struct {

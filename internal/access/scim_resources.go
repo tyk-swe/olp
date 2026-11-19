@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	filter "github.com/scim2/filter-parser/v2"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -24,7 +26,7 @@ func (s *Server) scimSQL(group bool) string {
 // Origin is operator configuration, escaped as a SQL literal, never a request Host.
 func sqlText(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-func (s *Server) scimRead(r *http.Request, q Queryer, group bool, id string) (scim.Document, string, error) {
+func (s *Server) scimRead(r *http.Request, q database.Queryer, group bool, id string) (scim.Document, string, error) {
 	var data []byte
 	var etag string
 	err := q.QueryRow(r.Context(), "SELECT resource,etag::text FROM ("+s.scimSQL(group)+") resource WHERE id=$1", id).Scan(&data, &etag)
@@ -36,7 +38,7 @@ func (s *Server) scimRead(r *http.Request, q Queryer, group bool, id string) (sc
 	return d, etag, err
 }
 
-func (s *Server) scimGet(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+func (s *Server) scimGet(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
 		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
@@ -59,7 +61,7 @@ func scimResourceSchema(group bool) string {
 	return scim.UserSchema
 }
 
-func (s *Server) scimList(r *http.Request, _ Principal, group bool) (httpkit.Reply, error) {
+func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	values := r.URL.Query()
 	if r.Method == "POST" {
 		body, e := scim.Decode(r.Body)

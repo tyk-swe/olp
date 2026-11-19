@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -192,7 +193,7 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *call, principal access.Principal) (parsedRequest, error) {
+func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *call, principal authz.Principal) (parsedRequest, error) {
 	if in.Request != nil {
 		family := protocols.WireFamily(in.surface(), "", wire.Chat)
 		if family == wire.Gemini && mode == "streaming" {
@@ -280,7 +281,7 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 	return parsedRequest{request: parsed}, nil
 }
 
-func (p *Playground) call(r *http.Request, principal access.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
+func (p *Playground) call(r *http.Request, principal authz.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
 	s := p.Gateway
 	return &call{
 		request:     request{id: uuidString(), minted: true, clientIP: consumerauth.ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
@@ -297,16 +298,16 @@ func (p *Playground) call(r *http.Request, principal access.Principal, parsed *w
 	}
 }
 
-func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *fault.Error {
+func (p *Playground) authorize(principal authz.Principal) func(*routing.Route) *fault.Error {
 	return func(route *routing.Route) *fault.Error {
-		if principal.Project(route.ProjectID, access.View) != nil {
+		if principal.Project(route.ProjectID, authz.View) != nil {
 			return fault.ModelNotFound(route.Slug)
 		}
 		return nil
 	}
 }
 
-func (p *Playground) handle(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (p *Playground) handle(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	var in playgroundRequest
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -461,7 +462,7 @@ func attemptPriority(x *call, targetID string) int {
 	return 0
 }
 
-func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal access.Principal) error {
+func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
 	var in playgroundRequest
 	if err := httpkit.Decode(r, &in); err != nil {
 		return err

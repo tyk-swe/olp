@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -79,7 +79,7 @@ func collectOne[T any](rows pgx.Rows, err error) (T, bool, error) {
 	return value, err == nil, err
 }
 
-func readRecord(ctx context.Context, q access.Queryer, providerID string) (record, bool, error) {
+func readRecord(ctx context.Context, q database.Queryer, providerID string) (record, bool, error) {
 	return collectOne[record](q.Query(ctx, selectRecord, providerID))
 }
 
@@ -99,7 +99,7 @@ type provider struct {
 
 const selectProvider = `SELECT etag::text,project_id::text,configuration FROM olp.providers WHERE id=$1::uuid`
 
-func readProvider(ctx context.Context, q access.Queryer, providerID string) (provider, bool, error) {
+func readProvider(ctx context.Context, q database.Queryer, providerID string) (provider, bool, error) {
 	return collectOne[provider](q.Query(ctx, selectProvider, providerID))
 }
 
@@ -107,7 +107,7 @@ func lockProvider(ctx context.Context, tx pgx.Tx, providerID string) (provider, 
 	return collectOne[provider](tx.Query(ctx, selectProvider+` FOR UPDATE`, providerID))
 }
 
-func completedMonths(ctx context.Context, q access.Queryer, r record, scope source.Scope, earliest, today time.Time) ([]time.Time, error) {
+func completedMonths(ctx context.Context, q database.Queryer, r record, scope source.Scope, earliest, today time.Time) ([]time.Time, error) {
 	digest := scope.Digest()
 	rows, err := q.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
 		WHERE provider_id=$1 AND source=$2 AND scope_digest=$3
@@ -334,7 +334,7 @@ func scheduleNow(ctx context.Context, tx pgx.Tx, providerID, etag string) (bool,
 	return tag.RowsAffected() > 0, err
 }
 
-func invoiced(ctx context.Context, q access.Queryer, providerID string, window reconciliation.Range) ([]invoicedCost, error) {
+func invoiced(ctx context.Context, q database.Queryer, providerID string, window reconciliation.Range) ([]invoicedCost, error) {
 	rows, err := q.Query(ctx, `SELECT amount::text,btrim(currency),day,fetched_at,line_item,source
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=$1::uuid AND day>=$2::date AND day<$3::date

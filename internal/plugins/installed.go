@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
@@ -32,13 +32,13 @@ type Installed struct {
 // the unconfined tier, an unconfined plugin an owner permitted. unconfined is
 // the tier, or nil. Everything that runs a plugin obtains it here, and
 // everything that pins one obtains its profile from Profile.
-func Usable(ctx context.Context, q access.Queryer, unconfined *Unconfined, digest string) (Installed, error) {
+func Usable(ctx context.Context, q database.Queryer, unconfined *Unconfined, digest string) (Installed, error) {
 	return usable(ctx, q, unconfined, digest, true)
 }
 
 // Profile returns the profile id that a usable plugin declares, for a
 // provider to pin with the plugin's digest.
-func Profile(ctx context.Context, q access.Queryer, unconfined *Unconfined, digest, id string) (*connectors.PluginProfile, error) {
+func Profile(ctx context.Context, q database.Queryer, unconfined *Unconfined, digest, id string) (*connectors.PluginProfile, error) {
 	installed, err := usable(ctx, q, unconfined, digest, false)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func Profile(ctx context.Context, q access.Queryer, unconfined *Unconfined, dige
 
 // Profiles returns the profiles of every usable plugin, which providers may
 // pin, newest build of each plugin first.
-func Profiles(ctx context.Context, q access.Queryer, unconfined *Unconfined) ([]connectors.Profile, error) {
+func Profiles(ctx context.Context, q database.Queryer, unconfined *Unconfined) ([]connectors.Profile, error) {
 	rows, err := q.Query(ctx, "SELECT digest, manifest, executable IS NOT NULL FROM olp.plugins WHERE approved_at IS NOT NULL AND ($1 OR executable IS NULL) ORDER BY manifest->>'name', installed_at DESC, digest", unconfined != nil)
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ func pluginProfile(digest string, manifest abi.Manifest, unconfined bool, id str
 
 // usable reads a plugin that Usable admits, with a confined plugin's module
 // only when withModule is set.
-func usable(ctx context.Context, q access.Queryer, unconfined *Unconfined, digest string, withModule bool) (Installed, error) {
+func usable(ctx context.Context, q database.Queryer, unconfined *Unconfined, digest string, withModule bool) (Installed, error) {
 	var installed Installed
 	var manifest []byte
 	var approved bool
@@ -112,7 +112,7 @@ const selectPlugin = `SELECT p.digest, p.abi_version, p.size_bytes, p.executable
 	p.installed_by::text, i.email, p.installed_at, p.approved_by::text, a.email, p.approved_at
 	FROM olp.plugins p JOIN olp.users i ON i.id = p.installed_by LEFT JOIN olp.users a ON a.id = p.approved_by`
 
-func loadPlugin(ctx context.Context, q access.Queryer, digest string) (contract.Plugin, error) {
+func loadPlugin(ctx context.Context, q database.Queryer, digest string) (contract.Plugin, error) {
 	return scanPlugin(q.QueryRow(ctx, selectPlugin+" WHERE p.digest=$1", digest))
 }
 

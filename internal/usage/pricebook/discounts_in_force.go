@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type DiscountInForce struct {
@@ -14,7 +14,7 @@ type DiscountInForce struct {
 	Multiplier   string
 }
 
-func ReadDiscountsInForce(ctx context.Context, q access.Queryer) ([]DiscountInForce, error) {
+func ReadDiscountsInForce(ctx context.Context, q database.Queryer) ([]DiscountInForce, error) {
 	rows, err := q.Query(ctx, `SELECT DISTINCT ON (provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''))
  provider_kind,vendor_id,provider_id::text,multiplier::text
  FROM olp.pricing_discounts WHERE effective_at<=now()

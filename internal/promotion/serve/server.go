@@ -9,6 +9,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -85,7 +87,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 	deps.Access.Route(mux, "POST /api/v1/configuration/apply", s.apply, access.MaxBody(maxDocument), access.Deadline(60*time.Second))
 }
 
-func (s server) export(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s server) export(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	current, err := read(r.Context(), s.access.Pool)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -105,7 +107,7 @@ func (s server) export(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	return httpkit.OK(contract.ConfigurationExportResponse{Digest: digest, Document: document}), nil
 }
 
-func (s server) plan(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s server) plan(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	d, err := s.decode(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -120,7 +122,7 @@ func (s server) plan(r *http.Request, p access.Principal) (httpkit.Reply, error)
 	return httpkit.OK(result), nil
 }
 
-func (s server) apply(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s server) apply(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	d, err := s.decode(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -244,7 +246,7 @@ func expectedDigest(value nullable.Nullable[string]) *string {
 	return &digest
 }
 
-func (s server) prepare(ctx context.Context, p access.Principal, d desired) (prepared, error) {
+func (s server) prepare(ctx context.Context, p authz.Principal, d desired) (prepared, error) {
 	workload, err := identity.Prepare(ctx, d.identity, p, s.identity)
 	if err != nil {
 		return prepared{}, err
@@ -260,9 +262,9 @@ func (d desired) needsPrepare() bool {
 	return d.identity.NeedsPrepare() || len(d.servers) > 0
 }
 
-func authorize(ctx context.Context, q access.Queryer, p access.Principal, d desired) error {
+func authorize(ctx context.Context, q database.Queryer, p authz.Principal, d desired) error {
 	if d.bindings.HasExternal() {
-		if err := p.Authorize(access.Settings); err != nil {
+		if err := p.Authorize(authz.Settings); err != nil {
 			return err
 		}
 	}

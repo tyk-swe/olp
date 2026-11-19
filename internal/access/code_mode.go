@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type CodeResource struct{ table, audit string }
@@ -22,7 +23,7 @@ var (
 	CodeBudgets  = CodeResource{table: "code_token_budgets", audit: "code_budget"}
 )
 
-type CodeWriter func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error)
+type CodeWriter func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error)
 
 func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project string, input any, write CodeWriter) (httpkit.Reply, error) {
 	projectID, err := httpkit.ParseUUID(project)
@@ -43,7 +44,7 @@ func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project strin
 	return s.codeUpdate(r, tx, p, resource, projectID, write)
 }
 
-func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, input any, write CodeWriter) (httpkit.Reply, error) {
+func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, input any, write CodeWriter) (httpkit.Reply, error) {
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -63,7 +64,7 @@ func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p Principal, resource Co
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, projectID string, write CodeWriter) (httpkit.Reply, error) {
+func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, projectID string, write CodeWriter) (httpkit.Reply, error) {
 	id, err := httpkit.ParseUUID(r.PathValue("id"))
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -72,7 +73,7 @@ func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource Co
 	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+resource.table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&oldProject, Change); err != nil {
+	if err := p.Project(&oldProject, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if oldProject != projectID {
@@ -89,7 +90,7 @@ func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource Co
 	return httpkit.Detail(body, etag), tx.Commit(r.Context())
 }
 
-func codeSave(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, id, etag string, existing bool, write CodeWriter) (any, error) {
+func codeSave(r *http.Request, tx pgx.Tx, p authz.Principal, resource CodeResource, id, etag string, existing bool, write CodeWriter) (any, error) {
 	body, err := write(tx, p, id, etag, existing)
 	if err != nil {
 		return nil, err
@@ -105,16 +106,16 @@ func codeSave(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, id
 // $%[1]d.
 type CodeMatch struct{ Field, SQL string }
 
-func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
+func (s *Server) CodeList(r *http.Request, p authz.Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
 	return s.codeList(r, p, selectSQL, false, matches)
 }
 
 // CodeUsageList adds digest filtering for the two content-free usage ledgers.
-func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
+func (s *Server) CodeUsageList(r *http.Request, p authz.Principal, selectSQL string, matches ...CodeMatch) (httpkit.Reply, error) {
 	return s.codeList(r, p, selectSQL, true, matches)
 }
 
-func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUsers bool, matches []CodeMatch) (httpkit.Reply, error) {
+func (s *Server) codeList(r *http.Request, p authz.Principal, selectSQL string, endUsers bool, matches []CodeMatch) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -125,7 +126,7 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if err = p.Project(&project, View); err != nil {
+		if err = p.Project(&project, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -184,10 +185,10 @@ const codePoolJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project
 	'account_ids',ARRAY(SELECT account_id FROM olp.code_pool_accounts WHERE pool_id=x.id ORDER BY account_id),
 	'api_key_ids',ARRAY(SELECT api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id)) FROM olp.code_pools x`
 
-func (s *Server) codePools(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) codePools(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.CodeList(r, p, codePoolJSON)
 }
-func (s *Server) codeBudgets(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) codeBudgets(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.CodeList(r, p, `SELECT to_jsonb(x)-'created_by' FROM olp.code_token_budgets x`)
 }
 
@@ -201,7 +202,7 @@ type CodePoolInput struct {
 	APIKeyIDs      []string         `json:"api_key_ids"`
 }
 
-func (s *Server) writeCodePool(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) writeCodePool(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in CodePoolInput
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -210,7 +211,7 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (httpkit.Reply, err
 	if validationError != nil {
 		return httpkit.Reply{}, validationError
 	}
-	return s.CodeWrite(r, CodePools, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
+	return s.CodeWrite(r, CodePools, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodePool(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
@@ -222,7 +223,7 @@ func codeScoped(ctx context.Context, tx pgx.Tx, table, id, project string) error
 		return err
 	}
 	if !matches {
-		return NotFound
+		return httpkit.NotFound
 	}
 	return nil
 }
@@ -236,7 +237,7 @@ type CodeBudgetInput struct {
 	Enabled       bool    `json:"enabled"`
 }
 
-func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) writeCodeBudget(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in CodeBudgetInput
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -245,17 +246,17 @@ func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (httpkit.Reply, e
 	if validationError != nil {
 		return httpkit.Reply{}, validationError
 	}
-	return s.CodeWrite(r, CodeBudgets, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
+	return s.CodeWrite(r, CodeBudgets, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeBudget(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
-func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, raw CodePoolInput, existing bool) (json.RawMessage, error) {
+func SaveCodePool(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, raw CodePoolInput, existing bool) (json.RawMessage, error) {
 	in, validationError := raw.Validated()
 	if validationError != nil {
 		return nil, validationError
 	}
-	if err := p.Project(&in.ProjectID, Change); err != nil {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	if in.OwnerUserID != nil {
@@ -322,12 +323,12 @@ func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, 
 	return result, queryErr
 }
 
-func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, raw CodeBudgetInput, existing bool) (json.RawMessage, error) {
+func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, raw CodeBudgetInput, existing bool) (json.RawMessage, error) {
 	in, validationError := raw.Validated()
 	if validationError != nil {
 		return nil, validationError
 	}
-	if err := p.Project(&in.ProjectID, Change); err != nil {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	if in.RouteID != nil {

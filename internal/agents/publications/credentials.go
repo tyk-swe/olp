@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -40,7 +40,7 @@ func StoreEntraCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing,
 
 // CredentialMatches lets declarative promotion retain an unchanged credential
 // version. It never exposes material or compares credentials from another project.
-func CredentialMatches(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, project, id string, material []byte) (bool, error) {
+func CredentialMatches(ctx context.Context, q database.Queryer, keys *secrets.KeyRing, installation, project, id string, material []byte) (bool, error) {
 	if keys == nil {
 		return false, httpkit.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
 	}

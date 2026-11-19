@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -35,7 +36,7 @@ func Parse(document contract.ConfigurationDocument) (Settings, error) {
 	return Settings{TimeZone: zone, Budget: budget, RequireLocalMFA: promotion.Pointer(document.RequireLocalMfa)}, nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Settings, error) {
+func Read(ctx context.Context, q database.Queryer) (Settings, error) {
 	zone, err := access.ReadBudgetTimeZone(ctx, q)
 	if err != nil {
 		return Settings{}, err

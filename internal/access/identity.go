@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -234,7 +236,7 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 			return httpkit.Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(id), "installation.setup", "installation", s.Installation, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(id), "installation.setup", "installation", s.Installation, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	response, err := s.newSession(r, tx, id)
@@ -244,7 +246,7 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 	return response, tx.Commit(r.Context())
 }
 
-func (s *Server) users(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) users(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -256,7 +258,7 @@ func (s *Server) users(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	items, err := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, p), err
 }
-func (s *Server) user(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) user(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "user_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -264,7 +266,7 @@ func (s *Server) user(r *http.Request, _ Principal) (httpkit.Reply, error) {
 	u, err := scanUser(s.Pool.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
 	return httpkit.Detail(u, u.ETag), err
 }
-func (s *Server) updateUser(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Role        *string `json:"role"`
 		Active      *bool   `json:"active"`
@@ -276,7 +278,7 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (httpkit.Reply, error)
 	if input.Role == nil && input.Active == nil && input.AccessScope == nil {
 		return httpkit.Reply{}, httpkit.Invalid("user", "Provide a role or active status.")
 	}
-	if input.Role != nil && !validRole(*input.Role) {
+	if input.Role != nil && !authz.ValidRole(*input.Role) {
 		return httpkit.Reply{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	if input.AccessScope != nil && *input.AccessScope != "global" && *input.AccessScope != "assigned" {
@@ -401,7 +403,7 @@ func (s *Server) EnsureUsableOwner(ctx context.Context, tx pgx.Tx) error {
 
 // Invitations are outstanding access grants and cannot outlive the issuer's
 // membership-management authority. Call inside the authority change transaction.
-func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor Actor, revokedBy string) error {
+func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor authz.Actor, revokedBy string) error {
 	result, err := tx.Exec(r.Context(), `UPDATE olp.invitations
         SET revoked_at=now(),revoked_by=NULLIF($2::text,'')::uuid
         WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, revokedBy)
@@ -417,7 +419,7 @@ func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor Ac
 const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.role,'invited_by',i.invited_by,'invited_by_email',inviter.email,'accepted_by_email',accepted.email,'revoked_by_email',revoker.email,'accepted_at',i.accepted_at,'revoked_at',i.revoked_at,'expires_at',i.expires_at,'created_at',i.created_at,'status',CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END)`
 const invitationFrom = ` FROM olp.invitations i LEFT JOIN olp.users inviter ON inviter.id=i.invited_by LEFT JOIN olp.users accepted ON accepted.id=i.accepted_by LEFT JOIN olp.users revoker ON revoker.id=i.revoked_by`
 
-func (s *Server) invitations(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) invitations(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -434,7 +436,7 @@ func invitation(r *http.Request, tx pgx.Tx, id string) (any, error) {
 	err := tx.QueryRow(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id=$1", id).Scan(&data)
 	return json.RawMessage(data), err
 }
-func (s *Server) createInvitation(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Email string `json:"email"`
 		Role  string `json:"role"`
@@ -447,7 +449,7 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if !validRole(input.Role) {
+	if !authz.ValidRole(input.Role) {
 		return httpkit.Reply{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	hours := 168
@@ -499,7 +501,7 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (httpkit.Reply, 
 	}
 	return result, tx.Commit(r.Context())
 }
-func (s *Server) retireInvitation(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "invitation_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -586,7 +588,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, authz.UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
 	response, err := s.localSession(r, tx, userID)
@@ -598,13 +600,13 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 
 // The process switch is immutable after composition; database policy is read
 // inside the caller's installation transaction for protected mutations.
-func (s *Server) localLoginEnabled(r *http.Request, q Queryer) (bool, error) {
+func (s *Server) localLoginEnabled(r *http.Request, q database.Queryer) (bool, error) {
 	var enabled bool
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
 	return enabled && !s.localLoginDisabled, err
 }
 
-func (s *Server) requireInvitationLogin(r *http.Request, q Queryer) error {
+func (s *Server) requireInvitationLogin(r *http.Request, q database.Queryer) error {
 	enabled, err := s.localLoginEnabled(r, q)
 	if err != nil {
 		return err

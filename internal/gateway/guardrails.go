@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -464,7 +464,7 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthor
 	return s.boundGuardrails(parent, engine).Evaluate(ctx, evaluation, masks)
 }
 
-func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+func (s *Server) EvaluateGuardrails(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 	if s == nil || s.deps.Runtime == nil {
 		return guardrails.Result{}, httpkit.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
@@ -474,10 +474,10 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned 
 	defer s.gate.Release(r.Context())
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = func(route *routing.Route) *fault.Error {
-		if err := p.Authorize(access.Playground); err != nil {
+		if err := p.Authorize(authz.Playground); err != nil {
 			return fault.PermissionError("guardrail_forbidden", "Playground access is required.")
 		}
-		if err := p.Project(route.ProjectID, access.View); err != nil {
+		if err := p.Project(route.ProjectID, authz.View); err != nil {
 			return fault.ModelNotFound(route.Slug)
 		}
 		return nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 
 	"github.com/tyk-swe/olp/internal/gateway/quota"
@@ -115,7 +116,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	}
 	credential.NewAPI(m.Access).Register(mux)
 	definition.NewAPI(m.Access, publishGuardrails).Register(mux)
-	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)

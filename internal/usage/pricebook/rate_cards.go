@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -165,7 +165,7 @@ func scanCardRevision(row interface{ Scan(...any) error }) (CardRevision, error)
 	return r, err
 }
 
-func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([]rates.Price, error) {
+func loadCardPrices(ctx context.Context, q database.Queryer, revisionID string) ([]rates.Price, error) {
 	byRevision, err := LoadCardPricesByRevisions(ctx, q, []string{revisionID})
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([
 
 // LoadCardPricesByRevisions reads the explicit rates of each named card
 // revision; the configuration exporter and revision listings share it.
-func LoadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionIDs []string) (map[string][]rates.Price, error) {
+func LoadCardPricesByRevisions(ctx context.Context, q database.Queryer, revisionIDs []string) (map[string][]rates.Price, error) {
 	if len(revisionIDs) == 0 {
 		return nil, nil
 	}
@@ -284,7 +284,7 @@ func createCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
 
 // loadCardRevisionSummaries lists a card's in-force and latest revisions
 // without their price rows.
-func loadCardRevisionSummaries(ctx context.Context, q access.Queryer, cardID string) ([]CardRevision, error) {
+func loadCardRevisionSummaries(ctx context.Context, q database.Queryer, cardID string) ([]CardRevision, error) {
 	summaries, err := loadCardRevisionSummariesByCards(ctx, q, []string{cardID})
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func loadCardRevisionSummaries(ctx context.Context, q access.Queryer, cardID str
 	return []CardRevision{}, nil
 }
 
-func loadCardRevisionSummariesByCards(ctx context.Context, q access.Queryer, cardIDs []string) (map[string][]CardRevision, error) {
+func loadCardRevisionSummariesByCards(ctx context.Context, q database.Queryer, cardIDs []string) (map[string][]CardRevision, error) {
 	if len(cardIDs) == 0 {
 		return nil, nil
 	}
@@ -338,7 +338,7 @@ func CreateRateCard(ctx context.Context, tx pgx.Tx, actor string, owner Owner) (
 	}
 }
 
-func InstallationCurrency(ctx context.Context, q access.Queryer) (string, error) {
+func InstallationCurrency(ctx context.Context, q database.Queryer) (string, error) {
 	var currency string
 	err := q.QueryRow(ctx,
 		"SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency)

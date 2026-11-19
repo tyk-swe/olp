@@ -5,20 +5,20 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // ResearchAccount validates the provider draft before route publication.
 // Research does not need a model offer and never selects a replacement account.
-func ResearchAccount(ctx context.Context, q access.Queryer, route codemode.Route) (codemode.Account, error) {
+func ResearchAccount(ctx context.Context, q database.Queryer, route codemode.Route) (codemode.Account, error) {
 	return researchAccount(ctx, q, route, true)
 }
 
-func researchAccount(ctx context.Context, q access.Queryer, route codemode.Route, draft bool) (codemode.Account, error) {
+func researchAccount(ctx context.Context, q database.Queryer, route codemode.Route, draft bool) (codemode.Account, error) {
 	var a codemode.Account
 	if route.Tools == nil {
 		return a, codemode.Refuse(404, "code_research_disabled")

@@ -7,11 +7,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -89,7 +89,7 @@ func vault(deps Deps) imports.Vault {
 	return imports.Vault{Keys: deps.Keys, Installation: deps.Installation}
 }
 
-func (p planning) billingItems(ctx context.Context, q access.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
+func (p planning) billingItems(ctx context.Context, q database.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
 	ref := string(billingRef(entry.Name))
 	current := importedCredential(existing)
 	if entry.Billing == nil {

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -20,7 +21,7 @@ type credential struct {
 }
 
 func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, keys Keys) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(servers) == 0 {
 			return nil
 		}
@@ -39,12 +40,12 @@ func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, k
 	}
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, bindings promotion.Bindings, prepared Prepared, keys Keys, server Server) (bool, error) {
+func apply(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, bindings promotion.Bindings, prepared Prepared, keys Keys, server Server) (bool, error) {
 	projectID, ok := directory.ID(server.Project)
 	if !ok {
 		return false, fmt.Errorf("mcp server project %q is missing", server.Project)
 	}
-	if err := p.Project(&projectID, access.Change); err != nil {
+	if err := p.Project(&projectID, authz.Change); err != nil {
 		return false, err
 	}
 	existing, err := find(ctx, tx, projectID, server)
@@ -67,7 +68,7 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promoti
 	return false, nil
 }
 
-func save(ctx context.Context, tx pgx.Tx, p access.Principal, bindings promotion.Bindings, keys Keys, projectID string, existing *registration.Definition, server Server, catalog *upstream.Catalog) error {
+func save(ctx context.Context, tx pgx.Tx, p authz.Principal, bindings promotion.Bindings, keys Keys, projectID string, existing *registration.Definition, server Server, catalog *upstream.Catalog) error {
 	flat := flatten(server.Transport)
 	bearer, err := credentialOf(ctx, tx, bindings, keys, flat, existing)
 	if err != nil {

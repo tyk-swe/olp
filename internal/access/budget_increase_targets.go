@@ -8,6 +8,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
@@ -57,12 +58,12 @@ func costs(l keyauthority.AdmissionLimits) *keyauthority.BudgetPolicy {
 	return &keyauthority.BudgetPolicy{DailyCostLimit: l.DailyCostLimit, WeeklyCostLimit: l.WeeklyCostLimit, MonthlyCostLimit: l.MonthlyCostLimit}
 }
 
-func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
+func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p authz.Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
 	if err = t.validate(); err != nil {
 		return
 	}
 	if t.Kind == "installation" {
-		if err = p.Authorize(Settings); err != nil {
+		if err = p.Authorize(authz.Settings); err != nil {
 			return
 		}
 		owner = limits.AggregateBudgetID("installation", s.Installation)
@@ -72,23 +73,23 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 	if t.Kind == "organization" {
 		// An organization's budget belongs to whoever manages it, so a token
 		// delegated only that scope raises it without managing keys.
-		if err = p.Authorize(ManageOrganization); err != nil {
+		if err = p.Authorize(authz.ManageOrganization); err != nil {
 			return
 		}
-		if err = p.Organization(t.ID, Change); err != nil {
+		if err = p.Organization(t.ID, authz.Change); err != nil {
 			return
 		}
 		owner = limits.AggregateBudgetID("organization", t.ID)
 		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.organizations WHERE id=$1", t.ID).Scan(&policy)
 		return
 	}
-	if err = p.Authorize(Keys); err != nil {
+	if err = p.Authorize(authz.Keys); err != nil {
 		return
 	}
 	switch t.Kind {
 	case "project", "project_end_user", "attribution":
 		project = &t.ID
-		if err = p.Project(project, Change); err != nil {
+		if err = p.Project(project, authz.Change); err != nil {
 			return
 		}
 		var endUser *keyauthority.EndUserPolicy
@@ -124,7 +125,7 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 			return
 		}
 		project = a.ProjectID
-		if err = p.Project(project, Change); err != nil {
+		if err = p.Project(project, authz.Change); err != nil {
 			return
 		}
 		if err = a.BindLimitTemplates(templates); err != nil {
@@ -143,7 +144,7 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 		}
 	}
 	if err == nil {
-		err = p.Project(project, Change)
+		err = p.Project(project, authz.Change)
 	}
 	return
 }

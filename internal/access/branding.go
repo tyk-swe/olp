@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 const maxLogoBytes = 64 << 10
@@ -64,7 +65,7 @@ func validateLogo(raw string) (string, error) {
 	return mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-func (s *Server) updateBranding(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name   string  `json:"name"`
 		Logo   *string `json:"logo"`

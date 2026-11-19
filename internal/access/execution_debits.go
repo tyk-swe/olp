@@ -5,11 +5,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 // executionDebits reports financial exposure, not invoice charges. Accounting
 // facts and all existing spend/budget endpoints keep their original meaning.
-func (s *Server) executionDebits(r *http.Request, p Principal) (httpkit.Reply, error) {
+func (s *Server) executionDebits(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err

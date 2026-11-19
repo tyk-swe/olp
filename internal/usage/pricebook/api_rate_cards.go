@@ -1,18 +1,19 @@
 package pricebook
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *API) listRateCards(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listRateCards(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -52,51 +53,34 @@ func (s *API) listRateCards(r *http.Request, _ access.Principal) (httpkit.Reply,
 	return httpkit.ListReplyBy(items, page, func(c RateCard) string { return c.ID }), nil
 }
 
-func (s *API) createRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createRateCard(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input rateCardInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	owner, err := parseOwner(input.Owner.Kind, input.Owner.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = ownerExists(r.Context(), tx, owner); err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, err := CreateRateCard(r.Context(), tx, principal.UserID(), owner)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	card, err := scanCard(tx.QueryRow(r.Context(), cardColumns+" WHERE c.id=$1::uuid", id))
-	if err != nil {
-		return httpkit.Reply{}, fmt.Errorf("store rate card: %w", err)
-	}
-	result := httpkit.Reply{Status: http.StatusCreated,
-		Location: "/api/v1/rate-cards/" + card.ID, Body: card}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "rate_card.create",
-		"rate_card", card.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		owner, err := parseOwner(input.Owner.Kind, input.Owner.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = ownerExists(r.Context(), tx, owner); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, err := CreateRateCard(r.Context(), tx, principal.UserID(), owner)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		card, err := scanCard(tx.QueryRow(r.Context(), cardColumns+" WHERE c.id=$1::uuid", id))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, fmt.Errorf("store rate card: %w", err)
+		}
+		result := httpkit.Reply{Status: http.StatusCreated,
+			Location: "/api/v1/rate-cards/" + card.ID, Body: card}
+		return result, access.Event{Action: "rate_card.create", Resource: "rate_card", ID: card.ID}, nil
+	})
 }
 
-func (s *API) getRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) getRateCard(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "rate_card_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -113,7 +97,7 @@ func (s *API) getRateCard(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	return httpkit.OK(card), nil
 }
 
-func (s *API) listRateCardRevisions(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listRateCardRevisions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "rate_card_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -169,7 +153,7 @@ func (s *API) listRateCardRevisions(r *http.Request, _ access.Principal) (httpki
 	return httpkit.OK(param.Page{Items: items, NextCursor: next}), nil
 }
 
-func (s *API) createRateCardRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createRateCardRevision(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input cardRevisionInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -181,51 +165,34 @@ func (s *API) createRateCardRevision(r *http.Request, _ access.Principal) (httpk
 	if input.Markup == nil {
 		return httpkit.Reply{}, httpkit.Invalid("markup", "A rate card revision needs a markup.")
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	var exists bool
-	if err = tx.QueryRow(r.Context(),
-		"SELECT EXISTS(SELECT 1 FROM olp.rate_cards WHERE id=$1::uuid)", cardID).Scan(&exists); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !exists {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
-	}
-	effectiveAt := time.Now().UTC()
-	if input.EffectiveAt != nil {
-		effectiveAt = input.EffectiveAt.UTC()
-		if effectiveAt.Before(time.Now()) {
-			return httpkit.Reply{}, httpkit.Invalid("effective_at",
-				"Choose an effective time now or in the future.")
+	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var exists bool
+		if err = tx.QueryRow(r.Context(),
+			"SELECT EXISTS(SELECT 1 FROM olp.rate_cards WHERE id=$1::uuid)", cardID).Scan(&exists); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	currency, err := InstallationCurrency(r.Context(), tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	revision, err := CreateCardRevision(r.Context(), tx, principal.UserID(), cardID, *input.Markup, effectiveAt, input.Prices, currency, s.Normalizer)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated,
-		Location: "/api/v1/rate-cards/" + cardID + "/revisions/" + fmt.Sprint(revision.Revision),
-		Body:     revision}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "rate_card.publish",
-		"rate_card", cardID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		if !exists {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
+		}
+		effectiveAt := time.Now().UTC()
+		if input.EffectiveAt != nil {
+			effectiveAt = input.EffectiveAt.UTC()
+			if effectiveAt.Before(time.Now()) {
+				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("effective_at",
+					"Choose an effective time now or in the future.")
+			}
+		}
+		currency, err := InstallationCurrency(r.Context(), tx)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		revision, err := CreateCardRevision(r.Context(), tx, principal.UserID(), cardID, *input.Markup, effectiveAt, input.Prices, currency, s.Normalizer)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: http.StatusCreated,
+			Location: "/api/v1/rate-cards/" + cardID + "/revisions/" + fmt.Sprint(revision.Revision),
+			Body:     revision}
+		return result, access.Event{Action: "rate_card.publish", Resource: "rate_card", ID: cardID}, nil
+	})
 }

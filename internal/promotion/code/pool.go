@@ -11,6 +11,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -94,7 +96,7 @@ func (p Pool) ownerRefs() []string {
 	return []string{*p.OwnerRef}
 }
 
-func readPools(ctx context.Context, q access.Queryer) ([]Pool, error) {
+func readPools(ctx context.Context, q database.Queryer) ([]Pool, error) {
 	pools, err := access.ReadCodePools(ctx, q)
 	if err != nil {
 		return nil, err
@@ -121,7 +123,7 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
 }
 
-func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
+func resolvePool(ctx context.Context, q database.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
 	projectID, err := projectOf(directory, p.Project)
 	if err != nil {
 		return resolved[access.CodePoolInput]{}, err
@@ -157,11 +159,11 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 	return resolved[access.CodePoolInput]{ref: p.ID, to: to, input: input}, err
 }
 
-func poolChange(ctx context.Context, q access.Queryer, p resolved[access.CodePoolInput]) (change, error) {
+func poolChange(ctx context.Context, q database.Queryer, p resolved[access.CodePoolInput]) (change, error) {
 	action, err := compared(ctx, q, p, access.ReadCodePoolInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
 			_, err := access.SaveCodePool(ctx, tx, principal, p.to.id, httpkit.NewID(), p.input, p.to.existing)
 			return err
 		},

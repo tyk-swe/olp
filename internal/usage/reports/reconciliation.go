@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // ProviderDaySpend is the operator spend one provider accrued on one UTC day:
@@ -30,7 +30,7 @@ type ProviderDaySpend struct {
 // contributes; the report's excluded_caller_attempts then undercounts the
 // same way. Hourly rows also keep only request-grain priced and incomplete
 // counts, which the response documents as an approximation.
-func ReconciliationSpend(ctx context.Context, q access.Queryer, start, end time.Time, providers []string) ([]ProviderDaySpend, error) {
+func ReconciliationSpend(ctx context.Context, q database.Queryer, start, end time.Time, providers []string) ([]ProviderDaySpend, error) {
 	if len(providers) == 0 {
 		return nil, nil
 	}

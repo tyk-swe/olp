@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -27,7 +29,7 @@ func parseSAML(fragment nullable.Nullable[contract.ConfigurationSAML]) (*access.
 	return &definition, nil
 }
 
-func readSAML(ctx context.Context, q access.Queryer) (*access.SAMLDefinition, error) {
+func readSAML(ctx context.Context, q database.Queryer) (*access.SAMLDefinition, error) {
 	definition, ok, err := access.ReadSAMLDefinition(ctx, q)
 	if !ok {
 		return nil, err
@@ -46,7 +48,7 @@ func renderSAML(definition *access.SAMLDefinition) (nullable.Nullable[contract.C
 	return nullable.NewNullableWithValue(rendered), nil
 }
 
-func planSAML(ctx context.Context, q access.Queryer, desired *access.SAMLDefinition) ([]promotion.Item, error) {
+func planSAML(ctx context.Context, q database.Queryer, desired *access.SAMLDefinition) ([]promotion.Item, error) {
 	if desired == nil {
 		return nil, nil
 	}
@@ -63,7 +65,7 @@ func planSAML(ctx context.Context, q access.Queryer, desired *access.SAMLDefinit
 }
 
 func SAMLApplier(desired Desired, deps Deps, request *http.Request) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if desired.saml == nil {
 			return nil
 		}

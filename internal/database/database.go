@@ -6,8 +6,14 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type Queryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
 
 func Configuration(rawURL string, maxConnections int, timeout time.Duration) (*pgxpool.Config, error) {
 	c, err := pgxpool.ParseConfig(rawURL)

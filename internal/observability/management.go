@@ -11,6 +11,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -21,7 +23,7 @@ import (
 type Management struct {
 	Access *access.Server
 	Cache  *Cache
-	Pool   access.Queryer
+	Pool   database.Queryer
 	// Fleet reads the circuit and probe state gateways share; nil when no
 	// shared state is configured.
 	Fleet FleetHealth
@@ -39,7 +41,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "GET /api/v1/provider-health", m.providerHealth)
 }
 
-func (m *Management) ready(_ *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (m *Management) ready(_ *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	health, err := readyHealth(m.Cache.readinessSnapshot(), time.Now())
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -47,7 +49,7 @@ func (m *Management) ready(_ *http.Request, _ access.Principal) (httpkit.Reply, 
 	return httpkit.OK(healthResponse(health)), nil
 }
 
-func (m *Management) providerHealth(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) providerHealth(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	window := 15
 	if raw := query.Get("window_minutes"); raw != "" {

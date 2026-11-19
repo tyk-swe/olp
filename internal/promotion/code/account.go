@@ -8,8 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
@@ -43,7 +44,7 @@ func (a Account) input(project, provider, credential string) codeaccounts.Input 
 	return codeaccounts.Input{ProjectID: project, ProviderID: provider, CredentialID: credential, Settings: a.Settings}
 }
 
-func readAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
+func readAccounts(ctx context.Context, q database.Queryer) ([]Account, error) {
 	accounts, err := codeaccounts.ReadAccounts(ctx, q)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func date(value *string) (*openapi_types.Date, error) {
 	return &openapi_types.Date{Time: parsed}, nil
 }
 
-func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory promotion.Directory, credentials map[string]string) (resolved[codeaccounts.Input], error) {
+func resolveAccount(ctx context.Context, q database.Queryer, a Account, directory promotion.Directory, credentials map[string]string) (resolved[codeaccounts.Input], error) {
 	projectID, err := projectOf(directory, a.Project)
 	if err != nil {
 		return resolved[codeaccounts.Input]{}, err
@@ -100,11 +101,11 @@ func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory 
 	return resolved[codeaccounts.Input]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
 }
 
-func accountChange(ctx context.Context, q access.Queryer, a resolved[codeaccounts.Input]) (change, error) {
+func accountChange(ctx context.Context, q database.Queryer, a resolved[codeaccounts.Input]) (change, error) {
 	action, err := compared(ctx, q, a, codeaccounts.ReadInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, httpkit.NewID(), a.input, a.to.existing)
 			return err
 		},

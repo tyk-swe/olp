@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -23,13 +24,13 @@ func validManagementToken(input managementTokenInput) error {
 	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	delegable := TokenScopes()
+	delegable := authz.TokenScopes()
 	if len(input.Scopes) < 1 || len(input.Scopes) > len(delegable) {
 		return httpkit.Invalid("scopes", fmt.Sprintf("Select 1–%d unique scopes.", len(delegable)))
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
-		op, ok := ParseOperation(scope)
+		op, ok := authz.ParseOperation(scope)
 		if seen[scope] || !ok || !slices.Contains(delegable, op) {
 			return httpkit.Invalid("scopes", "Use unique management operation scopes.")
 		}
@@ -62,7 +63,7 @@ func validManagementToken(input managementTokenInput) error {
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
 const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
-func (s *Server) managementTokens(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) managementTokens(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -75,7 +76,7 @@ func (s *Server) managementTokens(r *http.Request, _ Principal) (httpkit.Reply, 
 	return httpkit.ListReply(items, p), err
 }
 
-func (s *Server) managementToken(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) managementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "management_token_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -86,7 +87,7 @@ func (s *Server) managementToken(r *http.Request, _ Principal) (httpkit.Reply, e
 	return httpkit.Detail(json.RawMessage(data), etag), err
 }
 
-func (s *Server) createManagementToken(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input managementTokenInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -143,7 +144,7 @@ func (s *Server) createManagementToken(r *http.Request, _ Principal) (httpkit.Re
 	return result, tx.Commit(r.Context())
 }
 
-func (s *Server) revokeManagementToken(r *http.Request, _ Principal) (httpkit.Reply, error) {
+func (s *Server) revokeManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "management_token_id")
 	if err != nil {
 		return httpkit.Reply{}, err
