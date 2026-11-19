@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func ValidateGenericRequest(root oif.Value, headers http.Header, request codemode.Request) error {

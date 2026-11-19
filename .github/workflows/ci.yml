@@ -112,7 +112,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - '**/*.go'
-              - 'internal/operations/tokenization/estimate/ranks/LICENSE'
+              - 'internal/domain/operations/tokenization/estimate/ranks/LICENSE'
               - '**/package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'

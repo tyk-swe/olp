@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )

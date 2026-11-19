@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // Chat observes a Chat Completions response. A stream reports usage only in

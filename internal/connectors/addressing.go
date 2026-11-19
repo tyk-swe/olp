@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 func DefaultProfileEndpoint(kind Kind, profileID, region, project string) string {

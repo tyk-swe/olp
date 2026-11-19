@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {

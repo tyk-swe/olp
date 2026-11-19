@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 )
 
 const MaxCounter = int64(1)<<53 - 1

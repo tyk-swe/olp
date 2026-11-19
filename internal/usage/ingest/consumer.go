@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 

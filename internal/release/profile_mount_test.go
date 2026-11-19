@@ -8,7 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

@@ -198,7 +198,7 @@ host or path names the operator's account. The record stores the vendor ID
 separately from its editable resolved connection values.
 
 Each preset is a reviewed vendor contract in
-[`internal/vendors`](../../internal/vendors/catalog.go): its operations, generation
+[`internal/domain/vendors`](../../internal/domain/vendors/catalog.go): its operations, generation
 dialects, the request fields its documentation refuses or renames, and the
 documentation it was reviewed against. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
@@ -312,7 +312,7 @@ Probes and inference use the same normalized endpoint and egress policy. The
 allowlists never relax OIDC issuer or Vertex token endpoint checks.
 These exceptions are installation-wide administrative trust decisions.
 They do not provide origin-specific tenant isolation. See the
-[egress](../../internal/egress) policy for the boundary rules.
+[egress](../../internal/platform/egress) policy for the boundary rules.
 
 ## Operations script variables
 

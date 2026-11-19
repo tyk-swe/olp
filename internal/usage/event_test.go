@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func metadataAttempt(ordinal int, providerID string, model string, committed bool) Attempt {

@@ -12,7 +12,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 const MaxBody = 16 << 20

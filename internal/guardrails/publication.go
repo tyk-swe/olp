@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const revisionColumns = "v.id::text,g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,v.configuration,v.timeout_ms,v.on_error"

@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func ValidateRouteReferences(r *http.Request, q database.Queryer, routes []string, projectID *string) error {

@@ -13,8 +13,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
-	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+	"github.com/tyk-swe/olp/internal/platform/database"
 
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails/vendor"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type ModelRule struct {

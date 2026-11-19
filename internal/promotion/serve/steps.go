@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublication"
 	"github.com/tyk-swe/olp/internal/promotion/code"

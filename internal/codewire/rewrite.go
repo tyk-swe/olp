@@ -5,9 +5,9 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func RewriteRequestModel(body []byte, from, to string) ([]byte, error) {

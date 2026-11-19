@@ -9,8 +9,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+	"github.com/tyk-swe/olp/internal/platform/database"
 
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 

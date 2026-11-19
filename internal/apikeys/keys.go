@@ -11,9 +11,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/priority"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/priority"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 type keyInput struct {

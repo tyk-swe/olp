@@ -2,7 +2,7 @@ package identity
 
 import (
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type Config struct {

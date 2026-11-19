@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (p *Prober) ListModels(ctx context.Context, t Target) ([]string, error) {

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/prompts"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
-	"github.com/tyk-swe/olp/internal/prompts"
 )
 
 func TestAgentSnapshotCloneAndDigest(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {

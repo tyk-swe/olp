@@ -9,8 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 

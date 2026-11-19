@@ -23,7 +23,7 @@ RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \
     mkdir -p /out && go build -mod=readonly -trimpath -tags="$OLP_GO_TAGS" \
       -ldflags="-s -w -X main.Version=$version" -o /out/olp ./cmd/olp
 RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
-RUN cp internal/operations/tokenization/estimate/ranks/LICENSE /out/TIKTOKEN-LICENSE
+RUN cp internal/domain/operations/tokenization/estimate/ranks/LICENSE /out/TIKTOKEN-LICENSE
 RUN install -d -m 0700 /rootfs/run/olp/secrets && install -d -m 0755 /rootfs/run/olp/database
 
 FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS console-build

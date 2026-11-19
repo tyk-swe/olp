@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func loadOrganizations(ctx context.Context, q database.Queryer, p *authz.Principal, user string) error {

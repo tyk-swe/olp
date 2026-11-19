@@ -727,7 +727,7 @@ translated to them with a late system message fails with `unsupported_parameter`
 instead of moving the message to the front.
 
 Keep these tables aligned with the
-[protocol suites](../../internal/protocols/translation_test.go) when semantics
+[protocol suites](../../internal/domain/protocols/translation_test.go) when semantics
 change.
 
 ### Anthropic providers
@@ -738,7 +738,7 @@ it is set to true. Translation treats `text` as no structured output. `json_obje
 unknown formats are still refused, and whether a given model accepts the
 translated field is provider/model dependent: unsupported combinations fail
 clearly rather than silently degrading. The
-[Anthropic encoder](../../internal/protocols/canonical_anthropic.go) enforces
+[Anthropic encoder](../../internal/domain/protocols/canonical_anthropic.go) enforces
 these rules. Cached-input usage, provider request IDs, media parts, and
 oversized-response bounds remain part of the shared contract.
 
@@ -748,7 +748,7 @@ candidate, a tool-result message without its tool-call ID, an image with an
 explicit detail level, or an input audio, input file, or refusal content part. A
 missing maximum output token count is also refused, because Anthropic requires
 one. These checks live in the
-[Anthropic encoder](../../internal/protocols/canonical_anthropic.go). The
+[Anthropic encoder](../../internal/domain/protocols/canonical_anthropic.go). The
 [connector capability rules](../../internal/connectors/capability.go) keep token
 counting unary and bind the selected transport mode.
 
@@ -760,7 +760,7 @@ appears after the conversation has started, a tool result whose content is not
 text and, as with Anthropic, input audio, input file and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
 rather than guessed. These checks live in the
-[Gemini encoder](../../internal/protocols/canonical_gemini.go); the
+[Gemini encoder](../../internal/domain/protocols/canonical_gemini.go); the
 [connector capability rules](../../internal/connectors/capability.go) enforce
 unary token counting and refuse asynchronous generation. Preserved counting
 requests are validated after model rewriting as well.
@@ -819,11 +819,11 @@ provider error fields, malformed base64, or an image-count mismatch fail the
 attempt. Other Bedrock models, and every edit/variation/audio/video operation,
 remain refused.
 
-The [image-input tests](../../internal/protocols/bedrock_test.go) and
-[stream bounds tests](../../internal/protocols/stream_translation_test.go) cover these
+The [image-input tests](../../internal/domain/protocols/bedrock_test.go) and
+[stream bounds tests](../../internal/domain/protocols/stream_translation_test.go) cover these
 rules.
 
-The [Go Converse encoder](../../internal/protocols/bedrock.go) refuses, with an
+The [Go Converse encoder](../../internal/domain/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets a
 deterministic seed, sets parallel tool-call selection, asks for a structured
 response format other than `text` or a well-formed `json_schema`, puts a name or
@@ -973,7 +973,7 @@ establish live-provider or production-performance qualification.
 | Tier | What it adds | Evidence required |
 | --- | --- | --- |
 | Reviewed preset | A catalog entry over an existing dialect and hosting composition | Vendor contract fixtures in the unit tier, pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
-| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures in the unit tier, pricing coverage, and a recorded manual run against a stub or real provider |
+| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/domain/protocols` or `internal/domain/operations` | Conformance fixtures in the unit tier, pricing coverage, and a recorded manual run against a stub or real provider |
 | Plugin | Authentication and hosting around a built-in dialect, supplied by an operator ([plugins](plugins.md)) | The plugin's own manifest review and origin approval |
 
 No tier certifies a model: certification stays a live, exact-tuple probe run by

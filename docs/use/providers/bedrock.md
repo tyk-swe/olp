@@ -79,7 +79,7 @@ Bedrock protocol translation runs in the unit tier. Run it focused
 with:
 
 ```sh
-go test -count=1 ./internal/protocols -run Bedrock
+go test -count=1 ./internal/domain/protocols -run Bedrock
 ```
 
 Connector tests and paid live qualification were subtracted with the test

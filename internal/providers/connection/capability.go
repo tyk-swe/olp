@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

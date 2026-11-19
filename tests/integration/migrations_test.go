@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/harness"
 )
@@ -44,7 +44,7 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0137_code_allowance_observation.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0137_code_allowance_observation.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
 		)`); err != nil {
 		t.Fatal(err)
 	}
-	directory := "../../internal/database/migrations"
+	directory := "../../internal/platform/database/migrations"
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
 
 func applyHistoricalMigration(t *testing.T, pool *pgxpool.Pool, name string) {
 	t.Helper()
-	sql, err := os.ReadFile(filepath.Join("../../internal/database/migrations", name))
+	sql, err := os.ReadFile(filepath.Join("../../internal/platform/database/migrations", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +501,7 @@ func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0142_batch_submission.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0142_batch_submission.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestCommitmentObservedDayMigrationRestatesExistingOutliers(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT version FROM olp.focus_dirty_days WHERE day=$1`, day).Scan(&bucketBefore); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0144_focus_observed_commitment_days.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0144_focus_observed_commitment_days.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

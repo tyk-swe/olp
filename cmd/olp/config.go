@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/bodylimit"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 type Mode string

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func defaultSchema(profileID, dialect, operation string) json.RawMessage {

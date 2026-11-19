@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/domain/prompts"
 )
 
 func NormalizeDraft(d Draft) Draft { return cloneDraft(d, true) }

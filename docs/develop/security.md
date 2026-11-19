@@ -13,7 +13,7 @@ Report suspected vulnerabilities privately through the
 
 | Boundary | What crosses it | How it is protected |
 | --- | --- | --- |
-| Edge to public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
+| Edge to public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/domain/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
 | Private listener | Health probes and metrics | Unauthenticated by design. Bind it to a private interface and restrict it with the chart's NetworkPolicy. |
 | OLP to PostgreSQL | All durable state | Bearer credentials are stored only as digests and other secrets only sealed by the master key ring; see [secrets](#secrets). |
 | OLP to Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
@@ -156,7 +156,7 @@ their cache and reports unavailable versions in route plans. Expired values
 and sealed credentials cannot substitute for an unavailable pinned reference.
 See [external secrets](../operate/external-secrets.md) for identity, rotation and recovery.
 
-`internal/secrets/purpose.go` declares every purpose, and only that package can
+`internal/platform/secrets/purpose.go` declares every purpose, and only that package can
 construct one, so no digest or ciphertext names an ad hoc purpose. Purpose
 names are bound into stored data and never change:
 
@@ -172,7 +172,7 @@ process.
 
 ## Egress
 
-**Provider egress** (`internal/egress`) requires HTTPS unless an operator lists
+**Provider egress** (`internal/platform/egress`) requires HTTPS unless an operator lists
 the host, refuses addresses outside public unicast unless an operator lists the
 network, rejects a host when any DNS answer is unsafe, dials only the validated
 addresses, refuses redirects, and requires TLS 1.2 or newer. Processes log a

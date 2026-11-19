@@ -12,9 +12,9 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage/reports"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 const signalScopeLimit = 10000

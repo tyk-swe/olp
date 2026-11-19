@@ -6,7 +6,7 @@ under capability-named top-level folders such as `plugin/`, `management/`,
 `inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
 named for the module that owns the behavior, never for a layer. The console
 mirrors the same feature boundaries under `console/src/lib/features/`.
-PostgreSQL migrations live under `internal/database/migrations/`.
+PostgreSQL migrations live under `internal/platform/database/migrations/`.
 
 | Area | Backend and console owner |
 | --- | --- |
@@ -18,14 +18,14 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/` and `models/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
-| Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
-| Protocol and lifecycle contracts | `internal/protocols/`, `internal/geminilifecycle/` |
+| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
+| Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/domain/contentpolicy/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
-| Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
-| Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
+| Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/platform/database/` |
+| Egress, secrets and telemetry | `internal/platform/egress/`, `internal/platform/secrets/`, `internal/observability/`, `internal/platform/telemetry/` |
 
 ## Contracts and feature ownership
 
@@ -188,7 +188,7 @@ declared in `scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`,
 where each plane is assembled by one constructor and `Run` owns mode
 selection, listeners and shutdown ordering. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
-vocabulary, as `internal/routeidentity` and `internal/access/authority` do. A
+vocabulary, as `internal/domain/routeidentity` and `internal/access/authority` do. A
 wrapper whose only job is forwarding to another package belongs in that
 package instead.
 
@@ -202,6 +202,17 @@ package instead.
   management kit serves the control plane. `cmd/olp` is the only place that
   knows both, so pass a collaborator in there instead of importing across.
 - Nothing under `internal` imports `cmd`.
+- `internal/domain` is vocabulary and logic that does no I/O. It imports only
+  `internal/domain` and the signed reference catalog, and never `net/http`, a
+  database driver or the Valkey client. Take the value in as an argument and
+  do the I/O in the caller.
+- `internal/platform` is the infrastructure every feature builds on, such as
+  the database pool, egress, secrets and telemetry. It imports only
+  `internal/platform` and `internal/domain`, never a feature.
+- Every other directory under `internal` is named for the module that owns a
+  behavior, including its SQL, validation and routes. A new package goes in
+  `internal/domain` when it does no I/O, in `internal/platform` when it is
+  infrastructure no single module owns, and next to its module otherwise.
 - `internal/access` is the management kit and holds no feature. It
   authenticates callers, registers routes, runs write transactions and records
   audit rows. A new resource gets its own package that imports the kit.

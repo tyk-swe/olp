@@ -13,8 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 func ValidateBudgetTimeZone(name string) error {

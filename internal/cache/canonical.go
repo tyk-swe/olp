@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // Canonical uses the validated source index, never float64 decoding. Numeric

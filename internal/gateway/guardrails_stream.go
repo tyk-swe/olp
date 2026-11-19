@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type guardrailStream struct {

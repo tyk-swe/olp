@@ -5,7 +5,7 @@ import (
 	"maps"
 	"math/big"
 
-	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
 // LimitTemplates supplies independent ceilings at each referencing boundary.

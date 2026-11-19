@@ -8,7 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/domain/priority"
 )
 
 func TestPoolAdmitsUpToCapacityThenQueuesUpToDepth(t *testing.T) {

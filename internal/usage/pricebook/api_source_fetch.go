@@ -13,7 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 

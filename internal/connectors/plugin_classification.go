@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 

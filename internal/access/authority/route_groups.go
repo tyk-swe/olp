@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
 // RouteGroups are project-local named sets of ordinary or subscription slugs.
