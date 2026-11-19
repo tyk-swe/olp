@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2265,5 +2267,182 @@ func TestEachKindOfProviderFailureIsClassifiedAndFallsBackOnlyWhileTheReplyIsUnc
 				t.Fatalf("outcome = %s for reply code %q", env.Outcome, tc.code)
 			}
 		})
+	}
+}
+
+type providerCalls struct{ a, b atomic.Int64 }
+
+func refusing(calls *atomic.Int64, refusals int64, status int, retryAfter string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if calls.Add(1) > refusals {
+			completion(modelA, answerText)(w, r)
+			return
+		}
+		if retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"error":{"message":"refused"}}`)
+	}
+}
+
+func unreachableLimits(t *testing.T) Dependencies {
+	t.Helper()
+	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := func() limitadmission.OutagePolicy { return limitadmission.FailClosed }
+	return Dependencies{Admission: quota.NewAdmission(limitadmission.NewDurable(runner, nil), fleet.New(runner), closed, slog.New(slog.DiscardHandler))}
+}
+
+func TestARouteRetriesAProviderOnlyUnderItsRetryRuleThenMovesOnAndSaysWhyNoProviderServed(t *testing.T) {
+	const always = 1 << 20
+	brief := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1}}
+	patient := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
+	limited := &routing.Limits{RequestsPerMinute: new(int64(5))}
+	for name, tc := range map[string]struct {
+		retry      routing.Retry
+		refusals   [2]int64
+		refusal    int
+		retryAfter string
+		limits     [2]*routing.Limits
+		deadline   int64
+		status     int
+		code       string
+		calls      [2]int64
+		retries    []int
+		budget     int
+	}{
+		"a rate limited provider is retried until it answers": {
+			retry: brief, refusals: [2]int64{2, 0}, refusal: http.StatusTooManyRequests,
+			status: http.StatusOK, calls: [2]int64{3, 0}, retries: []int{0, 1, 2},
+		},
+		"retries run out and the next provider serves": {
+			retry: brief, refusals: [2]int64{always, 0}, refusal: http.StatusTooManyRequests,
+			status: http.StatusOK, calls: [2]int64{3, 1}, retries: []int{0, 1, 2, 0}, budget: 4,
+		},
+		"a failure without a retry rule moves on at once": {
+			retry: brief, refusals: [2]int64{always, 0}, refusal: http.StatusInternalServerError,
+			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"a wait the provider asks for past the deadline is not taken": {
+			retry: patient, refusals: [2]int64{always, 0}, refusal: http.StatusTooManyRequests, retryAfter: "60", deadline: 400,
+			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"every provider failing reports the last failure": {
+			refusals: [2]int64{always, always}, refusal: http.StatusInternalServerError,
+			status: http.StatusBadGateway, code: "upstream_unavailable", calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"a provider whose limit cannot be read is passed over": {
+			limits: [2]*routing.Limits{limited, nil},
+			status: http.StatusOK, calls: [2]int64{0, 1}, retries: []int{0},
+		},
+		"no provider with a readable limit reports the limits": {
+			limits: [2]*routing.Limits{limited, limited},
+			status: http.StatusServiceUnavailable, code: "distributed_limits_unavailable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var deps []Dependencies
+			if tc.limits != [2]*routing.Limits{} {
+				deps = append(deps, unreachableLimits(t))
+			}
+			h := newHarness(t, Config{}, deps...)
+			budget := 0
+			h.republish(func(s *routing.Snapshot, a, b routing.Provider) {
+				route := s.Routes[routeSlug]
+				route.Retry = tc.retry
+				route.MaxAttempts = cmp.Or(tc.budget, route.MaxAttempts)
+				if tc.deadline > 0 {
+					route.OverallTimeout = tc.deadline
+				}
+				budget = route.MaxAttempts
+				s.Routes[routeSlug] = route
+				for i, provider := range []routing.Provider{a, b} {
+					provider.Limits = tc.limits[i]
+					s.Providers[provider.ID] = provider
+				}
+			})
+			var calls providerCalls
+			h.mock.set("a", refusing(&calls.a, tc.refusals[0], tc.refusal, tc.retryAfter))
+			h.mock.set("b", refusing(&calls.b, tc.refusals[1], tc.refusal, tc.retryAfter))
+
+			reply := enter(t, h, nil, entryChat)
+
+			if reply.status != tc.status || reply.code != tc.code {
+				t.Fatalf("reply = %d %q, want %d %q", reply.status, reply.code, tc.status, tc.code)
+			}
+			if got := [2]int64{calls.a.Load(), calls.b.Load()}; got != tc.calls {
+				t.Fatalf("provider calls = %v, want %v", got, tc.calls)
+			}
+			attempts := h.sink.last(t).Attempts
+			retries := make([]int, len(attempts))
+			for i, fact := range attempts {
+				retries[i] = fact.Retry
+			}
+			if !slices.Equal(retries, tc.retries) {
+				t.Fatalf("recorded retries = %v, want %v", retries, tc.retries)
+			}
+			if len(attempts) > budget {
+				t.Fatalf("%d attempts ran on a route allowing %d", len(attempts), budget)
+			}
+		})
+	}
+}
+
+func TestARetryStopsAtTheRoutesAttemptBudgetAndReportsTheProvidersRefusal(t *testing.T) {
+	h := newHarness(t, Config{})
+	budget := 0
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Retry = routing.Retry{classRateLimit: {MaxRetries: 10, BaseBackoffMS: 1, MaxBackoffMS: 1}}
+		budget = route.MaxAttempts
+		s.Routes[routeSlug] = route
+	})
+	var calls providerCalls
+	h.mock.set("a", refusing(&calls.a, 1<<20, http.StatusTooManyRequests, ""))
+	h.mock.set("b", refusing(&calls.b, 0, 0, ""))
+
+	reply := enter(t, h, nil, entryChat)
+
+	if reply.status != http.StatusTooManyRequests || reply.code != "upstream_rate_limit" {
+		t.Fatalf("reply = %d %q, want the provider's rate limit", reply.status, reply.code)
+	}
+	if calls.a.Load() != int64(budget) || calls.b.Load() != 0 {
+		t.Fatalf("provider calls = %d and %d on a route allowing %d attempts", calls.a.Load(), calls.b.Load(), budget)
+	}
+}
+
+func TestACallerLeavingDuringARetryWaitEndsTheRequestAsCancelledWithoutAnotherAttempt(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Retry = routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
+		s.Routes[routeSlug] = route
+	})
+	var calls providerCalls
+	h.mock.set("a", refusing(&calls.a, 1<<20, http.StatusTooManyRequests, "2"))
+	h.mock.set("b", refusing(&calls.b, 0, 0, ""))
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/chat/completions", strings.NewReader(entryChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+fullKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("the caller got status %d while the route was waiting to retry", resp.StatusCode)
+	}
+
+	env := h.sink.last(t)
+	if env.Outcome != "cancelled" || len(env.Attempts) != 1 || calls.a.Load() != 1 || calls.b.Load() != 0 {
+		t.Fatalf("outcome = %q with %d attempts, provider calls %d and %d; want one attempt and a cancelled request", env.Outcome, len(env.Attempts), calls.a.Load(), calls.b.Load())
 	}
 }
