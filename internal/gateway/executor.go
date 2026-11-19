@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/guardstream"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -578,7 +579,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 		}()
 		emit := func(frame []byte) error {
-			if e := parallel.join(x, terminalGuardrailFrame(x.family, frame)); e != nil {
+			if e := parallel.join(x, guardstream.Terminal(x.family, frame)); e != nil {
 				return e
 			}
 			if x.providerState {
@@ -633,14 +634,14 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			return err
 		}
 		deliver := emit
-		var guarded *guardrailStream
+		var guarded *guardstream.Stream
 		if x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
-			guarded, err = newGuardrailStream(x)
+			guarded, err = x.guardrailStream()
 			if err != nil {
 				return fail(classPolicy, &attemptFailure{policyCode: guardrailError(err).Code, overall: true, noRetry: true})
 			}
 			emit = func(frame []byte) error {
-				frames, e := guarded.push(actx, frame)
+				frames, e := guarded.Push(actx, frame)
 				if e != nil {
 					return e
 				}
@@ -732,7 +733,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		if guarded != nil {
 			if err == nil {
 				var frames [][]byte
-				frames, err = guarded.finish(actx)
+				frames, err = guarded.Finish(actx)
 				if err == nil {
 					for _, frame := range frames {
 						if err = deliver(frame); err != nil {
@@ -741,7 +742,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 					}
 				}
 			}
-			x.recordGuardrails(guarded.stream.Decisions())
+			x.recordGuardrails(guarded.Decisions())
 		}
 		if err == nil && strictResponseIncomplete {
 			st.settled = true

@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/guardstream"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -175,6 +176,15 @@ func (x *call) guardrailStreamSurface(document oif.Document) error {
 		}
 	}
 	return nil
+}
+
+func (x *call) guardrailStream() (*guardstream.Stream, error) {
+	return guardstream.New(guardstream.Config{
+		Engine: x.guardrailEngine, Masks: x.guardrailMasks, Input: x.guardrailInput,
+		RequestID: x.request.accountingID(), Route: x.route.Slug, InternalModel: x.internalGuardrail,
+		Family: x.family, Window: x.snapshot().GuardrailWindow(), Strict: x.strict(),
+		ToolContext: x.guardrailCtx, Record: x.recordGuardrails,
+	})
 }
 
 func (x *call) recordGuardrails(values []guardrails.Evidence) {

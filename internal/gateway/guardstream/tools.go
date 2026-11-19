@@ -1,4 +1,4 @@
-package gateway
+package guardstream
 
 import (
 	"bytes"
@@ -11,23 +11,23 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-type streamToolCall struct {
+type toolCall struct {
 	chunks          bool
 	name, arguments string
 	done            bool
 }
 
-func (g *guardrailStream) tool(id string) *streamToolCall {
+func (g *Stream) tool(id string) *toolCall {
 	v := g.calls[id]
 	if v == nil {
-		v = &streamToolCall{}
+		v = &toolCall{}
 		g.calls[id] = v
 	}
 	return v
 }
-func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
+func (g *Stream) collectTools(frame []byte) (bool, error) {
 	var data []byte
-	if g.family == wire.Bedrock {
+	if g.config.Family == wire.Bedrock {
 		message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 		if err != nil {
 			return false, guardrails.ErrSurface
@@ -49,7 +49,7 @@ func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
 		return false, guardrails.ErrSurface
 	}
 	touched := false
-	switch g.family {
+	switch g.config.Family {
 	case wire.Chat:
 		var choices []struct {
 			Index  int     `json:"index"`
@@ -246,7 +246,7 @@ func jsonIndex(v any) string {
 	return strconv.FormatInt(i, 10)
 }
 
-func decodeGuardrailJSON(data []byte, value any) error {
+func decodeJSON(data []byte, value any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	return decoder.Decode(value)
@@ -256,7 +256,7 @@ func decodeGuardrailJSON(data []byte, value any) error {
 // argument delta. Later deltas become empty, and terminal snapshots are kept
 // consistent. This runs only on transformed routes, after the whole call is
 // buffered; successful strict frames never enter this path.
-func (g *guardrailStream) rewriteTools() error {
+func (g *Stream) rewriteTools() error {
 	emitted := map[string]bool{}
 	argument := func(id string) string {
 		if emitted[id] {
@@ -270,7 +270,7 @@ func (g *guardrailStream) rewriteTools() error {
 		var message eventstream.Message
 		var lines [][]byte
 		lineIndex := -1
-		if g.family == wire.Bedrock {
+		if g.config.Family == wire.Bedrock {
 			var err error
 			message, err = eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 			if err != nil {
@@ -291,10 +291,10 @@ func (g *guardrailStream) rewriteTools() error {
 			continue
 		}
 		var root map[string]any
-		if decodeGuardrailJSON(data, &root) != nil {
+		if decodeJSON(data, &root) != nil {
 			return guardrails.ErrSurface
 		}
-		switch g.family {
+		switch g.config.Family {
 		case wire.Chat:
 			for _, value := range jsonArray(root["choices"]) {
 				choice := jsonObject(value)
@@ -319,7 +319,7 @@ func (g *guardrailStream) rewriteTools() error {
 					if call.chunks {
 						input = map[string]any{}
 					} else {
-						if decodeGuardrailJSON([]byte(call.arguments), &input) != nil {
+						if decodeJSON([]byte(call.arguments), &input) != nil {
 							return guardrails.ErrSurface
 						}
 					}
@@ -361,7 +361,7 @@ func (g *guardrailStream) rewriteTools() error {
 				for pi, value := range jsonArray(content["parts"]) {
 					if fn := jsonObject(jsonObject(value)["functionCall"]); fn != nil {
 						var args any
-						if decodeGuardrailJSON([]byte(g.calls[strconv.Itoa(ci)+"_"+strconv.Itoa(pi)].arguments), &args) != nil {
+						if decodeJSON([]byte(g.calls[strconv.Itoa(ci)+"_"+strconv.Itoa(pi)].arguments), &args) != nil {
 							return guardrails.ErrSurface
 						}
 						fn["args"] = args
@@ -377,7 +377,7 @@ func (g *guardrailStream) rewriteTools() error {
 		if err != nil {
 			return guardrails.ErrSurface
 		}
-		if g.family == wire.Bedrock {
+		if g.config.Family == wire.Bedrock {
 			message.Payload = encoded
 			var out bytes.Buffer
 			if eventstream.NewEncoder().Encode(&out, message) != nil {
