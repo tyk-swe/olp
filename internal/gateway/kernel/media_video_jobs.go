@@ -165,7 +165,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := s.Deps.Media.Store.Refresh(r.Context(), record.ID, jobs.Unfenced, update)
 	if err != nil {
-		s.mediaFailOutcome(x, w, &AttemptFailure{class: classConnect})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassConnect})
 		return
 	}
 	var body []byte
@@ -312,7 +312,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if finalized.Lifecycle != jobs.Deleted {
 		s.Deps.Media.Jobs.RecordGap()
-		s.mediaFailOutcome(x, w, &AttemptFailure{class: classConnect})
+		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassConnect})
 		return
 	}
 	if record.StrictContract && result == nil {

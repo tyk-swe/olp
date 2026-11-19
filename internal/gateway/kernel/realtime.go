@@ -338,7 +338,7 @@ func realtimeDial(ctx context.Context, s *Server, x *Call, p *Pin, endpoint stri
 	}
 	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
+		return nil, finish(ClassConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
 	if err := s.applySlotCredential(ctx, x, probe, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
 		return nil, finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))

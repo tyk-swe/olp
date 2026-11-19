@@ -258,7 +258,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint string, body []byte, contentType string) (*PinnedResponse, *AttemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	if err := exchange.bound.validateEndpoint(endpoint); err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	var reader io.Reader
 	if body != nil {
@@ -266,7 +266,7 @@ func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint
 	}
 	req, err := exchange.bound.request(ctx, method, endpoint, reader, make(http.Header))
 	if err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

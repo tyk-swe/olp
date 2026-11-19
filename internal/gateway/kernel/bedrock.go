@@ -199,7 +199,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *Call, p *Pin, endpoint stri
 	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")

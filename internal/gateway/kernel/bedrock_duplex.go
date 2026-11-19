@@ -88,7 +88,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *Call, p *Pin) (duplex
 		return finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock duplex profile cannot address this model."))
 	}
 	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
-		return finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
+		return finish(ClassConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
 	}
 	dialCtx, cancel := context.WithCancel(ctx)
 	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
@@ -96,7 +96,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *Call, p *Pin) (duplex
 	dialTimer.Stop()
 	if err != nil {
 		cancel()
-		class := classConnect
+		class := ClassConnect
 		if errors.Is(err, connectors.ErrCredentialRejected) {
 			class = classCredential
 		}

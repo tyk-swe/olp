@@ -320,7 +320,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 	}
 	target, err := s.Deps.Media.Jobs.Target(ctx, *record)
 	if err != nil {
-		return s.jobRefused(fact, &AttemptFailure{class: classConnect})
+		return s.jobRefused(fact, &AttemptFailure{class: ClassConnect})
 	}
 	provider, slot := target.Provider, target.Slot
 	if provider.CredentialSource == "caller" {
@@ -381,7 +381,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 	defer func() { reservation.Settle(ctx, dispatched, nil) }()
 	if _, deleting := job.(media.VideoDelete); deleting {
 		if _, err := s.Deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
-			return s.jobRefused(fact, &AttemptFailure{class: classConnect})
+			return s.jobRefused(fact, &AttemptFailure{class: ClassConnect})
 		}
 	}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)

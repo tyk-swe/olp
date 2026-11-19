@@ -557,7 +557,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
 	if e := s.markSessionDispatched(reqCtx, x); e != nil {
-		fact.Class = classConnect
+		fact.Class = ClassConnect
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
@@ -569,7 +569,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		x.spendCaps(p.Hold.budgets, p.attempt)
 	}
 	if err != nil {
-		fact.Class = classConnect
+		fact.Class = ClassConnect
 		dispatched := state.dispatched.Load()
 		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
 		fact.RecordEvidence(dispatched)
