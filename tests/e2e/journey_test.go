@@ -451,3 +451,49 @@ func TestAPIKeyWritesReplayGuardStaleRotateRevokeAndAudit(t *testing.T) {
 		t.Fatalf("key audit = %v, want %v", actions, want)
 	}
 }
+
+func TestWorkloadIssuerWritesReplayGuardStaleKeepIssuerAndAudit(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "workloads"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	issuer := func(name, url string) map[string]any {
+		return map[string]any{
+			"name": name, "issuer": url, "jwks_url": url + "/keys", "enabled": false,
+			"audiences": []string{"olp"}, "algorithms": []string{"RS256"}, "max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+			"mappings": []map[string]any{{
+				"name": "deploy", "match": map[string]string{"/sub": "repository"}, "project_id": project,
+				"limit_template": "standard", "route_groups": []string{"main"}, "scopes": []string{"inference"},
+			}},
+		}
+	}
+	expect := func(method, path string, body any, headers map[string]string, want int) {
+		t.Helper()
+		if status, raw := s.Do(owner, method, path, body, headers); status != want {
+			t.Fatalf("%s %s: %s", method, path, describe(status, raw))
+		}
+	}
+
+	create := harness.Idempotent()
+	input := issuer("pipeline", "https://issuer.example")
+	created := s.Want(owner, "POST", "/api/v1/workload-issuers", input, create, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/workload-issuers", input, create, http.StatusCreated); replayed["id"] != created["id"] {
+		t.Fatalf("replayed create returned another issuer")
+	}
+	expect("POST", "/api/v1/workload-issuers", issuer("", "https://other.example"), harness.Idempotent(), http.StatusUnprocessableEntity)
+	id := created["id"].(string)
+	path := "/api/v1/workload-issuers/" + id
+
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	renamed := issuer("renamed", "https://issuer.example")
+	expect("PUT", path, renamed, harness.Idempotent(stale), http.StatusPreconditionFailed)
+	expect("PUT", path, issuer("renamed", "https://moved.example"), harness.Idempotent(harness.ETag(created)), http.StatusUnprocessableEntity)
+	updated := s.Want(owner, "PUT", path, renamed, harness.Idempotent(harness.ETag(created)), http.StatusOK)
+	if stored := s.Want(owner, "GET", path, nil, nil, http.StatusOK); stored["name"] != "renamed" || stored["etag"] != updated["etag"] || stored["etag"] == created["etag"] {
+		t.Fatalf("stored issuer = %v", stored)
+	}
+
+	if actions, want := auditActions(t, s, id), []string{"workload_issuer.update", "workload_issuer.update"}; !slices.Equal(actions, want) {
+		t.Fatalf("issuer audit = %v, want %v", actions, want)
+	}
+}
