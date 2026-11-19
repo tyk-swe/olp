@@ -36,6 +36,7 @@ if [[ -n $problems ]]; then
   echo "check-lint: fix the code, never add an entry to $legacy" >&2
   exit 1
 fi
+./scripts/check-exemptions.sh
 
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(

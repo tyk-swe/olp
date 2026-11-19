@@ -21,4 +21,7 @@ check() {
   return 1
 }
 
-check console/eslint-legacy.json console/
+status=0
+check console/eslint-legacy.json console/ || status=1
+check .golangci-legacy.json "" || status=1
+exit $status
