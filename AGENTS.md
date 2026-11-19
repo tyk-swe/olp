@@ -121,7 +121,9 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 ## Architecture rules
 
-A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler, and never add a file to the `hand_rolled` list in `scripts/check-lint.sh`. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
+A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler, and never add an entry to `.golangci-legacy.json`. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
+
+Go lint enforces four structural rules. Nothing under `internal/gateway` imports `internal/access` and nothing under `internal/access` imports the gateway, because only `cmd/olp` wires the serving and management planes together. A function stays under 100 lines and a file under 500 lines of code, outside tests and generated files. `.golangci-legacy.json` lists the code that broke a rule before it existed. The lint gate fails on any violation that is not listed and on any listed entry that no longer violates, so the lists only shrink
 
 ## Agent skills
 
