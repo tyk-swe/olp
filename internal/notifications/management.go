@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -253,7 +254,7 @@ type document struct {
 	body json.RawMessage
 }
 
-func (res resource) find(ctx context.Context, q access.Queryer, id string) (document, error) {
+func (res resource) find(ctx context.Context, q database.Queryer, id string) (document, error) {
 	var found document
 	err := q.QueryRow(ctx, "SELECT id::text,document,etag::text,project_id::text FROM ("+res.documentsSQL+") documents WHERE id=$1", id).
 		Scan(&found.id, &found.body, &found.etag, &found.projectID)

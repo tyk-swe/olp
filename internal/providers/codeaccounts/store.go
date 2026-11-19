@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
@@ -65,7 +66,7 @@ func (in Input) validated() (Input, error) {
 	return Input{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Settings: in.Settings}, in.Settings.Validate()
 }
 
-func ReadAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
+func ReadAccounts(ctx context.Context, q database.Queryer) ([]Account, error) {
 	rows, err := q.Query(ctx, `SELECT a.id::text,p.name,v.name,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
 	if err != nil {
 		return nil, err
@@ -73,7 +74,7 @@ func ReadAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[Account])
 }
 
-func AccountIDs(ctx context.Context, q access.Queryer, projectID, providerID, principal string) ([]string, error) {
+func AccountIDs(ctx context.Context, q database.Queryer, projectID, providerID, principal string) ([]string, error) {
 	rows, err := q.Query(ctx, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, projectID, providerID, principal)
 	if err != nil {
 		return nil, err
@@ -81,14 +82,14 @@ func AccountIDs(ctx context.Context, q access.Queryer, projectID, providerID, pr
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-func ReadInput(ctx context.Context, q access.Queryer, id string) (Input, error) {
+func ReadInput(ctx context.Context, q database.Queryer, id string) (Input, error) {
 	var in Input
 	err := q.QueryRow(ctx, `SELECT project_id::text,provider_id::text,credential_id::text,name,enabled,models,extra_usage_enabled,cycle_anchor::text FROM olp.code_accounts WHERE id=$1`, id).
 		Scan(&in.ProjectID, &in.ProviderID, &in.CredentialID, &in.Name, &in.Enabled, &in.Models, &in.ExtraUsageEnabled, &in.CycleAnchor)
 	return in, err
 }
 
-func ReadGranted(ctx context.Context, q access.Queryer, providerName, projectID, credentialID string) (Granted, bool, error) {
+func ReadGranted(ctx context.Context, q database.Queryer, providerName, projectID, credentialID string) (Granted, bool, error) {
 	var granted Granted
 	err := q.QueryRow(ctx, `SELECT p.id::text,c.principal FROM olp.providers p JOIN olp.provider_credentials c ON c.provider_id=p.id JOIN olp.provider_grants g ON g.credential_id=c.id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND c.id=$3 AND c.principal<>'' AND c.revoked_at IS NULL AND `+grants.LiveCondition+``, providerName, projectID, credentialID).Scan(&granted.ProviderID, &granted.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {

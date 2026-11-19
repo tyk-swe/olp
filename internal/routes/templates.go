@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -156,7 +157,7 @@ func scanTemplate(row pgx.Row) (*template, error) {
 	return t, err
 }
 
-func loadTemplate(ctx context.Context, q access.Queryer, id string, lock bool) (*template, error) {
+func loadTemplate(ctx context.Context, q database.Queryer, id string, lock bool) (*template, error) {
 	query := "SELECT " + templateColumns + " FROM olp.route_templates WHERE id=$1"
 	if lock {
 		query += " FOR UPDATE"
@@ -168,7 +169,7 @@ func loadTemplate(ctx context.Context, q access.Queryer, id string, lock bool) (
 	return t, err
 }
 
-func loadTemplates(ctx context.Context, q access.Queryer) ([]*template, error) {
+func loadTemplates(ctx context.Context, q database.Queryer) ([]*template, error) {
 	rows, err := q.Query(ctx, "SELECT "+templateColumns+" FROM olp.route_templates ORDER BY name")
 	if err != nil {
 		return nil, err
@@ -220,7 +221,7 @@ type certifiedModel struct {
 	operations                                 []string
 }
 
-func certifiedModels(ctx context.Context, q access.Queryer, providerID string) ([]certifiedModel, error) {
+func certifiedModels(ctx context.Context, q database.Queryer, providerID string) ([]certifiedModel, error) {
 	rows, err := q.Query(ctx, `SELECT p.id::text,p.project_id::text,r.models,coalesce((r.configuration->'options'->'models')::jsonb,'{}'::jsonb),
 		coalesce(r.configuration->'options'->>'vendor_id',''),coalesce(r.configuration->>'kind',p.kind)
 		FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
@@ -536,7 +537,7 @@ func (s *Server) template(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return s.templateDetail(r.Context(), s.Access.Pool, t)
 }
 
-func (s *Server) templateDetail(ctx context.Context, q access.Queryer, t *template) (httpkit.Reply, error) {
+func (s *Server) templateDetail(ctx context.Context, q database.Queryer, t *template) (httpkit.Reply, error) {
 	rows, err := q.Query(ctx, "SELECT provider_id::text,provider_model_id::text,upstream_model,route_slug,draft_id::text,outcome,created_at FROM olp.route_template_routes WHERE template_id=$1 ORDER BY created_at,route_slug,upstream_model", t.ID)
 	if err != nil {
 		return httpkit.Reply{}, err

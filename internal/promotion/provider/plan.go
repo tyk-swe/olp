@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -31,13 +31,13 @@ func Planner(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.
 	planner := planning{bindings: bindings, deps: deps}
 	return promotion.Planner{
 		Claims: Claims(entries),
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			return planner.plan(ctx, q, entries)
 		},
 	}
 }
 
-func (p planning) plan(ctx context.Context, q access.Queryer, entries []Entry) ([]promotion.Item, error) {
+func (p planning) plan(ctx context.Context, q database.Queryer, entries []Entry) ([]promotion.Item, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (p planning) plan(ctx context.Context, q access.Queryer, entries []Entry) (
 	return slices.Compact(slices.SortedFunc(slices.Values(slices.Concat(items...)), compareItems)), nil
 }
 
-func (p planning) planEntry(ctx context.Context, q access.Queryer, entry Entry, existing destination, found bool, directory promotion.Directory) ([]promotion.Item, error) {
+func (p planning) planEntry(ctx context.Context, q database.Queryer, entry Entry, existing destination, found bool, directory promotion.Directory) ([]promotion.Item, error) {
 	configuration, plugin, err := p.prepare(ctx, q, entry)
 	if err != nil {
 		return nil, err
@@ -154,13 +154,13 @@ func encoded(entry Entry) ([]byte, error) {
 	return json.Marshal(rendered)
 }
 
-func (p planning) slotItems(ctx context.Context, q access.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
+func (p planning) slotItems(ctx context.Context, q database.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
 	return promotion.TryMap(slices.DeleteFunc(slices.Clone(entry.Slots), func(slot Slot) bool { return !referenced(slot) }), func(slot Slot) (promotion.Item, error) {
 		return p.slotItem(ctx, q, entry, slot, existing.slots[slot.Name])
 	})
 }
 
-func (p planning) slotItem(ctx context.Context, q access.Queryer, entry Entry, slot Slot, current storedSlot) (promotion.Item, error) {
+func (p planning) slotItem(ctx context.Context, q database.Queryer, entry Entry, slot Slot, current storedSlot) (promotion.Item, error) {
 	kind := contract.ConfigurationPlanItemKindCredential
 	ref := SlotRef(entry.Name, slot.Name)
 	if credential, supplied := p.bindings[ref]; supplied {

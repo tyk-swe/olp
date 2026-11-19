@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
@@ -289,7 +290,7 @@ func toolsetOutsideProject() error {
 	return httpkit.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
 }
 
-func activeRevision(ctx context.Context, q access.Queryer, project *string, name string) (string, error) {
+func activeRevision(ctx context.Context, q database.Queryer, project *string, name string) (string, error) {
 	current, err := guardrailpolicy.FindLatest(ctx, q, project, name)
 	if err != nil {
 		return "", err

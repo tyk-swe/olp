@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -16,7 +17,7 @@ import (
 const detail = "Organization budget; destination memberships are preserved."
 
 func Planner(desired []Organization) promotion.Planner {
-	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+	return promotion.Planner{Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 		current, err := Read(ctx, q)
 		if err != nil {
 			return nil, err

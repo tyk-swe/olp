@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -63,7 +64,7 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 	}
 }
 
-func readDiscounts(ctx context.Context, q access.Queryer, providers promotion.Directory) ([]Discount, error) {
+func readDiscounts(ctx context.Context, q database.Queryer, providers promotion.Directory) ([]Discount, error) {
 	stored, err := pricebook.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func discountAction(discount Discount, inForce map[scope]string) contract.Config
 	return contract.ConfigurationPlanItemActionCreate
 }
 
-func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
+func planDiscounts(ctx context.Context, q database.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
 	current, err := readDiscounts(ctx, q, providers)
 	if err != nil {
 		return nil, err

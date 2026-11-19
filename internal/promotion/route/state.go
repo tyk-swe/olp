@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -29,7 +29,7 @@ type draft struct {
 	route Route
 }
 
-func Read(ctx context.Context, q access.Queryer) (State, error) {
+func Read(ctx context.Context, q database.Queryer) (State, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return State{}, err

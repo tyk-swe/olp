@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -133,7 +133,7 @@ type stored struct {
 	sink       Sink
 }
 
-func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Sink, error) {
 	current, err := readStored(ctx, q)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
 	return promotion.Map(current, func(s stored) Sink { return s.sink }), nil
 }
 
-func readStored(ctx context.Context, q access.Queryer) ([]stored, error) {
+func readStored(ctx context.Context, q database.Queryer) ([]stored, error) {
 	active, err := sinks.ReadActiveSinks(ctx, q)
 	if err != nil {
 		return nil, err

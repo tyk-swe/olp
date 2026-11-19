@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -18,7 +19,7 @@ type inspectionKeyContext struct {
 	authority          keyauthority.Authority
 }
 
-func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
+func (s *Server) inspectionKey(r *http.Request, q database.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
 	key := inspectionKeyContext{}
 	if selected == nil {
 		if err := principal.Project(route.ProjectID, access.View); err != nil {

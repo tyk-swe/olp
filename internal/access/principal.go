@@ -15,13 +15,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-type Queryer interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-	Query(context.Context, string, ...any) (pgx.Rows, error)
-}
 type User struct {
 	ID          string    `json:"id"`
 	Email       string    `json:"email"`
@@ -72,7 +69,7 @@ func scanUser(row pgx.Row) (User, error) {
 // Authenticate resolves the caller from a management token or the session
 // cookie and, for a browser session, requires the CSRF proof on unsafe
 // methods. It authorizes no operation.
-func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
+func (s *Server) Authenticate(r *http.Request, q database.Queryer) (Principal, error) {
 	if secret, ok := managementBearer(r); ok {
 		return s.machinePrincipal(r, q, secret)
 	}
@@ -96,7 +93,7 @@ func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
 	return p, nil
 }
 
-func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
+func (p *Principal) loadProjects(ctx context.Context, q database.Queryer) error {
 	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp.effective_project_members WHERE user_id=$1", p.ID)
 	if err != nil {
 		return err
@@ -132,7 +129,7 @@ func managementBearer(r *http.Request) (string, bool) {
 // Authorize bounds its scopes by the creator's role, and an assigned creator
 // narrows it to the creator's projects and project roles. The stored token is
 // never changed.
-func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Principal, error) {
+func (s *Server) machinePrincipal(r *http.Request, q database.Queryer, secret string) (Principal, error) {
 	var p Principal
 	p.Kind = "machine"
 	parts := strings.Split(secret, "_")

@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
@@ -93,7 +94,7 @@ func (s *Management) get(r *http.Request, _ access.Principal) (httpkit.Reply, er
 
 // load reads an installed plugin that the deployment lets the API show: an
 // unconfined plugin only where the unconfined tier is enabled.
-func (s *Management) load(ctx context.Context, q access.Queryer, digest string) (contract.Plugin, error) {
+func (s *Management) load(ctx context.Context, q database.Queryer, digest string) (contract.Plugin, error) {
 	plugin, err := loadPlugin(ctx, q, digest)
 	if err == nil && !plugin.Executable.IsNull() && s.Unconfined == nil {
 		return contract.Plugin{}, pgx.ErrNoRows
@@ -290,7 +291,7 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 }
 
 // pinningResources names resources whose drafts or immutable revisions pin a plugin digest.
-func pinningResources(ctx context.Context, q access.Queryer, digest string) (string, error) {
+func pinningResources(ctx context.Context, q database.Queryer, digest string) (string, error) {
 	rows, err := q.Query(ctx, `SELECT name FROM (SELECT p.name, p.id FROM olp.providers p
 		WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=$1
 		   OR EXISTS (SELECT 1 FROM olp.provider_revisions r WHERE r.provider_id=p.id AND r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=$1)

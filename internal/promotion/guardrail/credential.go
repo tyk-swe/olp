@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -51,7 +52,7 @@ func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault 
 
 type resolver func(string) (string, error)
 
-func credentialID(ctx context.Context, q access.Queryer, project *string) resolver {
+func credentialID(ctx context.Context, q database.Queryer, project *string) resolver {
 	return func(name string) (string, error) {
 		id, found, err := credential.FindID(ctx, q, project, name)
 		if err == nil && !found {
@@ -61,6 +62,6 @@ func credentialID(ctx context.Context, q access.Queryer, project *string) resolv
 	}
 }
 
-func credentialName(ctx context.Context, q access.Queryer) resolver {
+func credentialName(ctx context.Context, q database.Queryer) resolver {
 	return func(id string) (string, error) { return credential.Name(ctx, q, id) }
 }

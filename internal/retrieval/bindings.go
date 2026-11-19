@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
@@ -103,17 +104,17 @@ func scanBinding(row pgx.Row) (*Binding, error) {
 	d.ProjectID, d.Name = project, name
 	return d, nil
 }
-func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Binding, error) {
+func Load(ctx context.Context, q database.Queryer, id string, lock bool) (*Binding, error) {
 	query := "SELECT " + bindingColumns + bindingJoin + " WHERE b.id=$1"
 	if lock {
 		query += " FOR UPDATE OF b"
 	}
 	return scanBinding(q.QueryRow(ctx, query, id))
 }
-func Find(ctx context.Context, q access.Queryer, project, name string) (*Binding, error) {
+func Find(ctx context.Context, q database.Queryer, project, name string) (*Binding, error) {
 	return scanBinding(q.QueryRow(ctx, "SELECT "+bindingColumns+bindingJoin+" WHERE b.project_id=$1 AND lower(b.name)=lower($2) AND b.retired_at IS NULL", project, name))
 }
-func List(ctx context.Context, q access.Queryer) ([]Binding, error) {
+func List(ctx context.Context, q database.Queryer) ([]Binding, error) {
 	rows, err := q.Query(ctx, "SELECT "+bindingColumns+bindingJoin+" WHERE b.retired_at IS NULL ORDER BY b.project_id,lower(b.name)")
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ func List(ctx context.Context, q access.Queryer) ([]Binding, error) {
 
 // ValidateAuthority runs in the management transaction. The serving path also
 // verifies current published route, target, credential and API-key authority.
-func ValidateAuthority(ctx context.Context, q access.Queryer, in Input) (string, error) {
+func ValidateAuthority(ctx context.Context, q database.Queryer, in Input) (string, error) {
 	rows, err := q.Query(ctx, `SELECT DISTINCT p.id::text FROM (
  SELECT r.slug,r.project_id,v.targets,v.operations FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'
  UNION ALL SELECT d.slug,d.project_id,d.targets,d.operations FROM olp.route_drafts d WHERE d.state='draft'

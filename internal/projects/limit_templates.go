@@ -7,12 +7,13 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // ValidateTemplateReferences prevents removing templates still used by live local
 // keys/groups, enabled workload mappings or the project policy, including during
 // configuration promotion. Workload principals derive limits from their issuer.
-func ValidateTemplateReferences(ctx context.Context, q access.Queryer, project string, t authority.LimitTemplates) error {
+func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project string, t authority.LimitTemplates) error {
 	var names []string
 	err := q.QueryRow(ctx, `SELECT ARRAY(SELECT DISTINCT name FROM (
  SELECT policy->>'limit_template' name FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL AND revoked_at IS NULL

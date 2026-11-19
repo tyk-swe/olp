@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -457,7 +458,7 @@ func simulationRoute(id, slug string, fidelity routing.RouteFidelity, operations
 	}
 	return r
 }
-func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*routinginputs.Inputs, error) {
+func (s *Server) routingInputs(r *http.Request, q database.Queryer) (*routinginputs.Inputs, error) {
 	if s.Inputs != nil {
 		return s.Inputs(), nil
 	}
@@ -467,7 +468,7 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*routinginput
 // Credential revocation and grant lapse are authoritative without publishing a
 // new route or provider revision. Apply them to previews just as the executor
 // does at dispatch.
-func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *routing.Snapshot, route routing.Route) (func(string) routing.Eligibility, error) {
+func routeCredentialEligibility(ctx context.Context, q database.Queryer, snapshot *routing.Snapshot, route routing.Route) (func(string) routing.Eligibility, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
 		provider := snapshot.Providers[target.ProviderID]

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -57,7 +58,7 @@ func scan(row pgx.Row) (*Definition, error) {
 	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Type, &d.Destination, &d.Streams, &d.Enabled, &d.HasCredential, &d.ETag, &d.RetiredAt, &d.Delivery.Delivered, &d.Delivery.Failed, &d.Delivery.Expired, &d.Delivery.LastDeliveredAt)
 	return &d, err
 }
-func load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
+func load(ctx context.Context, q database.Queryer, id string, lock bool) (*Definition, error) {
 	query := "SELECT " + columns + " FROM olp.managed_export_sinks WHERE id=$1"
 	if lock {
 		query += " FOR NO KEY UPDATE"

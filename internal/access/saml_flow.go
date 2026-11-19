@@ -13,6 +13,7 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/samlidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -147,7 +148,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 	return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{cookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, tx.Commit(r.Context())
 }
 
-func (s *Server) readSAMLFlow(r *http.Request, q Queryer, state string) (samlFlow, []byte, *time.Time, error) {
+func (s *Server) readSAMLFlow(r *http.Request, q database.Queryer, state string) (samlFlow, []byte, *time.Time, error) {
 	var f samlFlow
 	var digest []byte
 	var received *time.Time

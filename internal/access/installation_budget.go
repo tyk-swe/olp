@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -85,13 +86,13 @@ func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p Principal, desired *s
 	return err
 }
 
-func ReadBudgetTimeZone(ctx context.Context, q Queryer) (string, error) {
+func ReadBudgetTimeZone(ctx context.Context, q database.Queryer) (string, error) {
 	var zone string
 	err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&zone)
 	return zone, err
 }
 
-func ReadInstallationBudget(ctx context.Context, q Queryer) (*authority.BudgetPolicy, error) {
+func ReadInstallationBudget(ctx context.Context, q database.Queryer) (*authority.BudgetPolicy, error) {
 	var policy *authority.BudgetPolicy
 	err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
 	return policy, err

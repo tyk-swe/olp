@@ -16,6 +16,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -92,13 +93,13 @@ func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, er
 	return user, nil
 }
 
-func mfaConfigured(ctx context.Context, q Queryer, user string) (bool, error) {
+func mfaConfigured(ctx context.Context, q database.Queryer, user string) (bool, error) {
 	var enabled bool
 	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE user_id=$1)", user).Scan(&enabled)
 	return enabled, err
 }
 
-func ReadLocalMFARequired(ctx context.Context, q Queryer) (bool, error) {
+func ReadLocalMFARequired(ctx context.Context, q database.Queryer) (bool, error) {
 	var value string
 	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='auth.mfa_required'),'false')").Scan(&value); err != nil {
 		return false, err

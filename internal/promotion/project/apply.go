@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -110,7 +111,7 @@ func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 	return costs.Install(ctx, snapshots)
 }
 
-func organizationID(ctx context.Context, q access.Queryer, name string) (string, error) {
+func organizationID(ctx context.Context, q database.Queryer, name string) (string, error) {
 	id, found, err := projects.OrganizationIDByName(ctx, q, name)
 	if err != nil || found {
 		return id, err

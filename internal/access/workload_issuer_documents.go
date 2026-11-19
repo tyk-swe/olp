@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -16,7 +17,7 @@ type StoredWorkloadIssuer struct {
 
 const selectWorkloadIssuer = "SELECT id::text,document,etag::text FROM olp.workload_issuers WHERE issuer=$1"
 
-func ReadWorkloadIssuerDocuments(ctx context.Context, q Queryer) ([]workload.Config, error) {
+func ReadWorkloadIssuerDocuments(ctx context.Context, q database.Queryer) ([]workload.Config, error) {
 	rows, err := q.Query(ctx, "SELECT document FROM olp.workload_issuers ORDER BY issuer")
 	if err != nil {
 		return nil, err
@@ -24,7 +25,7 @@ func ReadWorkloadIssuerDocuments(ctx context.Context, q Queryer) ([]workload.Con
 	return pgx.CollectRows(rows, pgx.RowTo[workload.Config])
 }
 
-func FindWorkloadIssuer(ctx context.Context, q Queryer, issuer string) (StoredWorkloadIssuer, bool, error) {
+func FindWorkloadIssuer(ctx context.Context, q database.Queryer, issuer string) (StoredWorkloadIssuer, bool, error) {
 	return scanWorkloadIssuer(q.QueryRow(ctx, selectWorkloadIssuer, issuer))
 }
 

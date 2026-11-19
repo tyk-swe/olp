@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/plugins"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
@@ -15,10 +16,10 @@ import (
 
 type Executables struct {
 	tier  *plugins.Unconfined
-	query access.Queryer
+	query database.Queryer
 }
 
-func NewExecutables(tier *plugins.Unconfined, query access.Queryer) *Executables {
+func NewExecutables(tier *plugins.Unconfined, query database.Queryer) *Executables {
 	return &Executables{tier: tier, query: query}
 }
 

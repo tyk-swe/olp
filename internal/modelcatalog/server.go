@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -117,7 +118,7 @@ func (s *Server) describe(r *http.Request, visible func(routing.Route) bool, pri
 	return httpkit.OK(map[string]any{"items": models, "prices_visible": prices}), nil
 }
 
-func readPublication(ctx context.Context, q access.Queryer, id string) (Publication, error) {
+func readPublication(ctx context.Context, q database.Queryer, id string) (Publication, error) {
 	var result Publication
 	err := q.QueryRow(ctx, `SELECT COALESCE(c.enabled,false),COALESCE(c.prices_public,false),COALESCE(c.etag,p.etag)::text FROM olp.projects p LEFT JOIN olp.model_catalog_project_settings c ON c.project_id=p.id WHERE p.id=$1`, id).Scan(&result.Enabled, &result.PricesPublic, &result.ETag)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -184,7 +185,7 @@ func (s *Server) putPublication(r *http.Request, _ access.Principal) (httpkit.Re
 	return httpkit.Detail(result, result.ETag), tx.Commit(r.Context())
 }
 
-func readExposure(ctx context.Context, q access.Queryer, id string) (Exposure, *string, error) {
+func readExposure(ctx context.Context, q database.Queryer, id string) (Exposure, *string, error) {
 	var result Exposure
 	var project *string
 	err := q.QueryRow(ctx, `SELECT COALESCE(c.expose_upstream_models,false),COALESCE(c.etag,r.etag)::text,r.project_id::text FROM olp.routes r LEFT JOIN olp.model_catalog_route_settings c ON c.route_id=r.id WHERE r.id=$1 AND r.state='active'`, id).Scan(&result.ExposeUpstreamModels, &result.ETag, &project)

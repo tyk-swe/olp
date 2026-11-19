@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -598,13 +599,13 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 
 // The process switch is immutable after composition; database policy is read
 // inside the caller's installation transaction for protected mutations.
-func (s *Server) localLoginEnabled(r *http.Request, q Queryer) (bool, error) {
+func (s *Server) localLoginEnabled(r *http.Request, q database.Queryer) (bool, error) {
 	var enabled bool
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
 	return enabled && !s.localLoginDisabled, err
 }
 
-func (s *Server) requireInvitationLogin(r *http.Request, q Queryer) error {
+func (s *Server) requireInvitationLogin(r *http.Request, q database.Queryer) error {
 	enabled, err := s.localLoginEnabled(r, q)
 	if err != nil {
 		return err

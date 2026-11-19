@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type TemplateOwner struct {
@@ -14,7 +14,7 @@ type TemplateOwner struct {
 	ProjectID *string
 }
 
-func ReadTemplateInputs(ctx context.Context, q access.Queryer) ([]TemplateInput, error) {
+func ReadTemplateInputs(ctx context.Context, q database.Queryer) ([]TemplateInput, error) {
 	stored, err := loadTemplates(ctx, q)
 	if err != nil {
 		return nil, err

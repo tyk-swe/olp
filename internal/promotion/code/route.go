@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
@@ -144,7 +145,7 @@ func renderRoute(r Route) (contract.ConfigurationCodeRoute, error) {
 	return contract.ConfigurationCodeRoute{Id: id, Project: r.Project, Slug: r.Slug, Draft: draft, Published: published}, err
 }
 
-func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
+func readRoutes(ctx context.Context, q database.Queryer) ([]Route, error) {
 	stored, err := routes.ReadStoredCodeRoutes(ctx, q)
 	if err != nil {
 		return nil, err
@@ -156,7 +157,7 @@ func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
 	return promotion.TryMap(stored, func(s routes.StoredCodeRoute) (Route, error) { return portableRoute(ctx, q, s, slots) })
 }
 
-func portableRoute(ctx context.Context, q access.Queryer, s routes.StoredCodeRoute, slots map[string]PaidTarget) (Route, error) {
+func portableRoute(ctx context.Context, q database.Queryer, s routes.StoredCodeRoute, slots map[string]PaidTarget) (Route, error) {
 	draft, err := portablePolicy(s.Draft, slots)
 	if err != nil {
 		return Route{}, err
@@ -165,7 +166,7 @@ func portableRoute(ctx context.Context, q access.Queryer, s routes.StoredCodeRou
 	return Route{ID: s.ID, Project: s.Project, Slug: s.Slug, Draft: draft, Published: published}, err
 }
 
-func resolveRoute(ctx context.Context, q access.Queryer, r Route, in scope) (resolved[routeInput], error) {
+func resolveRoute(ctx context.Context, q database.Queryer, r Route, in scope) (resolved[routeInput], error) {
 	projectID, err := projectOf(in.directory, r.Project)
 	if err != nil {
 		return resolved[routeInput]{}, err
@@ -193,14 +194,14 @@ func resolveRoute(ctx context.Context, q access.Queryer, r Route, in scope) (res
 	return resolved[routeInput]{ref: r.ID, to: to, input: routeInput{draft: draft, published: published}}, err
 }
 
-func (r Route) frozen(ctx context.Context, q access.Queryer, projectID string, in scope) (*frozen, error) {
+func (r Route) frozen(ctx context.Context, q database.Queryer, projectID string, in scope) (*frozen, error) {
 	if r.Published == nil {
 		return nil, nil
 	}
 	return r.Published.resolve(ctx, q, r.Slug, projectID, in)
 }
 
-func routeChange(ctx context.Context, q access.Queryer, r resolved[routeInput]) (change, error) {
+func routeChange(ctx context.Context, q database.Queryer, r resolved[routeInput]) (change, error) {
 	action, republished, err := routeAction(ctx, q, r)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeRoute, Key: r.ref, Action: action},
@@ -210,7 +211,7 @@ func routeChange(ctx context.Context, q access.Queryer, r resolved[routeInput]) 
 	}, err
 }
 
-func routeAction(ctx context.Context, q access.Queryer, r resolved[routeInput]) (contract.ConfigurationPlanItemAction, bool, error) {
+func routeAction(ctx context.Context, q database.Queryer, r resolved[routeInput]) (contract.ConfigurationPlanItemAction, bool, error) {
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, r.input.published != nil, nil
 	}

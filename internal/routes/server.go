@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
@@ -112,7 +113,7 @@ func scanDraft(row pgx.Row) (*draft, error) {
 	return &d, nil
 }
 
-func loadDraft(ctx context.Context, q access.Queryer, id string, lock bool) (*draft, error) {
+func loadDraft(ctx context.Context, q database.Queryer, id string, lock bool) (*draft, error) {
 	query := "SELECT " + draftColumns + draftFrom + " WHERE d.id=$1"
 	if lock {
 		query += " FOR UPDATE OF d"
@@ -141,7 +142,7 @@ func (r *resolved) available() bool {
 // resolve looks up every provider model referenced by the targets against the
 // providers' activated revisions, which is what the gateway will serve, and
 // the reference catalog's documented lifecycle of each.
-func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []routing.PublishedTarget) (map[string]*resolved, error) {
+func (s *Server) resolve(ctx context.Context, q database.Queryer, targets []routing.PublishedTarget) (map[string]*resolved, error) {
 	ids := make([]string, 0, len(targets))
 	for _, t := range targets {
 		ids = append(ids, t.ProviderModelID)
@@ -263,7 +264,7 @@ func (d *draft) detail(live map[string]*resolved) map[string]any {
 	return behaviorJSON(map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}, d.Behavior)
 }
 
-func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (httpkit.Reply, error) {
+func (s *Server) draftDetail(ctx context.Context, q database.Queryer, d *draft) (httpkit.Reply, error) {
 	live, err := s.resolve(ctx, q, d.Targets)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -301,7 +302,7 @@ func sameProject(a, b *string) bool {
 	return *a == *b
 }
 
-func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
+func ValidateAndNormalizeDraftInput(ctx context.Context, q database.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
 	if !routeidentity.ValidSlug(in.Slug) {
 		return nil, httpkit.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
@@ -446,7 +447,7 @@ func sortedTags(tags []string) []string {
 	return slices.Sorted(slices.Values(tags))
 }
 
-func reserveOrdinarySlug(ctx context.Context, q access.Queryer, slug string) error {
+func reserveOrdinarySlug(ctx context.Context, q database.Queryer, slug string) error {
 	var conflict bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_routes WHERE slug=$1)`, slug).Scan(&conflict); err != nil {
 		return err

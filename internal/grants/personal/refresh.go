@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
@@ -21,7 +21,7 @@ type storedGrant struct {
 	Expires   time.Time
 }
 
-func readGrant(ctx context.Context, q access.Queryer, bound Binding) (storedGrant, error) {
+func readGrant(ctx context.Context, q database.Queryer, bound Binding) (storedGrant, error) {
 	var grant storedGrant
 	err := q.QueryRow(ctx, `SELECT id::text,access_secret_id::text,refresh_secret_id::text,refresh_attempt_id::text,expires_at FROM olp.mcp_user_grants WHERE binding_digest=$1 AND revoked_at IS NULL AND failure_code IS NULL AND access_secret_id IS NOT NULL`, bound.Digest()).Scan(&grant.ID, &grant.AccessID, &grant.RefreshID, &grant.AttemptID, &grant.Expires)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -30,7 +30,7 @@ func readGrant(ctx context.Context, q access.Queryer, bound Binding) (storedGran
 	return grant, err
 }
 
-func (s *Store) readAccess(ctx context.Context, q access.Queryer, bound Binding, grant storedGrant) ([]byte, error) {
+func (s *Store) readAccess(ctx context.Context, q database.Queryer, bound Binding, grant storedGrant) ([]byte, error) {
 	token, err := s.keys.Read(ctx, q, s.installation, grant.AccessID, bound.accessPurpose())
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 	return tx.Commit(record)
 }
 
-func refreshBinding(ctx context.Context, q access.Queryer, bound Binding, revisionID string) error {
+func refreshBinding(ctx context.Context, q database.Queryer, bound Binding, revisionID string) error {
 	if revisionID != "" && bound.AgentID != "" {
 		_, err := revisionAgentBinding(ctx, q, bound, revisionID)
 		return err

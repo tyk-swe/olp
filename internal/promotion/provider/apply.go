@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -168,7 +169,7 @@ func (a applying) replacement(ctx context.Context, tx pgx.Tx, entry Entry, slot 
 	return &id, nil
 }
 
-func (d Deps) matches(ctx context.Context, q access.Queryer, credentialID *string, credential promotion.Credential) (bool, error) {
+func (d Deps) matches(ctx context.Context, q database.Queryer, credentialID *string, credential promotion.Credential) (bool, error) {
 	if credentialID == nil {
 		return false, nil
 	}

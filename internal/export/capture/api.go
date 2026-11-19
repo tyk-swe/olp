@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/export/destination"
 )
 
@@ -122,7 +123,7 @@ func (a *API) sinks(r *http.Request, _ access.Principal) (httpkit.Reply, error) 
 	return httpkit.OK(map[string][]sinkOption{"items": options}), nil
 }
 
-func readConfiguration(ctx context.Context, q access.Queryer, query string) (configuration, error) {
+func readConfiguration(ctx context.Context, q database.Queryer, query string) (configuration, error) {
 	var c configuration
 	err := q.QueryRow(ctx, query).Scan(&c.Enabled, &c.ETag)
 	return c, err
@@ -346,7 +347,7 @@ func (a *API) lock(r *http.Request, tx pgx.Tx, p access.Principal) (Policy, erro
 	return current, httpkit.Match(r, current.ETag)
 }
 
-func readPolicy(ctx context.Context, q access.Queryer, query, id string) (Policy, error) {
+func readPolicy(ctx context.Context, q database.Queryer, query, id string) (Policy, error) {
 	var raw []byte
 	if err := q.QueryRow(ctx, query, id).Scan(&raw); err != nil {
 		return Policy{}, access.NotFoundOr(err)
@@ -360,7 +361,7 @@ func decodePolicy(raw []byte) (Policy, error) {
 	return p, err
 }
 
-func admit(ctx context.Context, q access.Queryer, s Settings) (resolved, error) {
+func admit(ctx context.Context, q database.Queryer, s Settings) (resolved, error) {
 	var enabled configuration
 	if err := q.QueryRow(ctx, configurationSQL).Scan(&enabled.Enabled, &enabled.ETag); err != nil {
 		return resolved{}, err
@@ -374,7 +375,7 @@ func admit(ctx context.Context, q access.Queryer, s Settings) (resolved, error) 
 	return check(ctx, q, s)
 }
 
-func check(ctx context.Context, q access.Queryer, s Settings) (resolved, error) {
+func check(ctx context.Context, q database.Queryer, s Settings) (resolved, error) {
 	if s.SinkID == "" {
 		return resolved{}, httpkit.Invalid("sink", "capture requires an installation-owned sink")
 	}
@@ -402,7 +403,7 @@ func check(ctx context.Context, q access.Queryer, s Settings) (resolved, error) 
 	return resolved{sink: sink, detectors: routeProject}, nil
 }
 
-func checkProject(ctx context.Context, q access.Queryer, raw *string) (*string, error) {
+func checkProject(ctx context.Context, q database.Queryer, raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -420,7 +421,7 @@ func checkProject(ctx context.Context, q access.Queryer, raw *string) (*string, 
 	return &project, nil
 }
 
-func checkSink(ctx context.Context, q access.Queryer, sink string) error {
+func checkSink(ctx context.Context, q database.Queryer, sink string) error {
 	var owned, capturable bool
 	err := q.QueryRow(ctx, sinkScopeSQL, sink).Scan(&owned, &capturable)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !owned {
@@ -435,7 +436,7 @@ func checkSink(ctx context.Context, q access.Queryer, sink string) error {
 	return nil
 }
 
-func checkRoute(ctx context.Context, q access.Queryer, route, project *string) (*string, error) {
+func checkRoute(ctx context.Context, q database.Queryer, route, project *string) (*string, error) {
 	if route == nil {
 		return nil, nil
 	}
@@ -452,7 +453,7 @@ func checkRoute(ctx context.Context, q access.Queryer, route, project *string) (
 	return routeProject, nil
 }
 
-func checkKeys(ctx context.Context, q access.Queryer, keys []string, project *string) error {
+func checkKeys(ctx context.Context, q database.Queryer, keys []string, project *string) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -481,7 +482,7 @@ type keyOwner struct {
 	Project *string
 }
 
-func pinFor(ctx context.Context, q access.Queryer, scope resolved, names []string) ([]Redactor, error) {
+func pinFor(ctx context.Context, q database.Queryer, scope resolved, names []string) ([]Redactor, error) {
 	if len(names) == 0 {
 		return []Redactor{}, nil
 	}

@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type OrganizationBudget struct {
@@ -19,7 +19,7 @@ type LockedOrganization struct {
 	Budget *authority.BudgetPolicy
 }
 
-func ReadOrganizationBudgets(ctx context.Context, q access.Queryer) ([]OrganizationBudget, error) {
+func ReadOrganizationBudgets(ctx context.Context, q database.Queryer) ([]OrganizationBudget, error) {
 	rows, err := q.Query(ctx, "SELECT name,budget_policy FROM olp.organizations")
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func LockOrganizationByName(ctx context.Context, tx pgx.Tx, name string) (Locked
 	return locked, err == nil, err
 }
 
-func OrganizationIDByName(ctx context.Context, q access.Queryer, name string) (string, bool, error) {
+func OrganizationIDByName(ctx context.Context, q database.Queryer, name string) (string, bool, error) {
 	var id string
 	err := q.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", name).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

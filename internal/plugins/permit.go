@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -131,7 +132,7 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (httpkit.Reply,
 }
 
 // isPermitted reports whether an owner permitted the executable with digest.
-func isPermitted(ctx context.Context, q access.Queryer, digest string) (bool, error) {
+func isPermitted(ctx context.Context, q database.Queryer, digest string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.plugins WHERE digest=$1 AND executable IS NOT NULL)", digest).Scan(&exists)
 	return exists, err

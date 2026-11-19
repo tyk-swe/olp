@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // Organization membership widens project scope, never installation roles or
@@ -30,7 +31,7 @@ func (p Principal) OrganizationIDs() []string {
 	return ids
 }
 
-func (p *Principal) loadOrganizations(ctx context.Context, q Queryer, user string) error {
+func (p *Principal) loadOrganizations(ctx context.Context, q database.Queryer, user string) error {
 	rows, err := q.Query(ctx, "SELECT organization_id::text,role FROM olp.organization_members WHERE user_id=$1", user)
 	if err != nil {
 		return err

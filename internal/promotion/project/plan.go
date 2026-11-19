@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -15,14 +16,14 @@ import (
 
 func Planner(desired []Project, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(ctx context.Context, q access.Queryer, p access.Principal) error {
+		Authorize: func(ctx context.Context, q database.Queryer, p access.Principal) error {
 			current, err := Read(ctx, q)
 			if err != nil {
 				return err
 			}
 			return authorizeCatalog(p, desired, current)
 		},
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			if err := checkOrganizations(ctx, q, desired, names); err != nil {
 				return nil, err
 			}
@@ -38,7 +39,7 @@ func Planner(desired []Project, names promotion.Names) promotion.Planner {
 	}
 }
 
-func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project, names promotion.Names) error {
+func checkOrganizations(ctx context.Context, q database.Queryer, desired []Project, names promotion.Names) error {
 	for _, project := range desired {
 		if project.Organization == nil || names.Organization(*project.Organization) {
 			continue

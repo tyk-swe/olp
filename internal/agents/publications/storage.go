@@ -5,15 +5,15 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func Load(ctx context.Context, q access.Queryer, id, kind string, lock bool) (*agentcontract.Publication, error) {
+func Load(ctx context.Context, q database.Queryer, id, kind string, lock bool) (*agentcontract.Publication, error) {
 	query := `SELECT id::text,kind,project_id::text,name,etag::text,draft,latest_revision_id::text,retired FROM olp.agent_publications WHERE id=$1 AND kind=$2`
 	if lock {
 		query += " FOR UPDATE"
@@ -76,7 +76,7 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontr
 
 // ValidateReferences rechecks immutable pins and live registration ownership
 // inside the publication transaction. It never contacts a provider or MCP peer.
-func ValidateReferences(ctx context.Context, tx access.Queryer, kind string, d agentcontract.Draft) error {
+func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d agentcontract.Draft) error {
 	if err := d.Validate(kind); err != nil {
 		return httpkit.Invalid("draft", err.Error())
 	}
@@ -216,7 +216,7 @@ func insertRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontrac
 	return concurrent, lookupErr
 }
 
-func LoadRevision(ctx context.Context, q access.Queryer, publication, id string) (agentcontract.Revision, error) {
+func LoadRevision(ctx context.Context, q database.Queryer, publication, id string) (agentcontract.Revision, error) {
 	var v agentcontract.Revision
 	err := q.QueryRow(ctx, `SELECT v.id::text,v.publication_id::text,v.project_id::text,v.kind,v.digest,v.definition,COALESCE(p.latest_revision_id=v.id,false),COALESCE((SELECT array_agg(label ORDER BY label) FROM olp.prompt_labels WHERE publication_id=p.id AND revision_id=v.id),'{}'::text[]) FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.publication_id=$1 AND v.id=$2`, publication, id).Scan(&v.ID, &v.PublicationID, &v.ProjectID, &v.Kind, &v.Digest, &v.Definition, &v.Current, &v.Labels)
 	return v, err

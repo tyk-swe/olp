@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -20,7 +21,7 @@ const (
 	ownerColumns = "o.project_id::text,o.found IS NOT NULL"
 )
 
-func Authorize(ctx context.Context, q access.Queryer, p access.Principal, a guardrails.Attachment, need access.Need) error {
+func Authorize(ctx context.Context, q database.Queryer, p access.Principal, a guardrails.Attachment, need access.Need) error {
 	t, err := locate(ctx, q, a)
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func Authorize(ctx context.Context, q access.Queryer, p access.Principal, a guar
 	return authorize(p, t, need)
 }
 
-func locate(ctx context.Context, q access.Queryer, a guardrails.Attachment) (target, error) {
+func locate(ctx context.Context, q database.Queryer, a guardrails.Attachment) (target, error) {
 	t := target{Attachment: a}
 	if !t.owned() {
 		return t, nil
@@ -54,7 +55,7 @@ type listed struct {
 	found            bool
 }
 
-func list(ctx context.Context, q access.Queryer) ([]listed, error) {
+func list(ctx context.Context, q database.Queryer) ([]listed, error) {
 	rows, err := q.Query(ctx, "SELECT "+columns+",a.etag::text,v.policy_id::text,p.active_revision_id::text,"+ownerColumns+` FROM olp.guardrail_attachments a
  JOIN olp.guardrail_policy_revisions v ON v.id=a.policy_revision_id JOIN olp.guardrail_policies p ON p.id=v.policy_id`+owner+" ORDER BY a.position,a.id LIMIT 10001")
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/priority"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -572,7 +573,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (httpkit.Reply, err
 	return result, tx.Commit(r.Context())
 }
 
-func ValidateRouteReferences(r *http.Request, q Queryer, routes []string, projectID *string) error {
+func ValidateRouteReferences(r *http.Request, q database.Queryer, routes []string, projectID *string) error {
 	if len(routes) == 0 {
 		return nil
 	}

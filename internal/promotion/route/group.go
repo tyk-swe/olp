@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -31,7 +32,7 @@ func groupsOf(entries []contract.ConfigurationProjectEntry) []group {
 	})...)
 }
 
-func checkGroups(ctx context.Context, q access.Queryer, directory promotion.Directory, groups []group) error {
+func checkGroups(ctx context.Context, q database.Queryer, directory promotion.Directory, groups []group) error {
 	return promotion.Every(groups, func(g group) error {
 		owners, err := routes.SlugProjectIDs(ctx, q, g.members)
 		if err != nil {

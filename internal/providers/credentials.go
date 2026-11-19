@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
@@ -357,7 +358,7 @@ func insertCredentialVersion(ctx context.Context, tx pgx.Tx, providerID string, 
 	return id, version, err
 }
 
-func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string) ([]byte, error) {
+func (s *Server) readCredential(ctx context.Context, q database.Queryer, id string) ([]byte, error) {
 	var referenceJSON []byte
 	if err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1", id).Scan(&referenceJSON); err != nil {
 		return nil, err
@@ -383,7 +384,7 @@ func (s *Server) BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID,
 	return err
 }
 
-func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error) {
+func (s *Server) CredentialEquals(ctx context.Context, q database.Queryer, credentialID, secret string) (bool, error) {
 	current, err := s.access.Keys.Read(ctx, q, s.access.Installation, credentialID, secrets.ProviderCredential)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -395,7 +396,7 @@ func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credent
 	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
 }
 
-func (s *Server) ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
+func (s *Server) ExternalCredentialEquals(ctx context.Context, q database.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
 	var data []byte
 	err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", credentialID).Scan(&data)
 	if errors.Is(err, pgx.ErrNoRows) {

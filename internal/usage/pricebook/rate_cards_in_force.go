@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type CardInForce struct {
@@ -15,7 +15,7 @@ type CardInForce struct {
 	Markup       *string
 }
 
-func ReadCardsInForce(ctx context.Context, q access.Queryer) ([]CardInForce, error) {
+func ReadCardsInForce(ctx context.Context, q database.Queryer) ([]CardInForce, error) {
 	rows, err := q.Query(ctx, `SELECT c.id::text,
  (SELECT name FROM olp.organizations WHERE id=c.organization_id),
  (SELECT name FROM olp.projects WHERE id=c.project_id),

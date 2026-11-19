@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -62,7 +62,7 @@ type flowRecord struct {
 	Outcome   enrollmentOutcome
 }
 
-func readFlow(ctx context.Context, q access.Queryer, id, member string) (flowRecord, error) {
+func readFlow(ctx context.Context, q database.Queryer, id, member string) (flowRecord, error) {
 	var item flowRecord
 	err := q.QueryRow(ctx, `SELECT id::text,binding,expires_at,claimed_by::text,coalesce(flow,''),session_secret_id::text,exchange_attempt_id::text,coalesce(poll_interval,0),coalesce(outcome,'') FROM olp.mcp_grant_enrollments WHERE id=$1 AND claimed_by=$2 AND expires_at>now()`, id, member).Scan(&item.ID, &item.Binding, &item.ExpiresAt, &item.ClaimedBy, &item.Flow, &item.SessionID, &item.AttemptID, &item.Interval, &item.Outcome)
 	return item, err
@@ -169,7 +169,7 @@ func (s *Store) saveDevice(ctx context.Context, item flowRecord, deviceCode stri
 	return tx.Commit(ctx)
 }
 
-func (s *Store) loadSession(ctx context.Context, q access.Queryer, item flowRecord) (flowSession, error) {
+func (s *Store) loadSession(ctx context.Context, q database.Queryer, item flowRecord) (flowSession, error) {
 	if item.SessionID == nil {
 		return flowSession{}, errOAuth
 	}

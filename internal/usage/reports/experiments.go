@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // maxReportRows bounds the groups a selector or experiment report returns.
@@ -81,7 +82,7 @@ func (f Filters) routeScope(q *filterQuery, column string) {
 }
 
 // ReadSelectorSavings reports each selector's savings in the range.
-func ReadSelectorSavings(ctx context.Context, q access.Queryer, f Filters) (SelectorSavingsReport, error) {
+func ReadSelectorSavings(ctx context.Context, q database.Queryer, f Filters) (SelectorSavingsReport, error) {
 	report := SelectorSavingsReport{Start: f.Start, End: f.End, Items: []SelectorSavings{}}
 	var query filterQuery
 	query.push(`SELECT route_slug, selector, count(*),
@@ -118,7 +119,7 @@ func ReadSelectorSavings(ctx context.Context, q access.Queryer, f Filters) (Sele
 
 // labelCurrency is the currency the report's own rows carry, falling back to
 // the installation's so a report without priced rows still labels its zero.
-func labelCurrency(ctx context.Context, q access.Queryer, currency *string) (*string, error) {
+func labelCurrency(ctx context.Context, q database.Queryer, currency *string) (*string, error) {
 	if currency != nil {
 		return currency, nil
 	}
@@ -133,7 +134,7 @@ const experimentLag = 2 * time.Hour
 
 // ReadExperiments compares each shadow target with the primary path of the
 // requests it mirrored in the range.
-func ReadExperiments(ctx context.Context, q access.Queryer, f Filters) (ExperimentReport, error) {
+func ReadExperiments(ctx context.Context, q database.Queryer, f Filters) (ExperimentReport, error) {
 	report := ExperimentReport{Start: f.Start, End: f.End, Items: []Experiment{}}
 	var query filterQuery
 	start, end := query.bind(f.Start), query.bind(f.End)

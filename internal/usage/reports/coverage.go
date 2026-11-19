@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 const gapEvidenceSQL = `SELECT COALESCE(SUM(event_count), 0)::bigint,
@@ -22,7 +22,7 @@ const gapEvidenceSQL = `SELECT COALESCE(SUM(event_count), 0)::bigint,
 
 // readGapEvidence sums the metadata known to be missing from the range, from
 // both live gap rows and their retained hourly rollups.
-func readGapEvidence(ctx context.Context, q access.Queryer, f Filters) (int64, int64, error) {
+func readGapEvidence(ctx context.Context, q database.Queryer, f Filters) (int64, int64, error) {
 	var events, uncertain int64
 	if err := q.QueryRow(ctx, gapEvidenceSQL, f.Start, f.End).Scan(&events, &uncertain); err != nil {
 		return 0, 0, fmt.Errorf("read request metadata gap evidence: %w", err)
@@ -35,7 +35,7 @@ func readGapEvidence(ctx context.Context, q access.Queryer, f Filters) (int64, i
 
 // readCoverage counts the partial boundary hours the range cannot include
 // because they survive only as retained aggregates.
-func readCoverage(ctx context.Context, q access.Queryer, f Filters) (Coverage, error) {
+func readCoverage(ctx context.Context, q database.Queryer, f Filters) (Coverage, error) {
 	buckets := make([]time.Time, 0, 2)
 	if lower := floorHour(f.Start); !lower.Equal(f.Start) {
 		buckets = append(buckets, lower)

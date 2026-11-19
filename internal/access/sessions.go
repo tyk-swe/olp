@@ -8,10 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
+func (s *Server) sessionBody(r *http.Request, q database.Queryer, u User, token string) (any, error) {
 	var sessionID string
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT id::text FROM olp.sessions WHERE digest=$1),'')", s.Auth.Digest(secrets.SessionDigest, token)).Scan(&sessionID)
 	operations := []string{}
@@ -28,7 +29,7 @@ type sessionAuth struct {
 
 // sessionStrength reads how a session was authenticated, which a session
 // rotated without a fresh sign-in keeps.
-func sessionStrength(r *http.Request, q Queryer, sessionID string) (sessionAuth, error) {
+func sessionStrength(r *http.Request, q database.Queryer, sessionID string) (sessionAuth, error) {
 	var strength sessionAuth
 	err := q.QueryRow(r.Context(), "SELECT auth_method,mfa_verified FROM olp.sessions WHERE id=$1", sessionID).Scan(&strength.Method, &strength.MFA)
 	return strength, err
@@ -217,7 +218,7 @@ type projectOption struct {
 	Role string `json:"role"`
 }
 
-func (s *Server) profileBody(r *http.Request, q Queryer, p Principal) (httpkit.Reply, error) {
+func (s *Server) profileBody(r *http.Request, q database.Queryer, p Principal) (httpkit.Reply, error) {
 	var rows pgx.Rows
 	var err error
 	if p.AllProjects {

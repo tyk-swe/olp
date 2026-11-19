@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -241,7 +242,7 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 }
 
 // ValidateWorkloadBindings preserves enrolled subjects during planning and writes.
-func ValidateWorkloadBindings(ctx context.Context, q Queryer, id string, input workload.Config) error {
+func ValidateWorkloadBindings(ctx context.Context, q database.Queryer, id string, input workload.Config) error {
 	rows, err := q.Query(ctx, "SELECT DISTINCT workload_mapping,project_id::text FROM olp.api_keys WHERE workload_issuer_id=$1", id)
 	if err != nil {
 		return err

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -95,7 +96,7 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (h
 	})
 }
 
-func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, network *egress.ConnectionOptions) error {
+func validateNetworkReference(ctx context.Context, q database.Queryer, providerID string, network *egress.ConnectionOptions) error {
 	if network == nil || network.CredentialID == "" {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -13,7 +14,7 @@ import (
 const mfaDetail = "Change the local sign-in policy; factors, challenges and recovery codes remain installation-local."
 
 func Planner(desired Settings) promotion.Planner {
-	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+	return promotion.Planner{Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 		current, err := Read(ctx, q)
 		if err != nil {
 			return nil, err

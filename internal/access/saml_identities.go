@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 func samlSignInRole(c samlConfiguration, managed, assigned string, data []byte) string {
@@ -21,7 +22,7 @@ func samlSignInRole(c samlConfiguration, managed, assigned string, data []byte) 
 	return samlMappedRole(c, f.Email, f.Groups)
 }
 
-func (s *Server) usableSAMLOwner(ctx context.Context, q Queryer) (bool, error) {
+func (s *Server) usableSAMLOwner(ctx context.Context, q database.Queryer) (bool, error) {
 	c, err := loadSAML(ctx, q)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -169,7 +170,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (httpkit.Reply, error)
 	return session, tx.Commit(r.Context())
 }
 
-func usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, error) {
+func usableSAMLIdentities(r *http.Request, q database.Queryer, p Principal) ([]string, error) {
 	c, err := loadSAML(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // Need is how a principal uses a project-bound resource.
@@ -57,7 +58,7 @@ func (p Principal) ProjectIDs() []string {
 // RequireProject checks that p may place a new resource in projectID. A
 // project that does not exist answers like one outside p's scope, and the
 // unassigned boundary takes an installation-wide principal.
-func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, projectID *string) error {
+func (s *Server) RequireProject(ctx context.Context, q database.Queryer, p Principal, projectID *string) error {
 	if projectID == nil {
 		if p.AllProjects {
 			return nil

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // EpochHealth is the gateway-epoch completeness picture readiness reports.
@@ -17,7 +17,7 @@ type EpochHealth struct {
 }
 
 // ReadEpochHealth summarizes gateway epochs and retained uncertainty gaps.
-func ReadEpochHealth(ctx context.Context, q access.Queryer) (EpochHealth, error) {
+func ReadEpochHealth(ctx context.Context, q database.Queryer) (EpochHealth, error) {
 	var health EpochHealth
 	err := q.QueryRow(ctx, `SELECT COUNT(*) FILTER (WHERE gracefully_closed_at IS NULL
 				AND stale_detected_at IS NULL)::bigint,

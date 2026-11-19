@@ -6,12 +6,13 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
-func checkKeyRouteGroups(r *http.Request, q Queryer, names []string, projectID *string) error {
+func checkKeyRouteGroups(r *http.Request, q database.Queryer, names []string, projectID *string) error {
 	return checkRouteGroupNames(r.Context(), q, names, projectID)
 }
-func checkRouteGroupNames(ctx context.Context, q Queryer, names []string, projectID *string) error {
+func checkRouteGroupNames(ctx context.Context, q database.Queryer, names []string, projectID *string) error {
 	if len(names) == 0 {
 		return nil
 	}

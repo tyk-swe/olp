@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 const organizationFields = `'id',o.id,'name',o.name,'etag',o.etag,'created_by',o.created_by,'created_at',o.created_at,'updated_at',o.updated_at,'project_count',(SELECT count(*) FROM olp.projects p WHERE p.organization_id=o.id)`
@@ -245,7 +246,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 	return httpkit.Reply{Status: 204, ETag: etag}, tx.Commit(r.Context())
 }
 
-func organizationProject(r *http.Request, q access.Queryer, p access.Principal, need access.Need) error {
+func organizationProject(r *http.Request, q database.Queryer, p access.Principal, need access.Need) error {
 	raw := r.PathValue("organization_id")
 	if raw == "" {
 		return nil

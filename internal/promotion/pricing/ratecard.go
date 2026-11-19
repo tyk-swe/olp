@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -124,7 +125,7 @@ func validateOwner(field string, entry contract.ConfigurationRateCardOwner, owne
 	}
 }
 
-func readCards(ctx context.Context, q access.Queryer) ([]storedCard, error) {
+func readCards(ctx context.Context, q database.Queryer) ([]storedCard, error) {
 	cards, err := pricebook.ReadCardsInForce(ctx, q)
 	if err != nil {
 		return nil, err
@@ -198,7 +199,7 @@ func cardAction(card RateCard, existing map[Owner]storedCard, currency string) c
 	}
 }
 
-func readCardState(ctx context.Context, q access.Queryer) (map[Owner]storedCard, string, error) {
+func readCardState(ctx context.Context, q database.Queryer) (map[Owner]storedCard, string, error) {
 	stored, err := readCards(ctx, q)
 	if err != nil {
 		return nil, "", err
@@ -207,7 +208,7 @@ func readCardState(ctx context.Context, q access.Queryer) (map[Owner]storedCard,
 	return indexCards(stored), currency, currencyErr
 }
 
-func planCards(ctx context.Context, q access.Queryer, desired []RateCard) ([]promotion.Item, error) {
+func planCards(ctx context.Context, q database.Queryer, desired []RateCard) ([]promotion.Item, error) {
 	existing, currency, err := readCardState(ctx, q)
 	if err != nil {
 		return nil, err

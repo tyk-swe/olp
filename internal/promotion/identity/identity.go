@@ -7,6 +7,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -46,7 +47,7 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	return Desired{saml: definition, groups: groups, issuers: issuers, declared: declaredProjects(document.Projects)}, nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Desired, error) {
+func Read(ctx context.Context, q database.Queryer) (Desired, error) {
 	definition, err := readSAML(ctx, q)
 	if err != nil {
 		return Desired{}, err
@@ -87,8 +88,8 @@ func Authorize(d Desired, p access.Principal) error {
 
 func Planner(d Desired) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(_ context.Context, _ access.Queryer, p access.Principal) error { return Authorize(d, p) },
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Authorize: func(_ context.Context, _ database.Queryer, p access.Principal) error { return Authorize(d, p) },
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			definition, err := planSAML(ctx, q, d.saml)
 			if err != nil {
 				return nil, err

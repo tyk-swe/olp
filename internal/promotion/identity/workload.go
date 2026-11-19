@@ -11,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -56,7 +57,7 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	return access.ValidateWorkloadConfig(config)
 }
 
-func readWorkload(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
+func readWorkload(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
 	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func renderWorkload(issuers []contract.ConfigurationWorkloadIssuer) []contract.C
 	})
 }
 
-func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Item, error) {
+func planWorkload(ctx context.Context, q database.Queryer, d Desired) ([]promotion.Item, error) {
 	if len(d.issuers) == 0 {
 		return nil, nil
 	}
@@ -102,7 +103,7 @@ func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion
 	})
 }
 
-func planIssuer(ctx context.Context, q access.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
+func planIssuer(ctx context.Context, q database.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
 	current, exists, err := access.FindWorkloadIssuer(ctx, q, issuer.Issuer)
 	if err != nil {
 		return promotion.Item{}, err
@@ -165,7 +166,7 @@ func effective(stored catalog, entry contract.ConfigurationProjectEntry, declare
 	return catalog{templates: slices.Collect(maps.Keys(templates)), groups: groups}
 }
 
-func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, error) {
+func readCatalogs(ctx context.Context, q database.Queryer) (map[string]catalog, error) {
 	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return nil, err

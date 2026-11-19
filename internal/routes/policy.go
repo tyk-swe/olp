@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -58,7 +59,7 @@ func policyScope(r *http.Request) (string, string, access.Operation, error) {
 	}
 	return scope, id, operation, nil
 }
-func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*string, error) {
+func policyProject(ctx context.Context, q database.Queryer, scope, id string) (*string, error) {
 	if scope == "installation" {
 		return nil, nil
 	}
@@ -70,7 +71,7 @@ func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*st
 	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp."+table+" WHERE id=$1", id).Scan(&project)
 	return project, err
 }
-func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bool) (*routing.Policy, string, error) {
+func loadPolicy(ctx context.Context, q database.Queryer, scope, id string, lock bool) (*routing.Policy, string, error) {
 	etag := policyETag
 	if scope != "installation" {
 		table := "route_drafts"

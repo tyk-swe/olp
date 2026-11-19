@@ -9,6 +9,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -260,7 +261,7 @@ func (d desired) needsPrepare() bool {
 	return d.identity.NeedsPrepare() || len(d.servers) > 0
 }
 
-func authorize(ctx context.Context, q access.Queryer, p access.Principal, d desired) error {
+func authorize(ctx context.Context, q database.Queryer, p access.Principal, d desired) error {
 	if d.bindings.HasExternal() {
 		if err := p.Authorize(access.Settings); err != nil {
 			return err

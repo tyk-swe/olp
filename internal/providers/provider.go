@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -64,7 +65,7 @@ func scanRecord(row pgx.Row) (*record, error) {
 
 var recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
 
-func readProvider(ctx context.Context, q access.Queryer, id string) (*record, error) {
+func readProvider(ctx context.Context, q database.Queryer, id string) (*record, error) {
 	return scanRecord(q.QueryRow(ctx, recordQuery, id))
 }
 
@@ -73,7 +74,7 @@ func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
 }
 
 // A provider outside p's scope is reported missing.
-func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
+func visibleProvider(ctx context.Context, q database.Queryer, p access.Principal, id string) (*record, error) {
 	current, err := readProvider(ctx, q, id)
 	if err != nil {
 		return nil, err
@@ -177,11 +178,11 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	return &d, nil
 }
 
-func (s *Server) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
+func (s *Server) detail(ctx context.Context, q database.Queryer, id string) (*detail, error) {
 	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 
-func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (httpkit.Reply, error) {
+func (s *Server) detailReply(ctx context.Context, q database.Queryer, id string) (httpkit.Reply, error) {
 	d, err := s.detail(ctx, q, id)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -295,7 +296,7 @@ func deref[T comparable](v *T) T {
 	return *v
 }
 
-func ReadProviderNames(ctx context.Context, q access.Queryer) (map[string]string, error) {
+func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.providers")
 	if err != nil {
 		return nil, err

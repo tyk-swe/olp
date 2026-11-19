@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -96,7 +97,7 @@ func check(d *draft, live map[string]*resolved) error {
 // to or classifies with is active, and every plugin its selectors run is an
 // approved confined plugin, so activation never dangles. A route retired
 // afterwards is skipped at request time with a recorded reason.
-func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
+func checkReferences(ctx context.Context, q database.Queryer, d *draft) error {
 	behavior, err := routing.DecodeBehavior(d.Behavior)
 	if err != nil {
 		return err
@@ -369,7 +370,7 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 	return &v, nil
 }
 
-func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*revisionRow, error) {
+func loadRevision(ctx context.Context, q database.Queryer, routeID, ref string) (*revisionRow, error) {
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.revision=$2", routeID, n))
 	}
@@ -399,7 +400,7 @@ type routeRow struct {
 	Latest         *revisionRow
 }
 
-func (s *Server) routeJSON(ctx context.Context, q access.Queryer, row *routeRow) (map[string]any, error) {
+func (s *Server) routeJSON(ctx context.Context, q database.Queryer, row *routeRow) (map[string]any, error) {
 	live, err := s.resolve(ctx, q, row.Latest.Targets)
 	if err != nil {
 		return nil, err
@@ -414,7 +415,7 @@ func (s *Server) routeJSON(ctx context.Context, q access.Queryer, row *routeRow)
 const routeColumns = "r.id::text,r.slug,r.state,r.etag::text,r.retired_at,r.retired_by::text,r.created_at,r.latest_revision,u.email,r.project_id::text,pr.name," + revisionColumns
 const routeFrom = " FROM olp.routes r JOIN olp.users u ON u.id=r.created_by JOIN olp.route_revisions v ON v.id=r.latest_revision_id LEFT JOIN olp.projects pr ON pr.id=r.project_id"
 
-func routeProject(ctx context.Context, q access.Queryer, id string) (*string, error) {
+func routeProject(ctx context.Context, q database.Queryer, id string) (*string, error) {
 	var project *string
 	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.routes WHERE id=$1", id).Scan(&project)
 	return project, err

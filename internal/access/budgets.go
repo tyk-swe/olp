@@ -10,6 +10,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -216,7 +217,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (httpkit.Reply,
 	return httpkit.Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
 }
 
-func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string) error {
+func checkBudgetGroup(ctx context.Context, q database.Queryer, groupID, projectID *string) error {
 	if groupID == nil {
 		return nil
 	}

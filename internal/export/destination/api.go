@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage/retention"
@@ -44,7 +45,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/gaps", a.gaps)
 }
 
-func RequireScope(ctx context.Context, server *access.Server, q access.Queryer, p access.Principal, projectID *string) error {
+func RequireScope(ctx context.Context, server *access.Server, q database.Queryer, p access.Principal, projectID *string) error {
 	if projectID == nil {
 		return p.Authorize(access.Settings)
 	}
@@ -350,7 +351,7 @@ func (a *API) allowsScheme(u *url.URL) bool {
 	return u.Scheme == "https" || u.Scheme == "http" && slices.Contains(a.egress.PlainHTTPHosts, u.Hostname())
 }
 
-func (a *API) filter(ctx context.Context, q access.Queryer, raw json.RawMessage, sinkProject *string) (Filter, error) {
+func (a *API) filter(ctx context.Context, q database.Queryer, raw json.RawMessage, sinkProject *string) (Filter, error) {
 	if !present(raw) {
 		return Filter{}, nil
 	}
@@ -373,14 +374,14 @@ func (a *API) filter(ctx context.Context, q access.Queryer, raw json.RawMessage,
 	return Filter{Project: project, Route: input.Route, Outcome: input.Outcome}, nil
 }
 
-func (a *API) updatedFilter(ctx context.Context, q access.Queryer, raw json.RawMessage, current stored) (Filter, error) {
+func (a *API) updatedFilter(ctx context.Context, q database.Queryer, raw json.RawMessage, current stored) (Filter, error) {
 	if raw == nil {
 		return current.Filter, nil
 	}
 	return a.filter(ctx, q, raw, current.ProjectID)
 }
 
-func filterProject(ctx context.Context, q access.Queryer, raw, sinkProject *string) (*string, error) {
+func filterProject(ctx context.Context, q database.Queryer, raw, sinkProject *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -401,7 +402,7 @@ func filterProject(ctx context.Context, q access.Queryer, raw, sinkProject *stri
 	return &project, nil
 }
 
-func filterRoute(ctx context.Context, q access.Queryer, route, sinkProject *string) error {
+func filterRoute(ctx context.Context, q database.Queryer, route, sinkProject *string) error {
 	if route == nil {
 		return nil
 	}
@@ -418,7 +419,7 @@ func filterRoute(ctx context.Context, q access.Queryer, route, sinkProject *stri
 	return nil
 }
 
-func (a *API) updatedSpec(ctx context.Context, q access.Queryer, k kind, raw json.RawMessage, previous Spec, current stored) (Spec, error) {
+func (a *API) updatedSpec(ctx context.Context, q database.Queryer, k kind, raw json.RawMessage, previous Spec, current stored) (Spec, error) {
 	if raw == nil {
 		return previous, nil
 	}
@@ -434,7 +435,7 @@ func (a *API) updatedSpec(ctx context.Context, q access.Queryer, k kind, raw jso
 	return spec, checkSpec(ctx, q, spec, previous, current.ProjectID)
 }
 
-func checkSpec(ctx context.Context, q access.Queryer, spec, previous Spec, projectID *string) error {
+func checkSpec(ctx context.Context, q database.Queryer, spec, previous Spec, projectID *string) error {
 	switch s := spec.(type) {
 	case StripeMeter:
 		return checkCustomers(ctx, q, s, projectID)
@@ -444,7 +445,7 @@ func checkSpec(ctx context.Context, q access.Queryer, spec, previous Spec, proje
 	return nil
 }
 
-func checkCustomers(ctx context.Context, q access.Queryer, spec StripeMeter, projectID *string) error {
+func checkCustomers(ctx context.Context, q database.Queryer, spec StripeMeter, projectID *string) error {
 	projects := slices.Collect(maps.Keys(spec.Customers))
 	if projectID != nil && slices.ContainsFunc(projects, func(project string) bool { return project != *projectID }) {
 		return httpkit.Invalid("settings.customers", "a project sink maps only its own project")
@@ -460,7 +461,7 @@ func checkCustomers(ctx context.Context, q access.Queryer, spec StripeMeter, pro
 	return httpkit.Invalid("settings.customers", fmt.Sprintf("customers names project %s which does not exist", missing))
 }
 
-func checkStart(ctx context.Context, q access.Queryer, spec FOCUS, previous Spec) error {
+func checkStart(ctx context.Context, q database.Queryer, spec FOCUS, previous Spec) error {
 	start, err := spec.Start()
 	if err != nil || start == nil {
 		return err

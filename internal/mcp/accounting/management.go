@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
@@ -72,7 +73,7 @@ func scanToolCall(row toolCallRow) (ToolCall, error) {
 	return call, err
 }
 
-func loadToolCall(ctx context.Context, q access.Queryer, id string) (ToolCall, error) {
+func loadToolCall(ctx context.Context, q database.Queryer, id string) (ToolCall, error) {
 	return scanToolCall(q.QueryRow(ctx, "SELECT "+toolCallColumns+toolCallFrom+" WHERE c.id=$1", id))
 }
 
@@ -144,7 +145,7 @@ func validateResolveInput(outcome ResolveOutcome, evidenceDigest string) error {
 	return nil
 }
 
-func storedResolutionEvidence(ctx context.Context, q access.Queryer, call ToolCall) ([]byte, bool, error) {
+func storedResolutionEvidence(ctx context.Context, q database.Queryer, call ToolCall) ([]byte, bool, error) {
 	var evidence []byte
 	var err error
 	switch call.Status {

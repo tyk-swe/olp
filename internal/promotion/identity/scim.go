@@ -9,6 +9,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -73,7 +74,7 @@ func invalidGrant(p grant) bool {
 	return httpkit.ValidText("project", p.Project, 100) != nil || !p.Role.Valid()
 }
 
-func readSCIM(ctx context.Context, q access.Queryer) ([]group, error) {
+func readSCIM(ctx context.Context, q database.Queryer) ([]group, error) {
 	stored, err := access.ReadSCIMGroupMappings(ctx, q)
 	if err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ func sortedGrants(grants []grant) []grant {
 	}))
 }
 
-func planSCIM(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Item, error) {
+func planSCIM(ctx context.Context, q database.Queryer, d Desired) ([]promotion.Item, error) {
 	if len(d.groups) == 0 {
 		return nil, nil
 	}

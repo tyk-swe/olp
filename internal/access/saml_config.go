@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	dsig "github.com/russellhaering/goxmldsig"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/samlidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -57,7 +58,7 @@ type samlSigningKey struct {
 	Certificate []byte `json:"certificate"`
 }
 
-func ReadSAMLDefinition(ctx context.Context, q Queryer) (SAMLDefinition, bool, error) {
+func ReadSAMLDefinition(ctx context.Context, q database.Queryer) (SAMLDefinition, bool, error) {
 	var definition SAMLDefinition
 	err := q.QueryRow(ctx, "SELECT document FROM olp.saml_configuration WHERE singleton").Scan(&definition)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -66,7 +67,7 @@ func ReadSAMLDefinition(ctx context.Context, q Queryer) (SAMLDefinition, bool, e
 	return definition, err == nil, err
 }
 
-func loadSAML(ctx context.Context, q Queryer) (samlConfiguration, error) {
+func loadSAML(ctx context.Context, q database.Queryer) (samlConfiguration, error) {
 	var c samlConfiguration
 	err := q.QueryRow(ctx, "SELECT document||jsonb_build_object('id',id,'etag',etag) FROM olp.saml_configuration WHERE singleton").Scan(&c)
 	return c, err
@@ -143,7 +144,7 @@ func newSAMLSigningKey() (samlSigningKey, error) {
 	return samlSigningKey{Private: priv, Certificate: der}, err
 }
 
-func (s *Server) samlProvider(r *http.Request, q Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
+func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
 	m, err := validateSAML(c)
 	if err != nil {
 		return nil, m, err

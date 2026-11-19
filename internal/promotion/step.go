@@ -14,13 +14,14 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
 type Planner struct {
 	Claims    []Claim
-	Authorize func(context.Context, access.Queryer, access.Principal) error
-	Plan      func(context.Context, access.Queryer) ([]Item, error)
+	Authorize func(context.Context, database.Queryer, access.Principal) error
+	Plan      func(context.Context, database.Queryer) ([]Item, error)
 }
 
 type Applier func(context.Context, pgx.Tx, access.Principal) error

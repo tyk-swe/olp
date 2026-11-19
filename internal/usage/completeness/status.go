@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // Consumer states reported to the console. They are the only values the
@@ -51,7 +51,7 @@ const consumerHealthSQL = `SELECT pending_events, lag_events, oldest_pending_at,
 // `now`. A missing row is "unknown" rather than an error: an installation that
 // has never ingested is a legitimate state, and it is reported honestly instead
 // of as a healthy pipeline.
-func ReadConsumerStatus(ctx context.Context, q access.Queryer, now time.Time) (ConsumerStatus, error) {
+func ReadConsumerStatus(ctx context.Context, q database.Queryer, now time.Time) (ConsumerStatus, error) {
 	var pending, lag int64
 	var oldest *time.Time
 	var checked time.Time

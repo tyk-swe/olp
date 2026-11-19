@@ -16,6 +16,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"golang.org/x/oauth2"
 )
@@ -54,7 +55,7 @@ type oidcConfiguration struct {
 	UpdatedByEmail   string        `json:"updated_by_email"`
 }
 
-func loadOIDC(ctx context.Context, q Queryer) (oidcConfiguration, error) {
+func loadOIDC(ctx context.Context, q database.Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
 	err := q.QueryRow(ctx, "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
@@ -716,7 +717,7 @@ func oidcSignInRole(c oidcConfiguration, locallyManaged bool, role string, data 
 	return mappedRole(c, claims.Email, claims.Groups), nil
 }
 
-func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (map[string]bool, error) {
+func usableOIDCIdentities(r *http.Request, q database.Queryer, p Principal, local bool) (map[string]bool, error) {
 	c, err := loadOIDC(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil

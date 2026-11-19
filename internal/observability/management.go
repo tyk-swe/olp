@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -21,7 +22,7 @@ import (
 type Management struct {
 	Access *access.Server
 	Cache  *Cache
-	Pool   access.Queryer
+	Pool   database.Queryer
 	// Fleet reads the circuit and probe state gateways share; nil when no
 	// shared state is configured.
 	Fleet FleetHealth

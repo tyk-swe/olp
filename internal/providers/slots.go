@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -63,7 +64,7 @@ func findSlot(slots []slotRow, id string) *slotRow {
 	return &slots[index]
 }
 
-func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
+func loadSlots(ctx context.Context, q database.Queryer, providerID string) ([]slotRow, error) {
 	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),coalesce(c.profile_id,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint,s.etag::text FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
@@ -156,7 +157,7 @@ func orEmpty(list []string) []string {
 	return list
 }
 
-func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record) (httpkit.Reply, error) {
+func (s *Server) slotList(ctx context.Context, q database.Queryer, current *record) (httpkit.Reply, error) {
 	slots, err := loadSlots(ctx, q, current.ID)
 	if err != nil {
 		return httpkit.Reply{}, err

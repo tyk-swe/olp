@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -88,7 +89,7 @@ type listed struct {
 	body json.RawMessage
 }
 
-func listSinks(ctx context.Context, q access.Queryer, page httpkit.Pagination, p access.Principal) ([]listed, error) {
+func listSinks(ctx context.Context, q database.Queryer, page httpkit.Pagination, p access.Principal) ([]listed, error) {
 	rows, err := q.Query(ctx, listSinksSQL, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err
@@ -105,7 +106,7 @@ func listSinks(ctx context.Context, q access.Queryer, page httpkit.Pagination, p
 	return items, rows.Err()
 }
 
-func readSink(ctx context.Context, q access.Queryer, id string) (json.RawMessage, string, *string, error) {
+func readSink(ctx context.Context, q database.Queryer, id string) (json.RawMessage, string, *string, error) {
 	var body json.RawMessage
 	var etag string
 	var projectID *string
@@ -115,20 +116,20 @@ func readSink(ctx context.Context, q access.Queryer, id string) (json.RawMessage
 	return body, etag, projectID, nil
 }
 
-func SinkProject(ctx context.Context, q access.Queryer, id string) (*string, error) {
+func SinkProject(ctx context.Context, q database.Queryer, id string) (*string, error) {
 	var projectID *string
 	err := q.QueryRow(ctx, sinkProjectSQL, id).Scan(&projectID)
 	return projectID, access.NotFoundOr(err)
 }
 
-func lockSink(ctx context.Context, q access.Queryer, id string) (stored, error) {
+func lockSink(ctx context.Context, q database.Queryer, id string) (stored, error) {
 	var sink stored
 	err := q.QueryRow(ctx, lockSinkSQL, id).Scan(&sink.ID, &sink.Name, &sink.ProjectID, &sink.Type, &sink.Destination,
 		&sink.Streams, &sink.Format, &sink.Filter, &sink.Settings, &sink.Enabled, &sink.ETag, &sink.CredentialID)
 	return sink, access.NotFoundOr(err)
 }
 
-func listGaps(ctx context.Context, q access.Queryer, sinkID string, page httpkit.Pagination, p access.Principal) ([]Gap, error) {
+func listGaps(ctx context.Context, q database.Queryer, sinkID string, page httpkit.Pagination, p access.Principal) ([]Gap, error) {
 	rows, err := q.Query(ctx, listGapsSQL, sinkID, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err
@@ -152,13 +153,13 @@ func ReadCredential(ctx context.Context, q secrets.RowQuerier, keys *secrets.Key
 	return keys.Read(ctx, q, installation, *id, secrets.SinkCredential)
 }
 
-func ProjectExists(ctx context.Context, q access.Queryer, id string) (bool, error) {
+func ProjectExists(ctx context.Context, q database.Queryer, id string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id=$1)`, id).Scan(&exists)
 	return exists, err
 }
 
-func RouteProject(ctx context.Context, q access.Queryer, slug string) (*string, error) {
+func RouteProject(ctx context.Context, q database.Queryer, slug string) (*string, error) {
 	var project *string
 	err := q.QueryRow(ctx, `SELECT project_id::text FROM olp.routes WHERE slug=$1 FOR SHARE`, slug).Scan(&project)
 	return project, err

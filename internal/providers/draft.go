@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -366,7 +367,7 @@ func (s *Server) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, nam
 	return err
 }
 
-func preserveCredentialBoundary(ctx context.Context, q access.Queryer, providerID string, current, next connection.Configuration) error {
+func preserveCredentialBoundary(ctx context.Context, q database.Queryer, providerID string, current, next connection.Configuration) error {
 	move := connection.MoveCredentials(current, next)
 	if !move.Destination {
 		return nil
@@ -521,7 +522,7 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 }
 
 type installedPlugins struct {
-	q          access.Queryer
+	q          database.Queryer
 	unconfined *plugins.Unconfined
 }
 
@@ -540,6 +541,6 @@ func profileField(code string) string {
 	return "configuration.profile_revision"
 }
 
-func (s *Server) ConnectionPolicy(q access.Queryer) connection.Policy {
+func (s *Server) ConnectionPolicy(q database.Queryer) connection.Policy {
 	return connection.Policy{Egress: s.egress, Plugins: installedPlugins{q, s.unconfined}}
 }

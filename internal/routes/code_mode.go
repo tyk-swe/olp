@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
@@ -389,7 +390,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	return &codeRoute{Route: route, Adapters: adapters}, nil
 }
 
-func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Route) (map[string]routing.Provider, error) {
+func CodePaidProviders(ctx context.Context, tx database.Queryer, route codemode.Route) (map[string]routing.Provider, error) {
 	if len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		return map[string]routing.Provider{}, nil
 	}

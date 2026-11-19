@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -55,15 +56,15 @@ func scanModel(row pgx.Row) (storedModel, error) {
 	return m, nil
 }
 
-func loadModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+func loadModels(ctx context.Context, q database.Queryer, providerID string) ([]storedModel, error) {
 	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 ORDER BY upstream_model", providerID)
 }
 
-func enabledModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+func enabledModels(ctx context.Context, q database.Queryer, providerID string) ([]storedModel, error) {
 	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND enabled ORDER BY upstream_model", providerID)
 }
 
-func queryModels(ctx context.Context, q access.Queryer, query string, args ...any) ([]storedModel, error) {
+func queryModels(ctx context.Context, q database.Queryer, query string, args ...any) ([]storedModel, error) {
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -297,7 +298,7 @@ type setModelRequest struct {
 	Capabilities *[]connection.Capability `json:"capabilities"`
 }
 
-func readModel(ctx context.Context, q access.Queryer, providerID, modelID string) (storedModel, error) {
+func readModel(ctx context.Context, q database.Queryer, providerID, modelID string) (storedModel, error) {
 	return scanModel(q.QueryRow(ctx, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id=$2", providerID, modelID))
 }
 

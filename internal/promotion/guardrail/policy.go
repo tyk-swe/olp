@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/database"
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
@@ -231,7 +232,7 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 	return guardrailpolicy.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
-func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
+func pin(ctx context.Context, q database.Queryer, project *string, e Entry) (guardrails.Entry, error) {
 	current, err := definition.FindActive(ctx, q, guardrails.ProjectOf(project), e.Guardrail)
 	if err != nil {
 		return guardrails.Entry{}, err
