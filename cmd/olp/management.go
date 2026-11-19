@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/settings"
 
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
@@ -168,6 +169,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	providerServer.Register(mux)
 	codeaccounts.NewAPI(m.Access).Register(mux)
 	codeadmin.NewAPI(m.Access).Register(mux)
+	settings.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	playground := &gateway.Playground{Gateway: m.Gateway}
 	playgroundLimits := []access.RouteOption{access.MaxBody(gateway.PlaygroundBodyLimit), access.Deadline(gateway.PlaygroundTimeout)}

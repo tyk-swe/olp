@@ -1,4 +1,4 @@
-package access
+package settings
 
 import (
 	"encoding/json"
@@ -6,15 +6,16 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 )
 
 const settingJSON = `to_jsonb(s)||CASE WHEN s.key='budgets.time_zone' THEN jsonb_build_object('calendar',olp.budget_calendar_status(now())) ELSE '{}'::jsonb END`
 
-func (s *Server) settings(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
+	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -22,15 +23,15 @@ func (s *Server) settings(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	return httpkit.OK(map[string]any{"items": items}), err
 }
 
-func (s *Server) setting(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	var data []byte
 	var etag string
-	err = s.Pool.QueryRow(r.Context(), "SELECT "+settingJSON+",etag::text FROM olp.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
+	err = a.server.Pool.QueryRow(r.Context(), "SELECT "+settingJSON+",etag::text FROM olp.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
 	return httpkit.Detail(json.RawMessage(data), etag), err
 }
 
-func (s *Server) updateSetting(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Value string `json:"value"`
 	}
@@ -50,7 +51,7 @@ func (s *Server) updateSetting(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, httpkit.Invalid("value", "Use a byte window between 256 and 1048576.")
 		}
 	case "budgets.time_zone":
-		if err := ValidateBudgetTimeZone(input.Value); err != nil {
+		if err := access.ValidateBudgetTimeZone(input.Value); err != nil {
 			return httpkit.Reply{}, httpkit.Invalid("value", "Use a supported IANA time zone.")
 		}
 	case "limits.valkey_unavailable":
@@ -64,11 +65,11 @@ func (s *Server) updateSetting(r *http.Request, _ authz.Principal) (httpkit.Repl
 	default:
 		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "This setting does not exist.")
 	}
-	return Transact(s, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+	return access.Transact(a.server, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		return struct{}{}, settingChangeable(r, tx, p, key)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
-		reply, err := s.storeSetting(r, tx, p, key, input.Value)
-		return reply, Event{Action: "setting.update", Resource: "setting", ID: key}, err
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		reply, err := a.store(r, tx, p, key, input.Value)
+		return reply, access.Event{Action: "setting.update", Resource: "setting", ID: key}, err
 	})
 }
 
@@ -86,7 +87,7 @@ func settingChangeable(r *http.Request, tx pgx.Tx, p authz.Principal, key string
 	return httpkit.Match(r, etag)
 }
 
-func (s *Server) storeSetting(r *http.Request, tx pgx.Tx, p authz.Principal, key, value string) (httpkit.Reply, error) {
+func (a *API) store(r *http.Request, tx pgx.Tx, p authz.Principal, key, value string) (httpkit.Reply, error) {
 	if key == "budgets.time_zone" {
 		if _, err := tx.Exec(r.Context(), "SELECT olp.schedule_budget_zone($1,now())", value); err != nil {
 			return httpkit.Reply{}, err
@@ -97,12 +98,12 @@ func (s *Server) storeSetting(r *http.Request, tx pgx.Tx, p authz.Principal, key
 		return httpkit.Reply{}, err
 	}
 	if key == "auth.local_login_enabled" {
-		if err := s.EnsureUsableOwner(r.Context(), tx); err != nil {
+		if err := a.server.EnsureUsableOwner(r.Context(), tx); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
-	if key == "guardrails.stream_window_bytes" && s.RuntimePublisher != nil {
-		if err := s.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
+	if key == "guardrails.stream_window_bytes" && a.server.RuntimePublisher != nil {
+		if err := a.server.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
 			return httpkit.Reply{}, httpkit.Invalid("value", "The window is incompatible with published guardrails.")
 		}
 	}
