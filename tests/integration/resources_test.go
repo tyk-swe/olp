@@ -7,10 +7,12 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -315,6 +317,9 @@ type storedPlan struct {
 	slug, model string
 	kind        string
 	surface     string
+	profile     string
+	version     string
+	secure      bool
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
@@ -335,16 +340,35 @@ type storedGateway struct {
 func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *storedGateway {
 	t.Helper()
 	ctx, pool := t.Context(), fixture.pool
-	upstream := httptest.NewServer(plan.upstream)
+	upstream := httptest.NewUnstartedServer(plan.upstream)
+	var network *egress.ConnectionOptions
+	if plan.secure {
+		upstream.StartTLS()
+		network = &egress.ConnectionOptions{TrustRootsPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw}))}
+	} else {
+		upstream.Start()
+	}
 	t.Cleanup(upstream.Close)
+	installation, err := database.Installation(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := keyRing(t, "01")
+	if err := access.PrepareInstallation(ctx, pool, installation, secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), installation), keys); err != nil {
+		t.Fatal(err)
+	}
 	g := &storedGateway{
-		t: t, fixture: fixture, plan: plan, store: resources.New(pool),
+		t: t, fixture: fixture, plan: plan, store: resources.NewEncrypted(pool, installation, keys),
 		providerRevisionID: uuid.NewString(), slotID: uuid.NewString(), targetID: uuid.NewString(), modelID: uuid.NewString(), credentialID: uuid.NewString(),
 	}
 	credentialVersion := 1
 	slot := routing.Slot{ID: g.slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &g.credentialID, CredentialVersion: &credentialVersion}
-	kind, endpoint := cmp.Or(plan.kind, "openai"), upstream.URL+"/v1"
-	providerConfig := encoded(t, map[string]string{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model})
+	kind, endpoint := cmp.Or(plan.kind, "openai"), upstream.URL+cmp.Or(plan.version, "/v1")
+	profileRevision := ""
+	if plan.profile != "" {
+		profileRevision = connectors.ProfileRevision
+	}
+	providerConfig := encoded(t, map[string]any{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model, "profile_id": plan.profile, "profile_revision": profileRevision, "options": map[string]any{"network": network}})
 	certified := make([]routing.RevisionCapability, len(plan.operations))
 	for i, operation := range plan.operations {
 		certified[i] = routing.RevisionCapability{Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary", Source: "certified"}
@@ -368,7 +392,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
 		Providers: map[string]routing.Provider{fixture.providerID: {
-			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true,
+			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
 			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model,
 		}},
@@ -770,17 +794,18 @@ type retainedUpstream struct {
 	mu      sync.Mutex
 	calls   []upstreamCall
 	replies func(request string, nth int) map[string]string
+	headers func(*http.Request) map[string]string
 }
 
 const providerOwned = "provider-owned"
 
-var providerPrefix = regexp.MustCompile(`^/v1(/openai(/deployments/[^/]+)?)?`)
+var providerPrefix = regexp.MustCompile(`^/v1(beta)?(/openai(/deployments/[^/]+)?)?`)
 
 func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	request := r.Method + " " + providerPrefix.ReplaceAllString(r.URL.Path, "")
 	u.mu.Lock()
-	u.calls = append(u.calls, upstreamCall{request, cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key")), r.Header.Get("Authorization"), string(body)})
+	u.calls = append(u.calls, upstreamCall{request, cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")), r.Header.Get("Authorization"), string(body)})
 	nth := 0
 	for _, call := range u.calls {
 		if call.request == request {
@@ -794,6 +819,11 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if u.headers != nil {
+		for name, value := range u.headers(r) {
+			w.Header().Set(name, value)
+		}
+	}
 	_, _ = io.WriteString(w, reply)
 }
 
@@ -860,16 +890,17 @@ func (o retainedObject) identifiers() []string {
 	return ids
 }
 
-func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body string, want int) retainedObject {
+func (g *storedGateway) send(t *testing.T, method, path string, headers map[string]string, body string, want int) (http.Header, []byte) {
 	t.Helper()
 	request, err := http.NewRequestWithContext(t.Context(), method, g.server.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Authorization", "Bearer "+key)
 	request.Header.Set("X-OLP-Route", g.plan.slug)
-	if contentType != "" {
-		request.Header.Set("Content-Type", contentType)
+	for name, value := range headers {
+		if value != "" {
+			request.Header.Set(name, value)
+		}
 	}
 	response, err := g.server.Client().Do(request)
 	if err != nil {
@@ -878,11 +909,17 @@ func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body 
 	defer response.Body.Close()
 	raw, _ := io.ReadAll(response.Body)
 	if response.StatusCode != want {
-		t.Fatalf("%s %s as %s = %d, want %d: %s", method, path, key, response.StatusCode, want, raw)
+		t.Fatalf("%s %s with %v = %d, want %d: %s", method, path, headers, response.StatusCode, want, raw)
 	}
-	if strings.Contains(string(raw), providerOwned) {
-		t.Fatalf("%s %s exposed a provider identifier: %s", method, path, raw)
+	if strings.Contains(string(raw)+fmt.Sprint(response.Header), providerOwned) {
+		t.Fatalf("%s %s exposed a provider identifier: %v %s", method, path, response.Header, raw)
 	}
+	return response.Header, raw
+}
+
+func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body string, want int) retainedObject {
+	t.Helper()
+	_, raw := g.send(t, method, path, map[string]string{"Authorization": "Bearer " + key, "Content-Type": contentType}, body, want)
 	var decoded retainedObject
 	_ = json.Unmarshal(raw, &decoded)
 	return decoded
@@ -1095,5 +1132,177 @@ func TestAnthropicFilesAndBatchesHideProviderIdentifiersIsolateKeysAndKeepUnsett
 		if sent := upstream.sent(request); len(sent) != want {
 			t.Fatalf("the provider saw %d of %q, want %d", len(sent), request, want)
 		}
+	}
+}
+
+func geminiReplies(_ string, nth int) map[string]string {
+	now := time.Now().UTC()
+	file := fmt.Sprintf(`{"name":"files/%[1]s","displayName":"notes","mimeType":"text/plain","sizeBytes":"5","createTime":%[2]q,"updateTime":%[2]q,"expirationTime":%[3]q,"sha256Hash":"aGFzaA==","uri":"https://provider.invalid/v1beta/files/%[1]s","state":"ACTIVE"}`,
+		providerOwned, now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	interaction := func(n int) string {
+		return fmt.Sprintf(`{"id":"interaction-%s-%d","status":"completed","model":"gemini-model","steps":[{"type":"model_output","content":[{"type":"text","text":"hello"}]}],"usage":{"total_input_tokens":3,"total_output_tokens":2,"total_tokens":5}}`, providerOwned, n)
+	}
+	return map[string]string{
+		"POST /upload/v1beta/files":                                "",
+		"POST /upload/session-" + providerOwned:                    `{"file":` + file + `}`,
+		"GET /files/" + providerOwned:                              file,
+		"DELETE /files/" + providerOwned:                           `{}`,
+		"POST /interactions":                                       interaction(nth),
+		"GET /interactions/interaction-" + providerOwned + "-1":    interaction(1),
+		"DELETE /interactions/interaction-" + providerOwned + "-1": `{}`,
+	}
+}
+
+func geminiUploadHeaders(r *http.Request) map[string]string {
+	switch r.Header.Get("X-Goog-Upload-Command") {
+	case "start":
+		return map[string]string{"X-Goog-Upload-URL": "https://" + r.Host + "/upload/session-" + providerOwned, "X-Goog-Upload-Status": "active"}
+	case "upload, finalize":
+		return map[string]string{"X-Goog-Upload-Status": "final"}
+	}
+	return nil
+}
+
+func geminiKey(key string, extra map[string]string) map[string]string {
+	headers := maps.Clone(extra)
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	headers["x-goog-api-key"] = key
+	return headers
+}
+
+type geminiFile struct {
+	Name, URI string
+}
+
+func TestGeminiFilesUploadThroughAGatewaySessionHideProviderIdentifiersAndIsolateKeys(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	upstream := &retainedUpstream{replies: geminiReplies, headers: geminiUploadHeaders}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "gemini-files", model: "gemini-model", kind: "gemini", surface: "gemini", version: "/v1beta", secure: true,
+		operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const files = "/gemini/v1beta/"
+
+	started, _ := g.send(t, "POST", "/gemini/upload/v1beta/files", geminiKey("owner", map[string]string{
+		"Content-Type": "application/json", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+		"X-Goog-Upload-Header-Content-Length": "5", "X-Goog-Upload-Header-Content-Type": "text/plain",
+	}), `{"file":{"display_name":"notes"}}`, 200)
+	session, found := strings.CutPrefix(started.Get("X-Goog-Upload-URL"), g.server.URL)
+	if !found || !strings.HasPrefix(session, "/gemini/upload/") {
+		t.Fatalf("upload session is %q, want a session on the gateway", started.Get("X-Goog-Upload-URL"))
+	}
+	finalize := map[string]string{"X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"}
+	g.send(t, "POST", session, geminiKey("stranger", finalize), "stolen", 404)
+	if sent := upstream.sent("POST /upload/session-" + providerOwned); len(sent) != 0 {
+		t.Fatalf("another key's bytes reached the provider session: %+v", sent)
+	}
+	_, raw := g.send(t, "POST", session, geminiKey("owner", finalize), "hello", 200)
+	var uploaded struct{ File geminiFile }
+	if err := json.Unmarshal(raw, &uploaded); err != nil || !strings.HasPrefix(uploaded.File.Name, "files/") || uploaded.File.URI != g.server.URL+files+uploaded.File.Name {
+		t.Fatalf("finalized upload = %s, want a file named and addressed by the gateway", raw)
+	}
+	name := uploaded.File.Name
+	sent := upstream.sent("POST /upload/session-" + providerOwned)
+	if len(sent) != 1 || sent[0].key != "listed-secret" || sent[0].body != "hello" {
+		t.Fatalf("the provider session received %+v, want the owner's bytes under the provider credential", sent)
+	}
+
+	listed := func(key string) []string {
+		_, raw := g.send(t, "GET", files+"files", geminiKey(key, nil), "", 200)
+		var page struct{ Files []geminiFile }
+		if err := json.Unmarshal(raw, &page); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, len(page.Files))
+		for i, file := range page.Files {
+			names[i] = file.Name
+		}
+		return names
+	}
+	_, raw = g.send(t, "GET", files+name, geminiKey("owner", nil), "", 200)
+	var read geminiFile
+	if err := json.Unmarshal(raw, &read); err != nil || read.Name != name {
+		t.Fatalf("file read = %s, want %q", raw, name)
+	}
+	if got := listed("owner"); !slices.Equal(got, []string{name}) {
+		t.Fatalf("owner lists files %v, want %v", got, []string{name})
+	}
+	if got := listed("stranger"); len(got) != 0 {
+		t.Fatalf("another key lists files %v", got)
+	}
+	g.send(t, "GET", files+name, geminiKey("stranger", nil), "", 404)
+	g.send(t, "DELETE", files+name, geminiKey("stranger", nil), "", 404)
+
+	g.send(t, "DELETE", files+name, geminiKey("owner", nil), "", 200)
+	g.send(t, "GET", files+name, geminiKey("owner", nil), "", 404)
+	if got := listed("owner"); len(got) != 0 {
+		t.Fatalf("a deleted file is still listed: %v", got)
+	}
+	if sent := upstream.sent("DELETE /files/" + providerOwned); len(sent) != 1 || sent[0].key != "listed-secret" {
+		t.Fatalf("the provider saw deletes %+v, want one under the provider credential", sent)
+	}
+}
+
+func TestGeminiInteractionsHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "gemini-interactions", "gemini-model"
+	upstream := &retainedUpstream{replies: geminiReplies}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "gemini", surface: "gemini", profile: "gemini-interactions", version: "/v1beta", secure: true,
+		operations: []string{"generation"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const interactions = "/gemini/v1beta/interactions"
+	type interaction struct{ ID, Model, Status string }
+	create := func(key, body string, want int) interaction {
+		t.Helper()
+		_, raw := g.send(t, "POST", interactions, geminiKey(key, map[string]string{"Content-Type": "application/json"}), body, want)
+		var decoded interaction
+		_ = json.Unmarshal(raw, &decoded)
+		return decoded
+	}
+
+	first := create("owner", `{"model":"`+slug+`","input":"hi"}`, 200)
+	if first.ID == "" || first.Model != slug || first.Status != "completed" {
+		t.Fatalf("interaction = %+v, want a gateway identifier under the route name", first)
+	}
+	created := upstream.sent("POST /interactions")
+	if len(created) != 1 || created[0].key != "listed-secret" || !strings.Contains(created[0].body, `"model":"`+model+`"`) || strings.Contains(created[0].body, slug) {
+		t.Fatalf("interaction reached the provider as %+v, want the provider model under the provider credential", created)
+	}
+	_, raw := g.send(t, "GET", interactions+"/"+first.ID, geminiKey("owner", nil), "", 200)
+	var read interaction
+	if err := json.Unmarshal(raw, &read); err != nil || read.ID != first.ID || read.Model != slug {
+		t.Fatalf("interaction read = %s, want %q under the route name", raw, first.ID)
+	}
+
+	g.send(t, "GET", interactions+"/"+first.ID, geminiKey("stranger", nil), "", 404)
+	g.send(t, "DELETE", interactions+"/"+first.ID, geminiKey("stranger", nil), "", 404)
+	create("stranger", `{"model":"`+slug+`","input":"again","previous_interaction_id":"`+first.ID+`"}`, 400)
+	create("stranger", `{"model":"`+slug+`","input":"again","previous_interaction_id":"interaction_0123456789abcdef0123456789abcdef"}`, 400)
+	if sent := upstream.sent("POST /interactions"); len(sent) != 1 {
+		t.Fatalf("another key's continuation reached the provider: %+v", sent)
+	}
+
+	second := create("owner", `{"model":"`+slug+`","input":"again","previous_interaction_id":"`+first.ID+`"}`, 200)
+	if second.ID == "" || second.ID == first.ID {
+		t.Fatalf("continuation = %+v, want its own identifier", second)
+	}
+	continued := upstream.sent("POST /interactions")
+	if len(continued) != 2 || !strings.Contains(continued[1].body, `"previous_interaction_id":"interaction-`+providerOwned+`-1"`) || strings.Contains(continued[1].body, first.ID) {
+		t.Fatalf("continuation reached the provider as %+v, want the provider's parent identifier", continued)
+	}
+
+	g.send(t, "DELETE", interactions+"/"+first.ID, geminiKey("owner", nil), "", 200)
+	g.send(t, "GET", interactions+"/"+first.ID, geminiKey("owner", nil), "", 404)
+	if sent := upstream.sent("DELETE /interactions/interaction-" + providerOwned + "-1"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
 	}
 }
