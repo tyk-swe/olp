@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -329,7 +330,7 @@ type storedGateway struct {
 	mux     *http.ServeMux
 	server  *httptest.Server
 
-	providerRevisionID, routeRevisionID, slotID, targetID, credentialID string
+	providerRevisionID, routeRevisionID, slotID, targetID, modelID, credentialID string
 }
 
 func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *storedGateway {
@@ -339,18 +340,23 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	t.Cleanup(upstream.Close)
 	g := &storedGateway{
 		t: t, fixture: fixture, plan: plan, store: resources.New(pool),
-		providerRevisionID: uuid.NewString(), slotID: uuid.NewString(), targetID: uuid.NewString(), credentialID: uuid.NewString(),
+		providerRevisionID: uuid.NewString(), slotID: uuid.NewString(), targetID: uuid.NewString(), modelID: uuid.NewString(), credentialID: uuid.NewString(),
 	}
 	credentialVersion := 1
 	slot := routing.Slot{ID: g.slotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &g.credentialID, CredentialVersion: &credentialVersion}
 	kind, endpoint := cmp.Or(plan.kind, "openai"), upstream.URL+"/v1"
-	providerConfig := encoded(t, map[string]string{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key"})
+	providerConfig := encoded(t, map[string]string{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model})
+	certified := make([]routing.RevisionCapability, len(plan.operations))
+	for i, operation := range plan.operations {
+		certified[i] = routing.RevisionCapability{Operation: operation, Surface: "openai", Mode: "unary", Source: "certified"}
+	}
+	models := encoded(t, []routing.RevisionModel{{ID: g.modelID, UpstreamModel: plan.model, DisplayName: plan.model, Capabilities: certified}})
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_credentials (id,provider_id,version) VALUES ($1,$2,1)`, g.credentialID, fixture.providerID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_revisions (id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
-		VALUES ($1,$2,1,'listed',$3,'[]',$4,1,$1,$5)`, g.providerRevisionID, fixture.providerID, providerConfig,
-		encoded(t, []routing.RevisionSlot{{Slot: slot, Default: true}}), fixture.ownerID); err != nil {
+		VALUES ($1,$2,1,'listed',$3,$6,$4,1,$1,$5)`, g.providerRevisionID, fixture.providerID, providerConfig,
+		encoded(t, []routing.RevisionSlot{{Slot: slot, Default: true}}), fixture.ownerID, models); err != nil {
 		t.Fatal(err)
 	}
 	routeID, routeRevisionID := g.seedRoute(plan.slug)
@@ -365,13 +371,13 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Providers: map[string]routing.Provider{fixture.providerID: {
 			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
-			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot},
+			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model,
 		}},
 		Routes: map[string]routing.Route{plan.slug: {
 			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
 			RoutingID: routeID, RevisionID: g.routeRevisionID, Revision: 1, PublishedAt: time.Now(), ProjectID: &fixture.projectID,
 			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
-			Targets:  []routing.Target{{ID: g.targetID, ProviderID: fixture.providerID, ProviderModel: plan.model, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
+			Targets:  []routing.Target{{ID: g.targetID, ProviderID: fixture.providerID, ProviderModel: plan.model, Weight: 1, Timeout: 2000, RoutingID: g.modelID}},
 		}},
 	}
 	published, err := release.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{g.credentialID: []byte("listed-secret")})
@@ -424,7 +430,7 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 	ctx, pool, fixture := g.t.Context(), g.fixture.pool, g.fixture
 	routeID, revisionID := uuid.NewString(), uuid.NewString()
 	targets := encoded(g.t, []routing.PublishedTarget{{
-		ID: g.targetID, ProviderModelID: "listed-model-row", ProviderID: fixture.providerID,
+		ID: g.targetID, ProviderModelID: g.modelID, ProviderID: fixture.providerID,
 		ProviderModel: g.plan.model, Weight: 1, TimeoutMS: 2000,
 	}})
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.routes (id,slug,created_by,latest_revision,latest_revision_id,etag,project_id)
@@ -762,29 +768,47 @@ type upstreamCall struct {
 	request, key, authorization, body string
 }
 
+// retainedUpstream is a provider that owns files, batches and responses under
+// identifiers carrying providerOwned, which no gateway reply may contain.
 type retainedUpstream struct {
-	mu    sync.Mutex
-	calls []upstreamCall
+	mu        sync.Mutex
+	calls     []upstreamCall
+	responses int
 }
+
+const providerOwned = "provider-owned"
+
+var deploymentPrefix = regexp.MustCompile(`^/v1/openai(/deployments/[^/]+)?`)
 
 func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	request := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/v1/openai")
+	request := r.Method + " " + deploymentPrefix.ReplaceAllString(r.URL.Path, "")
 	u.mu.Lock()
 	u.calls = append(u.calls, upstreamCall{request, r.Header.Get("api-key"), r.Header.Get("Authorization"), string(body)})
+	if request == "POST /responses" {
+		u.responses++
+	}
+	created := u.responses
 	u.mu.Unlock()
-	const file = `{"id":"file-up1","object":"file","bytes":7,"created_at":1700000000,"filename":"batch.jsonl","purpose":"batch"}`
+	const file = `{"id":"file-provider-owned","object":"file","bytes":7,"created_at":1700000000,"filename":"batch.jsonl","purpose":"batch"}`
 	batch := func(status string) string {
-		return `{"id":"batch_up1","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"file-up1","completion_window":"24h","status":"` + status + `","created_at":1700000000}`
+		return `{"id":"batch_provider-owned","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"file-provider-owned","completion_window":"24h","status":"` + status + `","created_at":1700000000}`
+	}
+	response := func(id string) string {
+		return `{"id":"` + id + `","object":"response","created_at":1700000000,"status":"completed","model":"provider-model","output":[{"id":"msg_2","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
 	}
 	replies := map[string]string{
-		"POST /files":                    file,
-		"GET /files/file-up1":            file,
-		"GET /files/file-up1/content":    "CONTENT",
-		"DELETE /files/file-up1":         `{"id":"file-up1","object":"file","deleted":true}`,
-		"POST /batches":                  batch("validating"),
-		"GET /batches/batch_up1":         batch("in_progress"),
-		"POST /batches/batch_up1/cancel": batch("cancelling"),
+		"POST /files":                                      file,
+		"GET /files/file-provider-owned":                   file,
+		"GET /files/file-provider-owned/content":           "CONTENT",
+		"DELETE /files/file-provider-owned":                `{"id":"file-provider-owned","object":"file","deleted":true}`,
+		"POST /batches":                                    batch("validating"),
+		"GET /batches/batch_provider-owned":                batch("in_progress"),
+		"POST /batches/batch_provider-owned/cancel":        batch("cancelling"),
+		"POST /responses":                                  response(fmt.Sprintf("resp_provider-owned-%d", created)),
+		"GET /responses/resp_provider-owned-1":             response("resp_provider-owned-1"),
+		"GET /responses/resp_provider-owned-1/input_items": `{"object":"list","data":[{"id":"msg_1","type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"first_id":"msg_1","last_id":"msg_1","has_more":false}`,
+		"DELETE /responses/resp_provider-owned-1":          `{"id":"resp_provider-owned-1","object":"response.deleted","deleted":true}`,
 	}
 	reply, known := replies[request]
 	if !known {
@@ -801,6 +825,49 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 	return slices.DeleteFunc(slices.Clone(u.calls), func(call upstreamCall) bool { return call.request != request })
 }
 
+type retainedObject struct {
+	ID, Status  string
+	InputFileID string `json:"input_file_id"`
+	Deleted     bool
+	Data        []struct{ ID string }
+}
+
+func (o retainedObject) identifiers() []string {
+	ids := make([]string, len(o.Data))
+	for i, entry := range o.Data {
+		ids[i] = entry.ID
+	}
+	return ids
+}
+
+func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body string, want int) retainedObject {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), method, g.server.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+key)
+	request.Header.Set("X-OLP-Route", g.plan.slug)
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	response, err := g.server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(response.Body)
+	if response.StatusCode != want {
+		t.Fatalf("%s %s as %s = %d, want %d: %s", method, path, key, response.StatusCode, want, raw)
+	}
+	if strings.Contains(string(raw), providerOwned) {
+		t.Fatalf("%s %s exposed a provider identifier: %s", method, path, raw)
+	}
+	var decoded retainedObject
+	_ = json.Unmarshal(raw, &decoded)
+	return decoded
+}
+
 func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCredential(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -811,50 +878,9 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	})
 	g.key(t, "owner")
 	g.key(t, "stranger")
-	type object struct {
-		ID, Status  string
-		InputFileID string `json:"input_file_id"`
-		Deleted     bool
-		Data        []struct{ ID string }
-	}
-	call := func(key, method, path, contentType, body string, want int) object {
-		t.Helper()
-		request, err := http.NewRequestWithContext(t.Context(), method, g.server.URL+path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Authorization", "Bearer "+key)
-		request.Header.Set("X-OLP-Route", slug)
-		if contentType != "" {
-			request.Header.Set("Content-Type", contentType)
-		}
-		response, err := g.server.Client().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		raw, _ := io.ReadAll(response.Body)
-		if response.StatusCode != want {
-			t.Fatalf("%s %s as %s = %d, want %d: %s", method, path, key, response.StatusCode, want, raw)
-		}
-		if strings.Contains(string(raw), "file-up1") || strings.Contains(string(raw), "batch_up1") {
-			t.Fatalf("%s %s exposed a provider identifier: %s", method, path, raw)
-		}
-		var decoded object
-		_ = json.Unmarshal(raw, &decoded)
-		return decoded
-	}
-	identifiers := func(listed object) []string {
-		ids := make([]string, len(listed.Data))
-		for i, entry := range listed.Data {
-			ids[i] = entry.ID
-		}
-		return ids
-	}
-
 	line := `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}`
 	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" + line + "\n\r\n--b--\r\n"
-	file := call("owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
 	if file.ID == "" {
 		t.Fatal("upload returned no file identifier")
 	}
@@ -865,53 +891,106 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	if !strings.Contains(uploads[0].body, `"model":"`+model+`"`) || strings.Contains(uploads[0].body, slug) {
 		t.Fatalf("uploaded lines must name the provider model instead of the route: %s", uploads[0].body)
 	}
-	if got := call("owner", "GET", "/v1/files/"+file.ID, "", "", 200); got.ID != file.ID {
+	if got := g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 200); got.ID != file.ID {
 		t.Fatalf("file read returned %q, want %q", got.ID, file.ID)
 	}
-	if got := identifiers(call("owner", "GET", "/v1/files", "", "", 200)); !slices.Equal(got, []string{file.ID}) {
+	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{file.ID}) {
 		t.Fatalf("owner lists files %v, want only %s", got, file.ID)
 	}
-	call("owner", "GET", "/v1/files/"+file.ID+"/content", "", "", 200)
+	g.call(t, "owner", "GET", "/v1/files/"+file.ID+"/content", "", "", 200)
 
-	call("stranger", "GET", "/v1/files/"+file.ID, "", "", 404)
-	if got := identifiers(call("stranger", "GET", "/v1/files", "", "", 200)); len(got) != 0 {
+	g.call(t, "stranger", "GET", "/v1/files/"+file.ID, "", "", 404)
+	if got := g.call(t, "stranger", "GET", "/v1/files", "", "", 200).identifiers(); len(got) != 0 {
 		t.Fatalf("another key lists files %v", got)
 	}
 	submission := `{"input_file_id":"` + file.ID + `","endpoint":"/v1/chat/completions","completion_window":"24h"}`
-	call("stranger", "POST", "/v1/batches", "application/json", submission, 404)
+	g.call(t, "stranger", "POST", "/v1/batches", "application/json", submission, 404)
 	if sent := upstream.sent("POST /batches"); len(sent) != 0 {
 		t.Fatalf("a batch over another key's file reached the provider: %+v", sent)
 	}
 
-	batch := call("owner", "POST", "/v1/batches", "application/json", submission, 200)
+	batch := g.call(t, "owner", "POST", "/v1/batches", "application/json", submission, 200)
 	if batch.ID == "" || batch.InputFileID != file.ID || batch.Status != "validating" {
 		t.Fatalf("batch = %+v, want a gateway identifier over file %s", batch, file.ID)
 	}
 	submissions := upstream.sent("POST /batches")
-	if len(submissions) != 1 || !strings.Contains(submissions[0].body, `"input_file_id":"file-up1"`) || submissions[0].key != "listed-secret" {
+	if len(submissions) != 1 || !strings.Contains(submissions[0].body, `"input_file_id":"file-provider-owned"`) || submissions[0].key != "listed-secret" {
 		t.Fatalf("batch reached the provider as %+v, want the provider's file identifier and credential", submissions)
 	}
-	if got := call("owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.ID != batch.ID || got.InputFileID != file.ID || got.Status != "in_progress" {
+	if got := g.call(t, "owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.ID != batch.ID || got.InputFileID != file.ID || got.Status != "in_progress" {
 		t.Fatalf("batch read = %+v", got)
 	}
-	if got := identifiers(call("owner", "GET", "/v1/batches", "", "", 200)); !slices.Equal(got, []string{batch.ID}) {
+	if got := g.call(t, "owner", "GET", "/v1/batches", "", "", 200).identifiers(); !slices.Equal(got, []string{batch.ID}) {
 		t.Fatalf("owner lists batches %v, want only %s", got, batch.ID)
 	}
-	call("stranger", "GET", "/v1/batches/"+batch.ID, "", "", 404)
-	call("stranger", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 404)
-	if got := call("owner", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 200); got.ID != batch.ID || got.Status != "cancelling" {
+	g.call(t, "stranger", "GET", "/v1/batches/"+batch.ID, "", "", 404)
+	g.call(t, "stranger", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 404)
+	if got := g.call(t, "owner", "POST", "/v1/batches/"+batch.ID+"/cancel", "", "", 200); got.ID != batch.ID || got.Status != "cancelling" {
 		t.Fatalf("batch cancel = %+v", got)
 	}
-	if sent := upstream.sent("POST /batches/batch_up1/cancel"); len(sent) != 1 {
+	if sent := upstream.sent("POST /batches/batch_provider-owned/cancel"); len(sent) != 1 {
 		t.Fatalf("the provider saw %d cancels, want only the owner's", len(sent))
 	}
 
-	call("stranger", "DELETE", "/v1/files/"+file.ID, "", "", 404)
-	if got := call("owner", "DELETE", "/v1/files/"+file.ID, "", "", 200); !got.Deleted || got.ID != file.ID {
+	g.call(t, "stranger", "DELETE", "/v1/files/"+file.ID, "", "", 404)
+	if got := g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200); !got.Deleted || got.ID != file.ID {
 		t.Fatalf("file delete = %+v", got)
 	}
-	if sent := upstream.sent("DELETE /files/file-up1"); len(sent) != 1 {
+	if sent := upstream.sent("DELETE /files/file-provider-owned"); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
 	}
-	call("owner", "GET", "/v1/files/"+file.ID, "", "", 404)
+	g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 404)
+}
+
+func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "stored-responses", "responses-model"
+	upstream := &retainedUpstream{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const json = "application/json"
+
+	first := g.call(t, "owner", "POST", "/v1/responses", json, `{"model":"`+slug+`","input":"hi","store":true}`, 200)
+	if first.ID == "" {
+		t.Fatal("stored response returned no identifier")
+	}
+	created := upstream.sent("POST /responses")
+	if len(created) != 1 || created[0].key != "listed-secret" || created[0].authorization != "" || !strings.Contains(created[0].body, `"model":"`+model+`"`) {
+		t.Fatalf("response reached the provider as %+v, want the provider model and credential only", created)
+	}
+	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 200); got.ID != first.ID {
+		t.Fatalf("response read returned %q, want %q", got.ID, first.ID)
+	}
+	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID+"/input_items", "", "", 200); len(got.Data) != 1 {
+		t.Fatalf("input items = %+v, want the provider's one item", got)
+	}
+
+	continuation := `{"model":"` + slug + `","input":"again","previous_response_id":"` + first.ID + `","store":true}`
+	g.call(t, "stranger", "GET", "/v1/responses/"+first.ID, "", "", 404)
+	g.call(t, "stranger", "GET", "/v1/responses/"+first.ID+"/input_items", "", "", 404)
+	g.call(t, "stranger", "POST", "/v1/responses", json, continuation, 400)
+	g.call(t, "stranger", "DELETE", "/v1/responses/"+first.ID, "", "", 404)
+	if sent := upstream.sent("POST /responses"); len(sent) != 1 {
+		t.Fatalf("another key's continuation reached the provider: %+v", sent)
+	}
+
+	second := g.call(t, "owner", "POST", "/v1/responses", json, continuation, 200)
+	if second.ID == "" || second.ID == first.ID {
+		t.Fatalf("continuation returned %q after %q, want a new identifier", second.ID, first.ID)
+	}
+	if sent := upstream.sent("POST /responses"); len(sent) != 2 || !strings.Contains(sent[1].body, `"previous_response_id":"resp_provider-owned-1"`) {
+		t.Fatalf("continuation reached the provider as %+v, want the provider's identifier of the first response", sent)
+	}
+
+	if got := g.call(t, "owner", "DELETE", "/v1/responses/"+first.ID, "", "", 200); !got.Deleted || got.ID != first.ID {
+		t.Fatalf("response delete = %+v", got)
+	}
+	if sent := upstream.sent("DELETE /responses/resp_provider-owned-1"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
+	}
+	g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 404)
 }
