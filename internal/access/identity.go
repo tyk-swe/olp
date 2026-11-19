@@ -59,7 +59,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v1/profile":                            s.profile, "PATCH /api/v1/profile": s.updateProfile,
 		"POST /api/v1/profile/password": s.changePassword, "POST /api/v1/profile/password/enroll": s.enrollPassword,
 		"POST /api/v1/profile/reauthenticate": s.reauthenticate,
-		"GET /api/v1/audit":                   s.auditEvents,
 
 		"GET /api/v1/management-tokens": s.managementTokens, "POST /api/v1/management-tokens": s.createManagementToken,
 		"GET /api/v1/management-tokens/{management_token_id}":         s.managementToken,
