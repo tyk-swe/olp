@@ -204,74 +204,68 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpk
 			return httpkit.Reply{}, err
 		}
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	old, err := loadOIDC(r.Context(), tx)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, err
-	}
-	if err == nil {
-		if err = httpkit.Match(r, old.ETag); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		old, err := loadOIDC(r.Context(), tx)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		c.ID = old.ID
-		c.HasClientSecret = old.HasClientSecret
-	} else {
-		if r.Header.Get("If-Match") != "" {
-			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
-		}
-		c.ID = httpkit.NewID()
-	}
-	c.ETag = httpkit.NewID()
-	c.UpdatedByEmail = p.Email
-	if input.ClientSecret != nil {
-		var previous []byte
-		if old.HasClientSecret {
-			previous, err = s.access.Keys.Read(r.Context(), tx, s.access.Installation, c.ID, secrets.OIDCClientSecret)
-			if err != nil {
-				return httpkit.Reply{}, err
+		if err == nil {
+			if err = httpkit.Match(r, old.ETag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
 			}
-		}
-		if !hmac.Equal(previous, []byte(*input.ClientSecret)) {
-			// Verified identities prove sign-in only with the old credential.
-			// Clear that evidence in the same transaction so owner protection
-			// requires an independent path until OIDC succeeds again.
-			if _, err = tx.Exec(r.Context(), "UPDATE olp.oidc_identities SET role_claims=NULL WHERE role_claims IS NOT NULL"); err != nil {
-				return httpkit.Reply{}, err
-			}
-		}
-		c.HasClientSecret = *input.ClientSecret != ""
-		if c.HasClientSecret {
-			if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, c.ID, secrets.OIDCClientSecret, []byte(*input.ClientSecret), nil); err != nil {
-				return httpkit.Reply{}, err
-			}
+			c.ID = old.ID
+			c.HasClientSecret = old.HasClientSecret
 		} else {
-			if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", c.ID); err != nil {
-				return httpkit.Reply{}, err
+			if r.Header.Get("If-Match") != "" {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
+			}
+			c.ID = httpkit.NewID()
+		}
+		c.ETag = httpkit.NewID()
+		c.UpdatedByEmail = p.Email
+		if input.ClientSecret != nil {
+			var previous []byte
+			if old.HasClientSecret {
+				previous, err = s.access.Keys.Read(r.Context(), tx, s.access.Installation, c.ID, secrets.OIDCClientSecret)
+				if err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
+			}
+			if !hmac.Equal(previous, []byte(*input.ClientSecret)) {
+				// Verified identities prove sign-in only with the old credential.
+				// Clear that evidence in the same transaction so owner protection
+				// requires an independent path until OIDC succeeds again.
+				if _, err = tx.Exec(r.Context(), "UPDATE olp.oidc_identities SET role_claims=NULL WHERE role_claims IS NOT NULL"); err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
+			}
+			c.HasClientSecret = *input.ClientSecret != ""
+			if c.HasClientSecret {
+				if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, c.ID, secrets.OIDCClientSecret, []byte(*input.ClientSecret), nil); err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
+			} else {
+				if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", c.ID); err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
 			}
 		}
-	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	c.DiscoveryBinding = ""
-	return httpkit.Detail(c, c.ETag), tx.Commit(r.Context())
+		data, err := json.Marshal(c)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		c.DiscoveryBinding = ""
+		return httpkit.Detail(c, c.ETag), access.Event{Action: "oidc.configuration.update", Resource: "oidc_configuration", ID: c.ID}, nil
+	})
 }
 
 type oidcFlow struct {
@@ -789,63 +783,57 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (httpkit
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var owner string
-	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if owner != p.ID {
-		return httpkit.Reply{}, httpkit.Forbidden()
-	}
-	if err = s.access.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var local, localEnabled, locallyManaged bool
-	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !local || !locallyManaged || !localEnabled || s.access.LocalLoginDisabled() {
-		usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
-		if err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var owner string
+		if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		// An OIDC-managed account answers to the IdP, so no other sign-in method
-		// may outlive the identity through which the IdP can revoke its role.
-		var samlUsable []string
-		if locallyManaged {
-			if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
-				return httpkit.Reply{}, err
+		if owner != p.ID {
+			return httpkit.Reply{}, access.Event{}, httpkit.Forbidden()
+		}
+		if err = s.access.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var local, localEnabled, locallyManaged bool
+		if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if !local || !locallyManaged || !localEnabled || s.access.LocalLoginDisabled() {
+			usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			// An OIDC-managed account answers to the IdP, so no other sign-in method
+			// may outlive the identity through which the IdP can revoke its role.
+			var samlUsable []string
+			if locallyManaged {
+				if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
+			}
+			if len(usable) == 0 && len(samlUsable) == 0 {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 			}
 		}
-		if len(usable) == 0 && len(samlUsable) == 0 {
-			return httpkit.Reply{}, httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
+		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	// Removing an identity is no sign-in, so the rotated session keeps the
-	// method and MFA state of the session that asked.
-	strength, err := sessionStrength(r, tx, p.SessionID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	rotated, err := s.changeSignInMethod(r, tx, p.ID, strength)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	rotated.Status, rotated.Body = 204, nil
-	return rotated, tx.Commit(r.Context())
+		// Removing an identity is no sign-in, so the rotated session keeps the
+		// method and MFA state of the session that asked.
+		strength, err := sessionStrength(r, tx, p.SessionID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		rotated, err := s.changeSignInMethod(r, tx, p.ID, strength)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		rotated.Status, rotated.Body = 204, nil
+		return rotated, access.Event{Action: "oidc.unlink", Resource: "oidc_identity", ID: id}, nil
+	})
 }
 
 func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, strength sessionAuth) (httpkit.Reply, error) {

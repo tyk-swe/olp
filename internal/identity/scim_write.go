@@ -25,93 +25,88 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 			return httpkit.Reply{}, err
 		}
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	create := r.Method == "POST"
-	id := httpkit.NewID()
-	var current scim.Document
-	var etag string
-	if !create {
-		id, err = httpkit.IDParam(r, "scim_id")
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		create := r.Method == "POST"
+		id := httpkit.NewID()
+		var current scim.Document
+		var etag string
+		if !create {
+			id, err = httpkit.IDParam(r, "scim_id")
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, scim.Fail(404, "", "The resource was not found.")
+			}
+			current, etag, err = s.scimRead(r, tx, group, id)
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if match := r.Header.Get("If-Match"); match != "" && match != "*" && match != `"`+etag+`"` && match != `W/"`+etag+`"` {
+				return httpkit.Reply{}, access.Event{}, scim.Fail(412, "invalidVers", "The resource changed; read its current version.")
+			}
+		}
+		if r.Method == "PUT" {
+			extension := scim.UserExtension
+			if group {
+				extension = scim.GroupExtension
+			}
+			if _, present := body[extension]; !present {
+				body[extension] = current[extension]
+			}
+		}
+		if r.Method == "PATCH" {
+			body, err = scim.Patch(current, body, group, scimSelector(r, tx))
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		managed, err := scimManagedProjects(r, tx)
 		if err != nil {
-			return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		current, etag, err = s.scimRead(r, tx, group, id)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if match := r.Header.Get("If-Match"); match != "" && match != "*" && match != `"`+etag+`"` && match != `W/"`+etag+`"` {
-			return httpkit.Reply{}, scim.Fail(412, "invalidVers", "The resource changed; read its current version.")
-		}
-	}
-	if r.Method == "PUT" {
-		extension := scim.UserExtension
+		var affected []string
+		kind := "user"
 		if group {
-			extension = scim.GroupExtension
+			kind = "group"
+			affected, err = s.writeSCIMGroup(r, tx, id, body, r.Method)
+		} else {
+			id, err = s.writeSCIMUser(r, tx, id, body, r.Method)
+			affected = []string{id}
 		}
-		if _, present := body[extension]; !present {
-			body[extension] = current[extension]
-		}
-	}
-	if r.Method == "PATCH" {
-		body, err = scim.Patch(current, body, group, scimSelector(r, tx))
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	managed, err := scimManagedProjects(r, tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var affected []string
-	kind := "user"
-	if group {
-		kind = "group"
-		affected, err = s.writeSCIMGroup(r, tx, id, body, r.Method)
-	} else {
-		id, err = s.writeSCIMUser(r, tx, id, body, r.Method)
-		affected = []string{id}
-	}
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if orphaned, err := scimOrphansProject(r, tx, managed); err != nil || orphaned {
-		if err == nil {
-			err = scim.Fail(409, "", "Keep at least one project manager.")
+		if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{}, err
-	}
-	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "scim."+kind+"."+strings.ToLower(r.Method), kind, id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if r.Method == "DELETE" {
-		return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
-	}
-	resource, etag, err := s.scimRead(r, tx, group, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Detail(resource, etag)
-	if create {
-		reply.Status = 201
-		reply.Location = s.access.Origin + "/scim/v2/Users/" + id
-		if group {
-			reply.Location = s.access.Origin + "/scim/v2/Groups/" + id
+		if orphaned, err := scimOrphansProject(r, tx, managed); err != nil || orphaned {
+			if err == nil {
+				err = scim.Fail(409, "", "Keep at least one project manager.")
+			}
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	return reply, tx.Commit(r.Context())
+		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		written := access.Event{Action: "scim." + kind + "." + strings.ToLower(r.Method), Resource: kind, ID: id}
+		if r.Method == "DELETE" {
+			return httpkit.Reply{Status: 204}, written, nil
+		}
+		resource, etag, err := s.scimRead(r, tx, group, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Detail(resource, etag)
+		if create {
+			reply.Status = 201
+			reply.Location = s.access.Origin + "/scim/v2/Users/" + id
+			if group {
+				reply.Location = s.access.Origin + "/scim/v2/Groups/" + id
+			}
+		}
+		return reply, written, nil
+	})
 }
 
 // scimManagedProjects lists the managed projects that a directory change could

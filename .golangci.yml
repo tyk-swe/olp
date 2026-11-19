@@ -44,7 +44,7 @@ linters:
         linters: [funlen, revive]
       - path: \.gen\.go$
         linters: [funlen, revive]
-      - path: (^|/)internal/(access|identity)/
+      - path: (^|/)internal/access/
         linters: [forbidigo]
       - path: _test\.go$
         linters: [forbidigo]

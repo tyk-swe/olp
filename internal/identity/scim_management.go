@@ -49,52 +49,46 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 	if input.Mapping == nil {
 		return httpkit.Reply{}, httpkit.Invalid("mapping", "Provide an explicit mapping object.")
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	document, etag, err := s.scimRead(r, tx, true, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	data, _ := json.Marshal(input.Mapping)
-	var mapping map[string]any
-	if err = json.Unmarshal(data, &mapping); err != nil {
-		return httpkit.Reply{}, err
-	}
-	document[scim.GroupExtension] = mapping
-	managed, err := scimManagedProjects(r, tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	affected, err := s.writeSCIMGroup(r, tx, id, document, "PUT")
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = keepSCIMManagers(r, tx, managed); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "scim.group.mapping.update", "scim_group", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var body []byte
-	if err = tx.QueryRow(r.Context(), "SELECT "+scimGroupJSON+",g.etag::text FROM olp.scim_groups g WHERE id=$1", id).Scan(&body, &etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(json.RawMessage(body), etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		document, etag, err := s.scimRead(r, tx, true, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		data, _ := json.Marshal(input.Mapping)
+		var mapping map[string]any
+		if err = json.Unmarshal(data, &mapping); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		document[scim.GroupExtension] = mapping
+		managed, err := scimManagedProjects(r, tx)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		affected, err := s.writeSCIMGroup(r, tx, id, document, "PUT")
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = keepSCIMManagers(r, tx, managed); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var body []byte
+		if err = tx.QueryRow(r.Context(), "SELECT "+scimGroupJSON+",g.etag::text FROM olp.scim_groups g WHERE id=$1", id).Scan(&body, &etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(json.RawMessage(body), etag), access.Event{Action: "scim.group.mapping.update", Resource: "scim_group", ID: id}, nil
+	})
 }
 
 // keepSCIMManagers refuses a mapping change that leaves a project it managed
