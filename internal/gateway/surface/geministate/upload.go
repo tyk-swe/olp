@@ -22,26 +22,26 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type geminiCommand struct {
+type uploadCommand struct {
 	query    bool
 	finalize bool
 }
 
-func parseGeminiUploadCommand(value string) (geminiCommand, *fault.Error) {
+func parseCommand(value string) (uploadCommand, *fault.Error) {
 	switch strings.TrimSpace(value) {
 	case "query":
-		return geminiCommand{query: true}, nil
+		return uploadCommand{query: true}, nil
 	case "upload":
-		return geminiCommand{}, nil
+		return uploadCommand{}, nil
 	case "upload, finalize":
-		return geminiCommand{finalize: true}, nil
+		return uploadCommand{finalize: true}, nil
 	default:
 		param := "X-Goog-Upload-Command"
-		return geminiCommand{}, fault.InvalidRequest("invalid_value", "The upload command must be upload, upload, finalize, or query.", &param)
+		return uploadCommand{}, fault.InvalidRequest("invalid_value", "The upload command must be upload, upload, finalize, or query.", &param)
 	}
 }
 
-func parseGeminiUploadOffset(value string) (int64, *fault.Error) {
+func parseOffset(value string) (int64, *fault.Error) {
 	offset, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || offset < 0 {
 		param := "X-Goog-Upload-Offset"
@@ -50,7 +50,7 @@ func parseGeminiUploadOffset(value string) (int64, *fault.Error) {
 	return offset, nil
 }
 
-func validateGeminiChunk(expected, stored, offset, length int64, finalize bool) *fault.Error {
+func validateChunk(expected, stored, offset, length int64, finalize bool) *fault.Error {
 	if offset != stored {
 		param := "X-Goog-Upload-Offset"
 		return fault.InvalidRequest("invalid_value", "The upload offset does not match the stored session offset.", &param)
@@ -66,14 +66,14 @@ func validateGeminiChunk(expected, stored, offset, length int64, finalize bool) 
 	return nil
 }
 
-func writeGeminiUploadAck(w http.ResponseWriter, x *kernel.Call, offset int64, state string) {
+func acknowledge(w http.ResponseWriter, x *kernel.Call, offset int64, state string) {
 	x.ResponseHeaders(w.Header(), false)
 	w.Header().Set("X-Goog-Upload-Status", state)
 	w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(offset, 10))
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s surface) markGeminiUploadFailed(ctx context.Context, resource *resources.Resource) {
+func (s surface) markFailed(ctx context.Context, resource *resources.Resource) {
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
 	if err := s.kernel.Deps.Resources.Update(commitCtx, resource.ID, "failed", nil, nil); err != nil {
@@ -81,7 +81,7 @@ func (s surface) markGeminiUploadFailed(ctx context.Context, resource *resources
 	}
 }
 
-func (s surface) finishGeminiUploadAck(w http.ResponseWriter, x *kernel.Call, exchange *kernel.PinnedExchange) {
+func (s surface) finishAck(w http.ResponseWriter, x *kernel.Call, exchange *kernel.PinnedExchange) {
 	controller := http.NewResponseController(w)
 	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if err := controller.Flush(); err != nil {
@@ -99,7 +99,7 @@ type sessionState struct {
 	contentType      string
 }
 
-func geminiUploadState(resource *resources.Resource) (sessionState, error) {
+func readState(resource *resources.Resource) (sessionState, error) {
 	var metadata struct {
 		Expected int64  `json:"expected_length"`
 		Offset   int64  `json:"offset"`
@@ -111,7 +111,7 @@ func geminiUploadState(resource *resources.Resource) (sessionState, error) {
 	return sessionState{expected: metadata.Expected, offset: metadata.Offset, contentType: metadata.Type}, nil
 }
 
-func (c geminiCommand) header() string {
+func (c uploadCommand) header() string {
 	if c.finalize {
 		return "upload, finalize"
 	}
@@ -123,11 +123,11 @@ func acceptsChunk(length int64, rawOffset string, state sessionState, finalize b
 		param := "Content-Length"
 		return fault.InvalidRequest("missing_required_parameter", "Content-Length is required for Gemini upload chunks.", &param)
 	}
-	offset, err := parseGeminiUploadOffset(rawOffset)
+	offset, err := parseOffset(rawOffset)
 	if err != nil {
 		return err
 	}
-	if err := validateGeminiChunk(state.expected, state.offset, offset, length, finalize); err != nil {
+	if err := validateChunk(state.expected, state.offset, offset, length, finalize); err != nil {
 		return err
 	}
 	if length > maximum {
@@ -166,11 +166,11 @@ func (s surface) continueUpload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.kernel.ResourceSettle(ctx, x, p)
-	if err := s.geminiResourceGates(ctx, x, authority, p, route, true); err != nil {
+	if err := s.gates(ctx, x, authority, p, route, true); err != nil {
 		s.kernel.Refuse(x, w, err)
 		return
 	}
-	state, stateErr := geminiUploadState(session)
+	state, stateErr := readState(session)
 	if stateErr != nil {
 		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload session metadata is invalid."))
 		return
@@ -209,18 +209,18 @@ func (s surface) continueUpload(w http.ResponseWriter, r *http.Request) {
 	u.advance(ctx, resp, offset)
 }
 
-func (s surface) session(r *http.Request, authority keyauthority.Authority) (*resources.Resource, geminiCommand, *fault.Error) {
+func (s surface) session(r *http.Request, authority keyauthority.Authority) (*resources.Resource, uploadCommand, *fault.Error) {
 	session, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
 	if errors.Is(err, resources.ErrNotFound) {
-		return nil, geminiCommand{}, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key.")
+		return nil, uploadCommand{}, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key.")
 	}
 	if err != nil {
-		return nil, geminiCommand{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini upload session could not be read.")
+		return nil, uploadCommand{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini upload session could not be read.")
 	}
 	if session.State == "failed" {
-		return nil, geminiCommand{}, fault.ServerError(http.StatusConflict, "resource_transition", "The Gemini upload session has failed.")
+		return nil, uploadCommand{}, fault.ServerError(http.StatusConflict, "resource_transition", "The Gemini upload session has failed.")
 	}
-	command, commandErr := parseGeminiUploadCommand(r.Header.Get("X-Goog-Upload-Command"))
+	command, commandErr := parseCommand(r.Header.Get("X-Goog-Upload-Command"))
 	return session, command, commandErr
 }
 
@@ -248,11 +248,11 @@ type upload struct {
 	route     *routing.Route
 	pin       *kernel.Pin
 	state     sessionState
-	command   geminiCommand
+	command   uploadCommand
 }
 
 func (u upload) fail() {
-	u.markGeminiUploadFailed(u.r.Context(), u.session)
+	u.markFailed(u.r.Context(), u.session)
 }
 
 func (u upload) report() {
@@ -260,7 +260,7 @@ func (u upload) report() {
 		u.kernel.Refuse(u.x, u.w, fault.InvalidRequest("invalid_request", "A query upload command cannot contain a body.", nil))
 		return
 	}
-	writeGeminiUploadAck(u.w, u.x, u.state.offset, "active")
+	acknowledge(u.w, u.x, u.state.offset, "active")
 	u.kernel.Finish(u.x, &kernel.Outcome{Committed: true}, http.StatusOK)
 }
 
@@ -305,7 +305,7 @@ func (u upload) stage(ctx context.Context) (chunk, *fault.Error) {
 	if u.state.offset != 0 || !u.command.finalize || artifact.ContentLength != u.state.expected {
 		return staged, nil
 	}
-	manifest, qualifyErr := qualifyGeminiBatchJSONL(opened.File, u.route.Slug, u.kernel.BatchLineDigest)
+	manifest, qualifyErr := qualifyJSONL(opened.File, u.route.Slug, u.kernel.BatchLineDigest)
 	if _, err := opened.File.Seek(0, io.SeekStart); err != nil {
 		return staged, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
 	}
@@ -355,8 +355,8 @@ func (u upload) advance(ctx context.Context, resp *kernel.PinnedResponse, offset
 		u.kernel.Refuse(u.x, u.w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload offset could not be stored."))
 		return
 	}
-	writeGeminiUploadAck(u.w, u.x, offset, "active")
-	u.finishGeminiUploadAck(u.w, u.x, resp.Exchange)
+	acknowledge(u.w, u.x, offset, "active")
+	u.finishAck(u.w, u.x, resp.Exchange)
 }
 
 func (u upload) finalize(ctx context.Context, resp *kernel.PinnedResponse, offset int64, manifest *kernel.BatchManifest) {
@@ -394,7 +394,7 @@ func (u upload) bind(ctx context.Context, resp *kernel.PinnedResponse, offset in
 		u.fail()
 		return nil, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The finalized Gemini file could not be stored.")
 	}
-	projected, projectionErr := projectGeminiFile(file.object, created.ID, u.kernel.GatewayOrigin(u.r))
+	projected, projectionErr := projectFile(file.object, created.ID, u.kernel.GatewayOrigin(u.r))
 	if projectionErr != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected.")
 	}
@@ -417,7 +417,7 @@ func readFinalFile(body []byte, model string) (finalFile, *fault.Error) {
 	if json.Unmarshal(body, &envelope) != nil || len(envelope.File) == 0 {
 		return finalFile{}, invalid
 	}
-	metadata, state, expires, err := geminiFileMetadata(envelope.File, model)
+	metadata, state, expires, err := fileMetadata(envelope.File, model)
 	var object map[string]json.RawMessage
 	if err != nil || json.Unmarshal(envelope.File, &object) != nil {
 		return finalFile{}, invalid

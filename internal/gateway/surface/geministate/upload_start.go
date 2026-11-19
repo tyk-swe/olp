@@ -44,7 +44,7 @@ func (d declaredUpload) metadata(model string) map[string]any {
 	return metadata
 }
 
-func validateGeminiStartHeaders(protocol, command, rawLength string, maximum int64) (int64, *fault.Error) {
+func validateStart(protocol, command, rawLength string, maximum int64) (int64, *fault.Error) {
 	if protocol != "resumable" || command != "start" {
 		return 0, fault.InvalidRequest("invalid_request", "Gemini files require a resumable start upload.", nil)
 	}
@@ -56,7 +56,7 @@ func validateGeminiStartHeaders(protocol, command, rawLength string, maximum int
 	return length, nil
 }
 
-func parseGeminiUploadStartBody(body []byte) (string, bool, *fault.Error) {
+func parseStartBody(body []byte) (string, bool, *fault.Error) {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		return "", false, nil
 	}
@@ -112,7 +112,7 @@ func (s surface) startUpload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.kernel.ResourceSettle(ctx, x, p)
-	if err := s.geminiResourceGates(ctx, x, authority, p, route, true); err != nil {
+	if err := s.gates(ctx, x, authority, p, route, true); err != nil {
 		s.kernel.Refuse(x, w, err)
 		return
 	}
@@ -133,11 +133,11 @@ func (s surface) startUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Goog-Upload-Status", "active")
 	w.Header().Set("X-Goog-Upload-URL", s.kernel.GatewayOrigin(r)+"/gemini/upload/"+url.PathEscape(resource.ID))
 	w.WriteHeader(http.StatusOK)
-	s.finishGeminiUploadAck(w, x, resp.Exchange)
+	s.finishAck(w, x, resp.Exchange)
 }
 
 func (s surface) declared(w http.ResponseWriter, r *http.Request) (declaredUpload, *fault.Error) {
-	length, err := validateGeminiStartHeaders(r.Header.Get("X-Goog-Upload-Protocol"), r.Header.Get("X-Goog-Upload-Command"),
+	length, err := validateStart(r.Header.Get("X-Goog-Upload-Protocol"), r.Header.Get("X-Goog-Upload-Command"),
 		r.Header.Get("X-Goog-Upload-Header-Content-Length"), s.kernel.Config.MaxMediaBodyBytes)
 	if err != nil {
 		return declaredUpload{}, err
@@ -146,7 +146,7 @@ func (s surface) declared(w http.ResponseWriter, r *http.Request) (declaredUploa
 	if err != nil {
 		return declaredUpload{}, err
 	}
-	displayName, named, err := parseGeminiUploadStartBody(body)
+	displayName, named, err := parseStartBody(body)
 	if err != nil {
 		return declaredUpload{}, err
 	}

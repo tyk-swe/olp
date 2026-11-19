@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-func (s surface) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Resource, upstreamName string) (*resources.Resource, error) {
+func (s surface) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamName string) (*resources.Resource, error) {
 	upstreamID, err := kernel.GeminiFileID(upstreamName)
 	if err != nil {
 		return nil, kernel.ErrGeminiBatchFidelity
@@ -56,7 +56,7 @@ func (s surface) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Res
 	return nil, err
 }
 
-func (s surface) geminiBatchCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin) *fault.Error) {
+func (s surface) batchCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin) *fault.Error) {
 	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
@@ -89,7 +89,7 @@ func (s surface) geminiBatchCall(w http.ResponseWriter, r *http.Request, use ker
 	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.kernel.ResourceSettle(ctx, x, p)
-	if err := s.geminiResourceGates(ctx, x, authority, p, route, false); err != nil {
+	if err := s.gates(ctx, x, authority, p, route, false); err != nil {
 		s.kernel.Refuse(x, w, err)
 		return
 	}
@@ -98,8 +98,8 @@ func (s surface) geminiBatchCall(w http.ResponseWriter, r *http.Request, use ker
 	}
 }
 
-func (s surface) geminiBatchResourceObject(ctx context.Context, resource *resources.Resource, body []byte) ([]byte, error) {
-	names, err := geminiBatchInputNames(resource)
+func (s surface) resourceObject(ctx context.Context, resource *resources.Resource, body []byte) ([]byte, error) {
+	names, err := readInputNames(resource)
 	if err != nil {
 		return nil, kernel.ErrGeminiBatchFidelity
 	}
@@ -107,17 +107,17 @@ func (s surface) geminiBatchResourceObject(ctx context.Context, resource *resour
 	if err != nil {
 		return nil, kernel.ErrGeminiBatchFidelity
 	}
-	object, err := prepareGeminiBatchObject(body, batch, names)
+	object, err := prepareBatch(body, batch, names)
 	if err != nil {
 		return nil, err
 	}
-	return s.projectGeminiBatchResource(ctx, resource, object)
+	return s.projectResource(ctx, resource, object)
 }
 
-func (s surface) projectGeminiBatchResource(ctx context.Context, resource *resources.Resource, object geminiBatchObject) ([]byte, error) {
+func (s surface) projectResource(ctx context.Context, resource *resources.Resource, object batchObject) ([]byte, error) {
 	outputs := make(map[string]string, len(object.outputs))
 	for _, file := range object.outputs {
-		mapped, err := s.mapUpstreamGeminiFile(ctx, resource, file)
+		mapped, err := s.mapUpstreamFile(ctx, resource, file)
 		if err != nil {
 			return nil, err
 		}
@@ -126,13 +126,13 @@ func (s surface) projectGeminiBatchResource(ctx context.Context, resource *resou
 	return object.project(resource.ID, resource.RouteSlug, outputs)
 }
 
-func (s surface) geminiListBatches(w http.ResponseWriter, r *http.Request) {
+func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	pageSize, pageToken, cursorErr := geminiBatchPageCursor(r.URL.Query())
+	pageSize, pageToken, cursorErr := batchPageCursor(r.URL.Query())
 	if cursorErr != nil {
 		s.kernel.Refuse(x, w, cursorErr)
 		return
@@ -156,9 +156,9 @@ func (s surface) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	operations := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
-		operation, projectErr := s.geminiBatchResourceObject(r.Context(), row, row.Metadata)
+		operation, projectErr := s.resourceObject(r.Context(), row, row.Metadata)
 		if projectErr != nil {
-			s.kernel.Refuse(x, w, geminiBatchProjectionError(projectErr))
+			s.kernel.Refuse(x, w, projectionError(projectErr))
 			return
 		}
 		operations = append(operations, operation)
@@ -170,8 +170,8 @@ func (s surface) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 	s.kernel.WriteStateJSON(w, x, kernel.MustJSON(response))
 }
 
-func (s surface) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, method string, cancel bool) {
-	s.geminiBatchCall(w, r, use, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, resource *resources.Resource, p *kernel.Pin) *fault.Error {
+func (s surface) relayBatch(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, method string, cancel bool) {
+	s.batchCall(w, r, use, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, resource *resources.Resource, p *kernel.Pin) *fault.Error {
 		path := "batches/" + url.PathEscape(resource.UpstreamID)
 		if cancel {
 			path += ":cancel"
@@ -193,12 +193,12 @@ func (s surface) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch response could not be read.")
 		}
-		if cancel && geminiBatchCancelAcknowledgement(body) {
+		if cancel && cancelAcknowledged(body) {
 			response.Exchange.Complete(kernel.ClassSuccess)
 
-			projected, projectErr := s.geminiBatchResourceObject(ctx, resource, resource.Metadata)
+			projected, projectErr := s.resourceObject(ctx, resource, resource.Metadata)
 			if projectErr != nil {
-				return geminiBatchProjectionError(projectErr)
+				return projectionError(projectErr)
 			}
 			s.kernel.WriteStateJSON(w, x, projected, response.Exchange)
 			return nil
@@ -207,33 +207,33 @@ func (s surface) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		if decodeErr != nil || batch.ID != resource.UpstreamID {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini batch identity.")
 		}
-		names, namesErr := geminiBatchInputNames(resource)
+		names, namesErr := readInputNames(resource)
 		if namesErr != nil {
 			response.Exchange.Interrupt(kernel.ClassProtocol, true)
-			return geminiBatchProjectionError(kernel.ErrGeminiBatchFidelity)
+			return projectionError(kernel.ErrGeminiBatchFidelity)
 		}
-		object, metadata, metadataErr := settleGeminiBatchResult(response.Exchange, body, batch, kernel.ResourceModel(resource), names)
+		object, metadata, metadataErr := settleResult(response.Exchange, body, batch, kernel.ResourceModel(resource), names)
 		if metadataErr != nil {
-			return geminiBatchProjectionError(kernel.ErrGeminiBatchFidelity)
+			return projectionError(kernel.ErrGeminiBatchFidelity)
 		}
 		if err := s.kernel.Deps.Resources.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch refresh could not be committed.")
 		}
 
-		projected, projectErr := s.projectGeminiBatchResource(ctx, resource, object)
+		projected, projectErr := s.projectResource(ctx, resource, object)
 		if projectErr != nil {
-			return geminiBatchProjectionError(projectErr)
+			return projectionError(projectErr)
 		}
 		s.kernel.WriteStateJSON(w, x, projected, response.Exchange)
 		return nil
 	})
 }
 
-func (s surface) geminiGetBatch(w http.ResponseWriter, r *http.Request) {
-	s.geminiBatchRequest(w, r, kernel.RetainedRetrieval, http.MethodGet, false)
+func (s surface) getBatch(w http.ResponseWriter, r *http.Request) {
+	s.relayBatch(w, r, kernel.RetainedRetrieval, http.MethodGet, false)
 }
 
-func (s surface) geminiBatchCancel(w http.ResponseWriter, r *http.Request) {
+func (s surface) cancelBatch(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "cancel" || localID == "" {
 		x, _, done := s.kernel.StateBegin(w, r, wire.GeminiBatch)
@@ -244,11 +244,11 @@ func (s surface) geminiBatchCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.SetPathValue("name", localID)
-	s.geminiBatchRequest(w, r, kernel.RetainedHousekeeping, http.MethodPost, true)
+	s.relayBatch(w, r, kernel.RetainedHousekeeping, http.MethodPost, true)
 }
 
-func (s surface) geminiDeleteBatch(w http.ResponseWriter, r *http.Request) {
-	s.geminiBatchCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, resource *resources.Resource, p *kernel.Pin) *fault.Error {
+func (s surface) deleteBatch(w http.ResponseWriter, r *http.Request) {
+	s.batchCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, resource *resources.Resource, p *kernel.Pin) *fault.Error {
 		if err := s.kernel.RequireBatchEvidenceSettled(ctx, resource.UUID); err != nil {
 			return err
 		}
@@ -277,7 +277,7 @@ func (s surface) geminiDeleteBatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func geminiBatchPageCursor(query url.Values) (int, string, *fault.Error) {
+func batchPageCursor(query url.Values) (int, string, *fault.Error) {
 	pageSize := 10
 	if raw := query.Get("pageSize"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -288,14 +288,14 @@ func geminiBatchPageCursor(query url.Values) (int, string, *fault.Error) {
 		pageSize = parsed
 	}
 	token := query.Get("pageToken")
-	if token != "" && !strings.HasPrefix(token, kernel.RetainedListCursorPrefix) && !validGeminiResourceID(token, resources.KindGeminiBatch) {
+	if token != "" && !strings.HasPrefix(token, kernel.RetainedListCursorPrefix) && !validResourceID(token, resources.KindGeminiBatch) {
 		param := "pageToken"
 		return 0, "", fault.InvalidRequest("invalid_value", "pageToken must be a local Gemini batch identifier.", &param)
 	}
 	return pageSize, token, nil
 }
 
-func validGeminiResourceID(value, kind string) bool {
+func validResourceID(value, kind string) bool {
 	prefix := kind + "_"
 	raw := strings.TrimPrefix(value, prefix)
 	if raw == value || len(raw) != 32 {

@@ -25,7 +25,7 @@ func TestBatchRequestsAreAcceptedOnlyInTheTwoInputShapesAndTranslatedForTheProvi
 	t.Parallel()
 	file := "files/" + resources.LocalID(resources.KindGeminiFile, uuid.New())
 
-	accepted, err := validateGeminiBatchRequest([]byte(`{"batch":{"display_name":"nightly","inputConfig":{"requests":{"requests":[`+item("a")+`,`+item("b")+`]}}}}`), "route")
+	accepted, err := validateBatch([]byte(`{"batch":{"display_name":"nightly","inputConfig":{"requests":{"requests":[`+item("a")+`,`+item("b")+`]}}}}`), "route")
 	if err != nil {
 		t.Fatalf("inline batch refused: %+v", err)
 	}
@@ -45,7 +45,7 @@ func TestBatchRequestsAreAcceptedOnlyInTheTwoInputShapesAndTranslatedForTheProvi
 		t.Fatalf("inline batch = %+v, want two keyed requests and no file", accepted)
 	}
 
-	bound, err := validateGeminiBatchRequest([]byte(`{"batch":{"input_config":{"file_name":"`+file+`"}}}`), "route")
+	bound, err := validateBatch([]byte(`{"batch":{"input_config":{"file_name":"`+file+`"}}}`), "route")
 	if err != nil {
 		t.Fatalf("file batch refused: %+v", err)
 	}
@@ -55,7 +55,7 @@ func TestBatchRequestsAreAcceptedOnlyInTheTwoInputShapesAndTranslatedForTheProvi
 	if bound.Expected != nil || bound.Keys != nil || "files/"+bound.LocalFileID != file || bound.UpstreamFile != file || bound.DisplayName != nil {
 		t.Fatalf("file batch = %+v, want only the caller's file", bound)
 	}
-	respelled, err := validateGeminiBatchRequest([]byte(`{ "batch" : {"input_config":{"file_name":"`+file+`"}} }`), "route")
+	respelled, err := validateBatch([]byte(`{ "batch" : {"input_config":{"file_name":"`+file+`"}} }`), "route")
 	if err != nil || string(respelled.Canonical) != string(bound.Canonical) {
 		t.Fatalf("the same request spelled with other whitespace has another canonical form: %s and %s", respelled.Canonical, bound.Canonical)
 	}
@@ -88,7 +88,7 @@ func TestBatchRequestsAreAcceptedOnlyInTheTwoInputShapesAndTranslatedForTheProvi
 		"request is not a generation":  inline(`{"request":{"contents":"x"},"metadata":{"key":"a"}}`),
 		"request names a file":         inline(`{"request":{"contents":[{"role":"user","parts":[{"fileData":{"fileUri":"files/abc"}}]}]},"metadata":{"key":"a"}}`),
 	} {
-		if got, err := validateGeminiBatchRequest([]byte(body), "route"); err == nil || err.Status != 400 {
+		if got, err := validateBatch([]byte(body), "route"); err == nil || err.Status != 400 {
 			t.Errorf("%s: accepted as %+v with %+v, want a 400", name, got, err)
 		}
 	}

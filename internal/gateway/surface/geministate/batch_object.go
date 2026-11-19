@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-func geminiBatchCancelAcknowledgement(body []byte) bool {
+func cancelAcknowledged(body []byte) bool {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return true
 	}
@@ -21,46 +21,46 @@ func geminiBatchCancelAcknowledgement(body []byte) bool {
 	return json.Unmarshal(body, &value) == nil && value != nil && len(value) == 0
 }
 
-type geminiBatchObject struct {
+type batchObject struct {
 	outer, metadata map[string]json.RawMessage
 	outputs         []string
 }
 
-func prepareGeminiBatchObject(body []byte, batch upstream.GeminiBatch, names geminiInputNames) (geminiBatchObject, error) {
+func prepareBatch(body []byte, batch upstream.GeminiBatch, names inputNames) (batchObject, error) {
 	var object map[string]json.RawMessage
 	if json.Unmarshal(body, &object) != nil || object == nil {
-		return geminiBatchObject{}, kernel.ErrGeminiBatchFidelity
+		return batchObject{}, kernel.ErrGeminiBatchFidelity
 	}
 	var metadata map[string]json.RawMessage
 	if raw, present := object["metadata"]; present {
 		if json.Unmarshal(raw, &metadata) != nil || metadata == nil {
-			return geminiBatchObject{}, kernel.ErrGeminiBatchFidelity
+			return batchObject{}, kernel.ErrGeminiBatchFidelity
 		}
 		if rawName, present := metadata["name"]; present {
 			var name string
 			if json.Unmarshal(rawName, &name) != nil || name != "batches/"+batch.ID {
-				return geminiBatchObject{}, kernel.ErrGeminiBatchFidelity
+				return batchObject{}, kernel.ErrGeminiBatchFidelity
 			}
 		}
 	}
 	var outputs []string
 	for _, layer := range []map[string]json.RawMessage{object, metadata} {
-		if err := projectGeminiBatchInput(layer, names); err != nil {
-			return geminiBatchObject{}, err
+		if err := projectInput(layer, names); err != nil {
+			return batchObject{}, err
 		}
-		files, err := geminiBatchOutputNames(layer)
+		files, err := outputNames(layer)
 		if err != nil {
-			return geminiBatchObject{}, err
+			return batchObject{}, err
 		}
 		outputs = append(outputs, files...)
 	}
 	delete(object, "upstream_model")
 	delete(object, "local_input_file_name")
 	delete(object, "upstream_input_file_name")
-	return geminiBatchObject{outer: object, metadata: metadata, outputs: slices.Compact(outputs)}, nil
+	return batchObject{outer: object, metadata: metadata, outputs: slices.Compact(outputs)}, nil
 }
 
-func projectGeminiBatchInput(object map[string]json.RawMessage, names geminiInputNames) error {
+func projectInput(object map[string]json.RawMessage, names inputNames) error {
 	for _, field := range []string{"inputConfig", "input_config"} {
 		raw, present := object[field]
 		if !present {
@@ -84,7 +84,7 @@ func projectGeminiBatchInput(object map[string]json.RawMessage, names geminiInpu
 	return nil
 }
 
-func geminiBatchOutputNames(object map[string]json.RawMessage) ([]string, error) {
+func outputNames(object map[string]json.RawMessage) ([]string, error) {
 	var files []string
 	for _, field := range upstream.GeminiOutputFields() {
 		raw, present := object[field]
@@ -109,7 +109,7 @@ func geminiBatchOutputNames(object map[string]json.RawMessage) ([]string, error)
 	return files, nil
 }
 
-func (b geminiBatchObject) project(localID, routeSlug string, outputFiles map[string]string) ([]byte, error) {
+func (b batchObject) project(localID, routeSlug string, outputFiles map[string]string) ([]byte, error) {
 	localName := kernel.MustJSON("batches/" + localID)
 	for _, layer := range []map[string]json.RawMessage{b.outer, b.metadata} {
 		if _, present := layer["name"]; present {
@@ -141,39 +141,39 @@ func (b geminiBatchObject) project(localID, routeSlug string, outputFiles map[st
 	return json.Marshal(b.outer)
 }
 
-func settleGeminiBatchResult(exchange *kernel.PinnedExchange, body []byte, batch upstream.GeminiBatch, model string, names geminiInputNames) (geminiBatchObject, json.RawMessage, error) {
-	object, metadata, err := acceptGeminiBatchResult(body, batch, model, names)
+func settleResult(exchange *kernel.PinnedExchange, body []byte, batch upstream.GeminiBatch, model string, names inputNames) (batchObject, json.RawMessage, error) {
+	object, metadata, err := acceptResult(body, batch, model, names)
 	if err != nil {
-		return geminiBatchObject{}, nil, err
+		return batchObject{}, nil, err
 	}
 	exchange.Complete(kernel.ClassSuccess)
 	return object, metadata, nil
 }
 
-func acceptGeminiBatchResult(body []byte, batch upstream.GeminiBatch, model string, names geminiInputNames) (geminiBatchObject, json.RawMessage, error) {
-	object, err := prepareGeminiBatchObject(body, batch, names)
+func acceptResult(body []byte, batch upstream.GeminiBatch, model string, names inputNames) (batchObject, json.RawMessage, error) {
+	object, err := prepareBatch(body, batch, names)
 	if err != nil {
-		return geminiBatchObject{}, nil, err
+		return batchObject{}, nil, err
 	}
 	metadata, err := upstream.GeminiMetadata(body, model, names.Local, names.Upstream)
 	if err != nil {
-		return geminiBatchObject{}, nil, err
+		return batchObject{}, nil, err
 	}
 	return object, metadata, nil
 }
 
-type geminiInputNames struct {
+type inputNames struct {
 	Local    string `json:"local_input_file_name"`
 	Upstream string `json:"upstream_input_file_name"`
 }
 
-func geminiBatchInputNames(resource *resources.Resource) (geminiInputNames, error) {
-	var names geminiInputNames
+func readInputNames(resource *resources.Resource) (inputNames, error) {
+	var names inputNames
 	err := json.Unmarshal(resource.Metadata, &names)
 	return names, err
 }
 
-func geminiBatchProjectionError(err error) *fault.Error {
+func projectionError(err error) *fault.Error {
 	if errors.Is(err, kernel.ErrGeminiBatchFidelity) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unprojectable Gemini batch object.")
 	}

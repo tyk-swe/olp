@@ -25,7 +25,7 @@ func TestBatchRepliesNamingAnotherBatchOrInputAreRefusedAndAcceptedOnesShowOnlyC
 			if err != nil {
 				t.Fatalf("could not decode the provider reply: %v", err)
 			}
-			object, _, err := acceptGeminiBatchResult(body, batch, "gemini-model", geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
+			object, _, err := acceptResult(body, batch, "gemini-model", inputNames{Local: "files/local-input", Upstream: "files/native-input"})
 			if (err == nil) != tc.valid {
 				t.Fatalf("acceptance error is %v, want accepted=%v", err, tc.valid)
 			}

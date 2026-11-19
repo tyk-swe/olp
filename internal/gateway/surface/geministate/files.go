@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s surface) geminiResourceGates(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, p *kernel.Pin, route *routing.Route, newWork bool) *fault.Error {
+func (s surface) gates(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, p *kernel.Pin, route *routing.Route, newWork bool) *fault.Error {
 	if newWork {
 		if err := s.kernel.UnboundedPinLimits(x.AdmissionAuthority(authority), p, route); err != nil {
 			return err
@@ -32,7 +32,7 @@ func (s surface) geminiResourceGates(ctx context.Context, x *kernel.Call, author
 	return s.kernel.ReserveStateAndSlot(ctx, x, authority, p, route)
 }
 
-func geminiFileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time, error) {
+func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time, error) {
 	var file map[string]json.RawMessage
 	if json.Unmarshal(body, &file) != nil || file == nil {
 		return nil, "", nil, errors.New("malformed Gemini file")
@@ -70,7 +70,7 @@ func geminiFileMetadata(body []byte, model string) (json.RawMessage, string, *ti
 	return encoded, state, expires, err
 }
 
-func projectGeminiFile(body []byte, localID, origin string) ([]byte, error) {
+func projectFile(body []byte, localID, origin string) ([]byte, error) {
 	var file map[string]json.RawMessage
 	if json.Unmarshal(body, &file) != nil || file == nil {
 		return nil, errors.New("malformed Gemini file projection")
@@ -88,7 +88,7 @@ func projectGeminiFile(body []byte, localID, origin string) ([]byte, error) {
 	return json.Marshal(file)
 }
 
-func (s surface) geminiFileCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin, *routing.Route) *fault.Error) {
+func (s surface) fileCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin, *routing.Route) *fault.Error) {
 	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
@@ -121,7 +121,7 @@ func (s surface) geminiFileCall(w http.ResponseWriter, r *http.Request, use kern
 	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.kernel.ResourceSettle(ctx, x, p)
-	if err := s.geminiResourceGates(ctx, x, authority, p, route, false); err != nil {
+	if err := s.gates(ctx, x, authority, p, route, false); err != nil {
 		s.kernel.Refuse(x, w, err)
 		return
 	}
@@ -130,8 +130,8 @@ func (s surface) geminiFileCall(w http.ResponseWriter, r *http.Request, use kern
 	}
 }
 
-func (s surface) geminiGetFile(w http.ResponseWriter, r *http.Request) {
-	s.geminiFileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
+func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
+	s.fileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
 		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file address could not be resolved.")
@@ -149,7 +149,7 @@ func (s surface) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file response could not be read.")
 		}
-		metadata, state, expires, err := geminiFileMetadata(body, p.Model)
+		metadata, state, expires, err := fileMetadata(body, p.Model)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file.")
 		}
@@ -173,7 +173,7 @@ func (s surface) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if err := s.kernel.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file metadata could not be refreshed.")
 		}
-		projected, err := projectGeminiFile(body, res.ID, s.kernel.GatewayOrigin(r))
+		projected, err := projectFile(body, res.ID, s.kernel.GatewayOrigin(r))
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected.")
 		}
@@ -182,8 +182,8 @@ func (s surface) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s surface) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
-	s.geminiFileCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
+func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
+	s.fileCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
 		if res.ParentID != nil {
 			if err := s.kernel.RequireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
 				return err
@@ -211,13 +211,13 @@ func (s surface) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s surface) geminiListFiles(w http.ResponseWriter, r *http.Request) {
+func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	pageSize, pageToken, cursorErr := geminiPageCursor(r.URL.Query())
+	pageSize, pageToken, cursorErr := filePageCursor(r.URL.Query())
 	if cursorErr != nil {
 		s.kernel.Refuse(x, w, cursorErr)
 		return
@@ -247,7 +247,7 @@ func (s surface) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, _ := json.Marshal(metadata)
-		file, projectErr := projectGeminiFile(body, row.ID, s.kernel.GatewayOrigin(r))
+		file, projectErr := projectFile(body, row.ID, s.kernel.GatewayOrigin(r))
 		if projectErr != nil {
 			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."))
 			return
@@ -261,7 +261,7 @@ func (s surface) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 	s.kernel.WriteStateJSON(w, x, kernel.MustJSON(response))
 }
 
-func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, error) {
+func downloadURL(cfg connectors.Config, model, fileID string) (string, error) {
 	generation, err := cfg.URL(wire.Gemini, model, false)
 	if err != nil {
 		return "", err
@@ -273,7 +273,7 @@ func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, err
 	return parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media", nil
 }
 
-func (s surface) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
+func (s surface) downloadFile(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "download" || localID == "" {
 		x, _, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
@@ -284,8 +284,8 @@ func (s surface) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.SetPathValue("name", localID)
-	s.geminiFileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
-		endpoint, err := geminiDownloadURL(p.Provider.Connector(), p.Model, res.UpstreamID)
+	s.fileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
+		endpoint, err := downloadURL(p.Provider.Connector(), p.Model, res.UpstreamID)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 		}
@@ -332,7 +332,7 @@ func (s surface) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func geminiPageCursor(query url.Values) (int, string, *fault.Error) {
+func filePageCursor(query url.Values) (int, string, *fault.Error) {
 	pageSize := 10
 	if raw := query.Get("pageSize"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
