@@ -244,7 +244,11 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
-func (s *Server) RegisterKernel(mux *http.ServeMux) {
+// GeminiActions are the Gemini model actions a surface serves, keyed by the
+// name after the colon in /models/{model}:{action}.
+type GeminiActions map[string]http.HandlerFunc
+
+func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
 	if s.code != nil {
 		s.code.Register(mux)
 	}
@@ -257,7 +261,7 @@ func (s *Server) RegisterKernel(mux *http.ServeMux) {
 		Now:      s.Now,
 		Workflow: s.workflowCapability,
 	})
-	s.registerNative(mux, catalog)
+	s.registerNative(mux, catalog, actions)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)

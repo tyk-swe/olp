@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
+func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler, actions GeminiActions) {
 	mux.HandleFunc("POST /native/{dialect}/models/{model}", func(w http.ResponseWriter, r *http.Request) {
 		// A native generation dialect is generation on the native surface;
 		// every other native dialect is a registered unary operation.
@@ -66,11 +66,12 @@ func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
 					family = wire.GeminiEmbeddings
 				case "batchEmbedContents":
 					family = wire.GeminiEmbeddingsBatch
-				case "batchGenerateContent":
-					r.SetPathValue("model", model)
-					s.geminiCreateBatch(w, r)
-					return
 				default:
+					if handle, served := actions[action]; served {
+						r.SetPathValue("model", model)
+						handle(w, r)
+						return
+					}
 					s.begin(w, r)
 					fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown Gemini operation."), "gemini")
 					return

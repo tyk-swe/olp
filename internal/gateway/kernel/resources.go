@@ -37,7 +37,6 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
 	if s.Deps.Staging != nil {
-		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)

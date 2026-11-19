@@ -1,4 +1,4 @@
-package kernel
+package geministate
 
 import (
 	"bytes"
@@ -18,40 +18,23 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
-	mux.HandleFunc("OPTIONS /gemini/upload/", s.Preflight)
-	mux.HandleFunc("OPTIONS /gemini/download/", s.Preflight)
-	mux.HandleFunc("POST /gemini/upload/v1beta/files", s.geminiUploadStart)
-	mux.HandleFunc("POST /gemini/upload/{session}", s.geminiUploadCommand)
-	mux.HandleFunc("GET /gemini/v1beta/files", s.geminiListFiles)
-	mux.HandleFunc("GET /gemini/v1beta/files/{name}", s.geminiGetFile)
-	mux.HandleFunc("DELETE /gemini/v1beta/files/{name}", s.geminiDeleteFile)
-	mux.HandleFunc("GET /gemini/download/v1beta/files/{action}", s.geminiDownloadFile)
-	for _, version := range []string{"v1", "v1beta"} {
-		prefix := "/gemini/" + version + "/batches"
-		mux.HandleFunc("GET "+prefix, s.geminiListBatches)
-		mux.HandleFunc("GET "+prefix+"/{name}", s.geminiGetBatch)
-		mux.HandleFunc("POST "+prefix+"/{action}", s.geminiBatchCancel)
-		mux.HandleFunc("DELETE "+prefix+"/{name}", s.geminiDeleteBatch)
-	}
-}
-
-func (s *Server) geminiResourceGates(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, route *routing.Route, newWork bool) *fault.Error {
+func (s surface) geminiResourceGates(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, p *kernel.Pin, route *routing.Route, newWork bool) *fault.Error {
 	if newWork {
-		if err := s.UnboundedPinLimits(x.AdmissionAuthority(authority), p, route); err != nil {
+		if err := s.kernel.UnboundedPinLimits(x.AdmissionAuthority(authority), p, route); err != nil {
 			return err
 		}
 		if err := x.GuardrailSurfaceGate(route); err != nil {
 			return err
 		}
 	}
-	return s.ReserveStateAndSlot(ctx, x, authority, p, route)
+	return s.kernel.ReserveStateAndSlot(ctx, x, authority, p, route)
 }
 
 func validateGeminiStartHeaders(protocol, command, rawLength string, maximum int64) (int64, *fault.Error) {
@@ -98,52 +81,52 @@ func parseGeminiUploadStartBody(body []byte) (string, bool, *fault.Error) {
 	return name, true, nil
 }
 
-func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.StateBegin(w, r, wire.GeminiFile)
+func (s surface) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
-	route, err := s.NativeStateRoute(x, authority, r, "")
+	defer s.kernel.Gate.Release(r.Context())
+	route, err := s.kernel.NativeStateRoute(x, authority, r, "")
 	if err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
 	expected, err := validateGeminiStartHeaders(r.Header.Get("X-Goog-Upload-Protocol"), r.Header.Get("X-Goog-Upload-Command"),
-		r.Header.Get("X-Goog-Upload-Header-Content-Length"), s.Config.MaxMediaBodyBytes)
+		r.Header.Get("X-Goog-Upload-Header-Content-Length"), s.kernel.Config.MaxMediaBodyBytes)
 	if err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
-	body, readErr := s.ReadResourceBody(w, r)
+	body, readErr := s.kernel.ReadResourceBody(w, r)
 	if readErr != nil {
-		s.Refuse(x, w, readErr)
+		s.kernel.Refuse(x, w, readErr)
 		return
 	}
 	displayName, hasDisplayName, err := parseGeminiUploadStartBody(body)
 	if err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
-	if !s.Deps.Resources.Encrypted() {
-		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload sessions require encrypted resource storage."))
+	if !s.kernel.Deps.Resources.Encrypted() {
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload sessions require encrypted resource storage."))
 		return
 	}
-	p, err := s.NativeStatePin(r.Context(), x, route)
+	p, err := s.kernel.NativeStatePin(r.Context(), x, route)
 	if err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
-	ctx, cancel := s.StateDeadline(r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.ResourceSettle(ctx, x, p)
+	defer s.kernel.ResourceSettle(ctx, x, p)
 	if err := s.geminiResourceGates(ctx, x, authority, p, route, true); err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
-	endpoint, originErr := GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.Egress)
+	endpoint, originErr := kernel.GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.kernel.Egress)
 	if originErr != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini upload address could not be resolved."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini upload address could not be resolved."))
 		return
 	}
 	payload := []byte{}
@@ -158,25 +141,25 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 	if contentType := r.Header.Get("X-Goog-Upload-Header-Content-Type"); contentType != "" {
 		headers.Set("X-Goog-Upload-Header-Content-Type", contentType)
 	}
-	resp, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(payload), int64(len(payload)), "application/json", "application/json", headers)
+	resp, failure := s.kernel.GeminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(payload), int64(len(payload)), "application/json", "application/json", headers)
 	if failure != nil {
-		s.Refuse(x, w, UpstreamError(failure))
+		s.kernel.Refuse(x, w, kernel.UpstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
 	uploadURLs := resp.Header.Values("X-Goog-Upload-URL")
 	if len(uploadURLs) != 1 {
-		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider did not return one resumable upload URL."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider did not return one resumable upload URL."))
 		return
 	}
 	sessionURL := uploadURLs[0]
 	generationURL, _ := p.Provider.Connector().URL(wire.Gemini, p.Model, false)
-	if err := ValidateGeminiUploadURL(sessionURL, generationURL, s.Egress); err != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an invalid resumable upload URL."))
+	if err := kernel.ValidateGeminiUploadURL(sessionURL, generationURL, s.kernel.Egress); err != nil {
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an invalid resumable upload URL."))
 		return
 	}
-	resp.Exchange.Complete(ClassSuccess)
-	now := s.Now()
+	resp.Exchange.Complete(kernel.ClassSuccess)
+	now := s.kernel.Now()
 	expires := now.Add(time.Hour)
 	durableBound := now.Add(resources.DurableLifetime)
 	if durableBound.Before(expires) {
@@ -190,22 +173,22 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 	if contentType := r.Header.Get("X-Goog-Upload-Header-Content-Type"); contentType != "" {
 		metadata["content_type"] = contentType
 	}
-	commitCtx, stopCommit := ResourceCommitContext(ctx)
-	resource, storeErr := s.Deps.Resources.PutGeminiUploadSession(commitCtx, &resources.Resource{
+	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
+	resource, storeErr := s.kernel.Deps.Resources.PutGeminiUploadSession(commitCtx, &resources.Resource{
 		UUID: id, Kind: resources.KindGeminiUpload, APIKeyID: authority.ID, RouteSlug: route.Slug,
 		ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID,
 		TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID,
-		UpstreamID: id.String(), State: "active", Metadata: MustJSON(metadata), ExpiresAt: &expires,
+		UpstreamID: id.String(), State: "active", Metadata: kernel.MustJSON(metadata), ExpiresAt: &expires,
 	}, sessionURL)
 	stopCommit()
 	if storeErr != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The upload session could not be stored."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The upload session could not be stored."))
 		return
 	}
 
 	x.ResponseHeaders(w.Header(), false)
 	w.Header().Set("X-Goog-Upload-Status", "active")
-	w.Header().Set("X-Goog-Upload-URL", s.GatewayOrigin(r)+"/gemini/upload/"+url.PathEscape(resource.ID))
+	w.Header().Set("X-Goog-Upload-URL", s.kernel.GatewayOrigin(r)+"/gemini/upload/"+url.PathEscape(resource.ID))
 	w.WriteHeader(http.StatusOK)
 	s.finishGeminiUploadAck(w, x, resp.Exchange)
 }
@@ -276,10 +259,10 @@ func geminiFileMetadata(body []byte, model string) (json.RawMessage, string, *ti
 	if json.Unmarshal(nameRaw, &name) != nil {
 		return nil, "", nil, errors.New("Gemini file has no name")
 	}
-	if _, err := GeminiFileID(name); err != nil {
+	if _, err := kernel.GeminiFileID(name); err != nil {
 		return nil, "", nil, err
 	}
-	metadata := map[string]json.RawMessage{"upstream_model": MustJSON(model)}
+	metadata := map[string]json.RawMessage{"upstream_model": kernel.MustJSON(model)}
 	for field, value := range file {
 		if field != "upstream_model" && field != "batch_manifest" {
 			metadata[field] = value
@@ -322,143 +305,143 @@ func projectGeminiFile(body []byte, localID, origin string) ([]byte, error) {
 	return json.Marshal(file)
 }
 
-func writeGeminiUploadAck(w http.ResponseWriter, x *Call, offset int64, state string) {
+func writeGeminiUploadAck(w http.ResponseWriter, x *kernel.Call, offset int64, state string) {
 	x.ResponseHeaders(w.Header(), false)
 	w.Header().Set("X-Goog-Upload-Status", state)
 	w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(offset, 10))
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) markGeminiUploadFailed(ctx context.Context, resource *resources.Resource) {
-	commitCtx, stop := ResourceCommitContext(ctx)
+func (s surface) markGeminiUploadFailed(ctx context.Context, resource *resources.Resource) {
+	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
-	if err := s.Deps.Resources.Update(commitCtx, resource.ID, "failed", nil, nil); err != nil {
-		s.Log.Warn("Gemini upload session failure could not be recorded", "resource_id", resource.ID, "error", err)
+	if err := s.kernel.Deps.Resources.Update(commitCtx, resource.ID, "failed", nil, nil); err != nil {
+		s.kernel.Log.Warn("Gemini upload session failure could not be recorded", "resource_id", resource.ID, "error", err)
 	}
 }
 
-func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.StateBegin(w, r, wire.GeminiFile)
+func (s surface) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
-	session, err := s.Deps.Resources.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
+	defer s.kernel.Gate.Release(r.Context())
+	session, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.Refuse(x, w, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key."))
+		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini upload session could not be read."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini upload session could not be read."))
 		return
 	}
 	if session.State == "failed" {
-		s.Refuse(x, w, fault.ServerError(http.StatusConflict, "resource_transition", "The Gemini upload session has failed."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusConflict, "resource_transition", "The Gemini upload session has failed."))
 		return
 	}
 	command, commandErr := parseGeminiUploadCommand(r.Header.Get("X-Goog-Upload-Command"))
 	if commandErr != nil {
-		s.Refuse(x, w, commandErr)
+		s.kernel.Refuse(x, w, commandErr)
 		return
 	}
-	p, route, pinErr := s.ResolveResource(r.Context(), x, authority, session, "batch", RetainedNewWork)
+	p, route, pinErr := s.kernel.ResolveResource(r.Context(), x, authority, session, "batch", kernel.RetainedNewWork)
 	if pinErr != nil {
-		s.Refuse(x, w, pinErr)
+		s.kernel.Refuse(x, w, pinErr)
 		return
 	}
 	if x.Strict() {
-		s.Refuse(x, w, PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
+		s.kernel.Refuse(x, w, kernel.PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
 		return
 	}
 	if !p.Provider.Connector().Supports("batch", "gemini", "unary") || !p.Provider.Supports(p.Model, "batch", "gemini", "unary") {
-		s.Refuse(x, w, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key."))
+		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key."))
 		return
 	}
 	x.Route = route
-	ctx, cancel := s.StateDeadline(r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.ResourceSettle(ctx, x, p)
+	defer s.kernel.ResourceSettle(ctx, x, p)
 	if err := s.geminiResourceGates(ctx, x, authority, p, route, true); err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
 	expected, offset, contentType, err := geminiUploadState(session)
 	if err != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload session metadata is invalid."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload session metadata is invalid."))
 		return
 	}
 	if command.query {
 		if r.ContentLength != 0 {
-			s.Refuse(x, w, fault.InvalidRequest("invalid_request", "A query upload command cannot contain a body.", nil))
+			s.kernel.Refuse(x, w, fault.InvalidRequest("invalid_request", "A query upload command cannot contain a body.", nil))
 			return
 		}
 		writeGeminiUploadAck(w, x, offset, "active")
-		s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
+		s.kernel.Finish(x, &kernel.Outcome{Committed: true}, http.StatusOK)
 		return
 	}
 	if r.ContentLength < 0 {
 		param := "Content-Length"
-		s.Refuse(x, w, fault.InvalidRequest("missing_required_parameter", "Content-Length is required for Gemini upload chunks.", &param))
+		s.kernel.Refuse(x, w, fault.InvalidRequest("missing_required_parameter", "Content-Length is required for Gemini upload chunks.", &param))
 		return
 	}
 	requestOffset, offsetErr := parseGeminiUploadOffset(r.Header.Get("X-Goog-Upload-Offset"))
 	if offsetErr != nil {
-		s.Refuse(x, w, offsetErr)
+		s.kernel.Refuse(x, w, offsetErr)
 		return
 	}
 	if err := validateGeminiChunk(expected, offset, requestOffset, r.ContentLength, command.finalize); err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
 	remaining := expected - offset
-	if r.ContentLength > s.Config.MaxMediaBodyBytes {
-		s.Refuse(x, w, fault.ServerError(http.StatusRequestEntityTooLarge, "request_too_large", "The Gemini upload chunk exceeds the configured media limit."))
+	if r.ContentLength > s.kernel.Config.MaxMediaBodyBytes {
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusRequestEntityTooLarge, "request_too_large", "The Gemini upload chunk exceeds the configured media limit."))
 		return
 	}
-	var batchInput *BatchManifest
+	var batchInput *kernel.BatchManifest
 	var chunk io.Reader = bytes.NewReader(nil)
 	var chunkLength int64
 	if r.ContentLength > 0 {
-		deadline := time.Now().Add(RequestBodyTimeout)
+		deadline := time.Now().Add(kernel.RequestBodyTimeout)
 		if routeDeadline, ok := ctx.Deadline(); ok && routeDeadline.Before(deadline) {
 			deadline = routeDeadline
 		}
 		controller := http.NewResponseController(w)
 		if err := controller.SetReadDeadline(deadline); err != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini chunk read could not be bounded."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini chunk read could not be bounded."))
 			return
 		}
-		artifact, err := s.Deps.Staging.Put(ctx, staging.Upload{
-			Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.Config.MaxMediaBodyBytes), Body: r.Body,
+		artifact, err := s.kernel.Deps.Staging.Put(ctx, staging.Upload{
+			Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.kernel.Config.MaxMediaBodyBytes), Body: r.Body,
 		})
 		if err != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusBadRequest, "invalid_request", "The Gemini upload chunk could not be staged."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadRequest, "invalid_request", "The Gemini upload chunk could not be staged."))
 			return
 		}
 		// Keep failed reads bounded while HTTP/1 drains their remaining body.
 		_ = controller.SetReadDeadline(time.Time{})
-		defer s.Deps.Staging.Remove(artifact.Handle)
-		opened, err := s.Deps.Staging.Open(artifact.Handle)
+		defer s.kernel.Deps.Staging.Remove(artifact.Handle)
+		opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
 		if err != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read."))
 			return
 		}
 		defer opened.File.Close()
 		if offset == 0 && command.finalize && artifact.ContentLength == expected {
-			if manifest, qualifyErr := qualifyGeminiBatchJSONL(opened.File, route.Slug, s.BatchLineDigest); qualifyErr == nil {
+			if manifest, qualifyErr := qualifyGeminiBatchJSONL(opened.File, route.Slug, s.kernel.BatchLineDigest); qualifyErr == nil {
 				batchInput = &manifest
 			}
 			if _, seekErr := opened.File.Seek(0, io.SeekStart); seekErr != nil {
-				s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read."))
+				s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read."))
 				return
 			}
 		}
-		chunk, chunkLength = PinnedUploadSource{opened.File}, artifact.ContentLength
+		chunk, chunkLength = kernel.PinnedUploadSource{Reader: opened.File}, artifact.ContentLength
 	}
-	uploadURL, err := s.Deps.Resources.ReadGeminiUploadURL(ctx, session.UUID)
+	uploadURL, err := s.kernel.Deps.Resources.ReadGeminiUploadURL(ctx, session.UUID)
 	generationURL, generationErr := p.Provider.Connector().URL(wire.Gemini, p.Model, false)
-	if err != nil || generationErr != nil || ValidateGeminiUploadURL(uploadURL, generationURL, s.Egress) != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload session URL is unavailable."))
+	if err != nil || generationErr != nil || kernel.ValidateGeminiUploadURL(uploadURL, generationURL, s.kernel.Egress) != nil {
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload session URL is unavailable."))
 		return
 	}
 	commandHeader := "upload"
@@ -469,12 +452,12 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		"X-Goog-Upload-Command": {commandHeader},
 		"X-Goog-Upload-Offset":  {strconv.FormatInt(offset, 10)},
 	}
-	resp, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, chunk, chunkLength, contentType, "application/json", headers)
+	resp, failure := s.kernel.GeminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, chunk, chunkLength, contentType, "application/json", headers)
 	if failure != nil {
 		if failure.Acceptance.Unresolved() || failure.Status == http.StatusNotFound || failure.Status == http.StatusGone {
 			s.markGeminiUploadFailed(r.Context(), session)
 		}
-		s.Refuse(x, w, UpstreamError(failure))
+		s.kernel.Refuse(x, w, kernel.UpstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
@@ -484,16 +467,16 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		reported, parseErr := strconv.ParseInt(received, 10, 64)
 		if parseErr != nil || reported != newOffset || reported > expected {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini upload offset response is invalid."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini upload offset response is invalid."))
 			return
 		}
 		newOffset = reported
 	}
 	if command.finalize {
-		body, readErr := resp.ReadBody(s.Config.MaxResponseBytes)
+		body, readErr := resp.ReadBody(s.kernel.Config.MaxResponseBytes)
 		if readErr != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The finalized Gemini file response could not be read."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The finalized Gemini file response could not be read."))
 			return
 		}
 		var envelope struct {
@@ -501,144 +484,144 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(body, &envelope) != nil || len(envelope.File) == 0 {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file object."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file object."))
 			return
 		}
 		fileMetadata, state, expires, metadataErr := geminiFileMetadata(envelope.File, p.Model)
 		var fileObject map[string]json.RawMessage
 		if metadataErr != nil || json.Unmarshal(envelope.File, &fileObject) != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file object."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file object."))
 			return
 		}
 		var upstreamName string
 		if json.Unmarshal(fileObject["name"], &upstreamName) != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file name is invalid."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file name is invalid."))
 			return
 		}
-		upstreamID, idErr := GeminiFileID(upstreamName)
+		upstreamID, idErr := kernel.GeminiFileID(upstreamName)
 		if idErr != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file name is invalid."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file name is invalid."))
 			return
 		}
 		if batchInput != nil {
 			var fields map[string]json.RawMessage
 			_ = json.Unmarshal(fileMetadata, &fields)
-			fields["batch_manifest"] = MustJSON(batchInput)
-			fileMetadata = MustJSON(fields)
+			fields["batch_manifest"] = kernel.MustJSON(batchInput)
+			fileMetadata = kernel.MustJSON(fields)
 		}
-		resp.Exchange.Complete(ClassSuccess)
+		resp.Exchange.Complete(kernel.ClassSuccess)
 		file := &resources.Resource{
 			Kind: resources.KindGeminiFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
 			ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID,
 			TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID,
 			UpstreamID: upstreamID, State: state, Metadata: fileMetadata, ExpiresAt: expires,
 		}
-		commitCtx, stopCommit := ResourceCommitContext(ctx)
-		created, finalErr := s.Deps.Resources.FinalizeGeminiUpload(commitCtx, authority.ID, session.UUID, newOffset, file)
+		commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
+		created, finalErr := s.kernel.Deps.Resources.FinalizeGeminiUpload(commitCtx, authority.ID, session.UUID, newOffset, file)
 		stopCommit()
 		if finalErr != nil {
 			s.markGeminiUploadFailed(r.Context(), session)
-			s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The finalized Gemini file could not be stored."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The finalized Gemini file could not be stored."))
 			return
 		}
-		projected, projectionErr := projectGeminiFile(envelope.File, created.ID, s.GatewayOrigin(r))
+		projected, projectionErr := projectGeminiFile(envelope.File, created.ID, s.kernel.GatewayOrigin(r))
 		if projectionErr != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected."))
 			return
 		}
 		w.Header().Set("X-Goog-Upload-Status", "final")
 		w.Header().Set("X-Goog-Upload-Size-Received", strconv.FormatInt(newOffset, 10))
-		s.WriteStateJSON(w, x, MustJSON(map[string]json.RawMessage{"file": projected}), resp.Exchange)
+		s.kernel.WriteStateJSON(w, x, kernel.MustJSON(map[string]json.RawMessage{"file": projected}), resp.Exchange)
 		return
 	}
-	resp.Exchange.Complete(ClassSuccess)
+	resp.Exchange.Complete(kernel.ClassSuccess)
 	newMetadata, _ := json.Marshal(map[string]int64{"offset": newOffset})
-	commitCtx, stopCommit := ResourceCommitContext(ctx)
-	updateErr := s.Deps.Resources.Update(commitCtx, session.ID, "active", newMetadata, nil)
+	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
+	updateErr := s.kernel.Deps.Resources.Update(commitCtx, session.ID, "active", newMetadata, nil)
 	stopCommit()
 	if updateErr != nil {
 		s.markGeminiUploadFailed(r.Context(), session)
-		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload offset could not be stored."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload offset could not be stored."))
 		return
 	}
 	writeGeminiUploadAck(w, x, newOffset, "active")
 	s.finishGeminiUploadAck(w, x, resp.Exchange)
 }
 
-func (s *Server) finishGeminiUploadAck(w http.ResponseWriter, x *Call, exchange *PinnedExchange) {
+func (s surface) finishGeminiUploadAck(w http.ResponseWriter, x *kernel.Call, exchange *kernel.PinnedExchange) {
 	controller := http.NewResponseController(w)
 	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if err := controller.Flush(); err != nil {
 		exchange.Delivery(usage.ClientUnobserved)
 		x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The upload acknowledgement could not be delivered.")
-		s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, 0)
+		s.kernel.Finish(x, &kernel.Outcome{Err: x.Failure, Committed: true, Cancelled: true}, 0)
 		return
 	}
 	exchange.Delivery(usage.ClientTerminal)
-	s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
+	s.kernel.Finish(x, &kernel.Outcome{Committed: true}, http.StatusOK)
 }
 
-func (s *Server) geminiFileCall(w http.ResponseWriter, r *http.Request, use RetainedUse, op func(context.Context, *Call, keyauthority.Authority, *resources.Resource, *Pin, *routing.Route) *fault.Error) {
-	x, authority, done := s.StateBegin(w, r, wire.GeminiFile)
+func (s surface) geminiFileCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin, *routing.Route) *fault.Error) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
+	defer s.kernel.Gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "files/")
-	res, err := s.Deps.Resources.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
+	res, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
-		s.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini file with this name exists for this key."))
+		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini file with this name exists for this key."))
 		return
 	}
 	if err != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file mapping could not be read."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file mapping could not be read."))
 		return
 	}
-	p, route, pinErr := s.ResolveResource(r.Context(), x, authority, res, "batch", use)
+	p, route, pinErr := s.kernel.ResolveResource(r.Context(), x, authority, res, "batch", use)
 	if pinErr != nil {
-		s.Refuse(x, w, pinErr)
+		s.kernel.Refuse(x, w, pinErr)
 		return
 	}
 	if !p.Provider.Connector().Supports("batch", "gemini", "unary") || !p.Provider.Supports(p.Model, "batch", "gemini", "unary") {
-		s.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini file with this name exists for this key."))
+		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini file with this name exists for this key."))
 		return
 	}
 	if route.Fidelity.Strict() {
-		s.Refuse(x, w, PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
+		s.kernel.Refuse(x, w, kernel.PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
 		return
 	}
 	x.Route = route
-	ctx, cancel := s.StateDeadline(r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.ResourceSettle(ctx, x, p)
+	defer s.kernel.ResourceSettle(ctx, x, p)
 	if err := s.geminiResourceGates(ctx, x, authority, p, route, false); err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 		return
 	}
 	if err := op(ctx, x, authority, res, p, route); err != nil {
-		s.Refuse(x, w, err)
+		s.kernel.Refuse(x, w, err)
 	}
 }
 
-func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
-	s.geminiFileCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, _ keyauthority.Authority, res *resources.Resource, p *Pin, _ *routing.Route) *fault.Error {
-		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), nil)
+func (s surface) geminiGetFile(w http.ResponseWriter, r *http.Request) {
+	s.geminiFileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file address could not be resolved.")
 		}
-		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No Gemini file with this name exists for this key.")
 			}
-			return UpstreamError(failure)
+			return kernel.UpstreamError(failure)
 		}
 		defer resp.Body.Close()
-		body, err := resp.ReadBody(s.Config.MaxResponseBytes)
+		body, err := resp.ReadBody(s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file response could not be read.")
 		}
@@ -651,72 +634,72 @@ func (s *Server) geminiGetFile(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(body, &object) != nil || json.Unmarshal(object["name"], &upstreamName) != nil {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Gemini file name.")
 		}
-		upstreamID, idErr := GeminiFileID(upstreamName)
+		upstreamID, idErr := kernel.GeminiFileID(upstreamName)
 		if idErr != nil || upstreamID != res.UpstreamID {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider returned a mismatched Gemini file name.")
 		}
-		resp.Exchange.Complete(ClassSuccess)
+		resp.Exchange.Complete(kernel.ClassSuccess)
 		var previous, fields map[string]json.RawMessage
 		_ = json.Unmarshal(res.Metadata, &previous)
 		_ = json.Unmarshal(metadata, &fields)
 		if manifest, ok := previous["batch_manifest"]; ok {
 			fields["batch_manifest"] = manifest
-			metadata = MustJSON(fields)
+			metadata = kernel.MustJSON(fields)
 		}
-		if err := s.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+		if err := s.kernel.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file metadata could not be refreshed.")
 		}
-		projected, err := projectGeminiFile(body, res.ID, s.GatewayOrigin(r))
+		projected, err := projectGeminiFile(body, res.ID, s.kernel.GatewayOrigin(r))
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Gemini file could not be projected.")
 		}
-		s.WriteStateJSON(w, x, projected, resp.Exchange)
+		s.kernel.WriteStateJSON(w, x, projected, resp.Exchange)
 		return nil
 	})
 }
 
-func (s *Server) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
-	s.geminiFileCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, _ keyauthority.Authority, res *resources.Resource, p *Pin, _ *routing.Route) *fault.Error {
+func (s surface) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
+	s.geminiFileCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
 		if res.ParentID != nil {
-			if err := s.RequireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
+			if err := s.kernel.RequireBatchEvidenceSettled(ctx, *res.ParentID); err != nil {
 				return err
 			}
 		}
-		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), nil)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini file address could not be resolved.")
 		}
-		resp, failure := s.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
+		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No Gemini file with this name exists for this key.")
 			}
-			return UpstreamError(failure)
+			return kernel.UpstreamError(failure)
 		}
-		resp.Exchange.Complete(ClassSuccess)
+		resp.Exchange.Complete(kernel.ClassSuccess)
 		_ = resp.Body.Close()
-		if err := s.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.kernel.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file could not be tombstoned.")
 		}
-		s.WriteStateJSON(w, x, []byte(`{}`), resp.Exchange)
+		s.kernel.WriteStateJSON(w, x, []byte(`{}`), resp.Exchange)
 		return nil
 	})
 }
 
-func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.StateBegin(w, r, wire.GeminiFile)
+func (s surface) geminiListFiles(w http.ResponseWriter, r *http.Request) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
+	defer s.kernel.Gate.Release(r.Context())
 	pageSize, pageToken, cursorErr := geminiPageCursor(r.URL.Query())
 	if cursorErr != nil {
-		s.Refuse(x, w, cursorErr)
+		s.kernel.Refuse(x, w, cursorErr)
 		return
 	}
-	rows, continuation, listErr := s.ListedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.Deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor, false)
+	rows, continuation, listErr := s.kernel.ListedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.kernel.Deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor, false)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
 			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini file owned by this key.", &param)
@@ -726,23 +709,23 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		return batch, nil
 	}, func(row *resources.Resource) *fault.Error {
-		return s.AuthorizeListedResource(r.Context(), authority, row)
+		return s.kernel.AuthorizeListedResource(r.Context(), authority, row)
 	})
 	if listErr != nil {
-		s.Refuse(x, w, listErr)
+		s.kernel.Refuse(x, w, listErr)
 		return
 	}
 	files := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
 		var metadata map[string]json.RawMessage
 		if json.Unmarshal(row.Metadata, &metadata) != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."))
 			return
 		}
 		body, _ := json.Marshal(metadata)
-		file, projectErr := projectGeminiFile(body, row.ID, s.GatewayOrigin(r))
+		file, projectErr := projectGeminiFile(body, row.ID, s.kernel.GatewayOrigin(r))
 		if projectErr != nil {
-			s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."))
+			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "A Gemini file could not be projected."))
 			return
 		}
 		files = append(files, file)
@@ -751,7 +734,7 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 	if continuation != "" {
 		response["nextPageToken"] = continuation
 	}
-	s.WriteStateJSON(w, x, MustJSON(response))
+	s.kernel.WriteStateJSON(w, x, kernel.MustJSON(response))
 }
 
 func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, error) {
@@ -766,61 +749,61 @@ func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, err
 	return parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media", nil
 }
 
-func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
+func (s surface) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "download" || localID == "" {
-		x, _, done := s.StateBegin(w, r, wire.GeminiFile)
+		x, _, done := s.kernel.StateBegin(w, r, wire.GeminiFile)
 		if !done {
-			defer s.Gate.Release(r.Context())
-			s.Refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini file action."))
+			defer s.kernel.Gate.Release(r.Context())
+			s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini file action."))
 		}
 		return
 	}
 	r.SetPathValue("name", localID)
-	s.geminiFileCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, _ keyauthority.Authority, res *resources.Resource, p *Pin, _ *routing.Route) *fault.Error {
+	s.geminiFileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, _ keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
 		endpoint, err := geminiDownloadURL(p.Provider.Connector(), p.Model, res.UpstreamID)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 		}
 		x.PinnedBinary = true
-		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			return UpstreamError(failure)
+			return kernel.UpstreamError(failure)
 		}
 		defer resp.Body.Close()
 		contentType := resp.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := resp.StageBody(ctx, s.Deps.Staging, "gemini-file", contentType, s.Config.MaxResponseBytes)
+		artifact, err := resp.StageBody(ctx, s.kernel.Deps.Staging, "gemini-file", contentType, s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini download exceeded the configured response limit.")
 		}
-		resp.Exchange.Complete(ClassSuccess)
-		defer s.Deps.Staging.Remove(artifact.Handle)
-		opened, err := s.Deps.Staging.Open(artifact.Handle)
+		resp.Exchange.Complete(kernel.ClassSuccess)
+		defer s.kernel.Deps.Staging.Remove(artifact.Handle)
+		opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini download could not be read.")
 		}
 		defer opened.File.Close()
-		SetFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
+		kernel.SetFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini download response could not be bounded.")
 		}
 		x.ResponseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := CopyResourceContent(w, opened.File, artifact.ContentLength)
+		written, copyErr := kernel.CopyResourceContent(w, opened.File, artifact.ContentLength)
 		if copyErr != nil || written != artifact.ContentLength {
-			resp.Exchange.Delivery(DeliveryState(written))
+			resp.Exchange.Delivery(kernel.DeliveryState(written))
 			x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini download ended before all bytes were delivered.")
-			s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
+			s.kernel.Finish(x, &kernel.Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
 			return nil
 		}
 		if written > 0 {
-			x.Delivered(s.Now())
+			x.Delivered(s.kernel.Now())
 		}
 		resp.Exchange.Delivery(usage.ClientTerminal)
-		s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
+		s.kernel.Finish(x, &kernel.Outcome{Committed: true}, http.StatusOK)
 		return nil
 	})
 }
@@ -836,7 +819,7 @@ func geminiPageCursor(query url.Values) (int, string, *fault.Error) {
 		pageSize = parsed
 	}
 	token := query.Get("pageToken")
-	if token != "" && !strings.HasPrefix(token, RetainedListCursorPrefix) && !ValidGeminiFileID(token) {
+	if token != "" && !strings.HasPrefix(token, kernel.RetainedListCursorPrefix) && !kernel.ValidGeminiFileID(token) {
 		param := "pageToken"
 		return 0, "", fault.InvalidRequest("invalid_value", "pageToken must be a local Gemini file identifier.", &param)
 	}

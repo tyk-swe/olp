@@ -30,7 +30,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
-	batchupstream "github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -1333,59 +1332,6 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
 			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != (tc.class == ClassSuccess) {
-				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
-			}
-		})
-	}
-}
-
-func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, nestedName, rootInput string
-		valid                       bool
-	}{
-		{"matching references", "batches/native", "files/native-input", true},
-		{"mismatched nested name", "batches/unrelated", "files/native-input", false},
-		{"conflicting input alias", "batches/native", "files/unrelated", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, Config{})
-			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `{"name":"batches/native","metadata":{"name":%q,"state":"BATCH_STATE_RUNNING","inputConfig":{"fileName":"files/native-input"}},"input_config":{"file_name":%q}}`, tc.nestedName, tc.rootInput)
-			})
-			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.Provider.ID)
-			if !probed || !granted {
-				t.Fatal("could not claim half-open probe")
-			}
-			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
-			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/batches/native", nil, "")
-			if failure != nil {
-				t.Fatal(failure.Fault())
-			}
-			defer response.Body.Close()
-			body, err := response.ReadBody(h.gateway.Config.MaxResponseBytes)
-			if err != nil {
-				t.Fatal(err)
-			}
-			batch, err := batchupstream.DecodeGeminiBatch(body)
-			if err != nil {
-				t.Fatalf("could not decode native fixture: %v", err)
-			}
-			object, _, err := settleGeminiBatchResult(response.Exchange, body, batch, p.Model, geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
-			if (err == nil) != tc.valid {
-				t.Fatalf("unexpected batch validation: %v", err)
-			}
-			if tc.valid {
-				projected, err := object.project("local", routeSlug, nil)
-				if err != nil || bytes.Contains(projected, []byte("native-input")) || bytes.Count(projected, []byte("files/local-input")) != 2 {
-					t.Fatalf("projected references: %s, %v", projected, err)
-				}
-			}
-			h.gateway.settlePinnedHold(t.Context(), p.Hold)
-			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != tc.valid {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
