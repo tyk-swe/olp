@@ -2830,3 +2830,161 @@ func TestAVectorStoreListPagesNewestFirstRefillsPastLostStoresAndRefusesWhatItCa
 		t.Fatalf("a list over a store whose creation is unknown is %+v, want %+v", got, unsettled)
 	}
 }
+
+func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWorkAndRefuseWhatTheyCannotBind(t *testing.T) {
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "stores", "stores-model"
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price:       rates.Price{ProviderKind: "azure_openai", Model: model, Operation: "vector_store", StoragePerGiBDay: new("0.10"), Currency: "USD"},
+		EffectiveAt: fixture.observedAt,
+	})
+	provider := &storeProvider{issues: "1", scripted: map[string]string{}, statuses: map[string]int{}}
+	upstream := &retainedUpstream{replies: provider.replies, status: provider.status}
+	sink := &terminals{}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch", "vector_store", "retrieval"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream, sink: sink,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	g.key(t, "stateless")
+	g.key(t, "elsewhere")
+	stateless, elsewhere := g.runtime.keys["stateless"], g.runtime.keys["elsewhere"]
+	stateless.Policy.AllowProviderState, elsewhere.Policy.AllowedRoutes = false, []string{"another-route"}
+	g.runtime.keys["stateless"], g.runtime.keys["elsewhere"] = stateless, elsewhere
+	const providerFile = "file-" + providerOwned
+	provider.answers("POST /files", 200, `{"id":"`+providerFile+`","object":"file","bytes":5,"created_at":1,"filename":"a.txt","purpose":"assistants","status":"processed"}`)
+	provider.answers("POST "+providerStorePath("1")+"/files", 200, `{"id":"`+providerFile+`","object":"vector_store.file","vector_store_id":"vs_`+providerOwned+`1","status":"completed","created_at":1}`)
+	created := func(path, contentType, body, submission string) string {
+		t.Helper()
+		_, raw := g.send(t, "POST", path, map[string]string{"Authorization": "Bearer owner", "Content-Type": contentType, "Idempotency-Key": submission}, body, http.StatusOK)
+		var object retainedObject
+		if err := json.Unmarshal(raw, &object); err != nil || object.ID == "" {
+			t.Fatalf("POST %s answered %s: %v", path, raw, err)
+		}
+		return object.ID
+	}
+	store := created("/v1/vector_stores", "application/json", `{"name":"notes"}`, "store")
+	file := created("/v1/files", "multipart/form-data; boundary=b", "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n", "file")
+	created("/v1/vector_stores/"+store+"/files", "application/json", `{"file_id":"`+file+`"}`, "attachment")
+
+	const search, compact = "/search", "/v1/responses/compact"
+	searched, compacted := "POST "+providerStorePath("1")+search, "POST /responses/compact"
+	found := func(fileID string) string {
+		return `{"object":"vector_store.search_results.page","search_query":["q"],"data":[{"file_id":"` + fileID + `","score":0.5,"content":[{"type":"text","text":"hello"}]}],"has_more":false}`
+	}
+	const usage = `,"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`
+	summary := func(item, usage string) string {
+		return `{"object":"response.compaction","id":"cmp_1","output":[` + item + `]` + usage + `}`
+	}
+	const kept = `{"type":"compaction","id":"item_1","encrypted_content":"abc"}`
+	attached := func(fileID string) string { return `{"type":"input_file","file_id":"` + fileID + `"}` }
+	about := func(fileID string) string {
+		return `{"model":"` + slug + `","input":[{"role":"user","content":[` + attached(fileID) + `]}]}`
+	}
+	const question, text = `{"query":"q"}`, `{"model":"` + slug + `","input":"shorten this"}`
+	type work struct {
+		name, key, path, query, route, body string
+		answer                              string
+		answers                             int
+		status                              int
+		code                                string
+		reply, sent                         string
+		attempt                             string
+		tokens                              int64
+	}
+	for _, tc := range []work{
+		{name: "a search names the caller's file", path: search, body: question, answer: found(providerFile), status: 200, reply: `"file_id":"` + file + `"`, sent: question, attempt: "success committed tokenless"},
+		{name: "a search naming a file the caller never bound", path: search, body: question, answer: found("file-elsewhere"), status: 502, code: "provider_protocol_error", attempt: "protocol"},
+		{name: "a search the provider cannot answer", path: search, body: question, answer: `{"error":{"message":"down"}}`, answers: 500, status: 500, code: "provider_resource_error", attempt: "ambiguous"},
+		{name: "a search the provider throttles", path: search, body: question, answer: `{"error":{"message":"slow"}}`, answers: 429, status: 429, code: "provider_resource_error", attempt: "rate_limit"},
+		{name: "a search answered with a list", path: search, body: question, answer: `[]`, status: 502, code: "provider_protocol_error", attempt: "protocol"},
+		{name: "a search with a query parameter", path: search, query: "?limit=1", body: question, status: 400, code: "invalid_parameter"},
+		{name: "a search that is not an object", path: search, body: `[1]`, status: 400, code: "invalid_request"},
+		{name: "another key's search", key: "stranger", path: search, body: question, status: 404, code: "not_found"},
+		{name: "a compaction is accounted by its tokens", path: compact, route: slug, body: text, answer: summary(kept, usage), status: 200, reply: `"encrypted_content":"abc"`, sent: `{"model":"` + model + `","input":"shorten this"}`, attempt: "success committed", tokens: 15},
+		{name: "a compaction over the caller's file", path: compact, route: slug, body: about(file), answer: summary(kept, usage), status: 200, sent: attached(providerFile), attempt: "success committed", tokens: 15},
+		{name: "a compaction returning the caller's file", path: compact, route: slug, body: text, answer: summary(attached(providerFile), usage), status: 200, reply: attached(file), attempt: "success committed", tokens: 15},
+		{name: "a compaction returning a file the caller never bound keeps its usage", path: compact, route: slug, body: text, answer: summary(attached("file-elsewhere"), usage), status: 502, code: "provider_protocol_error", attempt: "protocol", tokens: 15},
+		{name: "a compaction with usage that cannot be read", path: compact, route: slug, body: text, answer: summary(kept, `,"usage":{"input_tokens":-1}`), status: 502, code: "provider_protocol_error", attempt: "protocol"},
+		{name: "a compaction the provider cannot answer", path: compact, route: slug, body: text, answer: `{"error":{"message":"down"}}`, answers: 500, status: 500, code: "provider_resource_error", attempt: "ambiguous"},
+		{name: "a compaction over a file the caller does not own", path: compact, route: slug, body: about("file_00000000000040008000000000000000"), status: 400, code: "invalid_resource_reference"},
+		{name: "a compaction after a response the caller does not own", path: compact, route: slug, body: `{"input":"x","previous_response_id":"response_00000000000040008000000000000000"}`, status: 400, code: "invalid_resource_reference"},
+		{name: "a compaction by a key that may not keep provider state", key: "stateless", path: compact, route: slug, body: text, status: 403, code: "provider_state_forbidden"},
+		{name: "a compaction by a key that may not use the route", key: "elsewhere", path: compact, route: slug, body: text, status: 403, code: "route_forbidden"},
+		{name: "a compaction on an unknown route", path: compact, route: "elsewhere", body: text, status: 404, code: "route_not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, request := tc.path, compacted
+			if tc.path == search {
+				path, request = "/v1/vector_stores/"+store+search, searched
+			}
+			if tc.answer != "" {
+				provider.answers(request, cmp.Or(tc.answers, 200), tc.answer)
+			}
+			recorded, asked := len(sink.all()), len(upstream.sent(request))
+			_, raw := g.send(t, "POST", path+tc.query, map[string]string{"Authorization": "Bearer " + cmp.Or(tc.key, "owner"), "Content-Type": "application/json", "X-OLP-Route": tc.route}, tc.body, tc.status)
+			var reply struct{ Error struct{ Code string } }
+			if err := json.Unmarshal(raw, &reply); err != nil || reply.Error.Code != tc.code || !strings.Contains(string(raw), tc.reply) {
+				t.Fatalf("reply = %s (%v), want code %q containing %q", raw, err, tc.code, tc.reply)
+			}
+			calls := upstream.sent(request)[asked:]
+			if (tc.answer != "") != (len(calls) == 1) || (tc.sent != "" && !strings.Contains(calls[0].body, tc.sent)) {
+				t.Fatalf("the provider received %+v, want a request only when it answers, containing %q", calls, tc.sent)
+			}
+			for _, call := range calls {
+				if call.key != "listed-secret" || strings.Contains(call.body, file) || strings.Contains(call.body, store) {
+					t.Fatalf("the provider received %+v, want the provider credential and no gateway identifier", call)
+				}
+			}
+			seen := sink.all()
+			if len(seen) != recorded+1 {
+				t.Fatalf("recorded %d requests, want one", len(seen)-recorded)
+			}
+			got, tokens := "", int64(0)
+			for _, attempt := range seen[recorded].Attempts {
+				got += attempt.Class
+				if attempt.Committed {
+					got += " committed"
+				}
+				if attempt.TokenlessUsage {
+					got += " tokenless"
+				}
+				if attempt.Usage != nil {
+					tokens += attempt.Usage.TotalTokens
+				}
+			}
+			if got != tc.attempt || tokens != tc.tokens {
+				t.Fatalf("attempts = %q with %d tokens, want %q with %d", got, tokens, tc.attempt, tc.tokens)
+			}
+		})
+	}
+
+	unasked := func(path, route, want string) {
+		t.Helper()
+		asked := len(upstream.sent(searched)) + len(upstream.sent(compacted))
+		request, err := http.NewRequest("POST", g.server.URL+path, strings.NewReader(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer owner")
+		request.Header.Set("Content-Type", "application/json")
+		if route != "" {
+			request.Header.Set("X-OLP-Route", route)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if !strings.Contains(string(raw), `"code":"`+want+`"`) || len(upstream.sent(searched))+len(upstream.sent(compacted)) != asked {
+			t.Fatalf("%s on route %q answered %d %s, want %s and no provider request", path, route, response.StatusCode, raw, want)
+		}
+	}
+	unasked(compact, "", "missing_required_parameter")
+	g.republish(t, func(route *routing.Route) { route.Operations = []string{"vector_store", "batch"} })
+	unasked(compact, slug, "operation_unavailable")
+	unasked("/v1/vector_stores/"+store+search, slug, "provider_resource_credential_unavailable")
+}
