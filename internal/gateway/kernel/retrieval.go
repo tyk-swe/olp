@@ -66,7 +66,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(fault.NotFoundError("not_found", "No retrieval binding exists for this key."))
 		return
 	}
-	candidate, ok := x.snapshot().FindRoute(binding.Route)
+	candidate, ok := x.Snapshot().FindRoute(binding.Route)
 	if !ok || candidate.ProjectID == nil || *candidate.ProjectID != binding.ProjectID {
 		fail(fault.ModelNotFound(binding.Route))
 		return
@@ -78,11 +78,11 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.Contains(route.Operations, "retrieval") {
-		fail(policyUnavailable("operation_unavailable", "The route does not allow retrieval."))
+		fail(PolicyUnavailable("operation_unavailable", "The route does not allow retrieval."))
 		return
 	}
 	if route.Fidelity.Mode == routing.FidelityStrict {
-		fail(policyUnavailable("unsupported_transformation", "Cloud retrieval requires a transformed route."))
+		fail(PolicyUnavailable("unsupported_transformation", "Cloud retrieval requires a transformed route."))
 		return
 	}
 	if gateErr := x.GuardrailSurfaceGate(&route); gateErr != nil {
@@ -108,7 +108,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 	// serving route revision or widening its certified capability tuple.
 	route.Targets = slices.DeleteFunc(slices.Clone(route.Targets), func(t routing.Target) bool { return t.ID != binding.TargetID })
 	if len(route.Targets) != 1 || route.Targets[0].ProviderModel != binding.Resource {
-		fail(policyUnavailable("retrieval_binding_unavailable", "The binding's certified target is unavailable."))
+		fail(PolicyUnavailable("retrieval_binding_unavailable", "The binding's certified target is unavailable."))
 		return
 	}
 	x.estimate = int64(len(encoded))
@@ -121,7 +121,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 	}
 	endpoint, urlErr := p.Provider.Connector().RetrievalURL(binding.Resource)
 	if urlErr != nil {
-		fail(policyUnavailable("retrieval_binding_unavailable", "The backend binding is unavailable."))
+		fail(PolicyUnavailable("retrieval_binding_unavailable", "The backend binding is unavailable."))
 		return
 	}
 	ctx, cancel := s.StateDeadline(r.Context(), &route)

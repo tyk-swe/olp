@@ -92,7 +92,7 @@ func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body [
 		return true, fault.ModelNotFound(model)
 	}
 	x.Route = &route
-	if !x.strict() && !serving {
+	if !x.Strict() && !serving {
 		return true, operations.Error("target_capability", "/route", "strict_native_operation", "Registered native operation endpoints require a strict route.")
 	}
 	codec, ok := operationregistry.Lookup(dialect)
@@ -131,7 +131,7 @@ func (x *Call) unaryAdmission(provider *routing.Provider, targetID, model string
 }
 
 func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
-	template, _ := x.snapshot().OperationTemplate(x.Route.Slug, targetID, x.operationName())
+	template, _ := x.Snapshot().OperationTemplate(x.Route.Slug, targetID, x.operationName())
 	if template == nil {
 		return unaryAdmission{}, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
 	}

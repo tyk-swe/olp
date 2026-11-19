@@ -197,7 +197,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	var p *Pin
 	defer func() { s.settleSession(r.Context(), x, p) }()
-	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *routing.Provider, model string) bool {
+	p, e = s.SelectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == "gemini-live" && provider.Connector().Supports("realtime", "gemini", "realtime") && provider.Supports(model, "realtime", "gemini", "realtime")
 	})
 	if e != nil {
@@ -308,7 +308,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	usageRecord, usageComplete, relayErr := s.relayGeminiLive(ctx, x, p, client, upstream, token, int(limit))
 	class := classProtocol
 	cancelled := false
-	if x.strict() && relayErr != nil {
+	if x.Strict() && relayErr != nil {
 		class = classAmbiguous
 		switch {
 		case errors.Is(relayErr, errGeminiLiveProviderError):
@@ -348,7 +348,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	if relayErr != nil {
 		x.Failure, status = fault.ServerError(http.StatusBadGateway, "live_incomplete", "The Live session ended without a complete transport contract."), http.StatusBadGateway
-		if x.strict() {
+		if x.Strict() {
 			switch {
 			case errors.Is(relayErr, errGeminiLiveProviderError):
 				x.Failure = fault.ServerError(http.StatusBadGateway, "live_provider_error", "The Live provider reported an error.")
@@ -369,7 +369,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, out = http.StatusOK, &Outcome{Committed: true}
-	if x.strict() {
+	if x.Strict() {
 		status = http.StatusSwitchingProtocols
 	}
 }
@@ -439,7 +439,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, u
 					}
 					payload = scrubbed.Bytes()
 				}
-				if x.strict() && (serverContent || toolCall) {
+				if x.Strict() && (serverContent || toolCall) {
 					mu.Lock()
 					inFlight = !turnComplete
 					mu.Unlock()
@@ -502,7 +502,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, u
 				}
 			} else if err := geminilifecycle.ValidateLiveClientFrame(payload, maxBytes); err != nil {
 				return end(fmt.Errorf("%w: %v", errGeminiLiveClientProtocol, err))
-			} else if x.strict() {
+			} else if x.Strict() {
 				// A client message can start or continue model work. Retain only
 				// whether a turn still needs its provider completion.
 				mu.Lock()
@@ -514,7 +514,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, u
 			}
 			if fromProvider {
 				x.Delivered(s.Now())
-				if x.strict() && providerError {
+				if x.Strict() && providerError {
 					return end(errGeminiLiveProviderError)
 				}
 			}
@@ -573,11 +573,11 @@ loop:
 	pending := inFlight
 	mu.Unlock()
 	code := websocket.CloseStatus(first.err)
-	if x.strict() && first.fromProvider && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+	if x.Strict() && first.fromProvider && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		first.err = fmt.Errorf("%w: %v", errGeminiLiveIncomplete, first.err)
 		code = websocket.StatusInternalError
 	}
-	if x.strict() && errors.Is(first.err, errGeminiLiveProviderError) {
+	if x.Strict() && errors.Is(first.err, errGeminiLiveProviderError) {
 		code = websocket.StatusInternalError
 	}
 	if code < 0 {
@@ -599,7 +599,7 @@ loop:
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if x.strict() && !errors.Is(first.err, context.DeadlineExceeded) {
+	if x.Strict() && !errors.Is(first.err, context.DeadlineExceeded) {
 		if first.deliveryFailed || !first.fromProvider && first.sourceClosed && (inFlight || deliveryFailed) {
 			return observed, false, fmt.Errorf("%w: %v", errGeminiLiveClientClosed, first.err)
 		}

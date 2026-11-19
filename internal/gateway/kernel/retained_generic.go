@@ -213,7 +213,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be read."))
 			return
 		}
-		candidate, ok := x.snapshot().FindRoute(slug)
+		candidate, ok := x.Snapshot().FindRoute(slug)
 		if !ok {
 			fail(fault.ModelNotFound(slug))
 			return
@@ -225,7 +225,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			return
 		}
 		if !slices.Contains(route.Operations, e.Operation) {
-			fail(policyUnavailable("operation_unavailable", "The route does not allow this operation."))
+			fail(PolicyUnavailable("operation_unavailable", "The route does not allow this operation."))
 			return
 		}
 		if err = x.GuardrailSurfaceGate(route); err != nil {
@@ -1113,7 +1113,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			fail(fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil))
 			return
 		}
-		candidate, ok := x.snapshot().FindRoute(slug)
+		candidate, ok := x.Snapshot().FindRoute(slug)
 		if !ok {
 			fail(fault.ModelNotFound(slug))
 			return
@@ -1125,7 +1125,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			return
 		}
 		if !slices.Contains(route.Operations, operation) {
-			fail(policyUnavailable("operation_unavailable", "The route does not allow this operation."))
+			fail(PolicyUnavailable("operation_unavailable", "The route does not allow this operation."))
 			return
 		}
 		if gateErr := x.GuardrailSurfaceGate(route); gateErr != nil {

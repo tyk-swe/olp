@@ -527,8 +527,8 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, pinErr)
 		return
 	}
-	if x.strict() {
-		s.Refuse(x, w, policyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
+	if x.Strict() {
+		s.Refuse(x, w, PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
 		return
 	}
 	if !p.Provider.Connector().Supports("batch", "gemini", "unary") || !p.Provider.Supports(p.Model, "batch", "gemini", "unary") {
@@ -768,7 +768,7 @@ func (s *Server) geminiFileCall(w http.ResponseWriter, r *http.Request, use Reta
 		return
 	}
 	if route.Fidelity.Strict() {
-		s.Refuse(x, w, policyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
+		s.Refuse(x, w, PolicyUnavailable("target_capability", "Strict routes do not serve Gemini files."))
 		return
 	}
 	x.Route = route

@@ -45,10 +45,10 @@ func providerStatePermitted(family wire.Format, authority keyauthority.Authority
 }
 
 func (s *Server) Refuse(x *Call, w http.ResponseWriter, e *fault.Error) {
-	s.refuseOn(x, w, e, x.family.Surface())
+	s.RefuseOn(x, w, e, x.family.Surface())
 }
 
-func (s *Server) refuseOn(x *Call, w http.ResponseWriter, e *fault.Error, surface string) {
+func (s *Server) RefuseOn(x *Call, w http.ResponseWriter, e *fault.Error, surface string) {
 	x.Failure = e
 	s.Finish(x, nil, e.Status)
 	fault.WriteSurfaceError(w, e, surface)

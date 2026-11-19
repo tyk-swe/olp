@@ -132,7 +132,7 @@ func (s *Server) adopt(ctx context.Context, x *Call, slug string, via usage.LegV
 	if x.walk.Visited(slug) {
 		return routing.FallbackRepeated, nil
 	}
-	route, ok := x.snapshot().FindRoute(slug)
+	route, ok := x.Snapshot().FindRoute(slug)
 	if !ok {
 		return routing.FallbackUnavailable, nil
 	}

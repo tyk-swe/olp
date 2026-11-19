@@ -25,7 +25,7 @@ import (
 
 func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	x := &Call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
-	fail := func(e *fault.Error) { s.refuseOn(x, w, e, "openai") }
+	fail := func(e *fault.Error) { s.RefuseOn(x, w, e, "openai") }
 	if !s.Gate.Admit(r.Context()) {
 		fail(fault.Overloaded)
 		return
@@ -113,14 +113,14 @@ func passthroughSuffix(r *http.Request) (string, bool) {
 
 func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Call, route *routing.Route, normalized string, query url.Values, fail func(*fault.Error)) {
 	target := route.Targets[0]
-	provider, ok := x.snapshot().FindProvider(target.ProviderID)
+	provider, ok := x.Snapshot().FindProvider(target.ProviderID)
 	if !ok || !provider.Enabled {
 		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
 		return
 	}
 	options := s.selectionOptions(r.Context(), x)
 	options.CheckSlots = false
-	plan, planErr := routing.Select(x.snapshot(), route.Slug, routing.PassthroughOperation, "native", "unary", x.affinity, options)
+	plan, planErr := routing.Select(x.Snapshot(), route.Slug, routing.PassthroughOperation, "native", "unary", x.affinity, options)
 	if planErr != nil {
 		fail(selectionError(planErr, route.Slug))
 		return

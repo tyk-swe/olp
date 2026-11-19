@@ -216,7 +216,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 func (s *Server) prepareMedia(ctx context.Context, x *Call, authority keyauthority.Authority) *fault.Error {
 	request := x.media
 	x.mode = request.Mode()
-	route, ok := x.snapshot().FindRoute(request.Route())
+	route, ok := x.Snapshot().FindRoute(request.Route())
 	if !ok {
 		return fault.ModelNotFound(request.Route())
 	}
@@ -230,7 +230,7 @@ func (s *Server) prepareMedia(ctx context.Context, x *Call, authority keyauthori
 }
 
 func (s *Server) planMedia(ctx context.Context, x *Call) *fault.Error {
-	if x.snapshot().GuardrailEngine(x.Route.Slug, x.keyID) != nil {
+	if x.Snapshot().GuardrailEngine(x.Route.Slug, x.keyID) != nil {
 		if e := x.GuardrailSurfaceGate(x.Route); e != nil {
 			return e
 		}
@@ -239,7 +239,7 @@ func (s *Server) planMedia(ctx context.Context, x *Call) *fault.Error {
 		return e
 	}
 	request := x.media
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	route := *x.Route
 	if route.Fidelity.Strict() {
 		if e := strictMediaContext(x); e != nil {
@@ -307,7 +307,7 @@ type encodedMedia struct {
 }
 
 func (x *Call) encodeMedia(snapshot *routing.View, provider routing.Provider, targetID, model string) (encodedMedia, error) {
-	if !x.strict() {
+	if !x.Strict() {
 		call, effective, failure := media.EncodeConfigured(x.media, provider.Connector(), model)
 		if failure != nil {
 			return encodedMedia{}, errors.New(failure.Message)

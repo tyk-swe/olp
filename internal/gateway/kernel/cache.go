@@ -277,7 +277,7 @@ func cacheAuthority(a keyauthority.Authority, rates, tokens, budgets bool) keyau
 func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	c := x.cache
 	a := x.attempts[0]
-	p := x.snapshot().Provider(a.ProviderID)
+	p := x.Snapshot().Provider(a.ProviderID)
 	var doc oif.Document
 	if x.unary != nil {
 		plan, err := x.unaryPlan(&p, a.TargetID, a.UpstreamModel)
@@ -311,7 +311,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	} else if c.policy.Scope == "route" {
 		scope = x.Route.ID
 	}
-	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.Route.ID, KeyID: x.keyID})
+	entries, guardrailErr := x.Snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.Route.ID, KeyID: x.keyID})
 	if guardrailErr != nil {
 		c.result = "bypass"
 		return nil
@@ -343,7 +343,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	// always requests stream usage for accounting, even when the caller does not.
 	fingerprint, _ := json.Marshal([]any{x.Route.RevisionID, x.Route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
 	if c.policy.Mode == "semantic" {
-		er, ok := x.snapshot().FindRoute(c.policy.EmbeddingRoute)
+		er, ok := x.Snapshot().FindRoute(c.policy.EmbeddingRoute)
 		if !ok {
 			c.result = "bypass"
 			return nil
@@ -351,7 +351,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 		embeddingRevision, _ := json.Marshal(er)
 		fingerprint = append(fingerprint, embeddingRevision...)
 		for _, t := range er.Targets {
-			fingerprint = append(fingerprint, []byte(x.snapshot().Provider(t.ProviderID).RevisionID)...)
+			fingerprint = append(fingerprint, []byte(x.Snapshot().Provider(t.ProviderID).RevisionID)...)
 		}
 	}
 	sum := sha256.Sum256(fingerprint)

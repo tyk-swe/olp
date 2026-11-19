@@ -134,7 +134,7 @@ func (s *Server) registerCloudBatchState(mux *http.ServeMux) {
 }
 
 func (s *Server) cloudBatchFail(x *Call, w http.ResponseWriter, e *fault.Error) {
-	s.refuseOn(x, w, e, "openai")
+	s.RefuseOn(x, w, e, "openai")
 }
 
 func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +149,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route must name a batch-enabled route.", nil))
 		return
 	}
-	snapshot := x.request.release.Snapshot()
+	snapshot := x.Snapshot()
 	route, ok := snapshot.FindRoute(slug)
 	if !ok || !slices.Contains(route.Operations, "batch") {
 		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No matching batch route exists."))
@@ -167,7 +167,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := s.StateDeadline(r.Context(), &route)
 	defer cancel()
-	p, e := s.selectPinSurface(ctx, x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
+	p, e := s.SelectPinSurface(ctx, x, &route, "batch", "native", "unary", func(provider *routing.Provider, model string) bool {
 		cfg := provider.Connector()
 		return provider.ProfileID == dialect && cfg.Supports("batch", "native", "unary") && cfg.BatchStorage != nil
 	})
@@ -181,9 +181,9 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No matching cloud batch dialect is available."))
 		return
 	}
-	if x.strict() {
+	if x.Strict() {
 		s.ReleaseHold(r.Context(), p.Hold)
-		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
+		s.cloudBatchFail(x, w, PolicyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
 		return
 	}
 	input, failure := validateCloudBatchRequest(body, adapter, p.Provider.BatchStorage)
@@ -218,7 +218,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	submission, e := s.BeginBatch(ctx, x, authority.ID, p, BatchIntent{
-		resourceID: plan.id, Kind: resources.KindCloudBatch, Adapter: adapter, Surface: batches.SurfaceNative,
+		ResourceID: plan.id, Kind: resources.KindCloudBatch, Adapter: adapter, Surface: batches.SurfaceNative,
 		Operation: wire.LineGeneration, Window: plan.window, Submission: plan.submission,
 		Source: source, Canonical: source.Bytes(), Effective: plan.body,
 	})
@@ -307,7 +307,7 @@ func planCloudBatch(p *Pin, adapter connectors.BatchAdapter, input cloudBatchReq
 	id := uuid.Must(uuid.NewV7())
 	label := strings.ReplaceAll(id.String(), "-", "")
 	display := cmp.Or(input.DisplayName, "olp-"+label)
-	window := defaultBatchCompletionWindow
+	window := DefaultBatchCompletionWindow
 	if input.TimeoutHours > 0 {
 		window = time.Duration(input.TimeoutHours) * time.Hour
 	}
@@ -383,7 +383,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		return
 	}
 	if !cancel {
-		candidate, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
+		candidate, exists := x.Snapshot().FindRoute(res.RouteSlug)
 		if !exists {
 			s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "The cloud batch route is unavailable."))
 			return
@@ -407,7 +407,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	x.Route = route
 	if route.Fidelity.Strict() {
 		s.ReleaseHold(r.Context(), p.Hold)
-		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
+		s.cloudBatchFail(x, w, PolicyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
 		return
 	}
 	if !cancel {
@@ -496,7 +496,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.Gate.Release(r.Context())
-	limit, after, err := listArgs(r)
+	limit, after, err := ListArgs(r)
 	if err != nil {
 		s.cloudBatchFail(x, w, err)
 		return

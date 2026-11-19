@@ -92,7 +92,7 @@ func guardrailStatus(failure guardrails.Failure) int {
 
 func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 	x.guard.metadata = x.request.guardrailMetadata
-	x.guard.engine = s.boundGuardrails(x, x.snapshot().GuardrailEngine(x.Route.Slug, x.keyID))
+	x.guard.engine = s.boundGuardrails(x, x.Snapshot().GuardrailEngine(x.Route.Slug, x.keyID))
 	if x.guard.internal {
 		x.guard.engine = x.guard.engine.WithoutModelGuardrails()
 	}
@@ -147,11 +147,11 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 		if err := x.guardrailStreamSurface(x.generation.parsed.OIF().Document()); err != nil {
 			return guardrailError(err)
 		}
-		if err := x.guard.engine.ValidateStream(x.snapshot().GuardrailWindow()); err != nil {
+		if err := x.guard.engine.ValidateStream(x.Snapshot().GuardrailWindow()); err != nil {
 			if x.Route.ContentPolicy != nil {
 				for _, rule := range x.Route.ContentPolicy.Rules {
 					if rule.Phase == contentpolicy.PhaseOutput {
-						return policyUnavailable("content_policy_streaming_requires_unary", "This migrated output policy requires a buffered unary response.")
+						return PolicyUnavailable("content_policy_streaming_requires_unary", "This migrated output policy requires a buffered unary response.")
 					}
 				}
 			}
@@ -182,7 +182,7 @@ func (x *Call) guardrailStream() (*guardstream.Stream, error) {
 	return guardstream.New(guardstream.Config{
 		Engine: x.guard.engine, Masks: x.guard.masks, Input: x.guard.input,
 		RequestID: x.request.accountingID(), Route: x.Route.Slug, InternalModel: x.guard.internal,
-		Family: x.family, Window: x.snapshot().GuardrailWindow(), Strict: x.strict(),
+		Family: x.family, Window: x.Snapshot().GuardrailWindow(), Strict: x.Strict(),
 		ToolContext: x.guard.ctx, Record: x.guard.record,
 	})
 }
@@ -221,7 +221,7 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 			}
 		}
 	})
-	if x.strict() && x.guard.engine.HasLegacyInput() {
+	if x.Strict() && x.guard.engine.HasLegacyInput() {
 		texts := contentpolicy.InputTexts(document)
 		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
 		for i, text := range texts {
@@ -282,7 +282,7 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 			}
 		}
 	}
-	if x.strict() && x.guard.engine.HasLegacyOutput() {
+	if x.Strict() && x.guard.engine.HasLegacyOutput() {
 		if err := interaction.CheckLegacyOutputCoverage(x.family, doc); err != nil {
 			result, _ := x.guard.engine.Unavailable(guardrails.Output)
 			x.guard.record(result.Decisions)
@@ -473,7 +473,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *Call, in guardrails.
 	if x.request.release == nil {
 		return guardrails.Result{}, guardrails.ErrSurface
 	}
-	p, compiled, err := policy(x.snapshot())
+	p, compiled, err := policy(x.Snapshot())
 	if err != nil {
 		return guardrails.Result{}, err
 	}
@@ -733,7 +733,7 @@ func (x *Call) guardrailHeaders(h http.Header, streamed, trailers bool) {
 }
 
 func (x *Call) GuardrailSurfaceGate(route *routing.Route) *fault.Error {
-	if engine := x.snapshot().GuardrailEngine(route.Slug, x.keyID); engine != nil {
+	if engine := x.Snapshot().GuardrailEngine(route.Slug, x.keyID); engine != nil {
 		x.guard.engine = engine
 		x.guard.metadata = x.request.guardrailMetadata
 		result, err := engine.Unavailable()
@@ -749,11 +749,11 @@ func (x *Call) GuardrailSurfaceGate(route *routing.Route) *fault.Error {
 }
 
 func (x *Call) legacyGuardrailError(result guardrails.Result, err error) error {
-	if !x.snapshot().HasGuardrails() {
+	if !x.Snapshot().HasGuardrails() {
 		return err
 	}
 	for _, evidence := range result.Decisions {
-		d := x.snapshot().GuardrailDefinition(evidence.Revision)
+		d := x.Snapshot().GuardrailDefinition(evidence.Revision)
 		if d.LegacyRuleID == "" {
 			continue
 		}
@@ -763,7 +763,7 @@ func (x *Call) legacyGuardrailError(result guardrails.Result, err error) error {
 	}
 	if errors.Is(err, guardrails.ErrBlocked) && len(result.Decisions) > 0 {
 		last := result.Decisions[len(result.Decisions)-1]
-		if x.snapshot().GuardrailDefinition(last.Revision).LegacyRuleID != "" {
+		if x.Snapshot().GuardrailDefinition(last.Revision).LegacyRuleID != "" {
 			return errContentPolicyBlocked
 		}
 	}

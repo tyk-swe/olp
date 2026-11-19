@@ -485,7 +485,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(file.Metadata, &metadata) != nil || metadata.Manifest.Adapter != geminiNativeManifest || metadata.Manifest.LineCount < 1 || metadata.Manifest.ManifestDigest == "" {
 			s.ReleaseHold(r.Context(), p.Hold)
-			s.Refuse(x, w, policyUnavailable("target_capability", "File-backed Gemini batches require qualified JSONL uploaded in one complete final chunk."))
+			s.Refuse(x, w, PolicyUnavailable("target_capability", "File-backed Gemini batches require qualified JSONL uploaded in one complete final chunk."))
 			return
 		}
 		input.Expected = new(int64(metadata.Manifest.LineCount))
@@ -706,7 +706,7 @@ func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use Ret
 		return
 	}
 	if route.Fidelity.Strict() {
-		s.Refuse(x, w, policyUnavailable("target_capability", "Strict routes do not serve Gemini batches."))
+		s.Refuse(x, w, PolicyUnavailable("target_capability", "Strict routes do not serve Gemini batches."))
 		return
 	}
 	x.Route = route

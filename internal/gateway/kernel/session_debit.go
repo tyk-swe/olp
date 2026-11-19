@@ -186,7 +186,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority key
 	if s.Deps.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	if snapshot == nil || x.Route == nil {
 		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}

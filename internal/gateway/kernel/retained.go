@@ -312,7 +312,7 @@ func (s *Server) authorizeResponseContract(ctx context.Context, x *Call, authori
 // serving identity its document recorded.
 func (s *Server) admitDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *durableDocument, operation string, use RetainedUse) (*Pin, *routing.Route, *fault.Error) {
 	if doc != nil {
-		current, ok := x.snapshot().FindRoute(r.RouteSlug)
+		current, ok := x.Snapshot().FindRoute(r.RouteSlug)
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.Now()) {
 			return nil, nil, fault.NotFoundError("not_found", "The stored provider resource is unavailable to this key.")
 		}

@@ -19,7 +19,7 @@ import (
 )
 
 func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) ([]float32, string, error) {
-	route, ok := parent.snapshot().FindRoute(parent.cache.policy.EmbeddingRoute)
+	route, ok := parent.Snapshot().FindRoute(parent.cache.policy.EmbeddingRoute)
 	if !ok || !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 		return nil, "", errors.New("embedding route unavailable")
 	}

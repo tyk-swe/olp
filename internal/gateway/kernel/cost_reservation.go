@@ -187,7 +187,7 @@ func (x *Call) attemptCostBound(attempt routing.Attempt) rates.Cost {
 		return rates.Cost{}
 	}
 	var provider routing.Provider
-	if snapshot := x.snapshot(); snapshot != nil {
+	if snapshot := x.Snapshot(); snapshot != nil {
 		var ok bool
 		if provider, ok = snapshot.FindProvider(attempt.ProviderID); !ok && (x.generation.parsed != nil || x.unary != nil) {
 			return rates.Cost{}
@@ -212,7 +212,7 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 	if rev == nil {
 		return costBound
 	}
-	provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
+	provider, ok := x.Snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
 		return costBound
 	}
@@ -308,7 +308,7 @@ func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
 // committed reports whether the attempt's provider settled under provisioned
 // capacity, whose usage has a price but no marginal cost.
 func (x *Call) committed(providerID string) bool {
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	if snapshot == nil {
 		return false
 	}
@@ -448,7 +448,7 @@ func (s *Server) settledCharge(x *Call) rates.Cost {
 			total = total.Add(cost)
 			continue
 		}
-		provider := x.snapshot().Provider(fact.ProviderID)
+		provider := x.Snapshot().Provider(fact.ProviderID)
 		if charge, ok := rev.Charge(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), costPtr,
 			string(provider.Kind), provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
@@ -478,7 +478,7 @@ func (x *Call) resolveAttemptCardRevision(providerID string, route *routing.Rout
 	// provider's, then the route's — the same precedence accounting applies.
 	project := x.authority.ProjectID
 	if project == nil {
-		if snapshot := x.snapshot(); snapshot != nil {
+		if snapshot := x.Snapshot(); snapshot != nil {
 			if provider, ok := snapshot.FindProvider(providerID); ok {
 				project = provider.ProjectID
 			}
@@ -506,7 +506,7 @@ func (x *Call) factCommitted(fact *events.AttemptFact) bool {
 	if fact.CommitmentPinned {
 		return fact.Commitment != nil
 	}
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	if snapshot == nil {
 		return false
 	}

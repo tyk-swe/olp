@@ -118,7 +118,7 @@ func responseParentProjection(res *resources.Resource, contract *storedResponseC
 }
 
 func responseResourceKind(x *Call) string {
-	if x.strict() {
+	if x.Strict() {
 		return resources.KindStrictResponse
 	}
 	return resources.KindResponse
@@ -150,7 +150,7 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	return r, &contract, nil
 }
 func (s *Server) putStrictResponse(ctx context.Context, x *Call, fact *events.AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
-	provider, ok := x.snapshot().FindProvider(fact.ProviderID)
+	provider, ok := x.Snapshot().FindProvider(fact.ProviderID)
 	if !ok {
 		return nil, resources.ErrContract
 	}

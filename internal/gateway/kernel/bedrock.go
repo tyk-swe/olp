@@ -93,7 +93,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		return
 	}
 	x.Route = &route
-	if x.strict() {
+	if x.Strict() {
 		// A release may have changed between the dispatch wrapper and begin.
 		// Never let that race serve strict work through the transformed resource path.
 		fail(fault.InvalidRequest("target_capability", "This interaction requires the compiled generation runner; retry against the current route.", nil))
@@ -121,7 +121,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
 	defer s.settleCaps(r.Context(), x)
-	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *routing.Provider, model string) bool {
+	p, e := s.SelectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *routing.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})
 	if e != nil {

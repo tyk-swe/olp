@@ -97,7 +97,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 
 	reserved, jobErr := s.Deps.Media.Store.Reserve(ctx, jobs.Reservation{
 		ID:                  localJobID,
-		StrictContract:      x.strict(),
+		StrictContract:      x.Strict(),
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		ProviderRevisionID:  attempt.ProviderRevisionID,
 		APIKeyID:            authority.ID,

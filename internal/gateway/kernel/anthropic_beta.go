@@ -46,7 +46,7 @@ func takesAnthropicBeta(cfg connectors.Config) bool {
 // servesAnthropicBeta is whether a target of the route is a provider that
 // takes the header.
 func (x *Call) servesAnthropicBeta() bool {
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	return slices.ContainsFunc(x.Route.Targets, func(t routing.Target) bool {
 		provider := snapshot.Provider(t.ProviderID)
 		return takesAnthropicBeta(provider.Connector())
@@ -91,7 +91,7 @@ func anthropicBetaFor(cfg connectors.Config, caller string) (beta string, ok boo
 // without their header, which the upstream refuses. A strict route validates the
 // header when its profile binds it.
 func (x *Call) checkAnthropicBeta() *fault.Error {
-	if x.strict() || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !x.servesAnthropicBeta() {
+	if x.Strict() || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !x.servesAnthropicBeta() {
 		return nil
 	}
 	caller, ok := anthropicBeta(x.semanticHeaders)
@@ -99,7 +99,7 @@ func (x *Call) checkAnthropicBeta() *fault.Error {
 		param := "anthropic-beta"
 		return fault.InvalidRequest("invalid_request", "The Anthropic-Beta header must be a valid header value of at most 2048 bytes.", &param)
 	}
-	snapshot := x.snapshot()
+	snapshot := x.Snapshot()
 	for _, target := range x.Route.Targets {
 		provider := snapshot.Provider(target.ProviderID)
 		cfg := provider.Connector()

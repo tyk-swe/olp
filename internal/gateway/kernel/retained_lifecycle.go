@@ -136,7 +136,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be read."))
 			return
 		}
-		candidate, ok := x.snapshot().FindRoute(slug)
+		candidate, ok := x.Snapshot().FindRoute(slug)
 		if !ok {
 			fail(fault.ModelNotFound(slug))
 			return
@@ -144,7 +144,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		route = &candidate
 		x.Route = route
 		if !route.Fidelity.Strict() {
-			fail(policyUnavailable("strict_route_required", "Native agent resources require a strict route."))
+			fail(PolicyUnavailable("strict_route_required", "Native agent resources require a strict route."))
 			return
 		}
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
@@ -152,7 +152,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			return
 		}
 		if !slices.Contains(route.Operations, e.Operation) {
-			fail(policyUnavailable("operation_unavailable", "The route does not allow this operation."))
+			fail(PolicyUnavailable("operation_unavailable", "The route does not allow this operation."))
 			return
 		}
 		if err = x.GuardrailSurfaceGate(route); err != nil {
@@ -675,7 +675,7 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *Call, p *Pin, route *r
 func retainedAgentEnvironment(source oif.Document) *fault.Error {
 	v, present := source.Root().Lookup("base_environment")
 	if present && v.Kind() != oif.Null && v.Kind() != oif.Object {
-		return policyUnavailable("unsupported_stateful_reference", "Native environment references are not supported by this agent resource contract.")
+		return PolicyUnavailable("unsupported_stateful_reference", "Native environment references are not supported by this agent resource contract.")
 	}
 	var bindings []oif.Value
 	if env, ok := v.Lookup("env"); ok {
@@ -690,7 +690,7 @@ func retainedAgentEnvironment(source oif.Document) *fault.Error {
 	}
 	for _, binding := range bindings {
 		if credential, ok := binding.Lookup("credential"); ok && credential.Kind() != oif.Null {
-			return policyUnavailable("unsupported_stateful_reference", "Native credential references are not supported by this agent resource contract.")
+			return PolicyUnavailable("unsupported_stateful_reference", "Native credential references are not supported by this agent resource contract.")
 		}
 	}
 	return nil
@@ -710,7 +710,7 @@ func normalizeRetainedAgent(source oif.Document) (oif.Document, error) {
 // execution because this contract has no model usage observations.
 func (s *Server) retainedControlPolicy(x *Call, p *Pin, route *routing.Route) *fault.Error {
 	if p.Provider.CredentialSource == "caller" {
-		return policyUnavailable("unsupported_provider_credentials", "Agent resources require managed provider credentials.")
+		return PolicyUnavailable("unsupported_provider_credentials", "Agent resources require managed provider credentials.")
 	}
 	if x.routingInputs == nil && s.Deps.Runtime != nil {
 		x.routingInputs = s.Deps.Runtime.RoutingInputs()
@@ -722,7 +722,7 @@ func (s *Server) retainedControlPolicy(x *Call, p *Pin, route *routing.Route) *f
 		p.attempt.Price = x.routingInputs.Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, x.operationName(), x.request.startedAt)
 	}
 	if p.attempt.Price != nil || x.attemptCardRevisionForRoute(p.Provider.ID, route, x.request.startedAt) != nil {
-		return policyUnavailable("unsupported_pricing", "Agent resource control does not support priced execution. Use an unpriced resource route.")
+		return PolicyUnavailable("unsupported_pricing", "Agent resource control does not support priced execution. Use an unpriced resource route.")
 	}
 	return nil
 }

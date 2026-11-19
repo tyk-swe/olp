@@ -104,7 +104,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		return
 	}
 	var err *fault.Error
-	p, err = s.selectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
+	p, err = s.SelectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
 		return (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
 	})
 	if err != nil {

@@ -44,7 +44,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *Call, authority 
 	if err := decoder.Decode(new(struct{})); err != io.EOF {
 		return nil, &mcp.WorkflowError{Status: 400, Code: "invalid_tool_call", Message: "The recovery identifier is invalid."}
 	}
-	if authority.ProjectID == nil || x.Route == nil || x.snapshot() == nil {
+	if authority.ProjectID == nil || x.Route == nil || x.Snapshot() == nil {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
 	runID, err := uuid.Parse(x.workflow.runID)
@@ -86,7 +86,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *Call, authority 
 		ID: dispatchID, APIKeyID: authority.ID, ProjectID: *authority.ProjectID,
 		RunID: x.workflow.runID, StepID: stepID, Kind: debits.KindTool, ClaimID: claimID,
 		Currency: currency, CostBound: "0", ChargeBound: "0", PreparedUntil: time.Now().Add(90 * time.Second),
-		Affinity: debits.Affinity{ReleaseID: canonicalSessionID(x.snapshot().Generation().ID), RevisionID: canonicalSessionID(x.Route.RevisionID), RouteRevisionID: canonicalSessionID(x.Route.RevisionID)},
+		Affinity: debits.Affinity{ReleaseID: canonicalSessionID(x.Snapshot().Generation().ID), RevisionID: canonicalSessionID(x.Route.RevisionID), RouteRevisionID: canonicalSessionID(x.Route.RevisionID)},
 	}
 	boundaries := x.AdmissionAuthority(authority).CostBoundaries(x.limitRoute())
 	if !boundaries.Resolved {

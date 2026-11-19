@@ -12,12 +12,12 @@ import (
 // later attempts may use its other slots; an unknown principal pins the
 // credential slot. A secret refresh alone does not change a principal.
 func (x *Call) servingAllowed(provider *routing.Provider, targetID, model string, slot routing.Slot, selectBaseline bool) bool {
-	if !x.strict() {
+	if !x.Strict() {
 		return true
 	}
 	var serving oif.ServingIdentity
 	if x.media != nil {
-		template, found := x.snapshot().MediaTemplate(x.Route.Slug, targetID, string(x.media.Op()))
+		template, found := x.Snapshot().MediaTemplate(x.Route.Slug, targetID, string(x.media.Op()))
 		if found {
 			serving = template.Serving()
 		}

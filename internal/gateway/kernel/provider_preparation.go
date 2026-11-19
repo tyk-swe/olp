@@ -87,7 +87,7 @@ func demandOf(e estimate.Estimate) *routing.TokenDemand {
 	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 }
 
-func (x *Call) strict() bool {
+func (x *Call) Strict() bool {
 	return x.Route != nil && x.Route.Fidelity.Strict()
 }
 
@@ -118,14 +118,14 @@ func (x *Call) preparedGuardrailInput(format wire.Format, document oif.Document)
 }
 
 func (x *Call) buildProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
-	if x.strict() {
+	if x.Strict() {
 		return x.buildStrict(targetID, model)
 	}
 	return x.buildTransformed(provider, model)
 }
 
 func (x *Call) buildStrict(targetID, model string) (preparedProvider, error) {
-	template, _ := x.snapshot().InteractionTemplate(x.Route.Slug, targetID)
+	template, _ := x.Snapshot().InteractionTemplate(x.Route.Slug, targetID)
 	if template == nil {
 		return preparedProvider{}, &oif.Incompatibility{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 	}
@@ -197,7 +197,7 @@ func (x *Call) buildTransformed(provider *routing.Provider, model string) (prepa
 				return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 			})
 			if err != nil {
-				return preparedProvider{}, policyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
+				return preparedProvider{}, PolicyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
 			}
 			if blocked {
 				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
@@ -275,7 +275,7 @@ func (x *Call) preparedEstimate(model string, effective requestSummary) (admitte
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
 func (x *Call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.Route == nil || x.Route.ContentPolicy == nil) && x.guard.engine == nil
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.Strict() && (x.Route == nil || x.Route.ContentPolicy == nil) && x.guard.engine == nil
 }
 
 type encodedRequest struct {
@@ -421,7 +421,7 @@ func (x *Call) recordEstimate(fact *events.AttemptFact, a routing.Attempt) {
 	if x.generation.parsed == nil && x.unary == nil {
 		return
 	}
-	provider := x.snapshot().Provider(a.ProviderID)
+	provider := x.Snapshot().Provider(a.ProviderID)
 	if admitted, err := x.attemptEstimate(&provider, a.TargetID, a.UpstreamModel); err == nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = admitted.input, string(admitted.provenance)
 	}
@@ -433,7 +433,7 @@ func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled,
 	if compiled == nil || len(compiled.Input) == 0 || protocols.InputInspectable(encodedWire) {
 		return nil
 	}
-	return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(encodedWire)+"` provider wire.")
+	return PolicyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(encodedWire)+"` provider wire.")
 }
 
 // prepareTransformed applies key retention policy after translation and provider

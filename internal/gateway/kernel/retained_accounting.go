@@ -161,7 +161,7 @@ func (s *Server) reserveRetainedPage(ctx context.Context, x *Call, authority key
 
 func (s *Server) prepareRetainedAdmission(x *Call, p *Pin, deferred bool) (retainedAdmissionPlan, *fault.Error) {
 	if p.Provider.CredentialSource == "caller" {
-		return retainedAdmissionPlan{}, policyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
+		return retainedAdmissionPlan{}, PolicyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
 	}
 	if deferred {
 		if err := s.retainedUnboundedLimits(x, p); err != nil {
