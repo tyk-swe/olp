@@ -118,6 +118,8 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 	return nil
 }
 
+func (s *Server) LimitsEnforced() bool { return s.limitsEnforced }
+
 func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
 	// Management responses carry credentials and member data; the public
 	// perimeter adds the rest of the API's security headers.

@@ -2,9 +2,10 @@ package authority
 
 import (
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 	"maps"
 	"math/big"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // LimitTemplates supplies independent ceilings at each referencing boundary.

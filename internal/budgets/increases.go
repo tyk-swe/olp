@@ -1,4 +1,4 @@
-package access
+package budgets
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -16,12 +17,12 @@ import (
 
 const increaseJSON = `to_jsonb(i)||jsonb_build_object('amount',i.amount::text)`
 
-func (s *Server) budgetIncreases(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) increases(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+increaseJSON+" FROM olp.budget_increases i WHERE i.id<$1 AND ($2 OR i.project_id=ANY($3::uuid[]) OR i.organization_id=ANY($5::uuid[])) ORDER BY i.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1, p.OrganizationIDs())
+	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+increaseJSON+" FROM olp.budget_increases i WHERE i.id<$1 AND ($2 OR i.project_id=ANY($3::uuid[]) OR i.organization_id=ANY($5::uuid[])) ORDER BY i.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1, p.OrganizationIDs())
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -29,7 +30,7 @@ func (s *Server) budgetIncreases(r *http.Request, p authz.Principal) (httpkit.Re
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) createBudgetIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in struct {
 		Target    BudgetTarget `json:"target"`
 		Window    string       `json:"window"`
@@ -54,10 +55,10 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ authz.Principal) (httpk
 	if in.Window != "day" && in.Window != "week" && in.Window != "month" {
 		return httpkit.Reply{}, httpkit.Invalid("window", "Choose day, week or month.")
 	}
-	return Mutate(s, r, in, func(tx pgx.Tx, p authz.Principal) (increaseTarget, error) {
-		owner, project, policy, err := s.budgetIncreaseTarget(r, tx, p, in.Target)
+	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (increaseTarget, error) {
+		owner, project, policy, err := a.target(r, tx, p, in.Target)
 		return increaseTarget{owner: owner, project: project, policy: policy}, err
-	}, func(tx pgx.Tx, p authz.Principal, target increaseTarget) (httpkit.Reply, Event, error) {
+	}, func(tx pgx.Tx, p authz.Principal, target increaseTarget) (httpkit.Reply, access.Event, error) {
 		var cap *string
 		if target.policy != nil {
 			switch in.Window {
@@ -70,12 +71,12 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ authz.Principal) (httpk
 			}
 		}
 		if cap == nil {
-			return httpkit.Reply{}, Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
 		}
 		var now, end time.Time
 		var window int64
 		if err := tx.QueryRow(r.Context(), `SELECT now(),window_id,end_at FROM olp.budget_window($1,now())`, in.Window).Scan(&now, &window, &end); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		expires := end
 		if in.ExpiresAt != nil && in.ExpiresAt.Before(expires) {
@@ -83,28 +84,28 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ authz.Principal) (httpk
 		}
 		expires = expires.Truncate(time.Millisecond)
 		if !expires.After(now) {
-			return httpkit.Reply{}, Event{}, httpkit.Invalid("expires_at", "Expiry must be in the future, within the current budget window.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("expires_at", "Expiry must be in the future, within the current budget window.")
 		}
 		var count int
 		if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM olp.budget_increases WHERE owner_id=$1 AND window_kind=$2 AND revoked_at IS NULL AND expires_at>now()`, target.owner, in.Window).Scan(&count); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if count >= 8 {
-			return httpkit.Reply{}, Event{}, httpkit.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
 		}
 		id, etag := httpkit.NewID(), httpkit.NewID()
 		encoded, _ := json.Marshal(in.Target)
 		_, err := tx.Exec(r.Context(), `INSERT INTO olp.budget_increases(id,owner_id,project_id,organization_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag) VALUES($1,$2,$3,CASE WHEN $4::jsonb->>'kind'='organization' THEN ($4::jsonb->>'id')::uuid ELSE NULL END,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, target.owner, target.project, encoded, in.Window, window, in.Amount, in.Reason, now, expires, end, p.UserID(), etag)
 		if err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
-			return httpkit.Reply{}, Event{}, err
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		var data json.RawMessage
 		err = tx.QueryRow(r.Context(), "SELECT "+increaseJSON+" FROM olp.budget_increases i WHERE id=$1", id).Scan(&data)
 		reply := httpkit.Reply{Status: 201, Body: data, ETag: etag, Location: "/api/v1/budget-increases/" + id}
-		return reply, Event{Action: "budget.increase.create", Resource: "budget_increase", ID: id}, err
+		return reply, access.Event{Action: "budget.increase.create", Resource: "budget_increase", ID: id}, err
 	})
 }
 
@@ -114,12 +115,12 @@ type increaseTarget struct {
 	policy  *keyauthority.BudgetPolicy
 }
 
-func (s *Server) revokeBudgetIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) revokeIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "increase_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return Transact(s, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+	return access.Transact(a.server, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		var target BudgetTarget
 		var project *string
 		var etag string
@@ -138,16 +139,16 @@ func (s *Server) revokeBudgetIncrease(r *http.Request, _ authz.Principal) (httpk
 			return struct{}{}, err
 		}
 		return struct{}{}, httpkit.Match(r, etag)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		if _, err := tx.Exec(r.Context(), `UPDATE olp.budget_increases SET revoked_at=COALESCE(revoked_at,now()),revoked_by=COALESCE(revoked_by,$2),etag=$3 WHERE id=$1`, id, p.UserID(), httpkit.NewID()); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		_, err := AdvanceAuthority(r.Context(), tx)
-		return httpkit.Reply{Status: http.StatusNoContent}, Event{Action: "budget.increase.revoke", Resource: "budget_increase", ID: id}, err
+		_, err := access.AdvanceAuthority(r.Context(), tx)
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "budget.increase.revoke", Resource: "budget_increase", ID: id}, err
 	})
 }
 
-func (s *Server) budgetIncrease(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) increase(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "increase_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -156,7 +157,7 @@ func (s *Server) budgetIncrease(r *http.Request, p authz.Principal) (httpkit.Rep
 	var project *string
 	var target BudgetTarget
 	var etag string
-	if err = s.Pool.QueryRow(r.Context(), "SELECT "+increaseJSON+",project_id::text,etag::text,target FROM olp.budget_increases i WHERE id=$1", id).Scan(&data, &project, &etag, &target); err != nil {
+	if err = a.server.Pool.QueryRow(r.Context(), "SELECT "+increaseJSON+",project_id::text,etag::text,target FROM olp.budget_increases i WHERE id=$1", id).Scan(&data, &project, &etag, &target); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = budgetIncreaseScope(p, target, project, authz.View); err != nil {
