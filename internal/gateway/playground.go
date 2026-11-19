@@ -17,7 +17,6 @@ import (
 
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -26,20 +25,16 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// playgroundTimeout bounds one console playground call end to end.
-const playgroundTimeout = 2 * time.Minute
+// PlaygroundTimeout bounds one console playground call end to end.
+const PlaygroundTimeout = 2 * time.Minute
+
+const PlaygroundBodyLimit = 1 << 20
 
 // Playground serves the console's unary test surface through the same
 // executor as API traffic, admitting a console session or management token
 // that holds the playground operation.
 type Playground struct {
-	Access  *access.Server
 	Gateway *Server
-}
-
-func (p *Playground) Register(mux *http.ServeMux) {
-	p.Access.Route(mux, "POST /api/v1/playground", p.handle, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
-	p.Access.Stream(mux, "POST /api/v1/playground/stream", p.stream, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
 }
 
 type playgroundTool struct {
@@ -307,7 +302,7 @@ func (p *Playground) authorize(principal authz.Principal) func(*routing.Route) *
 	}
 }
 
-func (p *Playground) handle(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+func (p *Playground) Handle(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	var in playgroundRequest
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -462,7 +457,7 @@ func attemptPriority(x *call, targetID string) int {
 	return 0
 }
 
-func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
+func (p *Playground) Stream(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
 	var in playgroundRequest
 	if err := httpkit.Decode(r, &in); err != nil {
 		return err

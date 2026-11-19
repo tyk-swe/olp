@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 )
 
 type Management struct{ access *access.Server }
@@ -26,7 +27,7 @@ SELECT b.id,b.project_id,b.route_id,b.api_key_id,b.conversation,b.parent_id,b.ro
 FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id)`
 
 func (m *Management) codeBindings(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	return m.access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x`, access.CodeMatch{Field: "account_id", SQL: `(x.account_id=$%[1]d::uuid OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=x.root_id AND p.account_id=$%[1]d::uuid))`})
+	return codeadmin.List(m.access, r, p, `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x`, codeadmin.Match{Field: "account_id", SQL: `(x.account_id=$%[1]d::uuid OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=x.root_id AND p.account_id=$%[1]d::uuid))`})
 }
 
 const codePinProjection = `jsonb_build_object('model',p.model,'target_model',coalesce(p.target_model,p.model),'account_id',p.account_id,'principal',p.principal,'created_at',p.created_at)`

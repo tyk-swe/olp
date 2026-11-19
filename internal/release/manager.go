@@ -751,7 +751,7 @@ func (m *Manager) Release() *Release {
 
 // EndUserDigest derives a project-scoped identity without retaining the identifier.
 func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
-	return access.DigestEndUser(m.auth, projectID, identifier)
+	return keyauthority.DigestEndUser(m.auth, projectID, identifier)
 }
 
 func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {

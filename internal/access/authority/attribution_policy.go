@@ -1,8 +1,9 @@
 package authority
 
 import (
-	"github.com/tyk-swe/olp/internal/attribution"
 	"maps"
+
+	"github.com/tyk-swe/olp/internal/attribution"
 )
 
 func (p KeyPolicy) AttributionPolicy() attribution.Policy {

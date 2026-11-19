@@ -5,8 +5,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -84,10 +84,10 @@ func keyIDs(ctx context.Context, q database.Queryer, projectID string, names []s
 	})
 }
 
-func usableKeys(ctx context.Context, q database.Queryer, projectID, name string) ([]access.NamedKey, error) {
-	keys, err := access.ReadKeysNamed(ctx, q, &projectID, name)
+func usableKeys(ctx context.Context, q database.Queryer, projectID, name string) ([]apikeys.NamedKey, error) {
+	keys, err := apikeys.ReadKeysNamed(ctx, q, &projectID, name)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Filter(keys, func(key access.NamedKey) bool { return !key.Expired }), nil
+	return promotion.Filter(keys, func(key apikeys.NamedKey) bool { return !key.Expired }), nil
 }

@@ -51,9 +51,9 @@ jobs:
             go:
               - 'Makefile'
               - 'scripts/check-lint.sh'
-              - 'scripts/check-imports.sh'
-              - 'scripts/project-imports.txt'
-              - 'staticcheck.conf'
+              - 'scripts/check-exemptions.sh'
+              - '.golangci.yml'
+              - '.golangci-legacy.json'
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
@@ -137,6 +137,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: $/.github/actions/setup
         with:
           node-modules: false
@@ -180,7 +181,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/staticcheck
+            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-unit-console:
     needs: changes
@@ -221,7 +222,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/staticcheck
+            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-e2e-api:
     needs: changes
@@ -245,7 +246,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/staticcheck
+            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-e2e-browser:
     needs: changes
@@ -283,7 +284,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/staticcheck
+            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   contracts:
     needs: changes

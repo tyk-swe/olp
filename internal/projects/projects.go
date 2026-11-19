@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
@@ -253,7 +255,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = s.access.EnsureUsableOwner(r.Context(), tx); err != nil {
+		if err = identity.EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag = httpkit.NewID()

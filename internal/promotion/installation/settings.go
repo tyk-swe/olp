@@ -3,6 +3,8 @@ package installation
 import (
 	"context"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
@@ -45,7 +47,7 @@ func Read(ctx context.Context, q database.Queryer) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	required, err := access.ReadLocalMFARequired(ctx, q)
+	required, err := identity.ReadLocalMFARequired(ctx, q)
 	if err != nil {
 		return Settings{}, err
 	}

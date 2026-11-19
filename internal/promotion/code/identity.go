@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -54,20 +56,20 @@ func lookup(absent string, ids []string) (destination, error) {
 	return destination{}, ambiguous()
 }
 
-func mapped(ref, project, derived string, unique bool, candidates []access.CodeCandidate) (destination, error) {
-	if direct := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
+func mapped(ref, project, derived string, unique bool, candidates []codeadmin.Candidate) (destination, error) {
+	if direct := slices.IndexFunc(candidates, func(c codeadmin.Candidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
 		if !candidates[direct].ScopeMatches {
 			return destination{}, httpkit.Invalid("code", "A destination artifact reference cannot change its immutable resource scope.")
 		}
 		return destination{id: ref, existing: true}, nil
 	}
-	if stable := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == derived }); stable >= 0 {
+	if stable := slices.IndexFunc(candidates, func(c codeadmin.Candidate) bool { return c.ID == derived }); stable >= 0 {
 		if candidates[stable].ProjectID != project || !candidates[stable].ScopeMatches {
 			return destination{}, httpkit.Invalid("code", "A mapped destination resource cannot change its immutable scope.")
 		}
 		return destination{id: derived, existing: true}, nil
 	}
-	natural := func(c access.CodeCandidate) bool { return c.ProjectID == project && c.NaturalMatches }
+	natural := func(c codeadmin.Candidate) bool { return c.ProjectID == project && c.NaturalMatches }
 	first := slices.IndexFunc(candidates, natural)
 	if first < 0 {
 		return destination{id: derived}, nil
@@ -143,7 +145,7 @@ func key(ctx context.Context, q database.Queryer, ref, project string, owner *st
 	if err != nil {
 		return "", err
 	}
-	allowed, err := access.ProjectKeyUsable(ctx, q, id, project, owner)
+	allowed, err := apikeys.ProjectKeyUsable(ctx, q, id, project, owner)
 	if err != nil {
 		return "", err
 	}

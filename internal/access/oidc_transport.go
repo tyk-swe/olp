@@ -8,15 +8,12 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func oidcURL(raw string) error {
+func CheckIdentityURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || len(raw) > 2048 {
 		return errors.New("invalid OIDC URL")
@@ -35,7 +32,7 @@ var identityEgress = egress.Policy{}
 
 // oidcAddresses resolves host to the addresses identity egress may dial; one
 // disallowed answer rejects the host.
-func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
+func IdentityAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addresses, err := identityEgress.Resolve(ctx, host)
@@ -47,6 +44,11 @@ func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	}
 	return addresses, nil
 }
+
+// IdentityHTTPClient applies the independent, bounded identity egress policy.
+// Provider network exceptions never broaden this client.
+func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
+
 func oidcHTTPClient(injected *http.Client) *http.Client {
 	if injected != nil {
 		return injected
@@ -57,7 +59,7 @@ func oidcHTTPClient(injected *http.Client) *http.Client {
 		if err != nil {
 			return nil, errors.New("invalid OIDC address")
 		}
-		addresses, err := oidcAddresses(ctx, host)
+		addresses, err := IdentityAddresses(ctx, host)
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +93,7 @@ func oidcDialAddresses(ctx context.Context, network, port string, addresses []ne
 type oidcTransport struct{ base http.RoundTripper }
 
 func (t oidcTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if err := oidcURL(r.URL.String()); err != nil {
+	if err := CheckIdentityURL(r.URL.String()); err != nil {
 		return nil, err
 	}
 	response, err := t.base.RoundTrip(r)
@@ -121,25 +123,4 @@ func (b *oidcBody) Read(p []byte) (int, error) {
 		return 0, errors.New("OIDC response is too large")
 	}
 	return n, err
-}
-func safeReturn(value string) bool {
-	if value == "" {
-		return true
-	}
-	if !strings.HasPrefix(value, "/") {
-		return false
-	}
-	// Check escaped input for controls, backslashes, and authority prefixes,
-	// while preserving safe query escapes in the original redirect destination.
-	decoded, err := url.PathUnescape(value)
-	if err != nil || !utf8.ValidString(decoded) || strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "\\") || strings.IndexFunc(decoded, unicode.IsControl) >= 0 {
-		return false
-	}
-	path, err := url.Parse(value)
-	if err != nil {
-		return false
-	}
-	base := url.URL{Scheme: "https", Host: "console.invalid", Path: "/"}
-	destination := base.ResolveReference(path)
-	return destination.Scheme == base.Scheme && destination.Host == base.Host && destination.User == nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 )
@@ -28,7 +29,7 @@ func (a API) Register(mux *http.ServeMux) {
 }
 
 func (a API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	return a.access.CodeList(r, p, accountJSON)
+	return codeadmin.List(a.access, r, p, accountJSON)
 }
 
 func (a API) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -40,7 +41,7 @@ func (a API) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return a.access.CodeWrite(r, access.CodeAccounts, in.ProjectID, in, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
+	return codeadmin.Write(a.access, r, codeadmin.Accounts, in.ProjectID, in, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return save(r.Context(), tx, p, id, etag, in, existing)
 	})
 }
