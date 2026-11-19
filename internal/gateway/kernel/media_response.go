@@ -104,7 +104,7 @@ func (s *Server) removeImages(images *media.ImageResult) {
 			continue
 		}
 		if err := s.Deps.Staging.Remove(*image.Handle); err != nil {
-			s.log.Warn("staged media image cleanup failed", "error", err)
+			s.Log.Warn("staged media image cleanup failed", "error", err)
 		}
 	}
 }

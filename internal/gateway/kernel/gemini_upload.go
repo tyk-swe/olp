@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-func geminiUploadOrigin(cfg connectors.Config, model string, egressPolicy interface {
+func GeminiUploadOrigin(cfg connectors.Config, model string, egressPolicy interface {
 	ValidateEndpoint(string) (*url.URL, error)
 }) (string, error) {
 	generate, err := cfg.URL(wire.Gemini, model, false)
@@ -43,7 +43,7 @@ func geminiUploadOrigin(cfg connectors.Config, model string, egressPolicy interf
 	return endpoint, nil
 }
 
-func validateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy interface {
+func ValidateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy interface {
 	ValidateEndpoint(string) (*url.URL, error)
 }) error {
 	upload, err := url.Parse(uploadURL)
@@ -63,7 +63,7 @@ func validateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 }
 
 func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
-	endpoint, err := geminiUploadOrigin(p.Provider.Connector(), p.Model, s.egress)
+	endpoint, err := GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.Egress)
 	if err != nil {
 		return nil, "", nil, geminiManagedUploadFailure(classConnect, false)
 	}
@@ -74,14 +74,14 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 		"X-Goog-Upload-Header-Content-Type":   {"application/jsonl"},
 	}
 	displayName, _ := json.Marshal(map[string]any{"file": map[string]string{"display_name": part.Filename}})
-	start, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(displayName), int64(len(displayName)), "application/json", "application/json", startHeaders)
+	start, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(displayName), int64(len(displayName)), "application/json", "application/json", startHeaders)
 	if failure != nil {
 		return nil, "", nil, failure
 	}
 	uploadURL := start.Header.Get("X-Goog-Upload-URL")
 	generationURL, _ := p.Provider.Connector().URL(wire.Gemini, p.Model, false)
 	if len(start.Header.Values("X-Goog-Upload-URL")) != 1 ||
-		validateGeminiUploadURL(uploadURL, generationURL, s.egress) != nil {
+		ValidateGeminiUploadURL(uploadURL, generationURL, s.Egress) != nil {
 		_ = start.Body.Close()
 		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
@@ -96,7 +96,7 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 		"X-Goog-Upload-Command": {"upload, finalize"},
 		"X-Goog-Upload-Offset":  {"0"},
 	}
-	final, failure := s.geminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, pinnedUploadSource{opened.File}, part.Size,
+	final, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, PinnedUploadSource{opened.File}, part.Size,
 		"application/jsonl", "application/json", chunkHeaders)
 	if failure != nil {
 		return nil, "", nil, failure
@@ -121,7 +121,7 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 	if json.Unmarshal(fileObject["name"], &name) != nil {
 		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
-	if _, err := geminiFileID(name); err != nil {
+	if _, err := GeminiFileID(name); err != nil {
 		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	return body, name, final.Exchange, nil
@@ -131,7 +131,7 @@ func geminiManagedUploadFailure(class string, dispatched bool) *AttemptFailure {
 	return &AttemptFailure{class: class, Status: http.StatusBadGateway, dispatched: dispatched}
 }
 
-func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*PinnedResponse, *AttemptFailure) {
+func (s *Server) GeminiPinnedRequest(ctx context.Context, x *Call, p *Pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*PinnedResponse, *AttemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.User != nil {
@@ -139,7 +139,7 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, metho
 	}
 	validationURL := *parsed
 	validationURL.RawQuery, validationURL.ForceQuery = "", false
-	if _, err := s.egress.ValidateEndpoint(validationURL.String()); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(validationURL.String()); err != nil {
 		return nil, exchange.fail(classConnect, nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
@@ -171,7 +171,7 @@ func (s *Server) geminiPinnedRequest(ctx context.Context, x *Call, p *Pin, metho
 	return s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 }
 
-func geminiFileID(name string) (string, error) {
+func GeminiFileID(name string) (string, error) {
 	prefix, id, ok := strings.Cut(name, "/")
 	if !ok || prefix != "files" || id == "" || strings.Contains(id, "/") {
 		return "", fmt.Errorf("invalid Gemini file name")
@@ -179,7 +179,7 @@ func geminiFileID(name string) (string, error) {
 	return id, nil
 }
 
-func validGeminiFileID(value string) bool {
+func ValidGeminiFileID(value string) bool {
 	const prefix = resources.KindGeminiFile + "_"
 	raw := strings.TrimPrefix(value, prefix)
 	if raw == value || len(raw) != 32 {

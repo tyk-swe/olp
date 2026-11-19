@@ -156,7 +156,7 @@ type AttemptFailure struct {
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *wire.UpstreamError
-	acceptance   upstream.Acceptance // what the exchange established about the upstream's work
+	Acceptance   upstream.Acceptance // what the exchange established about the upstream's work
 	accepted     bool                // a successful response began, even if its result could not be metered
 	overall      bool                // the route deadline, not the attempt deadline, expired
 	dispatched   bool                // the request reached the upstream before the failure
@@ -185,8 +185,8 @@ func (f *AttemptFailure) billingUncertain() bool {
 	if f.committed || f.accepted {
 		return true
 	}
-	if f.acceptance != "" {
-		return f.acceptance.Unresolved()
+	if f.Acceptance != "" {
+		return f.Acceptance.Unresolved()
 	}
 	switch f.class {
 	case classRateLimit, classUpstreamClient, classCredential, classContextWindow, classContentFilter:
@@ -321,13 +321,13 @@ func (s *Server) executeModelStep(ctx context.Context, x *Call, source *wire.Req
 		return &Outcome{Err: e}
 	}
 	if e := s.ReserveFallbackCost(stepCtx, x); e != nil {
-		quota.SettleKey(ctx, lease, false, nil, s.log)
+		quota.SettleKey(ctx, lease, false, nil, s.Log)
 		return &Outcome{Err: e}
 	}
 	start := len(x.facts)
 	x.stepDispatched = false
 	out := s.execute(stepCtx, x)
-	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.log)
+	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.Log)
 	return out
 }
 
@@ -430,7 +430,7 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 		}
 		f.dispatched = st.dispatched.Load() || (x.workflow != nil && st.connected.Load() && !st.notSent.Load())
 		f.credentialRefused = st.credentialRefused
-		f.acceptance = st.evidence().Acceptance()
+		f.Acceptance = st.evidence().Acceptance()
 		f.accepted = st.accepted
 		if x.generation.continuation != nil && x.generation.continuation.resource != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -438,11 +438,11 @@ func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provid
 			cancel()
 		}
 
-		if fact.Interaction != nil || fact.Carried || (retainedResponse && f.acceptance.Unresolved()) {
+		if fact.Interaction != nil || fact.Carried || (retainedResponse && f.Acceptance.Unresolved()) {
 			f.noRetry = f.noRetry || f.dispatched
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = f.acceptance
+			fact.Interaction.UpstreamState = f.Acceptance
 		}
 		f.class = class
 		fact.Class = class

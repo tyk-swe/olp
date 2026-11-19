@@ -116,7 +116,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	form.Disarm()
 	defer func() {
 		if err := s.Deps.Staging.Remove(file.Handle); err != nil {
-			s.log.Warn("file upload cleanup failed", "error", err)
+			s.Log.Warn("file upload cleanup failed", "error", err)
 		}
 	}()
 	p, e := s.selectPin(r.Context(), x, &route, "batch", "unary")
@@ -137,7 +137,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	adapter, _ := p.Provider.Connector().FilesBatchesAdapter()
 	uploadFile := file
 	uploadPurpose, uploadExtra := purpose, extra
-	var manifest batchManifest
+	var manifest BatchManifest
 	if p.Provider.VendorID == "groq" && purpose != "batch" {
 		param := "purpose"
 		s.ReleaseHold(r.Context(), p.Hold)
@@ -161,7 +161,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		uploadFile = translated
 		defer func() {
 			if err := s.Deps.Staging.Remove(translated.Handle); err != nil {
-				s.log.Warn("translated batch spool cleanup failed", "error", err)
+				s.Log.Warn("translated batch spool cleanup failed", "error", err)
 			}
 		}()
 		if adapter == connectors.BatchTogether {
@@ -314,7 +314,7 @@ func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint,
 			pipeW.CloseWithError(err)
 			return err
 		}
-		defer panics.Recover(s.log, "multipart upload", func(err error) { sendDone <- failure(err) })
+		defer panics.Recover(s.Log, "multipart upload", func(err error) { sendDone <- failure(err) })
 		writeFile := func() error {
 			opened, err := s.Deps.Staging.Open(file.Handle)
 			if err != nil {
@@ -336,7 +336,7 @@ func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint,
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(part, pinnedUploadSource{opened.File})
+			_, err = io.Copy(part, PinnedUploadSource{opened.File})
 			return err
 		}
 		if purpose != "" && fileFirst {
@@ -814,7 +814,7 @@ func (s *Server) detachGeminiResultFile(ctx context.Context, res *resources.Reso
 	return false, nil
 }
 
-func uploadedFileMetadata(metadata json.RawMessage, body []byte, adapter connectors.BatchAdapter, manifest batchManifest) (json.RawMessage, error) {
+func uploadedFileMetadata(metadata json.RawMessage, body []byte, adapter connectors.BatchAdapter, manifest BatchManifest) (json.RawMessage, error) {
 	switch {
 	case adapter.Managed():
 		return managedFileMetadata(metadata, body, adapter, manifest, "input")

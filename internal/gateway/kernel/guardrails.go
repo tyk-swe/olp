@@ -344,7 +344,7 @@ func (s *Server) startParallel(ctx context.Context, x *Call, cancelUpstream cont
 	p := &parallelGuardrail{result: make(chan guardrailResult, 1), cancel: cancel}
 	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.InputParallel, Segments: slices.Clone(x.guard.input), InternalModel: x.guard.internal}
 	go func() {
-		defer panics.Recover(s.log, "parallel guardrail", func(err error) {
+		defer panics.Recover(s.Log, "parallel guardrail", func(err error) {
 			p.result <- guardrailResult{err: err}
 			cancelUpstream()
 		})

@@ -397,7 +397,7 @@ func (s *Server) settleAdmission(ctx context.Context, x *Call) {
 		// A cache embedding uses this shared request reservation even when the
 		// parent's subsequent token or cost admission fails.
 		consumed := x.dispatched || x.cacheHit() || x.cache != nil && x.cache.embeddingDispatched
-		quota.SettleKey(ctx, x.cacheRateLease, consumed, &zero, s.log)
+		quota.SettleKey(ctx, x.cacheRateLease, consumed, &zero, s.Log)
 	}
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to
@@ -407,14 +407,14 @@ func (s *Server) settleAdmission(ctx context.Context, x *Call) {
 	s.recordCost(x)
 	if x.operationOverride == "guardrail" {
 		actual := x.estimate
-		quota.SettleKey(ctx, x.lease, x.dispatched, &actual, s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched, &actual, s.Log)
 		return
 	}
 	if first := x.generation.firstStep; first != nil {
-		quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.Log)
 		return
 	}
-	quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.Log)
 }
 
 // settledCharge is what the request's consumers owe from the attempts that

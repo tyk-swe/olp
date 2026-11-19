@@ -191,7 +191,7 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *Call, toolsetI
 	route := x.Route
 	go func() {
 		defer close(done)
-		defer panics.Recover(s.log, "workflow authority monitor", func(error) {
+		defer panics.Recover(s.Log, "workflow authority monitor", func(error) {
 			result <- fault.ServerError(http.StatusInternalServerError, "internal_error", "The workflow tool authority could not be checked.")
 			cancel()
 		})
@@ -243,8 +243,8 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *Call) *fault.Error
 		return s.Deps.Debits.MarkNotSent(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
-		if s.log != nil {
-			s.log.Warn("workflow debit release failed", "error", err.Error())
+		if s.Log != nil {
+			s.Log.Warn("workflow debit release failed", "error", err.Error())
 		}
 		s.markSessionUnknown(ctx, x)
 		return quota.LimitsUnavailable()

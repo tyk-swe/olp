@@ -154,7 +154,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	}
 	parsed, err := protocols.Parse(shape.family, fmt.Appendf(nil, shape.body, target.route.Slug), target.route.Slug)
 	if err != nil {
-		s.log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
+		s.Log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
 		return fleet.ProbeResult{}, false
 	}
 	// The probe plans against the route narrowed to the probed target, with
@@ -178,7 +178,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	x.bind(canonicalPlanner, nil, true)
 	defer s.settleAdmission(ctx, x)
 	if e := s.planCanonical(ctx, x); e != nil {
-		s.log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
+		s.Log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
 		return fleet.ProbeResult{}, false
 	}
 	x.budget, x.allowance = 1, 1

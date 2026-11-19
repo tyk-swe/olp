@@ -45,7 +45,7 @@ func (s *Server) registerGeminiLifecycle(mux *http.ServeMux) {
 	live := connectors.GeminiLiveMethod
 	mux.HandleFunc("GET /gemini/ws/"+live, s.geminiLive)
 	mux.HandleFunc("GET /ws/"+live, s.geminiLive)
-	mux.HandleFunc("OPTIONS /gemini/ws/", s.preflight)
+	mux.HandleFunc("OPTIONS /gemini/ws/", s.Preflight)
 }
 
 // geminiClientKey validates all SDK-supported key locations before the shared
@@ -143,7 +143,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		limit = 1 << 20
 	}
 	client.SetReadLimit(limit)
-	setupCtx, stopSetup := context.WithTimeout(ctx, requestBodyTimeout)
+	setupCtx, stopSetup := context.WithTimeout(ctx, RequestBodyTimeout)
 	messageType, initial, err := client.Read(setupCtx)
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
@@ -218,7 +218,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	check := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
-	if _, err := s.egress.ValidateEndpoint(check); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
 		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live provider address is not permitted."), http.StatusBadGateway
 		return
@@ -519,7 +519,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, u
 	done := make(chan relayEnd, 2)
 	remaining := 2
 	relay := func(dst, src duplexPeer, fromProvider bool) {
-		defer panics.Recover(s.log, "gemini live relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "gemini live relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, fromProvider)
 	}
 	go relay(upstream, client, false)

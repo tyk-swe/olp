@@ -119,7 +119,7 @@ func (s *Server) mirror(x *Call) {
 				<-s.shadows.slots
 				s.shadows.running.Done()
 			}()
-			defer panics.Recover(s.log, "shadow", func(error) {})
+			defer panics.Recover(s.Log, "shadow", func(error) {})
 			s.runShadow(x, attempt)
 		}()
 	}

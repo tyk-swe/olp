@@ -25,7 +25,7 @@ func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
 	for _, method := range routing.PassthroughMethods() {
 		mux.HandleFunc(method+" /native/{dialect}/routes/{route}/{path...}", s.passthrough)
 	}
-	mux.HandleFunc("OPTIONS /native/", s.preflight)
+	mux.HandleFunc("OPTIONS /native/", s.Preflight)
 	mux.HandleFunc("POST /v1/completions", s.inference(wire.Completions))
 	mux.HandleFunc("POST /v1/decisions", s.inference(wire.Decisions))
 	mux.HandleFunc("POST /gemini/v1beta/decisions", s.inference(wire.GeminiDecisions))
@@ -41,7 +41,7 @@ func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
 	for _, prefix := range []string{"/anthropic/v1", "/gemini/v1", "/gemini/v1beta"} {
 		mux.HandleFunc("GET "+prefix+"/models", catalog.Native)
 		mux.HandleFunc("GET "+prefix+"/models/{model}", catalog.Native)
-		mux.HandleFunc("OPTIONS "+prefix+"/", s.preflight)
+		mux.HandleFunc("OPTIONS "+prefix+"/", s.Preflight)
 		mux.HandleFunc(prefix+"/", func(w http.ResponseWriter, r *http.Request) {
 			s.begin(w, r)
 			fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown endpoint."), fault.RequestSurface(r))

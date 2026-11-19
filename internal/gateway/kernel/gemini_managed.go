@@ -34,7 +34,7 @@ type geminiManagedCounts struct {
 }
 
 type geminiManagedRecord struct {
-	batchManifest
+	BatchManifest
 	ProviderBatch    json.RawMessage      `json:"provider_batch"`
 	UpstreamModel    string               `json:"upstream_model"`
 	CompletionWindow string               `json:"completion_window"`
@@ -52,8 +52,8 @@ type geminiManagedState struct {
 	status   string
 }
 
-func newGeminiManagedRecord(localInput string, manifest batchManifest, clientMetadata json.RawMessage) geminiManagedRecord {
-	record := geminiManagedRecord{batchManifest: manifest, CompletionWindow: "24h", LocalInputFileID: localInput}
+func newGeminiManagedRecord(localInput string, manifest BatchManifest, clientMetadata json.RawMessage) geminiManagedRecord {
+	record := geminiManagedRecord{BatchManifest: manifest, CompletionWindow: "24h", LocalInputFileID: localInput}
 	if string(clientMetadata) != "null" {
 		record.ClientMetadata = clientMetadata
 	}
@@ -63,7 +63,7 @@ func newGeminiManagedRecord(localInput string, manifest batchManifest, clientMet
 func decodeGeminiManagedRecord(metadata json.RawMessage) (geminiManagedRecord, error) {
 	var record geminiManagedRecord
 	if err := json.Unmarshal(metadata, &record); err != nil {
-		return geminiManagedRecord{}, errGeminiBatchFidelity
+		return geminiManagedRecord{}, ErrGeminiBatchFidelity
 	}
 	return record, nil
 }
@@ -129,9 +129,9 @@ func optionalUnix(raw json.RawMessage) *int64 {
 }
 
 func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resources.Resource, fileName string) (*resources.Resource, *resources.Resource, error) {
-	fileID, err := geminiFileID(fileName)
+	fileID, err := GeminiFileID(fileName)
 	if err != nil {
-		return nil, nil, errGeminiBatchFidelity
+		return nil, nil, ErrGeminiBatchFidelity
 	}
 	batch, err := decodeGeminiManagedRecord(owner.Metadata)
 	if err != nil {
@@ -139,7 +139,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	}
 	view := func(role string) *resources.Resource {
 		metadata := managedFileRecord{
-			batchManifest: batch.batchManifest.withAdapter(connectors.BatchGeminiManaged), UpstreamModel: ResourceModel(owner), Role: role,
+			BatchManifest: batch.BatchManifest.withAdapter(connectors.BatchGeminiManaged), UpstreamModel: ResourceModel(owner), Role: role,
 			ResponsesFile: fileName, CompletionWindow: batch.CompletionWindow,
 			ProviderFile: managedFileObject{Filename: new(fileID + ".jsonl"), Purpose: new("batch")},
 		}
@@ -167,7 +167,7 @@ func geminiManagedFileName(resource *resources.Resource) (string, error) {
 func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resources.Resource) ([]byte, error) {
 	record, err := decodeGeminiManagedRecord(resource.Metadata)
 	if err != nil || len(record.ProviderBatch) == 0 {
-		return nil, errGeminiBatchFidelity
+		return nil, ErrGeminiBatchFidelity
 	}
 	if record.Status == "" {
 		return nil, errGeminiManagedBatchState
@@ -191,7 +191,7 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	if wire.BatchStageOf(record.Status) == wire.BatchTerminal {
 		batch, err := upstream.DecodeGeminiBatch(record.ProviderBatch)
 		if err != nil {
-			return nil, errGeminiBatchFidelity
+			return nil, ErrGeminiBatchFidelity
 		}
 		if batch.OutputFile != "" {
 			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, batch.OutputFile)
@@ -209,7 +209,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
-	fileID, err := geminiFileID(cmp.Or(record.ResponsesFile, resource.UpstreamID))
+	fileID, err := GeminiFileID(cmp.Or(record.ResponsesFile, resource.UpstreamID))
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
@@ -247,7 +247,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if record.Role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
-			response.Exchange.Interrupt(ClassProtocol, !errors.Is(err, errGeminiBatchFidelity))
+			response.Exchange.Interrupt(ClassProtocol, !errors.Is(err, ErrGeminiBatchFidelity))
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
@@ -286,7 +286,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 
 func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug string, source *staging.Part, role string) (*staging.Part, error) {
 	if role != "output" && role != "error" {
-		return nil, errGeminiBatchFidelity
+		return nil, ErrGeminiBatchFidelity
 	}
 	opened, err := s.Deps.Staging.Open(source.Handle)
 	if err != nil {
@@ -297,7 +297,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 	limit := min(s.Config.MaxResponseBytes, source.Limit, batches.MaxBatchBytes)
 	done := make(chan error, 1)
 	go func() {
-		defer panics.Recover(s.log, "gemini batch results", func(err error) {
+		defer panics.Recover(s.Log, "gemini batch results", func(err error) {
 			done <- err
 			_ = writer.CloseWithError(err)
 		})
@@ -313,8 +313,8 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 			if json.Unmarshal(raw, &line) != nil || line.Key == "" ||
 				(len(line.Response) == 0 || string(line.Response) == "null") && (len(line.Error) == 0 || string(line.Error) == "null") ||
 				len(line.Response) > 0 && string(line.Response) != "null" && len(line.Error) > 0 && string(line.Error) != "null" {
-				done <- errGeminiBatchFidelity
-				_ = writer.CloseWithError(errGeminiBatchFidelity)
+				done <- ErrGeminiBatchFidelity
+				_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 				return
 			}
 			if role == "output" && (len(line.Response) == 0 || string(line.Response) == "null") ||
@@ -325,16 +325,16 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 			if role == "output" {
 				completion, decodeErr := protocols.Decode(wire.Gemini, wire.Chat, line.Response, routeSlug, "")
 				if decodeErr != nil || completion == nil {
-					done <- errGeminiBatchFidelity
-					_ = writer.CloseWithError(errGeminiBatchFidelity)
+					done <- ErrGeminiBatchFidelity
+					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 					return
 				}
 				body := completion.Body
 				if completion.UpstreamID == "" {
 					var fields map[string]json.RawMessage
 					if json.Unmarshal(body, &fields) != nil {
-						done <- errGeminiBatchFidelity
-						_ = writer.CloseWithError(errGeminiBatchFidelity)
+						done <- ErrGeminiBatchFidelity
+						_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 						return
 					}
 					delete(fields, "id")
@@ -342,8 +342,8 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 				}
 				var decoded any
 				if json.Unmarshal(body, &decoded) != nil {
-					done <- errGeminiBatchFidelity
-					_ = writer.CloseWithError(errGeminiBatchFidelity)
+					done <- ErrGeminiBatchFidelity
+					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 					return
 				}
 				translated = map[string]any{
@@ -357,8 +357,8 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 					Message string          `json:"message"`
 				}
 				if json.Unmarshal(line.Error, &providerError) != nil {
-					done <- errGeminiBatchFidelity
-					_ = writer.CloseWithError(errGeminiBatchFidelity)
+					done <- ErrGeminiBatchFidelity
+					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 					return
 				}
 				code := ""
@@ -375,8 +375,8 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 			}
 			encoded, err := json.Marshal(translated)
 			if err != nil {
-				done <- errGeminiBatchFidelity
-				_ = writer.CloseWithError(errGeminiBatchFidelity)
+				done <- ErrGeminiBatchFidelity
+				_ = writer.CloseWithError(ErrGeminiBatchFidelity)
 				return
 			}
 			if _, err := writer.Write(append(encoded, '\n')); err != nil {
@@ -413,14 +413,14 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 
 func geminiResultScanError(err error) error {
 	if errors.Is(err, bufio.ErrTooLong) {
-		return fmt.Errorf("%w: %w", errGeminiBatchFidelity, err)
+		return fmt.Errorf("%w: %w", ErrGeminiBatchFidelity, err)
 	}
 	return err
 }
 
-var errGeminiBatchFidelity = errors.New("Gemini batch contains an unprojected provider identifier")
+var ErrGeminiBatchFidelity = errors.New("Gemini batch contains an unprojected provider identifier")
 
-func geminiBatchHasFileReference(request oif.Value) bool {
+func GeminiBatchHasFileReference(request oif.Value) bool {
 	var parts func(oif.Value) bool
 	parts = func(values oif.Value) bool {
 		for _, part := range values.Elements() {

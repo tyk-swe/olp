@@ -120,7 +120,7 @@ func (s *Server) settleSession(ctx context.Context, x *Call, p *Pin) {
 	}
 	s.settleCaps(ctx, x)
 	s.recordCost(x)
-	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
 }
 
 func sessionSettlement(x *Call) *int64 {

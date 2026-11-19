@@ -39,7 +39,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 			class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
 		}
 		f.dispatched = state.dispatched.Load()
-		f.acceptance = state.evidence().Acceptance()
+		f.Acceptance = state.evidence().Acceptance()
 		f.accepted = state.accepted
 		f.noRetry = f.noRetry || f.dispatched
 		f.class = class
@@ -50,7 +50,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 			fact.RetryAfter = &v
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = f.acceptance
+			fact.Interaction.UpstreamState = f.Acceptance
 		}
 		fact.RecordEvidence(f.billingUncertain())
 		finish()

@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Server) targetResolver() providerinvoke.Resolver {
-	return providerinvoke.Resolver{Credentials: s.Deps.Runtime, Policy: s.egress, Connections: s.connections, DefaultClient: s.client, HeaderTimeout: UpstreamHeaderTimeout}
+	return providerinvoke.Resolver{Credentials: s.Deps.Runtime, Policy: s.Egress, Connections: s.connections, DefaultClient: s.client, HeaderTimeout: UpstreamHeaderTimeout}
 }
 
 func (s *Server) targetBinding(x *Call, provider *routing.Provider, slot routing.Slot, model string) providerinvoke.Binding {

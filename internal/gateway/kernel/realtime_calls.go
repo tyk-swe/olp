@@ -360,7 +360,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(s.Now().Add(requestBodyTimeout)); err != nil {
+	if err := controller.SetReadDeadline(s.Now().Add(RequestBodyTimeout)); err != nil {
 		fail(fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
 		return
 	}
@@ -454,7 +454,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := s.reserveSessionDebit(bg, x, authority, p.attempt, nil); e != nil {
-		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
 		releasePin()
 		cancel()
 		fail(e)
@@ -462,7 +462,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if e := s.reserveSessionCost(bg, x, authority, p.attempt, webRTCBound); e != nil {
 		s.abandonSessionDebit(r.Context(), x)
-		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
 		releasePin()
 		cancel()
 		fail(e)
@@ -514,7 +514,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
 	}
-	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy.")
 	}
 	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)

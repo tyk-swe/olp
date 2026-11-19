@@ -357,7 +357,7 @@ func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug st
 	if digester == nil {
 		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
-	canonical, err := canonicalBatchJSON(body)
+	canonical, err := CanonicalBatchJSON(body)
 	if err != nil {
 		return nil, fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
 	}

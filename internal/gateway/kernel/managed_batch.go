@@ -35,9 +35,9 @@ const (
 	managedBatchLines     = 50000
 )
 
-const geminiNativeManifest connectors.BatchAdapter = "gemini_native"
+const GeminiNativeManifest connectors.BatchAdapter = "gemini_native"
 
-type batchManifest struct {
+type BatchManifest struct {
 	Adapter        connectors.BatchAdapter `json:"adapter,omitempty"`
 	Endpoint       string                  `json:"endpoint,omitempty"`
 	LineOperation  wire.LineOperation      `json:"line_operation,omitempty"`
@@ -45,7 +45,7 @@ type batchManifest struct {
 	ManifestDigest string                  `json:"manifest_digest,omitempty"`
 }
 
-func (m batchManifest) withAdapter(adapter connectors.BatchAdapter) batchManifest {
+func (m BatchManifest) withAdapter(adapter connectors.BatchAdapter) BatchManifest {
 	m.Adapter = adapter
 	return m
 }
@@ -58,7 +58,7 @@ type managedFileObject struct {
 }
 
 type managedFileRecord struct {
-	batchManifest
+	BatchManifest
 	UpstreamModel    string            `json:"upstream_model,omitempty"`
 	Role             string            `json:"role,omitempty"`
 	ProviderFile     managedFileObject `json:"provider_file"`
@@ -69,7 +69,7 @@ type managedFileRecord struct {
 func decodeManagedFileRecord(metadata json.RawMessage) (managedFileRecord, error) {
 	var record managedFileRecord
 	if err := json.Unmarshal(metadata, &record); err != nil {
-		return managedFileRecord{}, errGeminiBatchFidelity
+		return managedFileRecord{}, ErrGeminiBatchFidelity
 	}
 	return record, nil
 }
@@ -89,7 +89,7 @@ func resourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, err
 
 var errProviderFileMetadata = errors.New("invalid provider file metadata")
 
-func managedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest batchManifest, role string) (json.RawMessage, error) {
+func managedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest BatchManifest, role string) (json.RawMessage, error) {
 	record, err := decodeManagedFileRecord(prior)
 	if err != nil {
 		return nil, err
@@ -99,10 +99,10 @@ func managedFileMetadata(prior json.RawMessage, response []byte, adapter connect
 		return nil, fmt.Errorf("%w: %w", errProviderFileMetadata, err)
 	}
 	if manifest.Adapter != "" {
-		return json.Marshal(managedFileRecord{batchManifest: manifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file})
+		return json.Marshal(managedFileRecord{BatchManifest: manifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file})
 	}
 	return json.Marshal(managedFileRecord{
-		batchManifest: record.batchManifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file,
+		BatchManifest: record.BatchManifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file,
 		ResponsesFile: record.ResponsesFile,
 	})
 }
@@ -163,24 +163,24 @@ type managedBatchLine struct {
 }
 
 type translatedBatch struct {
-	manifest batchManifest
+	manifest BatchManifest
 	err      error
 }
 
-func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, batchManifest, *fault.Error) {
+func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, BatchManifest, *fault.Error) {
 	opened, err := s.Deps.Staging.Open(file.Handle)
 	if err != nil {
-		return nil, batchManifest{}, fault.ServerError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
+		return nil, BatchManifest{}, fault.ServerError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
 	}
 	defer opened.File.Close()
 	reader, writer := io.Pipe()
 	done := make(chan translatedBatch, 1)
 	go func() {
-		defer panics.Recover(s.log, "managed batch translation", func(err error) {
+		defer panics.Recover(s.Log, "managed batch translation", func(err error) {
 			_ = writer.CloseWithError(err)
 			done <- translatedBatch{err: fault.ServerError(http.StatusInternalServerError, "internal_error", "The batch file could not be translated.")}
 		})
-		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
+		manifest, err := translateManagedBatchLines(writer, opened.File, s.BatchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
 		done <- translatedBatch{manifest: manifest, err: err}
 	}()
 	artifact, spoolErr := s.Deps.Staging.Put(ctx, staging.Upload{
@@ -193,9 +193,9 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *
 			_ = s.Deps.Staging.Remove(artifact.Handle)
 		}
 		if failure, ok := translated.err.(*fault.Error); ok {
-			return nil, batchManifest{}, failure
+			return nil, BatchManifest{}, failure
 		}
-		return nil, batchManifest{}, fault.InvalidRequest("unsupported_parameter", "The batch file could not be translated.", new("file"))
+		return nil, BatchManifest{}, fault.InvalidRequest("unsupported_parameter", "The batch file could not be translated.", new("file"))
 	}
 	part := &staging.Part{
 		Handle: artifact.Handle, Digest: artifact.Digest, Filename: file.Filename,
@@ -214,10 +214,10 @@ func batchFileError(format string, lineNumber int) *fault.Error {
 	return fault.InvalidRequest("unsupported_parameter", fmt.Sprintf(format, lineNumber), new("file"))
 }
 
-func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest func(string) ([]byte, bool), target managedLineTarget) (batchManifest, error) {
-	fail := func(err error) (batchManifest, error) {
+func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest func(string) ([]byte, bool), target managedLineTarget) (BatchManifest, error) {
+	fail := func(err error) (BatchManifest, error) {
 		_ = writer.CloseWithError(err)
-		return batchManifest{}, err
+		return BatchManifest{}, err
 	}
 	defer writer.Close()
 	scanner := bufio.NewScanner(input)
@@ -255,7 +255,7 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		return fail(fault.InvalidRequest("unsupported_parameter", "The batch file must contain at least one request.", new("file")))
 	}
 	operation, _ := wire.BatchLineOperation(endpoint)
-	return batchManifest{
+	return BatchManifest{
 		Adapter: target.adapter, Endpoint: endpoint, LineOperation: operation, LineCount: count,
 		ManifestDigest: hex.EncodeToString(manifestHash.Sum(nil)),
 	}, nil
@@ -337,7 +337,7 @@ func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.Line
 	}
 	if t.adapter == connectors.BatchGeminiManaged {
 		document, err := oif.ParseJSON(encoded, oif.Limits{MaxBytes: managedBatchLineLimit})
-		if err != nil || geminiBatchHasFileReference(document.Root()) {
+		if err != nil || GeminiBatchHasFileReference(document.Root()) {
 			return nil, fault.InvalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", new("file"))
 		}
 	}
@@ -412,7 +412,7 @@ func managedBatchEndpoint(adapter connectors.BatchAdapter, endpoint string) (wir
 	}
 }
 
-func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
+func (s *Server) BatchLineDigest(customID string) ([]byte, bool) {
 	digester := s.Deps.Digester
 	if digester == nil {
 		return nil, false
@@ -420,7 +420,7 @@ func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
 	return digester.Digest(secrets.BatchLineDigest, customID), true
 }
 
-func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapter, endpoint string, window batchWindow, upstreamFileID, model string, manifest batchManifest, id uuid.UUID) ([]byte, *fault.Error) {
+func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapter, endpoint string, window batchWindow, upstreamFileID, model string, manifest BatchManifest, id uuid.UUID) ([]byte, *fault.Error) {
 	metadata, err := batchClientMetadata(source)
 	if adapter == connectors.BatchGeminiManaged {
 		if err != nil {
