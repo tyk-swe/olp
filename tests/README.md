@@ -191,7 +191,7 @@ Use `make check-go`, `make check-console`, or `make check-contracts` for focused
 static validation. Helm, dependency and release checks run separately in CI.
 
 Run one package, file or test directly while iterating. Unit tests run with
-`go test -count=1 ./internal/gateway` or
+`go test -count=1 ./internal/gateway/...` or
 `pnpm --dir console test --project unit src/lib/features/usage/priceEntry.test.ts`.
 The service-backed scripts pass extra arguments to their runner, as in
 `./scripts/test-integration.sh -run TestSCIM -v`,

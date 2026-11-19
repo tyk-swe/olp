@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
@@ -27,7 +27,7 @@ type observed struct {
 	limiter       *coordination.Client
 	runtime       *release.Manager
 	policy        *egress.Policy
-	gateway       *gateway.Server
+	gateway       *kernel.Server
 	accounting    *delivery.Delivery
 	spool         *staging.Spool
 	media         *jobs.Store

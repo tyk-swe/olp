@@ -232,7 +232,7 @@ Evidence keys:
   and `guardrail_platform_test.go`,
   operator-configured model evaluator routing/accounting; no dedicated vendor proof.
 - **W**: [`external.go`](../../internal/guardrails/external.go), inspected shared
-  webhook implementation; [`guardrails_test.go`](../../internal/gateway/guardrails_test.go)
+  webhook implementation; [`guardrails_test.go`](../../internal/gateway/kernel/guardrails_test.go)
   has a parallel evaluation fixture. No named third-party API compatibility proof.
 - **N**: [`vendor_test.go`](../../internal/guardrails/vendor/vendor_test.go) and the
   family tests beside it in [`vendor`](../../internal/guardrails/vendor): native HTTP

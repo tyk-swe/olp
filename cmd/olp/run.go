@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/surface"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -216,7 +216,7 @@ func reservePublicPaths(public *http.ServeMux, mode Mode) {
 			}
 			if reserved.Surface.Inference {
 				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					gateway.WriteNotFound(w, r, reserved.Surface.Name)
+					kernel.WriteNotFound(w, r, reserved.Surface.Name)
 				})
 			}
 		}
@@ -304,5 +304,5 @@ func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
 		}
 		return
 	}
-	gateway.WriteAdmissionOverload(w, r)
+	kernel.WriteAdmissionOverload(w, r)
 }
