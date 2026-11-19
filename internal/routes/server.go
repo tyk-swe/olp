@@ -37,8 +37,6 @@ type Server struct {
 	Region string
 	Access *access.Server
 	Inputs func() *routinginputs.Inputs
-	// Workflows resolves the tools a workflow route may call; nil where the
-	// deployment cannot run workflow tools.
 	Workflows       mcp.WorkflowResolver
 	WorkflowRelease func() *release.Release
 	InlineMedia     protocols.InlineMediaLimits
