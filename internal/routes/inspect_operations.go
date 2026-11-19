@@ -64,7 +64,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	if err != nil {
 		return nil, nil, nil, httpkit.Invalid("request", "Use a valid native operation source.")
 	}
-	if err := protocols.ValidateOperationInlineMedia(doc, codec.Identity, s.inlineMedia); err != nil {
+	if err := protocols.ValidateOperationInlineMedia(doc, codec.Identity, s.InlineMedia); err != nil {
 		return nil, nil, nil, httpkit.Invalid("request", err.Error())
 	}
 	return nil, &request, nil, nil

@@ -34,13 +34,12 @@ import (
 
 // Server serves the route management surface.
 type Server struct {
-	Region            string
-	Access            *access.Server
-	Inputs            func() *routinginputs.Inputs
-	WorkflowTools     func() mcp.WorkflowResolver
-	WorkflowRelease   func() *release.Release
-	WorkflowAvailable func() bool
-	inlineMedia       protocols.InlineMediaLimits
+	Region          string
+	Access          *access.Server
+	Inputs          func() *routinginputs.Inputs
+	Workflows       mcp.WorkflowResolver
+	WorkflowRelease func() *release.Release
+	InlineMedia     protocols.InlineMediaLimits
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.
 	Catalog *catalog.Signed
@@ -56,9 +55,6 @@ type Server struct {
 }
 
 // New prepares the route surface.
-func New(a *access.Server, inlineMedia protocols.InlineMediaLimits) *Server {
-	return &Server{Access: a, inlineMedia: inlineMedia}
-}
 
 const (
 	maxTargets      = 64
