@@ -27,17 +27,17 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-const stateRouteHeader = "X-OLP-Route"
+const StateRouteHeader = "X-OLP-Route"
 
 func (s *Server) registerState(mux *http.ServeMux) {
-	if s.deps.Resources == nil {
+	if s.Deps.Resources == nil {
 		return
 	}
 	s.registerRetainedLifecycle(mux)
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
 	s.registerCloudBatchState(mux)
-	if s.deps.Staging != nil {
+	if s.Deps.Staging != nil {
 		s.registerAnthropicState(mux)
 		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
@@ -50,7 +50,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
 		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
 	}
-	if s.deps.Resources.Encrypted() {
+	if s.Deps.Resources.Encrypted() {
 		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
 		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
 	}
@@ -71,12 +71,12 @@ const resourceEstimate = 100
 // a client disconnect. Persistence still has a short independent deadline.
 const resourceCommitTimeout = 5 * time.Second
 
-func resourceCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func ResourceCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), resourceCommitTimeout)
 }
 
 func (s *Server) settleFence(ctx context.Context, settle func(context.Context) error) {
-	commit, cancel := resourceCommitContext(ctx)
+	commit, cancel := ResourceCommitContext(ctx)
 	defer cancel()
 	if err := settle(commit); err != nil {
 		s.log.Warn("retained resource fence not settled", "error", err.Error())
@@ -85,13 +85,13 @@ func (s *Server) settleFence(ctx context.Context, settle func(context.Context) e
 
 const maxResourceList = 100
 
-type pin struct {
-	target   routing.Target
-	provider routing.Provider
+type Pin struct {
+	Target   routing.Target
+	Provider routing.Provider
 	attempt  routing.Attempt
-	slot     routing.Slot
-	model    string
-	hold     *dispatchHold
+	Slot     routing.Slot
+	Model    string
+	Hold     *dispatchHold
 }
 
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
@@ -115,7 +115,7 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	return p.Connector().SupportsFilesBatches()
 }
 
-func fireworksBatchRefusal(x *call, route *routing.Route) *fault.Error {
+func fireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
 	if x == nil || route == nil {
 		return nil
 	}
@@ -129,19 +129,19 @@ func fireworksBatchRefusal(x *call, route *routing.Route) *fault.Error {
 	return nil
 }
 
-func strictBatchTargetRefusal(p *pin) *fault.Error {
-	if p != nil && p.provider.Kind != "openai" && p.provider.Kind != "azure_openai" {
+func strictBatchTargetRefusal(p *Pin) *fault.Error {
+	if p != nil && p.Provider.Kind != "openai" && p.Provider.Kind != "azure_openai" {
 		return policyUnavailable("target_capability",
 			"Strict routes serve files and batches only for OpenAI and Azure.")
 	}
 	return nil
 }
 
-func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
+func ResourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
 	return cfg.ResourceURL(model, path, query)
 }
 
-func resourceModel(res *resources.Resource) string {
+func ResourceModel(res *resources.Resource) string {
 	var meta struct {
 		UpstreamModel string `json:"upstream_model"`
 	}
@@ -149,19 +149,19 @@ func resourceModel(res *resources.Resource) string {
 	return meta.UpstreamModel
 }
 
-func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, operation, mode string) (*pin, *fault.Error) {
+func (s *Server) selectPin(ctx context.Context, x *Call, route *routing.Route, operation, mode string) (*Pin, *fault.Error) {
 	return s.selectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
 		return stateQualified(p, model, operation, mode)
 	})
 }
 
-func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *fault.Error) {
+func (s *Server) selectPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
 	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
 }
 
 type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
 
-func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*pin, *fault.Error) {
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*Pin, *fault.Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -226,7 +226,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	session.adoptPin(plan)
-	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
+	deadline := s.Now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
 	if mode == "realtime" || mode == "webrtc" {
 		var ok bool
 		deadline, ok = ctx.Deadline()
@@ -248,7 +248,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
-			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
+			return &Pin{Target: target, Provider: provider, attempt: attempt, Slot: *slot, Model: attempt.UpstreamModel, Hold: gate.hold}, nil
 		case gateRejected:
 			return nil, gate.rejection.toError()
 		case gateExpired:
@@ -258,7 +258,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	return nil, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
 }
 
-func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*pinnedResponse, *attemptFailure) {
+func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint string, body []byte, contentType string) (*pinnedResponse, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	if err := exchange.bound.validateEndpoint(endpoint); err != nil {
 		return nil, exchange.fail(classConnect, nil)
@@ -276,7 +276,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	accept := "application/json"
-	if x.pinnedBinary {
+	if x.PinnedBinary {
 		accept = "application/binary"
 	}
 	req.Header.Set("Accept", accept)
@@ -289,7 +289,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 		}
 		return nil, exchange.fail(classCredential, nil)
 	}
-	maps.Copy(req.Header, x.pinnedHeaders)
+	maps.Copy(req.Header, x.PinnedHeaders)
 	// Skills use the GA contract the pinned SDK parses (id-addressed
 	// versions, latest_version_id). The dated beta header would opt
 	// into legacy response shapes with incompatible identities, so
@@ -297,29 +297,29 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	return s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 }
 
-func upstreamError(f *attemptFailure) *fault.Error {
+func UpstreamError(f *attemptFailure) *fault.Error {
 	if f.upstream != nil && f.upstream.Message != "" {
-		return &fault.Error{Status: f.status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
+		return &fault.Error{Status: f.Status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
 	}
 	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 }
 
-func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
-	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
+func (s *Server) StateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*Call, keyauthority.Authority, bool) {
+	x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
 	authority, ok := s.enter(w, r, x, s.authenticateInference)
 	return x, authority, !ok
 }
 
-func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (context.Context, context.CancelFunc) {
+func (s *Server) StateDeadline(ctx context.Context, route *routing.Route) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, time.Duration(route.OverallTimeout)*time.Millisecond)
 }
 
-func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
-	if e := x.checkBody(x.route); e != nil {
+func (s *Server) reserveState(ctx context.Context, x *Call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
+	if e := x.checkBody(x.Route); e != nil {
 		return e
 	}
 	var e *fault.Error
-	x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
 
@@ -333,9 +333,9 @@ var nativeStateWordings = map[string]nativeStateWording{
 	"gemini":    {missingRoute: "X-OLP-Route is required.", strictRoute: "Strict routes do not serve Gemini files."},
 }
 
-func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *fault.Error) {
+func (s *Server) NativeStateRoute(x *Call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *fault.Error) {
 	wording := nativeStateWordings[x.family.Surface()]
-	slug := cmp.Or(strings.TrimSpace(r.Header.Get(stateRouteHeader)), requested)
+	slug := cmp.Or(strings.TrimSpace(r.Header.Get(StateRouteHeader)), requested)
 	if slug == "" {
 		return nil, fault.InvalidRequest("missing_required_parameter", wording.missingRoute, nil)
 	}
@@ -343,8 +343,8 @@ func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *
 	if !ok {
 		return nil, fault.ModelNotFound(slug)
 	}
-	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+	x.Route = &route
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 		return nil, fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	if !slices.Contains(route.Operations, "batch") {
@@ -353,38 +353,38 @@ func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *
 	if x.strict() {
 		return nil, policyUnavailable("target_capability", wording.strictRoute)
 	}
-	if e := x.guardrailSurfaceGate(&route); e != nil {
+	if e := x.GuardrailSurfaceGate(&route); e != nil {
 		return nil, e
 	}
 	return &route, nil
 }
 
-func (s *Server) nativeStatePin(ctx context.Context, x *call, route *routing.Route) (*pin, *fault.Error) {
+func (s *Server) NativeStatePin(ctx context.Context, x *Call, route *routing.Route) (*Pin, *fault.Error) {
 	surface := x.family.Surface()
 	return s.selectPinSurface(ctx, x, route, "batch", surface, "unary", func(p *routing.Provider, model string) bool {
 		return p.Connector().Supports("batch", surface, "unary") && p.Supports(model, "batch", surface, "unary")
 	})
 }
 
-func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, route *routing.Route) *fault.Error {
+func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, route *routing.Route) *fault.Error {
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(ctx, x, authority, overall); e != nil {
 		return e
 	}
-	if p.hold != nil {
+	if p.Hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(overall), "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, s.Now().Add(overall), "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
-	p.hold = gate.hold
+	p.Hold = gate.hold
 	return nil
 }
 
-func (s *Server) resourceSettle(ctx context.Context, x *call, p *pin) {
+func (s *Server) ResourceSettle(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
-		s.settlePinnedHold(ctx, p.hold)
+		s.settlePinnedHold(ctx, p.Hold)
 	}
 	s.settleCaps(ctx, x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.log)
@@ -409,7 +409,7 @@ func upstreamString(body json.RawMessage, name string) (string, bool) {
 // nativeResourceID proves one unambiguous native identity before a provider
 // result may create or update its retained mapping. The source parser refuses
 // duplicate (including escaped) keys and invalid Unicode spellings.
-func nativeResourceID(body []byte, maxBytes int64) (string, bool) {
+func NativeResourceID(body []byte, maxBytes int64) (string, bool) {
 	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(maxBytes)})
 	if err != nil {
 		return "", false
@@ -420,11 +420,11 @@ func nativeResourceID(body []byte, maxBytes int64) (string, bool) {
 }
 
 func retainedIdentityMatches(body []byte, expected string, maxBytes int64) bool {
-	upstream, valid := nativeResourceID(body, maxBytes)
+	upstream, valid := NativeResourceID(body, maxBytes)
 	return valid && upstream == expected
 }
 
-func rewriteID(body []byte, name, value string) ([]byte, error) {
+func RewriteID(body []byte, name, value string) ([]byte, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, err
@@ -582,7 +582,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	obj := maps.Clone(stored)
 	maps.DeleteFunc(obj, func(name string, _ json.RawMessage) bool { return slices.Contains(privateBatchFields[:], name) })
 	maps.Copy(obj, files)
-	obj["id"] = mustJSON(res.ID)
+	obj["id"] = MustJSON(res.ID)
 	if _, ok := obj["object"]; !ok {
 		obj["object"] = json.RawMessage(`"batch"`)
 	}
@@ -596,7 +596,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = kind, upstreamID
-	if existing, err := s.deps.Resources.GetByUpstream(ctx, identity); err == nil {
+	if existing, err := s.Deps.Resources.GetByUpstream(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -628,24 +628,24 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		version := resources.DurableContractVersion
 		resource.ContractVersion = &version
 		resource.ExpiresAt = owner.ExpiresAt
-		source := mustJSON(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
-		payload := mustJSON(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
-		created, err := s.deps.Resources.PutDurableContract(ctx, resource, payload)
+		source := MustJSON(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
+		payload := MustJSON(durableDocument{Version: version, Source: source, Binding: ResourceModel(owner), Serving: batch.Serving})
+		created, err := s.Deps.Resources.PutDurableContract(ctx, resource, payload)
 		if err == nil {
 			return created, nil
 		}
 		// Another authorized poll may have installed the same output-file
 		// mapping concurrently. A collision owned by someone else still fails.
-		if existing, readErr := s.deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+		if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
 			return existing, nil
 		}
 		return nil, err
 	}
-	created, err := s.deps.Resources.Put(ctx, resource)
+	created, err := s.Deps.Resources.Put(ctx, resource)
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+	if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err
@@ -705,7 +705,7 @@ func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resourc
 	upstreamFiles := map[string]*string{"output_file_id": record.OutputFileID, "error_file_id": record.ErrorFileID}
 	projected := map[string]json.RawMessage{}
 	if record.LocalInputFileID != "" {
-		projected["input_file_id"] = mustJSON(record.LocalInputFileID)
+		projected["input_file_id"] = MustJSON(record.LocalInputFileID)
 	} else {
 		upstreamFiles["input_file_id"] = record.InputFileID
 	}
@@ -717,7 +717,7 @@ func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resourc
 		if err != nil {
 			return nil, err
 		}
-		projected[name] = mustJSON(mapped.ID)
+		projected[name] = MustJSON(mapped.ID)
 	}
 	return projected, nil
 }
@@ -732,36 +732,36 @@ func gateError(gate gateResult) *fault.Error {
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
 }
 
-func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte, exchanges ...*pinnedExchange) {
+func (s *Server) WriteStateJSON(w http.ResponseWriter, x *Call, body []byte, exchanges ...*pinnedExchange) {
 	s.writeStateJSONStatus(w, x, body, http.StatusOK, exchanges...)
 }
 
-func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int, exchanges ...*pinnedExchange) {
+func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *Call, body []byte, status int, exchanges ...*pinnedExchange) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if body != nil {
 		w.Header().Set("Content-Type", "application/json")
 	}
-	x.responseHeaders(w.Header(), false)
+	x.ResponseHeaders(w.Header(), false)
 	w.WriteHeader(status)
 	n, err := w.Write(body)
 	if err == nil && n == len(body) {
 		err = http.NewResponseController(w).Flush()
 	}
 	if err != nil || n != len(body) {
-		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
+		x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
 		for _, exchange := range exchanges {
-			exchange.delivery(deliveryState(n))
+			exchange.Delivery(DeliveryState(n))
 		}
-		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, 0)
 		return
 	}
 	if n > 0 {
-		x.delivered(s.now())
+		x.Delivered(s.Now())
 	}
 	for _, exchange := range exchanges {
-		exchange.delivery(usage.ClientTerminal)
+		exchange.Delivery(usage.ClientTerminal)
 	}
-	s.finish(x, &outcome{committed: true}, status)
+	s.Finish(x, &Outcome{Committed: true}, status)
 }
 
 func resourceListError(err error, message string) *fault.Error {
@@ -808,7 +808,7 @@ func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 }
 
 func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage, error) {
-	metadata := durableMetadata(resourceModel(owner))
+	metadata := durableMetadata(ResourceModel(owner))
 	adapter, err := resourceAdapter(owner)
 	if err != nil {
 		return nil, err
@@ -826,7 +826,7 @@ type refreshedFile struct {
 }
 
 func refreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (refreshedFile, error) {
-	metadata, state, expires := fileMetadata(body, resourceModel(res))
+	metadata, state, expires := fileMetadata(body, ResourceModel(res))
 	if res.Kind == resources.KindStrictFile {
 		return refreshedFile{metadata: metadata, state: state, expires: expires}, nil
 	}
@@ -868,5 +868,5 @@ func (e *pinnedExchange) completeRetainedControl() {
 	if e.request.retainedAdmission != nil {
 		_ = observeRetainedUsage(e, oif.Document{}, false)
 	}
-	e.complete(classSuccess)
+	e.Complete(ClassSuccess)
 }

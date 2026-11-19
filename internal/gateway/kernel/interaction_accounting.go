@@ -17,11 +17,11 @@ func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, s
 	if observed := geminiInteractionUsage(object); observed != nil {
 		evidence = events.ObservedUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
 	}
-	result, err := s.deps.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.now())
+	result, err := s.Deps.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.Now())
 	if err != nil {
 		return ingest.Persisted{}, err
 	}
-	if err := s.deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
+	if err := s.Deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
 		s.log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
 	}
 	return result, nil

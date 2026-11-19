@@ -16,11 +16,11 @@ func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.E
 	return ingest.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
 }
 
-func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact events.AttemptFact) *fault.Error {
+func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *Call, fact events.AttemptFact) *fault.Error {
 	if x.request.release == nil || x.request.release.Snapshot() == nil {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow release is unavailable"))
 	}
-	completedAt := s.now()
+	completedAt := s.Now()
 	envelope := events.Envelope{
 		RequestID: x.request.id, AccountingID: x.request.accountingID(), ClientIP: x.request.clientIP,
 		Actor: x.actor, KeyID: x.keyID, EndUserDigest: x.endUserDigest, BudgetGroupID: x.budgetGroupID,
@@ -40,8 +40,8 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact e
 	}
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), events.PersistTimeout)
 	defer cancel()
-	snapshots, settleErr := s.deps.Debits.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
-	if err := s.deps.Admission.InstallSnapshots(settleCtx, snapshots); err != nil {
+	snapshots, settleErr := s.Deps.Debits.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
+	if err := s.Deps.Admission.InstallSnapshots(settleCtx, snapshots); err != nil {
 		return s.workflowSettlementFailure(ctx, x, err)
 	}
 	if settleErr != nil {
@@ -50,7 +50,7 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact e
 	return nil
 }
 
-func (s *Server) workflowSettlementFailure(ctx context.Context, x *call, err error) *fault.Error {
+func (s *Server) workflowSettlementFailure(ctx context.Context, x *Call, err error) *fault.Error {
 	s.markSessionUnknown(ctx, x)
 	if s.log != nil {
 		s.log.Warn("workflow model attempt settlement failed", "error", err.Error())

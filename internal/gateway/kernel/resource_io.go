@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {
+func (s *Server) ReadResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {
 	deadline := time.Now().Add(requestBodyTimeout)
 	if parent, ok := r.Context().Deadline(); ok && parent.Before(deadline) {
 		deadline = parent
@@ -19,7 +19,7 @@ func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byt
 	if err := controller.SetReadDeadline(deadline); err != nil {
 		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
 	}
-	body, failure := s.gate.ReadBody(r)
+	body, failure := s.Gate.ReadBody(r)
 	if failure == nil {
 		_ = controller.SetReadDeadline(time.Time{})
 	}
@@ -27,14 +27,14 @@ func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byt
 	return body, failure
 }
 
-func setFileDownloadHeaders(h http.Header, contentType string, contentLength int64) {
+func SetFileDownloadHeaders(h http.Header, contentType string, contentLength int64) {
 	h.Set("Content-Type", contentType)
 	h.Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	h.Set("Content-Disposition", "attachment")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 }
 
-func copyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64) (int64, error) {
+func CopyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64) (int64, error) {
 	written, err := io.Copy(w, reader)
 	if err == nil && written != expected {
 		err = io.ErrUnexpectedEOF
@@ -45,7 +45,7 @@ func copyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64
 	return written, err
 }
 
-func mustJSON(value any) []byte {
+func MustJSON(value any) []byte {
 	out, _ := json.Marshal(value)
 	return out
 }

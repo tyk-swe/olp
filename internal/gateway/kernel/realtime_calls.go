@@ -45,8 +45,8 @@ type webrtcSession struct {
 	callID    string
 	keyID     string
 	token     string
-	x         *call
-	p         *pin
+	x         *Call
+	p         *Pin
 	conn      *websocket.Conn
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -82,7 +82,7 @@ func (s *Server) holdWebRTCExposure(keyID string, until time.Time) {
 	if s.webrtcExposures == nil {
 		s.webrtcExposures = map[string]time.Time{}
 	}
-	now := s.now()
+	now := s.Now()
 	for key, expiry := range s.webrtcExposures {
 		if now.After(expiry) {
 			delete(s.webrtcExposures, key)
@@ -100,7 +100,7 @@ func (s *Server) webrtcExposureHeld(keyID string) bool {
 	if !ok {
 		return false
 	}
-	if s.now().After(until) {
+	if s.Now().After(until) {
 		delete(s.webrtcExposures, keyID)
 		return false
 	}
@@ -320,12 +320,12 @@ func parseWebRTCCallID(location string) (string, bool) {
 }
 
 func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
-	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
+	x := &Call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "webrtc"
-	fail := func(e *fault.Error) { s.refuse(x, w, e) }
+	fail := func(e *fault.Error) { s.Refuse(x, w, e) }
 	permit := admission.PermitFromContext(r.Context())
 	if permit == nil {
-		permit = s.gate.Pool().AcquirePermit()
+		permit = s.Gate.Pool().AcquirePermit()
 	}
 	if permit == nil {
 		fail(fault.Overloaded)
@@ -341,7 +341,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.AuthenticationError("missing_authorization", "Provide an Authorization Bearer [REDACTED] key."))
 		return
 	}
-	authority, e := s.gate.AuthenticateRequest(r, token, "inference")
+	authority, e := s.Gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -360,12 +360,12 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(s.now().Add(requestBodyTimeout)); err != nil {
+	if err := controller.SetReadDeadline(s.Now().Add(requestBodyTimeout)); err != nil {
 		fail(fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
 		return
 	}
-	if s.cfg.MaxBodyBytes > 0 {
-		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+	if s.Config.MaxBodyBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, s.Config.MaxBodyBytes)
 	}
 	callReq, e := parseWebRTCCallRequest(r)
 	if e != nil {
@@ -384,8 +384,8 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.ModelNotFound(slug))
 		return
 	}
-	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+	x.Route = &route
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 		fail(fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
@@ -397,7 +397,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil))
 		return
 	}
-	if e := x.guardrailSurfaceGate(&route); e != nil {
+	if e := x.GuardrailSurfaceGate(&route); e != nil {
 		fail(e)
 		return
 	}
@@ -424,10 +424,10 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	releasePin := func() {
-		s.settleSessionHold(r.Context(), x, p.hold, nil)
+		s.settleSessionHold(r.Context(), x, p.Hold, nil)
 		s.settleCaps(r.Context(), x)
 	}
-	template, ok := snapshot.WebRTCTemplate(route.Slug, p.target.ID)
+	template, ok := snapshot.WebRTCTemplate(route.Slug, p.Target.ID)
 	if !ok || !template.WebRTC() {
 		releasePin()
 		cancel()
@@ -441,7 +441,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, &route); e != nil {
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(authority), p, &route); e != nil {
 		releasePin()
 		cancel()
 		fail(e)
@@ -470,7 +470,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := &webrtcSession{
 		id: uuid.NewString(), keyID: authority.ID, token: token,
-		x: x, p: p, ctx: bg, cancel: cancel, started: s.now(),
+		x: x, p: p, ctx: bg, cancel: cancel, started: s.Now(),
 		admission: permit.Transfer(),
 	}
 	s.registerWebRTCSession(sess)
@@ -492,7 +492,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	go s.runWebRTCControl(sess)
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", "/v1/realtime/calls/"+sess.id)
-	_ = controller.SetWriteDeadline(s.now().Add(webrtcAnswerTimeout))
+	_ = controller.SetWriteDeadline(s.Now().Add(webrtcAnswerTimeout))
 	w.WriteHeader(status)
 	_, werr := w.Write(answer)
 	if werr == nil {
@@ -509,18 +509,18 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp, session []byte) ([]byte, int, *fault.Error) {
 	x, p := sess.x, sess.p
-	cfg := p.provider.Connector()
-	endpoint, err := cfg.RealtimeCallsURL(p.model)
+	cfg := p.Provider.Connector()
+	endpoint, err := cfg.RealtimeCallsURL(p.Model)
 	if err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
 	}
 	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy.")
 	}
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
+	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
 	fact.Mode = "webrtc"
-	if p.hold != nil {
-		fact.Budgets = p.hold.budgets
+	if p.Hold != nil {
+		fact.Budgets = p.Hold.budgets
 	}
 	createCtx := ctx
 	cancelCreate := context.CancelFunc(func() {})
@@ -541,32 +541,32 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/sdp")
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := s.applySlotCredential(reqCtx, x, req, cfg, p.slot, body, &p.provider, p.model); err != nil {
+	if err := s.applySlotCredential(reqCtx, x, req, cfg, p.Slot, body, &p.Provider, p.Model); err != nil {
 		fact.Class = classCredential
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
 	}
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	client, err := s.providerClient(ctx, x.request.release, &p.Provider, p.Slot)
 	if err != nil {
 		fact.Class = classCredential
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
 	if e := s.markSessionDispatched(reqCtx, x); e != nil {
 		fact.Class = classConnect
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, e
 	}
 	resp, err := client.Do(req)
 	x.dispatched = x.dispatched || state.dispatched.Load() || resp != nil
-	if x.dispatched && p.hold != nil {
-		x.spendCaps(p.hold.budgets, p.attempt)
+	if x.dispatched && p.Hold != nil {
+		x.spendCaps(p.Hold.budgets, p.attempt)
 	}
 	if err != nil {
 		fact.Class = classConnect
@@ -576,7 +576,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		if dispatched {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 	}
@@ -590,10 +590,10 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		outcome := state.classifier.Classify(evidence)
 		sess.rejected = outcome.Acceptance == upstream.Terminal
 		fact.Class = string(outcome.Class)
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
-		return nil, 0, upstreamError(&attemptFailure{status: resp.StatusCode, upstream: nativeError})
+		return nil, 0, UpstreamError(&attemptFailure{Status: resp.StatusCode, upstream: nativeError})
 	}
 	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
 	if ok {
@@ -604,18 +604,18 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
 		fact.Class = classProtocol
 		fact.RecordEvidence(true)
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		if !ok || s.hangupWebRTCCall(ctx, sess) != nil {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		}
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
 	}
-	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.model, callID)
+	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.Model, callID)
 	if !ok || controlErr != nil {
 		fact.Class = classProtocol
 		fact.RecordEvidence(true)
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
@@ -626,7 +626,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = upstream.Accepted
 	}
-	fact.Duration = s.now().Sub(fact.StartedAt)
+	fact.Duration = s.Now().Sub(fact.StartedAt)
 	fact.RecordEvidence(true)
 	x.facts = append(x.facts, fact)
 	conn, e := s.dialWebRTCControl(createCtx, sess, controlEndpoint)
@@ -646,14 +646,14 @@ func (s *Server) dialWebRTCControl(ctx context.Context, sess *webrtcSession, end
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
-	if err := s.applySlotCredential(ctx, x, probe, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
+	if err := s.applySlotCredential(ctx, x, probe, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
 	}
 	headers := http.Header{}
 	for name, values := range probe.Header {
 		headers[name] = append([]string{}, values...)
 	}
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	client, err := s.providerClient(ctx, x.request.release, &p.Provider, p.Slot)
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
@@ -661,11 +661,11 @@ func (s *Server) dialWebRTCControl(ctx context.Context, sess *webrtcSession, end
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
 	}
-	limit := s.cfg.MaxEventBytes
+	limit := s.Config.MaxEventBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	conn.SetReadLimit(bodylimit.Lower(limit, x.route.MaxBodyBytes))
+	conn.SetReadLimit(bodylimit.Lower(limit, x.Route.MaxBodyBytes))
 	return conn, nil
 }
 
@@ -673,8 +673,8 @@ func (s *Server) hangupWebRTCCall(parent context.Context, sess *webrtcSession) e
 	if sess.callID == "" {
 		return errors.New("no provider call identity")
 	}
-	cfg := sess.p.provider.Connector()
-	endpoint, err := cfg.RealtimeHangupURL(sess.p.model, sess.callID)
+	cfg := sess.p.Provider.Connector()
+	endpoint, err := cfg.RealtimeHangupURL(sess.p.Model, sess.callID)
 	if err != nil {
 		return err
 	}
@@ -685,10 +685,10 @@ func (s *Server) hangupWebRTCCall(parent context.Context, sess *webrtcSession) e
 		return err
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := s.applySlotCredential(ctx, sess.x, req, cfg, sess.p.slot, nil, &sess.p.provider, sess.p.model); err != nil {
+	if err := s.applySlotCredential(ctx, sess.x, req, cfg, sess.p.Slot, nil, &sess.p.Provider, sess.p.Model); err != nil {
 		return err
 	}
-	client, err := s.providerClient(ctx, sess.x.request.release, &sess.p.provider, sess.p.slot)
+	client, err := s.providerClient(ctx, sess.x.request.release, &sess.p.Provider, sess.p.Slot)
 	if err != nil {
 		return err
 	}

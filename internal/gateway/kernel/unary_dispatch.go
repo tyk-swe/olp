@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -44,7 +44,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 		f.noRetry = f.noRetry || f.dispatched
 		f.class = class
 		fact.Class = class
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
 			v := f.retryAfter
 			fact.RetryAfter = &v
@@ -86,10 +86,10 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 		defer parallel.cancel()
 	}
 	cap := plan.Receipt().Obligations.MaxBodyBytes
-	if s.cfg.MaxResponseBytes > 0 {
-		cap = min(cap, int(s.cfg.MaxResponseBytes))
+	if s.Config.MaxResponseBytes > 0 {
+		cap = min(cap, int(s.Config.MaxResponseBytes))
 	}
-	exchange := &unaryExchange{now: s.now, dispatched: s.markSessionDispatched, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
+	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	if failure != nil {
 		return fail(failure.class, failure.failure)
@@ -123,8 +123,8 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 			return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 		}
 	}
-	fact.Class = classSuccess
-	fact.Duration = s.now().Sub(fact.StartedAt)
+	fact.Class = ClassSuccess
+	fact.Duration = s.Now().Sub(fact.StartedAt)
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = upstream.Terminal
 	}

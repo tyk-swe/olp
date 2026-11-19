@@ -38,7 +38,7 @@ func retainedGeminiFileID(raw string) (string, error) {
 	return local, nil
 }
 
-func retainedGeminiFileURI(r *resources.Resource, p *pin) (string, error) {
+func retainedGeminiFileURI(r *resources.Resource, p *Pin) (string, error) {
 	var metadata struct {
 		URI  string `json:"uri"`
 		Name string `json:"name"`
@@ -47,7 +47,7 @@ func retainedGeminiFileURI(r *resources.Resource, p *pin) (string, error) {
 		return "", resources.ErrContract
 	}
 	uri, err := url.Parse(metadata.URI)
-	endpoint, endpointErr := url.Parse(p.provider.Endpoint)
+	endpoint, endpointErr := url.Parse(p.Provider.Endpoint)
 	if err != nil || endpointErr != nil || uri.User != nil || uri.RawQuery != "" || uri.Fragment != "" || uri.Host != endpoint.Host || uri.Scheme != endpoint.Scheme || !strings.HasSuffix(uri.Path, "/files/"+r.UpstreamID) {
 		return "", resources.ErrContract
 	}
@@ -57,10 +57,10 @@ func retainedGeminiFileURI(r *resources.Resource, p *pin) (string, error) {
 // retainedInputMetadata validates controls which can spend under the pinned
 // credential. Only the resulting model identities and billing dimensions are
 // retained; native source content and grader definitions remain provider-side.
-func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retainedapi.Endpoint, source oif.Document, parent *resources.Resource) (map[string]any, error) {
-	meta := map[string]any{"upstream_model": p.model, "contract_revision": retainedapi.Revision}
+func retainedInputMetadata(p *Pin, route *routing.Route, owner string, e retainedapi.Endpoint, source oif.Document, parent *resources.Resource) (map[string]any, error) {
+	meta := map[string]any{"upstream_model": p.Model, "contract_revision": retainedapi.Revision}
 	if e.Kind == "context_cache" {
-		meta["serving_model"] = p.provider.Connector().Model(p.model)
+		meta["serving_model"] = p.Provider.Connector().Model(p.Model)
 		if e.Action == "create" {
 			if tools, present := source.Root().Lookup("tools"); present && tools.Kind() != oif.Null && (tools.Kind() != oif.Array || len(tools.Elements()) != 0) {
 				return nil, errors.New("cached tools are unsupported; declare supported client tools on each generation request")
@@ -116,12 +116,12 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 		data, _ := source.Root().Lookup("supervisedTuningSpec")
 		training, _ := data.Lookup("trainingDatasetUri")
 		uri, ok := training.Text()
-		if !ok || !p.provider.Connector().AllowsTuningDataset(uri) {
+		if !ok || !p.Provider.Connector().AllowsTuningDataset(uri) {
 			return nil, errors.New("training dataset is outside the connection's configured URI prefixes")
 		}
 		if validation, present := data.Lookup("validationDatasetUri"); present && validation.Kind() != oif.Null {
 			uri, ok := validation.Text()
-			if !ok || !p.provider.Connector().AllowsTuningDataset(uri) {
+			if !ok || !p.Provider.Connector().AllowsTuningDataset(uri) {
 				return nil, errors.New("validation dataset is outside the connection's configured URI prefixes")
 			}
 		}
@@ -167,7 +167,7 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 				return nil, errors.New("this evaluation definition has no qualified grader authority; recreate it before starting new runs")
 			}
 			for _, model := range prior.Models {
-				native := p.provider.Connector().Model(model)
+				native := p.Provider.Connector().Model(model)
 				pinned, present := prior.ServingModels[model]
 				if present && pinned != native || !present && native != model {
 					return nil, errors.New("this evaluation definition has no compatible native grader binding; recreate it before starting new runs")
@@ -197,7 +197,7 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 		servingModels := map[string]string{}
 		seenNative := map[string]bool{}
 		for _, model := range models {
-			native := p.provider.Connector().Model(model)
+			native := p.Provider.Connector().Model(model)
 			if seenNative[native] {
 				return nil, errors.New("evaluation aliases must have distinct native models for usage attribution")
 			}
@@ -268,12 +268,12 @@ func walkRetainedEvalModels(value oif.Value, path string, visit func(string, str
 	return nil
 }
 
-func retainedEvalModelAllowed(p *pin, route *routing.Route, owner, model string) bool {
-	if model == "" || route == nil || !slices.Contains(route.Operations, "generation") || !p.slot.Allows(model, route.Slug, owner) || !p.provider.Supports(model, "eval", "openai", "unary") || !p.provider.Supports(model, "generation", "openai", "unary") {
+func retainedEvalModelAllowed(p *Pin, route *routing.Route, owner, model string) bool {
+	if model == "" || route == nil || !slices.Contains(route.Operations, "generation") || !p.Slot.Allows(model, route.Slug, owner) || !p.Provider.Supports(model, "eval", "openai", "unary") || !p.Provider.Supports(model, "generation", "openai", "unary") {
 		return false
 	}
 	return slices.ContainsFunc(route.Targets, func(target routing.Target) bool {
-		return target.ProviderID == p.provider.ID && target.ProviderModel == model
+		return target.ProviderID == p.Provider.ID && target.ProviderModel == model
 	})
 }
 
@@ -299,7 +299,7 @@ func retainedEvalSlots(route *routing.Route, owner string, source oif.Document, 
 		return nil, err
 	}
 	return func(provider *routing.Provider, slot *routing.Slot, model string) bool {
-		candidate := &pin{provider: *provider, slot: *slot, model: model}
+		candidate := &Pin{Provider: *provider, Slot: *slot, Model: model}
 		for _, declared := range models {
 			if !retainedEvalModelAllowed(candidate, route, owner, declared) {
 				return false
@@ -433,16 +433,16 @@ func (s *Server) persistRetainedResult(ctx context.Context, r *resources.Resourc
 	// Create results were already committed with their submission identities.
 	// Empty item creations intentionally leave a deleted placeholder.
 	if e.Action != "create" {
-		save := s.deps.Resources.SaveRetainedResult
+		save := s.Deps.Resources.SaveRetainedResult
 		if e.Metered && (e.Action == "update" || e.Action == "patch") {
-			save = s.deps.Resources.SaveRetainedMutationResult
+			save = s.Deps.Resources.SaveRetainedMutationResult
 		}
 		if err := save(ctx, r); err != nil {
 			return err
 		}
 	}
 	if e.Operation == "fine_tuning" {
-		return s.deps.Resources.DiscoverRetainedModels(ctx, r, source)
+		return s.Deps.Resources.DiscoverRetainedModels(ctx, r, source)
 	}
 	return nil
 }

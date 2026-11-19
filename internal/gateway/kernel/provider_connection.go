@@ -11,10 +11,10 @@ import (
 )
 
 func (s *Server) targetResolver() providerinvoke.Resolver {
-	return providerinvoke.Resolver{Credentials: s.deps.Runtime, Policy: s.egress, Connections: s.connections, DefaultClient: s.client, HeaderTimeout: UpstreamHeaderTimeout}
+	return providerinvoke.Resolver{Credentials: s.Deps.Runtime, Policy: s.egress, Connections: s.connections, DefaultClient: s.client, HeaderTimeout: UpstreamHeaderTimeout}
 }
 
-func (s *Server) targetBinding(x *call, provider *routing.Provider, slot routing.Slot, model string) providerinvoke.Binding {
+func (s *Server) targetBinding(x *Call, provider *routing.Provider, slot routing.Slot, model string) providerinvoke.Binding {
 	var caller providerinvoke.CallerCredential
 	if x.origin != "probe" {
 		caller = x.callerSecret
@@ -22,7 +22,7 @@ func (s *Server) targetBinding(x *call, provider *routing.Provider, slot routing
 	return s.targetResolver().Bind(x.request.release, providerinvoke.Target{Provider: *provider, Slot: slot, Model: model}, caller)
 }
 
-func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, provider *routing.Provider, model string) ([]byte, error) {
+func (s *Server) slotSecret(ctx context.Context, x *Call, slot routing.Slot, provider *routing.Provider, model string) ([]byte, error) {
 	credential, err := s.targetBinding(x, provider, slot, model).Credential(ctx)
 	x.grantGeneration = credential.Generation
 	return credential.Secret, err
@@ -33,7 +33,7 @@ func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, pro
 // authenticates and signs the request. It records the values to redact. The
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
-func (s *Server) applySlotCredential(ctx context.Context, x *call, req *http.Request, cfg connectors.Config, slot routing.Slot, body []byte, provider *routing.Provider, model string) error {
+func (s *Server) applySlotCredential(ctx context.Context, x *Call, req *http.Request, cfg connectors.Config, slot routing.Slot, body []byte, provider *routing.Provider, model string) error {
 	return s.bindExchange(x, provider, slot, model, cfg, nil).authenticate(ctx, req, body)
 }
 
@@ -43,14 +43,14 @@ func (s *Server) providerNetworkSecret(ctx context.Context, pinned *release.Rele
 
 // pinEligibility reports whether a pinned slot's credential version and its
 // provider's network credential may still serve.
-func (s *Server) pinEligibility(p *pin) routing.Eligibility {
-	if p.slot.CredentialID != nil {
-		if eligibility := s.deps.Runtime.Eligibility(*p.slot.CredentialID); eligibility != routing.Eligible {
+func (s *Server) pinEligibility(p *Pin) routing.Eligibility {
+	if p.Slot.CredentialID != nil {
+		if eligibility := s.Deps.Runtime.Eligibility(*p.Slot.CredentialID); eligibility != routing.Eligible {
 			return eligibility
 		}
 	}
-	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
-		return s.deps.Runtime.Eligibility(p.provider.Network.CredentialID)
+	if p.Provider.Network != nil && p.Provider.Network.CredentialID != "" {
+		return s.Deps.Runtime.Eligibility(p.Provider.Network.CredentialID)
 	}
 	return routing.Eligible
 }

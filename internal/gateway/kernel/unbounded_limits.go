@@ -34,19 +34,19 @@ func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Pro
 
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
-func (s *Server) unboundedPinLimits(authority keyauthority.Authority, p *pin, route *routing.Route) *fault.Error {
-	if e := unboundedWorkLimits(authority, &p.provider, &p.slot, route); e != nil {
+func (s *Server) UnboundedPinLimits(authority keyauthority.Authority, p *Pin, route *routing.Route) *fault.Error {
+	if e := unboundedWorkLimits(authority, &p.Provider, &p.Slot, route); e != nil {
 		return e
 	}
-	if release := s.deps.Runtime.Release(); release != nil {
+	if release := s.Deps.Runtime.Release(); release != nil {
 		if route != nil {
 			if current, ok := release.Snapshot().FindRoute(route.Slug); ok {
 				route = &current
 			}
 		}
-		if provider, ok := release.Snapshot().FindProvider(p.provider.ID); ok {
+		if provider, ok := release.Snapshot().FindProvider(p.Provider.ID); ok {
 			for _, slot := range provider.Slots {
-				if slot.ID == p.slot.ID {
+				if slot.ID == p.Slot.ID {
 					return unboundedWorkLimits(authority, &provider, &slot, route)
 				}
 			}

@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func (x *call) redactBedrockFailure(message *eventstream.Message, observation protocols.BedrockObservation) error {
+func (x *Call) redactBedrockFailure(message *eventstream.Message, observation protocols.BedrockObservation) error {
 	source := observation.Source
 	if observation.Native.Valid() {
 		redacted, err := fault.RedactNativeFailureDocument(observation.Native, x.sensitive)

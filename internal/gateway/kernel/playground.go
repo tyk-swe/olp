@@ -188,7 +188,7 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *call, principal authz.Principal) (parsedRequest, error) {
+func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *Call, principal authz.Principal) (parsedRequest, error) {
 	if in.Request != nil {
 		family := protocols.WireFamily(in.surface(), "", wire.Chat)
 		if family == wire.Gemini && mode == "streaming" {
@@ -276,10 +276,10 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 	return parsedRequest{request: parsed}, nil
 }
 
-func (p *Playground) call(r *http.Request, principal authz.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
+func (p *Playground) call(r *http.Request, principal authz.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *Call {
 	s := p.Gateway
-	return &call{
-		request:     request{id: uuidString(), minted: true, clientIP: consumerauth.ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+	return &Call{
+		request:     request{id: uuidString(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: preferences,
 
@@ -324,39 +324,39 @@ func (p *Playground) Handle(r *http.Request, principal authz.Principal) (httpkit
 		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
 	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
+		x.Failure = e
+		s.Finish(x, nil, e.Status)
 		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	if !s.gate.Admit(r.Context()) {
-		x.failure = fault.Overloaded
-		s.finish(x, nil, fault.Overloaded.Status)
+	if !s.Gate.Admit(r.Context()) {
+		x.Failure = fault.Overloaded
+		s.Finish(x, nil, fault.Overloaded.Status)
 		return httpkit.Reply{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	// Playground calls, streamed or not, are charged to the route's project and
 	// installation, so they hold against those caps as probes and shadows do.
 	defer s.settleAdmission(r.Context(), x)
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
+		x.Failure = e
+		s.Finish(x, nil, e.Status)
 		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	out := s.execute(r.Context(), x)
-	if out.err != nil {
-		s.finish(x, out, out.err.Status)
-		status := out.err.Status
+	if out.Err != nil {
+		s.Finish(x, out, out.Err.Status)
+		status := out.Err.Status
 		if status == 0 {
 			status = http.StatusBadGateway
 		}
-		return httpkit.Reply{}, httpkit.Fail(status, out.err.Code, out.err.Message)
+		return httpkit.Reply{}, httpkit.Fail(status, out.Err.Code, out.Err.Message)
 	}
 	if e := s.enforceCompletionOutput(x, out.completion); e != nil {
-		s.finish(x, out, e.Status)
+		s.Finish(x, out, e.Status)
 		return httpkit.Reply{}, httpkit.Fail(e.Status, e.Code, e.Message)
 	}
-	s.finish(x, out, http.StatusOK)
+	s.Finish(x, out, http.StatusOK)
 	return httpkit.Reply{
 		Status:              http.StatusOK,
 		Body:                p.response(x, out, in),
@@ -364,7 +364,7 @@ func (p *Playground) Handle(r *http.Request, principal authz.Principal) (httpkit
 	}, nil
 }
 
-func routingEvidence(x *call) []map[string]any {
+func routingEvidence(x *Call) []map[string]any {
 	evidenceRows := []map[string]any{}
 	for _, fact := range x.facts {
 		var evidence routing.Decision
@@ -390,7 +390,7 @@ func routingEvidence(x *call) []map[string]any {
 	return evidenceRows
 }
 
-func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[string]any {
+func (p *Playground) response(x *Call, out *Outcome, in playgroundRequest) map[string]any {
 	c := out.completion
 	routing := routingEvidence(x)
 	if in.operation() != "generation" {
@@ -399,7 +399,7 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 			"model":       x.named().Slug,
 			"output_text": "",
 			"tool_calls":  []map[string]any{},
-			"latency_ms":  p.Gateway.now().Sub(x.request.startedAt).Milliseconds(),
+			"latency_ms":  p.Gateway.Now().Sub(x.request.startedAt).Milliseconds(),
 			"routing":     routing,
 		}
 		if json.Valid(c.Body) {
@@ -422,7 +422,7 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 		"model":       x.named().Slug,
 		"output_text": c.OutputText,
 		"tool_calls":  tools,
-		"latency_ms":  p.Gateway.now().Sub(x.request.startedAt).Milliseconds(),
+		"latency_ms":  p.Gateway.Now().Sub(x.request.startedAt).Milliseconds(),
 		"routing":     routing,
 	}
 	if c.FinishReason != "" {
@@ -448,7 +448,7 @@ func (p *Playground) response(x *call, out *outcome, in playgroundRequest) map[s
 	return res
 }
 
-func attemptPriority(x *call, targetID string) int {
+func attemptPriority(x *Call, targetID string) int {
 	for _, a := range x.attempts {
 		if a.TargetID == targetID {
 			return a.Priority
@@ -479,36 +479,36 @@ func (p *Playground) Stream(w http.ResponseWriter, r *http.Request, principal au
 		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
 	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
+		x.Failure = e
+		s.Finish(x, nil, e.Status)
 		return httpkit.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	if !s.gate.Admit(r.Context()) {
-		x.failure = fault.Overloaded
-		s.finish(x, nil, fault.Overloaded.Status)
+	if !s.Gate.Admit(r.Context()) {
+		x.Failure = fault.Overloaded
+		s.Finish(x, nil, fault.Overloaded.Status)
 		return httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	defer s.settleAdmission(r.Context(), x)
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
+		x.Failure = e
+		s.Finish(x, nil, e.Status)
 		return httpkit.Fail(e.Status, e.Code, e.Message)
 	}
-	sw := &playgroundStreamWriter{w: w, maxTotal: s.cfg.MaxResponseBytes}
+	sw := &playgroundStreamWriter{w: w, maxTotal: s.Config.MaxResponseBytes}
 	x.generation.emit = sw.emit
 	out := s.execute(r.Context(), x)
 	status := http.StatusOK
-	if out.err != nil && out.err.Status > 0 {
-		status = out.err.Status
+	if out.Err != nil && out.Err.Status > 0 {
+		status = out.Err.Status
 	}
-	s.finish(x, out, status)
-	if out.cancelled {
+	s.Finish(x, out, status)
+	if out.Cancelled {
 		return nil
 	}
-	if out.err != nil && !sw.committed {
-		return httpkit.Fail(out.err.Status, out.err.Code, out.err.Message)
+	if out.Err != nil && !sw.committed {
+		return httpkit.Fail(out.Err.Status, out.Err.Code, out.Err.Message)
 	}
 	sw.finish(x, out)
 	return nil
@@ -554,9 +554,9 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 	return nil
 }
 
-func (sw *playgroundStreamWriter) finish(x *call, out *outcome) {
-	if out.err != nil {
-		data, _ := json.Marshal(map[string]any{"code": out.err.Code, "message": out.err.Message, "status": out.err.Status})
+func (sw *playgroundStreamWriter) finish(x *Call, out *Outcome) {
+	if out.Err != nil {
+		data, _ := json.Marshal(map[string]any{"code": out.Err.Code, "message": out.Err.Message, "status": out.Err.Status})
 		_ = sw.write("error", data, false)
 		return
 	}

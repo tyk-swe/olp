@@ -29,7 +29,7 @@ import (
 
 // call owns authority, accounting and the shared attempt loop for one request.
 // Route changes replace routeLeg; operation state lives independently.
-type call struct {
+type Call struct {
 	prompt               *usage.PromptReference
 	currentCommitments   *routing.View
 	cache                *responseCacheCall
@@ -43,8 +43,8 @@ type call struct {
 	semanticQueryInvalid bool
 	retained             retainedOperation
 	retainedAdmission    *retainedAdmissionPlan
-	pinnedHeaders        http.Header
-	pinnedBinary         bool
+	PinnedHeaders        http.Header
+	PinnedBinary         bool
 	serving              *oif.ServingIdentity
 	servingSlot          string
 	servingBinding       string
@@ -113,7 +113,7 @@ type call struct {
 	once             sync.Once
 	facts            []events.AttemptFact
 	pinned           []*pinnedExchange
-	failure          *fault.Error     // terminal error decided before the attempt loop ran
+	Failure          *fault.Error     // terminal error decided before the attempt loop ran
 	firstByte        *time.Duration   // request start to the first payload byte the client received
 	lease            *admission.Lease // the API key reservation, settled once the request ends
 	dispatched       bool             // at least one attempt was handed to a provider
@@ -134,7 +134,7 @@ type routeLeg struct {
 
 	affinity []byte
 
-	route *routing.Route
+	Route *routing.Route
 
 	attempts []routing.Attempt
 	budget   int
@@ -180,7 +180,7 @@ type modelStepAccounting struct {
 
 // dropIngressQuery removes the query parameters a client surface sends that
 // are not native semantics.
-func (x *call) dropIngressQuery() *fault.Error {
+func (x *Call) dropIngressQuery() *fault.Error {
 	switch x.clientSurface() {
 	case "gemini":
 		return x.dropQueryKey()
@@ -197,7 +197,7 @@ func (x *call) dropIngressQuery() *fault.Error {
 // dropQueryKey removes the Gemini key query parameter from a request's
 // native semantics: authentication already consumed it, and it is neither
 // native semantics nor anything an upstream may receive.
-func (x *call) dropQueryKey() *fault.Error {
+func (x *Call) dropQueryKey() *fault.Error {
 	keys, present := x.semanticQuery["key"]
 	if !present {
 		return nil

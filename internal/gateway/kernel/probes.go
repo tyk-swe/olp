@@ -57,7 +57,7 @@ var probeRequests = map[string]struct {
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
 func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
-	if !s.deps.Admission.Ready() {
+	if !s.Deps.Admission.Ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
@@ -78,11 +78,11 @@ func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx contex
 
 // probeDue probes the targets whose fleet-wide claim this replica wins.
 func (s *Server) probeDue(ctx context.Context) (int, error) {
-	release := s.deps.Runtime.Release()
+	release := s.Deps.Runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
 	}
-	limiter := s.deps.Admission.Fleet()
+	limiter := s.Deps.Admission.Fleet()
 	probed := 0
 	for _, target := range probeTargets(release.Snapshot()) {
 		call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
@@ -165,15 +165,15 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	route.MaxAttempts = 1
 	route.OverallTimeout = min(route.OverallTimeout, probeDeadline.Milliseconds())
 	route.Behavior = routing.Behavior{Budget: route.Budget}
-	x := &call{
-		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: release},
+	x := &Call{
+		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: release},
 		family:             shape.family,
 		historicalSnapshot: release.Snapshot().WithRoute(route),
 		actor:              "system",
 		mode:               "unary",
 
 		origin:   usage.OriginProbe,
-		priority: routing.PriorityLow, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed},
+		priority: routing.PriorityLow, routeLeg: routeLeg{Route: &route}, generation: generationCall{parsed: parsed},
 	}
 	x.bind(canonicalPlanner, nil, true)
 	defer s.settleAdmission(ctx, x)
@@ -183,11 +183,11 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	}
 	x.budget, x.allowance = 1, 1
 	if e := s.reserveSystemBudgets(ctx, x); e != nil {
-		s.finish(x, &outcome{err: e}, e.Status)
+		s.Finish(x, &Outcome{Err: e}, e.Status)
 		return fleet.ProbeResult{}, false
 	}
 	out := s.execute(ctx, x)
-	s.finish(x, out, cmp.Or(errorStatus(out.err), 200))
+	s.Finish(x, out, cmp.Or(errorStatus(out.Err), 200))
 	if !x.dispatched || len(x.facts) == 0 {
 		return fleet.ProbeResult{}, false
 	}
@@ -195,10 +195,10 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	result := fleet.ProbeResult{
 		Status:     fleet.ProbeHealthy,
 		Model:      target.target.ProviderModel,
-		ObservedAt: s.now().UTC(),
+		ObservedAt: s.Now().UTC(),
 		LatencyMS:  fact.Duration.Milliseconds(),
 	}
-	if out.err != nil {
+	if out.Err != nil {
 		result.Class = fact.Class
 		if unhealthyClass(fact.Class) {
 			result.Status = fleet.ProbeUnhealthy
@@ -218,7 +218,7 @@ func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target pr
 	}
 	var until time.Time
 	if result.Status == fleet.ProbeUnhealthy {
-		until = s.now().Add(max(target.interval, health.CircuitOpenFor))
+		until = s.Now().Add(max(target.interval, health.CircuitOpenFor))
 	}
 	return limiter.PublishCircuit(call, target.provider, until)
 }

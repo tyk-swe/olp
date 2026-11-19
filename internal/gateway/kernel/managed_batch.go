@@ -167,8 +167,8 @@ type translatedBatch struct {
 	err      error
 }
 
-func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, batchManifest, *fault.Error) {
-	opened, err := s.deps.Staging.Open(file.Handle)
+func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, batchManifest, *fault.Error) {
+	opened, err := s.Deps.Staging.Open(file.Handle)
 	if err != nil {
 		return nil, batchManifest{}, fault.ServerError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
 	}
@@ -183,14 +183,14 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
 		done <- translatedBatch{manifest: manifest, err: err}
 	}()
-	artifact, spoolErr := s.deps.Staging.Put(ctx, staging.Upload{
+	artifact, spoolErr := s.Deps.Staging.Put(ctx, staging.Upload{
 		Filename: file.Filename, ContentType: "application/jsonl", MaximumLength: file.Limit, Body: reader,
 	})
 	_ = reader.Close()
 	translated := <-done
 	if spoolErr != nil || translated.err != nil {
 		if spoolErr == nil {
-			_ = s.deps.Staging.Remove(artifact.Handle)
+			_ = s.Deps.Staging.Remove(artifact.Handle)
 		}
 		if failure, ok := translated.err.(*fault.Error); ok {
 			return nil, batchManifest{}, failure
@@ -205,7 +205,7 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 }
 
 type managedLineTarget struct {
-	pin     *pin
+	pin     *Pin
 	route   *routing.Route
 	adapter connectors.BatchAdapter
 }
@@ -280,7 +280,7 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported shape.", lineNumber)
 	}
 	classified := line.URL
-	if t.adapter == connectors.BatchOpenAI && t.pin.provider.Kind == "azure_openai" {
+	if t.adapter == connectors.BatchOpenAI && t.pin.Provider.Kind == "azure_openai" {
 		classified = wire.CanonicalBatchEndpoint(line.URL)
 	}
 	operation, family, ok := managedBatchEndpoint(t.adapter, classified)
@@ -290,8 +290,8 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 	var body struct {
 		Model string `json:"model"`
 	}
-	upstreamModel := t.pin.provider.Connector().Model(t.pin.model)
-	if json.Unmarshal(line.Body, &body) != nil || body.Model != t.route.Slug && body.Model != t.pin.model && body.Model != upstreamModel {
+	upstreamModel := t.pin.Provider.Connector().Model(t.pin.Model)
+	if json.Unmarshal(line.Body, &body) != nil || body.Model != t.route.Slug && body.Model != t.pin.Model && body.Model != upstreamModel {
 		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported model.", lineNumber)
 	}
 	if t.adapter == connectors.BatchOpenAI {
@@ -303,10 +303,10 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 }
 
 func (t managedLineTarget) bindOpenAILine(document oif.Document, line managedBatchLine, upstreamModel string) ([]byte, error) {
-	if t.pin.provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
+	if t.pin.Provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
 		return nil, fault.InvalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", new("file"))
 	}
-	bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(mustJSON(upstreamModel)), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
+	bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(MustJSON(upstreamModel)), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +319,7 @@ func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.Line
 	if err != nil {
 		return nil, err
 	}
-	ingress, err := oif.Apply(bodyDocument, []oif.Change{{Pointer: "/model", Value: string(mustJSON(t.route.Slug)), Origin: oif.IdentityBinding, Reason: "batch ingress model alias"}})
+	ingress, err := oif.Apply(bodyDocument, []oif.Change{{Pointer: "/model", Value: string(MustJSON(t.route.Slug)), Origin: oif.IdentityBinding, Reason: "batch ingress model alias"}})
 	if err != nil {
 		return nil, err
 	}
@@ -352,15 +352,15 @@ func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.Line
 }
 
 func (t managedLineTarget) lineDefaults(operation wire.LineOperation) (protocols.Object, error) {
-	if t.pin.provider.ProfileID == "" {
-		return protocols.Object(t.pin.provider.ParameterDefaults), nil
+	if t.pin.Provider.ProfileID == "" {
+		return protocols.Object(t.pin.Provider.ParameterDefaults), nil
 	}
-	defaults, _, err := t.pin.provider.Connector().DefaultsFor(string(operation), t.pin.model)
+	defaults, _, err := t.pin.Provider.Connector().DefaultsFor(string(operation), t.pin.Model)
 	return defaults, err
 }
 
 func (t managedLineTarget) encodeRequest(request *wire.Request, upstreamModel string, defaults protocols.Object) ([]byte, error) {
-	provider := t.pin.provider
+	provider := t.pin.Provider
 	if t.adapter == connectors.BatchGeminiManaged {
 		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, string(provider.Kind), provider.VendorID, upstreamModel, defaults)
 		return encoded, err
@@ -413,7 +413,7 @@ func managedBatchEndpoint(adapter connectors.BatchAdapter, endpoint string) (wir
 }
 
 func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
-	digester := s.deps.Digester
+	digester := s.Deps.Digester
 	if digester == nil {
 		return nil, false
 	}

@@ -56,8 +56,8 @@ type cacheMetadata struct {
 	UsageComplete      bool        `json:"usage_complete"`
 }
 
-func (x *call) cacheHit() bool { return x.cache != nil && x.cache.admitted }
-func (x *call) cacheHeaders(h http.Header) {
+func (x *Call) cacheHit() bool { return x.cache != nil && x.cache.admitted }
+func (x *Call) cacheHeaders(h http.Header) {
 	if x.cache == nil {
 		return
 	}
@@ -67,7 +67,7 @@ func (x *call) cacheHeaders(h http.Header) {
 	}
 }
 
-func (s *Server) initializeCache(x *call) *fault.Error {
+func (s *Server) initializeCache(x *Call) *fault.Error {
 	if x.workflow != nil {
 		return nil
 	}
@@ -75,7 +75,7 @@ func (s *Server) initializeCache(x *call) *fault.Error {
 	if x.prompt != nil || x.family == wire.Completions || !operationregistry.PolicyFor(x.operationName()).CacheEligible {
 		return nil
 	}
-	if x.route.Cache == nil && x.request.cacheDirectives == "" {
+	if x.Route.Cache == nil && x.request.cacheDirectives == "" {
 		return nil
 	}
 	c, err := cache.ParseControls(x.request.cacheDirectives)
@@ -83,10 +83,10 @@ func (s *Server) initializeCache(x *call) *fault.Error {
 		return fault.InvalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.route.Cache == nil || s.deps.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
+	if x.Route.Cache == nil || s.Deps.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
-	p := x.route.Cache.Effective()
+	p := x.Route.Cache.Effective()
 	x.cache.policy = p
 	if c.NoStore || !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
 		return nil
@@ -164,18 +164,18 @@ func containsCacheReference(v oif.Value) bool {
 
 // admitCacheAware takes only request/concurrency reservations before lookup.
 // Misses then reserve the remaining dimensions; both leases settle once.
-func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold quota.CostReservation) *fault.Error {
+func (s *Server) admitCacheAware(ctx context.Context, x *Call, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold quota.CostReservation) *fault.Error {
 	if e := s.initializeCache(x); e != nil {
 		return e
 	}
 	if x.cache == nil || x.cache.result == "bypass" {
 		var e *fault.Error
-		x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+		x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 		return e
 	}
 	rates := cacheAuthority(*authority, true, false, false)
 	var e *fault.Error
-	x.cacheRateLease, e = s.deps.Admission.ReserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, quota.CostReservation{}, x.limitRoute())
+	x.cacheRateLease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, quota.CostReservation{}, x.limitRoute())
 	if e != nil {
 		return e
 	}
@@ -198,7 +198,7 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyaut
 		hold = quota.CostReservation{Amount: x.cache.budgetCost, Charge: x.cache.budgetCharge, RequestID: x.request.accountingID()}
 	}
 	remainder := cacheAuthority(*authority, false, tokens, budgets)
-	x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+	x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 	if e == nil && x.cache.entry != nil {
 		x.cache.admitted = true
 		x.cache.result = "hit"
@@ -274,7 +274,7 @@ func cacheAuthority(a keyauthority.Authority, rates, tokens, budgets bool) keyau
 	return a
 }
 
-func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
+func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	c := x.cache
 	a := x.attempts[0]
 	p := x.snapshot().Provider(a.ProviderID)
@@ -309,9 +309,9 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 	if c.policy.Scope == "project" {
 		scope = project
 	} else if c.policy.Scope == "route" {
-		scope = x.route.ID
+		scope = x.Route.ID
 	}
-	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.route.ID, KeyID: x.keyID})
+	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.Route.ID, KeyID: x.keyID})
 	if guardrailErr != nil {
 		c.result = "bypass"
 		return nil
@@ -341,7 +341,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 	// Entries already contain the caller's projected response, including its
 	// native dialect, named model, and usage preference. Upstream preparation
 	// always requests stream usage for accounting, even when the caller does not.
-	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
+	fingerprint, _ := json.Marshal([]any{x.Route.RevisionID, x.Route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
 	if c.policy.Mode == "semantic" {
 		er, ok := x.snapshot().FindRoute(c.policy.EmbeddingRoute)
 		if !ok {
@@ -355,7 +355,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		}
 	}
 	sum := sha256.Sum256(fingerprint)
-	space := cache.Space{Project: project, Route: x.route.ID, NamedRoute: x.named().ID, Scope: scope, Fingerprint: hex.EncodeToString(sum[:])}
+	space := cache.Space{Project: project, Route: x.Route.ID, NamedRoute: x.named().ID, Scope: scope, Fingerprint: hex.EncodeToString(sum[:])}
 	canonical := cache.Canonical(doc)
 	var query string
 	if c.policy.Mode == "semantic" {
@@ -385,9 +385,9 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 	var entry *cache.Entry
 	var err error
 	if c.controls.NoCache {
-		ticket, err = s.deps.Cache.Begin(lookup, space, canonical)
+		ticket, err = s.Deps.Cache.Begin(lookup, space, canonical)
 	} else {
-		ticket, entry, err = s.deps.Cache.Lookup(lookup, space, canonical, c.controls)
+		ticket, entry, err = s.Deps.Cache.Lookup(lookup, space, canonical, c.controls)
 	}
 	cancel()
 	if err != nil {
@@ -415,7 +415,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		}
 		lookup, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
 		var similarity float64
-		entry, similarity, err = s.deps.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
+		entry, similarity, err = s.Deps.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
 		cancel()
 		if err != nil {
 			c.result = "bypass"
@@ -434,12 +434,12 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		return nil
 	}
 	c.entry = entry
-	c.age = int64(max(s.now().Sub(entry.CreatedAt)/time.Second, 0))
+	c.age = int64(max(s.Now().Sub(entry.CreatedAt)/time.Second, 0))
 	c.budgetCost, c.budgetCharge = "0", "0"
-	fact := events.AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
+	fact := events.AttemptFact{Class: ClassSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
 	u := events.AttemptUsage(&fact, x.operationName())
 	var costPtr *rates.Cost
-	at := s.now()
+	at := s.Now()
 	if a.Price != nil {
 		if cost, ok := a.Price.Cost(u, at, true, a.Discount); ok {
 			if x.committed(a.ProviderID) {
@@ -459,7 +459,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 }
 func hexDigest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 
-func (s *Server) recordCacheHit(x *call) {
+func (s *Server) recordCacheHit(x *Call) {
 	c := x.cache
 	a := x.attempts[0]
 	currency := ""
@@ -471,33 +471,33 @@ func (s *Server) recordCacheHit(x *call) {
 		e.BudgetCost = c.budgetCost
 		e.BudgetCharge = c.budgetCharge
 	}
-	f := events.AttemptFact{Cache: e, Class: events.ClassCacheHit, Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
+	f := events.AttemptFact{Cache: e, Class: events.ClassCacheHit, Status: 200, StartedAt: s.Now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
 	x.facts = append(x.facts, f)
 	x.mirrors = false
 }
-func (s *Server) replayCache(ctx context.Context, x *call) *outcome {
+func (s *Server) replayCache(ctx context.Context, x *Call) *Outcome {
 	s.recordCacheHit(x)
 	c := x.cache
 	fact := &x.facts[len(x.facts)-1]
-	defer func() { fact.Duration = s.now().Sub(fact.StartedAt) }()
+	defer func() { fact.Duration = s.Now().Sub(fact.StartedAt) }()
 	if x.generation.parsed.Stream {
 		for _, frame := range c.entry.Frames {
 			if err := ctx.Err(); err != nil {
-				return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}
+				return &Outcome{Err: (&attemptFailure{class: classCancelled}).toError(), Cancelled: true}
 			}
 			fact.Committed = true
 			if err := x.generation.emit(frame); err != nil {
-				return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), committed: true, cancelled: true}
+				return &Outcome{Err: (&attemptFailure{class: classCancelled}).toError(), Committed: true, Cancelled: true}
 			}
 			if x.capture != nil {
 				x.capture.CaptureStreamFrame(x.family, frame)
 			}
 		}
-		return &outcome{committed: true}
+		return &Outcome{Committed: true}
 	}
-	return &outcome{completion: &wire.Completion{Body: c.entry.Body, Usage: c.metadata.Usage}}
+	return &Outcome{completion: &wire.Completion{Body: c.entry.Body, Usage: c.metadata.Usage}}
 }
-func (x *call) captureCacheFrame(frame []byte) {
+func (x *Call) captureCacheFrame(frame []byte) {
 	c := x.cache
 	if c == nil || c.result != "miss" || c.controls.NoStore {
 		return
@@ -510,13 +510,13 @@ func (x *call) captureCacheFrame(frame []byte) {
 	}
 	c.frames = append(c.frames, slices.Clone(frame))
 }
-func (s *Server) storeCache(x *call, out *outcome, status int) {
+func (s *Server) storeCache(x *Call, out *Outcome, status int) {
 	c := x.cache
-	if c == nil || c.result != "miss" || c.controls.NoStore || out == nil || out.err != nil || status < 200 || status >= 300 || len(x.facts) == 0 {
+	if c == nil || c.result != "miss" || c.controls.NoStore || out == nil || out.Err != nil || status < 200 || status >= 300 || len(x.facts) == 0 {
 		return
 	}
 	f := x.facts[len(x.facts)-1]
-	if f.Class != classSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.operationName() != "moderation" {
+	if f.Class != ClassSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.operationName() != "moderation" {
 		return
 	}
 	if out.completion != nil {
@@ -528,7 +528,7 @@ func (s *Server) storeCache(x *call, out *outcome, status int) {
 	metadata, _ := json.Marshal(cacheMetadata{Usage: f.Usage, ProviderID: f.ProviderID, ProviderRevisionID: f.ProviderRevisionID, UpstreamModel: f.UpstreamModel, UsageComplete: f.UsageComplete})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := s.deps.Cache.Put(ctx, c.ticket, cache.Entry{Body: c.body, Frames: c.frames, Metadata: metadata}, c.policy, c.controls, c.vector); err != nil {
+	if err := s.Deps.Cache.Put(ctx, c.ticket, cache.Entry{Body: c.body, Frames: c.frames, Metadata: metadata}, c.policy, c.controls, c.vector); err != nil {
 		if !errors.Is(err, cache.ErrNotStored) {
 			c.reason = "unavailable"
 		}

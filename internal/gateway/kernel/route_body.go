@@ -6,7 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (x *call) checkBody(route *routing.Route) *fault.Error {
+func (x *Call) checkBody(route *routing.Route) *fault.Error {
 	if route == nil || x.request.body == nil {
 		return nil
 	}

@@ -39,13 +39,13 @@ const exposedHeadersAnthropic = exposedHeaders + ", Request-Id"
 // made, the route revision that served, the vendor that answered, and for a
 // response that is not a stream, its cost. A request that made no attempt, as
 // one answered from the gateway's own records is, has none of these to tell.
-func (x *call) metadataHeaders(l *fault.HeaderList, text []byte, streamed bool) []byte {
+func (x *Call) metadataHeaders(l *fault.HeaderList, text []byte, streamed bool) []byte {
 	if x.attemptCount == 0 && !x.cacheHit() {
 		return text
 	}
 	text = l.Integer(text, headerAttempts, int64(x.attemptCount))
-	if x.route != nil && x.route.RevisionID != "" {
-		text = l.Str(text, headerRouteRevision, x.route.RevisionID)
+	if x.Route != nil && x.Route.RevisionID != "" {
+		text = l.Str(text, headerRouteRevision, x.Route.RevisionID)
 	}
 	// A provider that has no vendor, as a plugin's has none, names no one.
 	if x.attemptVendor != "" {
@@ -70,7 +70,7 @@ func (x *call) metadataHeaders(l *fault.HeaderList, text []byte, streamed bool) 
 // time: the reset is counted down to now, but the counts are not read again.
 // A key that limits nothing, a request that was admitted without a reservation,
 // and a surface with no rate-limit headers add none.
-func (x *call) responseHeaders(h http.Header, streamed bool) {
+func (x *Call) ResponseHeaders(h http.Header, streamed bool) {
 	x.cacheHeaders(h)
 	x.guardrailHeaders(h, streamed, false)
 	surface, state := x.clientSurface(), x.lease.RateState()
@@ -107,9 +107,9 @@ func withCacheRequestAllowance(state, requests limits.RateState) limits.RateStat
 	return merged
 }
 
-type streamedHeaders struct{ x *call }
+type streamedHeaders struct{ x *Call }
 
-func (h streamedHeaders) Opening(header http.Header) { h.x.responseHeaders(header, true) }
+func (h streamedHeaders) Opening(header http.Header) { h.x.ResponseHeaders(header, true) }
 
 func (h streamedHeaders) Closing(header http.Header, committed bool) {
 	h.x.guardrailHeaders(header, true, committed)

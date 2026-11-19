@@ -710,12 +710,12 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
+	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
 		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
 	})}
-	h.gateway.deps.Staging = spool
-	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
+	h.gateway.Deps.Staging = spool
+	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		for _, provider := range []routing.Provider{a, b} {
 			provider.Capabilities = []routing.Capability{
@@ -908,8 +908,8 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			_, _ = w.Write(source.Bytes())
 		})
 		p := testPinnedTarget(h, 0)
-		x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Bedrock, keyID: h.keyID}
-		resp, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodPost, p.provider.Endpoint, nil, "")
+		x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Bedrock, keyID: h.keyID}
+		resp, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodPost, p.Provider.Endpoint, nil, "")
 		if failure != nil {
 			t.Fatalf("provider stream: %+v", failure)
 		}
@@ -926,7 +926,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			t.Fatalf("terminal envelope=%+v", env)
 		}
 		attempt := env.Attempts[0]
-		if attempt.Class != classSuccess || !attempt.UsageComplete || attempt.Usage == nil || attempt.Usage.InputTokens != 2 || attempt.Usage.OutputTokens != 3 {
+		if attempt.Class != ClassSuccess || !attempt.UsageComplete || attempt.Usage == nil || attempt.Usage.InputTokens != 2 || attempt.Usage.OutputTokens != 3 {
 			t.Fatalf("validated provider result was lost: %+v", attempt)
 		}
 	})
@@ -1057,7 +1057,7 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 			route := h.rt.release.Snapshot().Route(routeSlug)
 			target := route.Targets[0]
 			provider := h.rt.release.Snapshot().Provider(target.ProviderID)
-			x := &call{family: wire.Chat, routeLeg: routeLeg{route: &route}}
+			x := &Call{family: wire.Chat, routeLeg: routeLeg{Route: &route}}
 			x.request.release = h.rt.release
 			x.authority = h.rt.keys[fullKey]
 			for _, text := range []string{"first", "second"} {
@@ -1242,10 +1242,10 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 			route.OverallTimeout = 150
 			target := route.Targets[0]
 			provider := snapshot.Providers[target.ProviderID]
-			p := &pin{provider: provider, target: target, model: modelA, slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: modelA}}
-			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
-			x.route = &route
-			ctx, cancel := h.gateway.stateDeadline(t.Context(), &route)
+			p := &Pin{Provider: provider, Target: target, Model: modelA, Slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: modelA}}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x.Route = &route
+			ctx, cancel := h.gateway.StateDeadline(t.Context(), &route)
 			defer cancel()
 			recorder := httptest.NewRecorder()
 			var writer http.ResponseWriter = recorder
@@ -1294,7 +1294,7 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name, object, class string
 	}{
-		{"valid terminal result", `"response"`, classSuccess},
+		{"valid terminal result", `"response"`, ClassSuccess},
 		{"invalid terminal result", `7`, classProtocol},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1309,27 +1309,27 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 				fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"native-response\",\"object\":%s,\"status\":\"completed\",\"output\":[]}}\n\n", tc.object)
 			})
 			p := testPinnedTarget(h, 0)
-			p.provider.VendorID = "openai"
-			probed, granted := openTestProbe(t, h, p.provider.ID)
+			p.Provider.VendorID = "openai"
+			probed, granted := openTestProbe(t, h, p.Provider.ID)
 			if !probed || !granted {
 				t.Fatal("could not claim half-open probe")
 			}
-			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
-			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
-			x.route = &routing.Route{Slug: routeSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
+			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x.Route = &routing.Route{Slug: routeSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
 			res := &resources.Resource{ID: resources.LocalID(resources.KindStrictResponse, uuid.New()), Kind: resources.KindStrictResponse, UpstreamID: "native-response", RouteSlug: routeSlug}
 			recorder := httptest.NewRecorder()
 			failure := h.gateway.streamStoredResponse(t.Context(), recorder, x, res, p, nil)
 			if failure == nil || failure.Code != "response_stream_incomplete" {
 				t.Fatalf("unexpected stream result: %+v", failure)
 			}
-			h.gateway.refuse(x, recorder, failure)
-			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			h.gateway.Refuse(x, recorder, failure)
+			h.gateway.settlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
 			if len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
-			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != (tc.class == classSuccess) {
+			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != (tc.class == ClassSuccess) {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
@@ -1352,18 +1352,18 @@ func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
 				fmt.Fprintf(w, `{"name":"batches/native","metadata":{"name":%q,"state":"BATCH_STATE_RUNNING","inputConfig":{"fileName":"files/native-input"}},"input_config":{"file_name":%q}}`, tc.nestedName, tc.rootInput)
 			})
 			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.provider.ID)
+			probed, granted := openTestProbe(t, h, p.Provider.ID)
 			if !probed || !granted {
 				t.Fatal("could not claim half-open probe")
 			}
-			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
-			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
-			response, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodGet, p.provider.Endpoint+"/batches/native", nil, "")
+			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
+			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/batches/native", nil, "")
 			if failure != nil {
 				t.Fatal(failure.toError())
 			}
 			defer response.Body.Close()
-			body, err := response.readBody(h.gateway.cfg.MaxResponseBytes)
+			body, err := response.ReadBody(h.gateway.Config.MaxResponseBytes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1371,7 +1371,7 @@ func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
 			if err != nil {
 				t.Fatalf("could not decode native fixture: %v", err)
 			}
-			object, _, err := settleGeminiBatchResult(response.exchange, body, batch, p.model, geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
+			object, _, err := settleGeminiBatchResult(response.Exchange, body, batch, p.Model, geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
 			if (err == nil) != tc.valid {
 				t.Fatalf("unexpected batch validation: %v", err)
 			}
@@ -1381,8 +1381,8 @@ func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
 					t.Fatalf("projected references: %s, %v", projected, err)
 				}
 			}
-			h.gateway.settlePinnedHold(t.Context(), p.hold)
-			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != tc.valid {
+			h.gateway.settlePinnedHold(t.Context(), p.Hold)
+			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != tc.valid {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
@@ -1397,26 +1397,26 @@ func TestGeminiManagedFileRejectsOversizedProviderLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Staging = spool
+	h.gateway.Deps.Staging = spool
 	h.mock.set("download", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"key":"huge","error":{"message":"`+strings.Repeat("a", managedBatchLineLimit+2)+`"}}`+"\n")
 	})
 	p := testPinnedTarget(h, 0)
-	probed, granted := openTestProbe(t, h, p.provider.ID)
+	probed, granted := openTestProbe(t, h, p.Provider.ID)
 	if !probed || !granted {
 		t.Fatal("could not claim half-open probe")
 	}
-	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
-	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+	p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
+	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
 	res := &resources.Resource{UpstreamID: "files/result", RouteSlug: routeSlug, Metadata: json.RawMessage(`{"role":"error"}`)}
 	recorder := httptest.NewRecorder()
 	failure := h.gateway.geminiManagedFileContent(t.Context(), recorder, x, res, p)
 	if failure == nil || failure.Code != "fidelity_protocol_violation" {
 		t.Fatalf("unexpected download result: %+v", failure)
 	}
-	h.gateway.refuse(x, recorder, failure)
-	h.gateway.settlePinnedHold(t.Context(), p.hold)
-	if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted {
+	h.gateway.Refuse(x, recorder, failure)
+	h.gateway.settlePinnedHold(t.Context(), p.Hold)
+	if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted {
 		t.Fatalf("oversized native line left circuit available, probe=%v granted=%v", probed, granted)
 	}
 }
@@ -1431,9 +1431,9 @@ func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
 	h.mock.set("a", status(http.StatusNoContent, ""))
 	p := testPinnedTarget(h, 0)
 	route := routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
-	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiInteractions, actor: "api_key_resource", keyID: h.keyID}
-	x.route = &route
-	response, failure := h.gateway.pinnedDo(t.Context(), x, p, http.MethodDelete, p.provider.Endpoint+"/interactions/native", nil, "")
+	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiInteractions, actor: "api_key_resource", keyID: h.keyID}
+	x.Route = &route
+	response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodDelete, p.Provider.Endpoint+"/interactions/native", nil, "")
 	if failure != nil {
 		t.Fatal(failure.toError())
 	}
@@ -1443,7 +1443,7 @@ func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
 	}
 	env := h.sink.last(t)
 	if w.Code != http.StatusOK || env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || len(env.Attempts) != 1 ||
-		env.Attempts[0].Class != classSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
+		env.Attempts[0].Class != ClassSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
 		t.Fatalf("unexpected delete acknowledgement evidence, status=%d envelope=%+v attempts=%+v", w.Code, env, env.Attempts)
 	}
 }
@@ -1458,10 +1458,10 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 		charge            string
 		family            retainedapi.Family
 	}{
-		{"accepted deletion", `{"id":"resource-native","deleted":true}`, classSuccess, true, "0.25", store},
+		{"accepted deletion", `{"id":"resource-native","deleted":true}`, ClassSuccess, true, "0.25", store},
 		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, classProtocol, false, "0", store},
 		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, classProtocol, false, "0", store},
-		{"conversation item returns parent identity", `{"id":"conversation-native"}`, classSuccess, true, "0.25", item},
+		{"conversation item returns parent identity", `{"id":"conversation-native"}`, ClassSuccess, true, "0.25", item},
 		{"conversation item returns child identity", `{"id":"resource-native"}`, classProtocol, false, "0", item},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1475,13 +1475,13 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			})
 			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.provider.ID)
+			probed, granted := openTestProbe(t, h, p.Provider.ID)
 			if !granted || !probed {
 				t.Fatal("could not claim half-open probe")
 			}
-			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
 			p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
-			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
 			id := uuid.New()
 			resource := &resources.Resource{UUID: id, ID: resources.LocalID(tc.family.Kind, id), Kind: tc.family.Kind, UpstreamID: "resource-native"}
 			var parent *resources.Resource
@@ -1492,11 +1492,11 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 			}
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/v1/resources/"+resource.ID, nil)
 			w := httptest.NewRecorder()
-			endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/resources/resource-native"
+			endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/resources/resource-native"
 			status := h.gateway.retainedDispatch(w, r, x, p, retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, resource, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-				h.gateway.refuse(x, w, e)
+				h.gateway.Refuse(x, w, e)
 			})
-			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			h.gateway.settlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
 			if status != http.StatusServiceUnavailable || w.Code != status || env.Outcome != "failure" || env.ErrorClass != "provider_state_unavailable" {
 				t.Fatalf("local deletion failure changed, status=%d body=%s outcome=%s error=%s", status, w.Body.String(), env.Outcome, env.ErrorClass)
@@ -1504,7 +1504,7 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 			if len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class || h.gateway.settledCharge(x).String() != tc.charge {
 				t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
 			}
-			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed || granted != tc.available {
+			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != tc.available {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
@@ -1523,13 +1523,13 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 		_, _ = io.WriteString(w, `{"id":"store-native","status":"completed"}`)
 	})
 	p := testPinnedTarget(h, 0)
-	probed, granted := openTestProbe(t, h, p.provider.ID)
+	probed, granted := openTestProbe(t, h, p.Provider.ID)
 	if !granted || !probed {
 		t.Fatal("could not claim half-open probe")
 	}
-	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
 	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
-	x := &call{
+	x := &Call{
 		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
 		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
 		retainedAdmission: &retainedAdmissionPlan{attempt: p.attempt, billing: retainedPriced},
@@ -1542,11 +1542,11 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 	}
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+resource.ID, nil)
 	w := httptest.NewRecorder()
-	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native"
+	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native"
 	status := h.gateway.retainedDispatch(w, r, x, p, e, resource, nil, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.refuse(x, w, e)
+		h.gateway.Refuse(x, w, e)
 	})
-	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	h.gateway.settlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)
 	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
 		t.Fatalf("local persistence failure returned %d, %s", status, w.Body.String())
@@ -1554,7 +1554,7 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 	if len(env.Attempts) != 1 || env.Attempts[0].Status != http.StatusOK || !env.Attempts[0].LocalRefusal || !env.Attempts[0].BillingUncertain {
 		t.Fatalf("local persistence failure changed acceptance or billing evidence: %+v", env.Attempts)
 	}
-	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+	if probed, granted := h.gateway.health.Claim(p.Provider.ID); !probed || !granted {
 		t.Fatalf("a local persistence failure changed provider health: probe=%v granted=%v", probed, granted)
 	}
 }
@@ -1571,19 +1571,19 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"file-native","vector_store_id":"store-other"}]}`)
 	})
 	p := testPinnedTarget(h, 0)
-	probed, granted := openTestProbe(t, h, p.provider.ID)
+	probed, granted := openTestProbe(t, h, p.Provider.ID)
 	if !granted || !probed {
 		t.Fatal("could not claim half-open probe")
 	}
-	p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
+	p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
 	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
-	x := &call{
+	x := &Call{
 		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
 		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
 		retainedAdmission: &retainedAdmissionPlan{billing: retainedPriced},
 	}
 	id := uuid.New()
-	parent := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native", TargetID: p.target.ID}
+	parent := &resources.Resource{UUID: id, ID: resources.LocalID("vector_store", id), Kind: "vector_store", UpstreamID: "store-native", TargetID: p.Target.ID}
 	e := retainedapi.Endpoint{
 		Family:    retainedapi.Family{Operation: "vector_store", Kind: "vector_store_file", Identity: "id", Collection: "data"},
 		Method:    http.MethodGet,
@@ -1592,11 +1592,11 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	}
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+parent.ID+"/files", nil)
 	w := httptest.NewRecorder()
-	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/vector_stores/store-native/files"
+	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native/files"
 	status := h.gateway.retainedDispatch(w, r, x, p, e, parent, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.refuse(x, w, e)
+		h.gateway.Refuse(x, w, e)
 	})
-	h.gateway.settlePinnedHold(t.Context(), p.hold)
+	h.gateway.settlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)
 	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
 		t.Fatalf("binding store failure was not reported as unavailable: %d, %s", status, w.Body.String())
@@ -1604,7 +1604,7 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
 		t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
 	}
-	if probed, granted := h.gateway.health.Claim(p.provider.ID); !probed || !granted {
+	if probed, granted := h.gateway.health.Claim(p.Provider.ID); !probed || !granted {
 		t.Fatalf("a local binding failure changed provider health: probe=%v granted=%v", probed, granted)
 	}
 }
@@ -1625,7 +1625,7 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"object":"response.compaction","id":"cmp-native","output":[{"type":"compaction","id":"item-native","file_id":"file-native"}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`)
 	})
-	response := h.do(t.Context(), http.MethodPost, "/v1/responses/compact", fullKey, []byte(`{"input":"compact this"}`), map[string]string{stateRouteHeader: routeSlug})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses/compact", fullKey, []byte(`{"input":"compact this"}`), map[string]string{StateRouteHeader: routeSlug})
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -1648,15 +1648,15 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
 	const exact = `{"count":9007199254740993}`
-	playground := Playground{Gateway: &Server{now: time.Now}}
-	x := &call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{route: &routing.Route{Slug: routeSlug}}}
+	playground := Playground{Gateway: &Server{Now: time.Now}}
+	x := &Call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{Route: &routing.Route{Slug: routeSlug}}}
 	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
 	for _, test := range []struct{ text, structured string }{
 		{exact, exact},
 		{`{"count":0,"count":9007199254740993}`, exact},
 		{exact + ` {"extra":true}`, ""},
 	} {
-		out := &outcome{completion: &wire.Completion{OutputText: test.text}}
+		out := &Outcome{completion: &wire.Completion{OutputText: test.text}}
 		body, err := json.Marshal(playground.response(x, out, in))
 		if err != nil {
 			t.Fatal(err)
@@ -1689,12 +1689,12 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 				_, _ = io.WriteString(w, tc.providerBody)
 			})
 			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.provider.ID)
+			probed, granted := openTestProbe(t, h, p.Provider.ID)
 			if !granted || !probed {
 				t.Fatal("could not claim half-open probe")
 			}
-			p.hold = &dispatchHold{provider: p.provider.ID, probed: probed}
-			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
 			id := uuid.New()
 			res := &resources.Resource{UUID: id, ID: resources.LocalID(resources.KindFile, id), Kind: resources.KindFile, UpstreamID: "file-native", Metadata: json.RawMessage(tc.storedMetadata)}
 			w := httptest.NewRecorder()
@@ -1702,24 +1702,24 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 			if failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "fidelity_protocol_violation" {
 				t.Fatalf("unexpected file refresh failure: %+v", failure)
 			}
-			h.gateway.refuse(x, w, failure)
-			h.gateway.settlePinnedHold(t.Context(), p.hold)
+			h.gateway.Refuse(x, w, failure)
+			h.gateway.settlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
 			if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].LocalRefusal != tc.local {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
-			if probed, granted := h.gateway.health.Claim(p.provider.ID); probed != tc.local || granted != tc.local {
+			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed != tc.local || granted != tc.local {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
 	}
 }
 
-func testPinnedTarget(h *harness, index int) *pin {
+func testPinnedTarget(h *harness, index int) *Pin {
 	snapshot := h.rt.release.Snapshot().Clone()
 	target := snapshot.Routes[routeSlug].Targets[index]
 	provider := snapshot.Providers[target.ProviderID]
-	return &pin{provider: provider, target: target, model: target.ProviderModel, slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: target.ProviderModel}}
+	return &Pin{Provider: provider, Target: target, Model: target.ProviderModel, Slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: target.ProviderModel}}
 }
 
 func openTestProbe(t *testing.T, h *harness, provider string) (bool, bool) {
@@ -1771,48 +1771,48 @@ func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
 		_, _ = io.WriteString(w, `{}`)
 	})
 	sent, unsent := testPinnedTarget(h, 0), testPinnedTarget(h, 1)
-	for _, p := range []*pin{sent, unsent} {
-		p.provider.Limits = &routing.Limits{RequestsPerMinute: new(int64(1))}
+	for _, p := range []*Pin{sent, unsent} {
+		p.Provider.Limits = &routing.Limits{RequestsPerMinute: new(int64(1))}
 	}
-	probed, granted := openTestProbe(t, h, unsent.provider.ID)
+	probed, granted := openTestProbe(t, h, unsent.Provider.ID)
 	if !probed || !granted {
 		t.Fatal("could not claim half-open probe")
 	}
-	h.gateway.health.ReleaseProbe(unsent.provider.ID)
-	reserve := func(p *pin) gateResult {
-		return acquireDispatchHold(t.Context(), h.gateway, &p.provider, &p.slot, 1, time.Minute, "")
+	h.gateway.health.ReleaseProbe(unsent.Provider.ID)
+	reserve := func(p *Pin) gateResult {
+		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, 1, time.Minute, "")
 	}
 	first := reserve(sent)
 	if first.verdict != gateAdmitted {
 		t.Fatalf("first admission: %+v", first)
 	}
-	sent.hold = first.hold
-	x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
-	response, failure := h.gateway.pinnedDo(t.Context(), x, sent, http.MethodGet, sent.provider.Endpoint, nil, "")
+	sent.Hold = first.hold
+	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+	response, failure := h.gateway.PinnedDo(t.Context(), x, sent, http.MethodGet, sent.Provider.Endpoint, nil, "")
 	if failure != nil {
 		t.Fatalf("first exchange: %+v", failure)
 	}
-	_, err = response.readBody(1024)
+	_, err = response.ReadBody(1024)
 	_ = response.Body.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.exchange.complete(classSuccess)
-	h.gateway.settlePinnedHold(t.Context(), sent.hold)
+	response.Exchange.Complete(ClassSuccess)
+	h.gateway.settlePinnedHold(t.Context(), sent.Hold)
 
 	second := reserve(unsent)
 	if second.verdict != gateAdmitted {
 		t.Fatalf("second admission: %+v", second)
 	}
-	unsent.hold = second.hold
-	if _, failure := h.gateway.pinnedDo(t.Context(), x, unsent, http.MethodGet, "://invalid", nil, ""); failure == nil {
+	unsent.Hold = second.hold
+	if _, failure := h.gateway.PinnedDo(t.Context(), x, unsent, http.MethodGet, "://invalid", nil, ""); failure == nil {
 		t.Fatal("invalid endpoint dispatched")
 	}
-	h.gateway.settlePinnedHold(t.Context(), unsent.hold)
+	h.gateway.settlePinnedHold(t.Context(), unsent.Hold)
 	if after := reserve(unsent); after.verdict != gateAdmitted {
 		t.Fatalf("second provider remained blocked by a quota or probe: %+v", after)
 	} else {
-		h.gateway.releaseHold(t.Context(), after.hold)
+		h.gateway.ReleaseHold(t.Context(), after.hold)
 	}
 	if after := reserve(sent); after.verdict != gateRejected {
 		t.Fatalf("first provider's dispatched request did not consume its allowance: %+v", after)
@@ -1886,7 +1886,7 @@ func TestRetainedGeminiKeyQueryParamDropped(t *testing.T) {
 	t.Parallel()
 	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "context_cache", Surface: "gemini", Kind: "context_cache"}, Action: "list"}
 	server := &Server{}
-	query, failure := server.retainedQuery(t.Context(), &call{}, endpoint, nil, url.Values{"key": {"secret"}, "pageSize": {"10"}})
+	query, failure := server.retainedQuery(t.Context(), &Call{}, endpoint, nil, url.Values{"key": {"secret"}, "pageSize": {"10"}})
 	if failure != nil {
 		t.Fatalf("retainedQuery with key: %v", failure)
 	}
@@ -1897,12 +1897,12 @@ func TestRetainedGeminiKeyQueryParamDropped(t *testing.T) {
 		t.Fatalf("pageSize = %v, want 10", query)
 	}
 	openAIEndpoint := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "vector_store", Surface: "openai", Kind: "vector_store"}, Action: "list"}
-	if _, failure := server.retainedQuery(t.Context(), &call{}, openAIEndpoint, nil, url.Values{"key": {"secret"}}); failure == nil {
+	if _, failure := server.retainedQuery(t.Context(), &Call{}, openAIEndpoint, nil, url.Values{"key": {"secret"}}); failure == nil {
 		t.Fatal("key accepted on non-Gemini surface")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/gemini/v1beta/cachedContents?key=secret&pageSize=0", nil)
 	var captured *fault.Error
-	status := server.listRetainedGeneric(httptest.NewRecorder(), request, &call{}, keyauthority.Authority{}, endpoint, func(err *fault.Error) { captured = err })
+	status := server.listRetainedGeneric(httptest.NewRecorder(), request, &Call{}, keyauthority.Authority{}, endpoint, func(err *fault.Error) { captured = err })
 	if status != 400 || captured == nil || !strings.Contains(captured.Message, "Page size") {
 		t.Fatalf("list with key and pageSize=0 = %d %+v, want 400 page size error", status, captured)
 	}
@@ -1998,15 +1998,15 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 			denied[i] = &resources.Resource{ID: fmt.Sprintf("stale-%d", i)}
 		}
 		fetch := fetchFrom(append(denied, &resources.Resource{ID: "valid-1"}))
-		server := Server{deps: Dependencies{Digester: secrets.NewAuthKey(make([]byte, 32), "test-installation")}}
-		page, cursor, err := server.listedResourcePage("key-a", "pageToken", 2, "", fetch, authorize)
+		server := Server{Deps: Dependencies{Digester: secrets.NewAuthKey(make([]byte, 32), "test-installation")}}
+		page, cursor, err := server.ListedResourcePage("key-a", "pageToken", 2, "", fetch, authorize)
 		if err != nil || len(page) != 0 || cursor == "" || strings.Contains(cursor, "stale-") {
 			t.Fatalf("first page = %v cursor=%q err=%v, want empty page with an opaque continuation", ids(page), cursor, err)
 		}
-		if _, _, err := server.listedResourcePage("key-b", "pageToken", 2, cursor, fetch, authorize); err == nil || err.Status != http.StatusBadRequest {
+		if _, _, err := server.ListedResourcePage("key-b", "pageToken", 2, cursor, fetch, authorize); err == nil || err.Status != http.StatusBadRequest {
 			t.Fatalf("another key's continuation error = %v, want 400", err)
 		}
-		page, cursor, err = server.listedResourcePage("key-a", "pageToken", 2, cursor, fetch, authorize)
+		page, cursor, err = server.ListedResourcePage("key-a", "pageToken", 2, cursor, fetch, authorize)
 		if err != nil || cursor != "" || !slices.Equal(ids(page), []string{"valid-1"}) {
 			t.Fatalf("next page = %v cursor=%q err=%v, want visible row and no continuation", ids(page), cursor, err)
 		}
@@ -2017,7 +2017,7 @@ func TestFileDownloadHeadersForceAttachmentForHTML(t *testing.T) {
 	t.Parallel()
 	const body = "<html><body>hello</body></html>"
 	recorder := httptest.NewRecorder()
-	setFileDownloadHeaders(recorder.Header(), "text/html; charset=utf-8", int64(len(body)))
+	SetFileDownloadHeaders(recorder.Header(), "text/html; charset=utf-8", int64(len(body)))
 	if _, err := recorder.WriteString(body); err != nil {
 		t.Fatal(err)
 	}

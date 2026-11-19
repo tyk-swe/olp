@@ -215,12 +215,12 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
+	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
 		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
 	})}
-	h.gateway.deps.Staging = spool
-	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
+	h.gateway.Deps.Staging = spool
+	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	mode := tc.mode
 	if mode == "" {
 		mode = "unary"
@@ -543,7 +543,7 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	if got.Status != http.StatusInternalServerError || len(got.Attempts) != 1 {
 		t.Fatalf("expected a delivery failure after one upstream attempt: %+v", got)
 	}
-	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != classSuccess || attempt.Committed {
+	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != ClassSuccess || attempt.Committed {
 		t.Fatalf("unexpected attempt evidence: %+v", attempt)
 	}
 }
@@ -559,7 +559,7 @@ func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 			name: "list after a failed poll", method: http.MethodGet, family: wire.VideoList,
 			body: `{"data":[{"id":"stored-video"}]}`,
 			facts: []events.AttemptFact{
-				{Class: classSuccess, Status: http.StatusOK, Committed: true},
+				{Class: ClassSuccess, Status: http.StatusOK, Committed: true},
 				{Class: classUpstreamServer, Status: http.StatusServiceUnavailable},
 			},
 		},
@@ -572,7 +572,7 @@ func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, Config{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				x := &call{family: tc.family, request: h.gateway.begin(w, r), facts: slices.Clone(tc.facts)}
+				x := &Call{family: tc.family, request: h.gateway.begin(w, r), facts: slices.Clone(tc.facts)}
 				out := &mediaOutcome{status: http.StatusOK}
 				h.gateway.deliverMediaJSON(w, x, out, []byte(tc.body))
 				h.gateway.finishMedia(x, out, out.status)
@@ -627,7 +627,7 @@ func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 				t.Fatalf("moderation did not produce an uncommitted content filter attempt: %+v", got)
 			}
 			if fallback {
-				if got.Status != http.StatusOK || len(got.Upstream) != 3 || len(got.Attempts) != 2 || got.Attempts[1].Class != classSuccess {
+				if got.Status != http.StatusOK || len(got.Upstream) != 3 || len(got.Attempts) != 2 || got.Attempts[1].Class != ClassSuccess {
 					t.Fatalf("content filter fallback did not serve the image: %+v", got)
 				}
 				return

@@ -62,11 +62,11 @@ type dispatchHold struct {
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
-func (s *Server) gateAttempt(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
+func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
 	if x.workflow != nil {
 		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
 		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
-			for _, owner := range quota.AttemptCaps(x.route, provider, slot) {
+			for _, owner := range quota.AttemptCaps(x.Route, provider, slot) {
 				if owner.Limits != nil {
 					gate.hold.budgets = append(gate.hold.budgets, owner.ID)
 				}
@@ -101,7 +101,7 @@ func (h *dispatchHold) settle(ctx context.Context, dispatched bool, actual *int6
 // releaseHold abandons an admitted slot before its dispatch: the quota
 // reservation is refunded in full and a held half-open probe is released so
 // a sibling can still try the recovering endpoint.
-func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
+func (s *Server) ReleaseHold(ctx context.Context, hold *dispatchHold) {
 	if hold == nil {
 		return
 	}
@@ -112,18 +112,18 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 	}
 }
 
-func (s *Server) settleSession(ctx context.Context, x *call, p *pin) {
-	s.finishSessionDebit(ctx, x, x.failure != nil)
+func (s *Server) settleSession(ctx context.Context, x *Call, p *Pin) {
+	s.finishSessionDebit(ctx, x, x.Failure != nil)
 	settled := sessionSettlement(x)
 	if p != nil {
-		s.settleSessionHold(ctx, x, p.hold, settled)
+		s.settleSessionHold(ctx, x, p.Hold, settled)
 	}
 	s.settleCaps(ctx, x)
 	s.recordCost(x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.log)
 }
 
-func sessionSettlement(x *call) *int64 {
+func sessionSettlement(x *Call) *int64 {
 	if !x.dispatched {
 		return new(int64(0))
 	}
@@ -137,7 +137,7 @@ func sessionSettlement(x *call) *int64 {
 	return new(max(x.estimate, *actual))
 }
 
-func (s *Server) settleSessionHold(ctx context.Context, x *call, hold *dispatchHold, actual *int64) {
+func (s *Server) settleSessionHold(ctx context.Context, x *Call, hold *dispatchHold, actual *int64) {
 	if hold == nil {
 		return
 	}
@@ -162,38 +162,38 @@ type attemptCompletion struct {
 	finishLease func() *fault.Error
 }
 
-func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *fault.Error) {
+func (h *dispatchHold) begin(ctx context.Context, s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *fault.Error) {
 	if !x.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
-		s.releaseHold(ctx, h)
+		s.ReleaseHold(ctx, h)
 		return false, nil
 	}
 	if x.workflow == nil {
 		return true, nil
 	}
-	authority, err := s.workflowAuthority(ctx, x, x.route, "")
+	authority, err := s.workflowAuthority(ctx, x, x.Route, "")
 	if err != nil {
-		s.releaseHold(ctx, h)
+		s.ReleaseHold(ctx, h)
 		return false, err
 	}
 	x.sessionDebit = nil
-	caps := quota.AttemptCaps(x.route, provider, &slot)
+	caps := quota.AttemptCaps(x.Route, provider, &slot)
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
 		caps = [3]quota.CappedOwner{}
 	}
 	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
-		s.releaseHold(ctx, h)
+		s.ReleaseHold(ctx, h)
 		return false, err
 	}
 	return true, nil
 }
 
-func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error, *fault.Error) {
+func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *Call) (context.Context, func() *fault.Error, *fault.Error) {
 	if x.authority.TaskCapability != nil {
-		admitter := s.deps.TaskAttemptAdmitter
+		admitter := s.Deps.TaskAttemptAdmitter
 		ok := admitter != nil
 		var err error
 		if ok {
-			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID, x.request.accountingID())
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.Route.Slug, x.Route.RevisionID, x.Route.ProjectID, x.request.accountingID())
 		}
 		if !ok || err != nil {
 			if errors.Is(err, release.ErrTaskAttemptLimit) {
@@ -209,14 +209,14 @@ func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (conte
 	return dispatchCtx, finish, nil
 }
 
-func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error) {
+func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *Call) (context.Context, func() *fault.Error) {
 	if x.workflow == nil {
 		return ctx, func() *fault.Error { return nil }
 	}
 	return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
 }
 
-func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*fault.Error, bool) {
+func (h *dispatchHold) complete(ctx context.Context, s *Server, x *Call, completion attemptCompletion) (*fault.Error, bool) {
 	dispatched := completion.failure == nil || completion.failure.dispatched
 	x.dispatched = x.dispatched || dispatched
 	x.stepDispatched = x.stepDispatched || dispatched
@@ -268,8 +268,8 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, complet
 // replica's local cooldown when it is not.
 func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.Slot) bool {
 	generation := s.slotGrantGeneration(slot)
-	if s.deps.Admission.Ready() {
-		return s.deps.Admission.Cooling(ctx, providerID, slot, generation)
+	if s.Deps.Admission.Ready() {
+		return s.Deps.Admission.Cooling(ctx, providerID, slot, generation)
 	}
 	return s.health.CoolingDown(providerID, slot.ID) ||
 		s.health.CoolingDown(providerID, credentialHealthKey(slot, generation))
@@ -279,7 +279,7 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 	if slot.CredentialID == nil {
 		return 0
 	}
-	return s.deps.Runtime.GrantGeneration(*slot.CredentialID)
+	return s.Deps.Runtime.GrantGeneration(*slot.CredentialID)
 }
 
 // gateSlot is the shared pre-dispatch boundary every new upstream attempt
@@ -292,10 +292,10 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 // until the attempt settles or releaseHold abandons them before dispatch.
 func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
-	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
+	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
-	if provider.Network != nil && provider.Network.CredentialID != "" && s.deps.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.Deps.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
 	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
@@ -316,7 +316,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 }
 
 func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) gateResult {
-	reservation, rejection, skip := s.deps.Admission.ReserveTarget(ctx, provider, slot, estimate, ttl, priority)
+	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}
@@ -340,11 +340,11 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		return true
 	}
 	if failure.dispatched && slot.CredentialID != nil &&
-		(failure.credentialRefused || failure.class == classCredential || failure.status == http.StatusUnauthorized) {
+		(failure.credentialRefused || failure.class == classCredential || failure.Status == http.StatusUnauthorized) {
 		// The upstream refused the credential, whatever rule classified the
 		// failure: a grant beneath it is refreshed early, which ends the
 		// cooldown (GrantRefreshed).
-		s.deps.Runtime.CredentialRefused(*slot.CredentialID, generation)
+		s.Deps.Runtime.CredentialRefused(*slot.CredentialID, generation)
 	}
 	switch failure.class {
 	case classCredential:
@@ -355,10 +355,10 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		// recording this cooldown. Its generation keeps that write scoped
 		// to the refused token, including across gateway replicas.
 		s.health.Cooldown(providerID, credentialHealthKey(slot, generation), health.CredentialCooldown)
-		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CredentialCooldown, true)
+		s.Deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CredentialCooldown, true)
 	case classRateLimit:
 		s.health.Cooldown(providerID, slot.ID, failure.retryAfter)
-		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CooldownDuration(failure.retryAfter), false)
+		s.Deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CooldownDuration(failure.retryAfter), false)
 	default:
 		return true
 	}
@@ -372,9 +372,9 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	// Cleanup is best-effort: older generations are already ineligible and
 	// their cooldowns expire. A delayed notifier must never clear a refusal
 	// of the newly served token.
-	generation := max(0, s.deps.Runtime.GrantGeneration(credentialID)-1)
+	generation := max(0, s.Deps.Runtime.GrantGeneration(credentialID)-1)
 	s.health.EndCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
-	s.deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
+	s.Deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }
 
 func rateLimitedTarget(refusal *quota.TargetRefusal) *attemptFailure {

@@ -76,7 +76,7 @@ func stripWorkflowApproval(parsed *wire.Request) (*wire.Request, json.RawMessage
 	return clean, raw, err
 }
 
-func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *fault.Error {
+func (s *Server) prepareWorkflowResume(ctx context.Context, x *Call) *fault.Error {
 	raw := x.generation.approval
 	if len(raw) == 0 {
 		return nil
@@ -85,7 +85,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *fault.Erro
 	if json.Unmarshal(raw, &request) != nil || !request.Approved || request.ContinuationToken == "" || len(request.Arguments) == 0 {
 		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	continuation, err := s.deps.WorkflowRuns.Continue(ctx, x.authority, request.ContinuationToken, x.workflow.transcript, request.Arguments, int(s.cfg.MaxBodyBytes))
+	continuation, err := s.Deps.WorkflowRuns.Continue(ctx, x.authority, request.ContinuationToken, x.workflow.transcript, request.Arguments, int(s.Config.MaxBodyBytes))
 	if err != nil || continuation.RouteRevisionID != x.named().RevisionID {
 		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
@@ -140,19 +140,19 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *fault.Erro
 	return nil
 }
 
-func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority keyauthority.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
+func (s *Server) callWorkflowTool(ctx context.Context, x *Call, authority keyauthority.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
 	if tool.Definition.Alias == recoveryToolName {
 		return s.recoverWorkflowContent(ctx, x, authority, call.ID, json.RawMessage(call.Arguments))
 	}
 	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, identityOrdinal, call.ID)
 	index := slices.IndexFunc(x.workflow.approvals, func(approval runs.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
-		return s.deps.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
+		return s.Deps.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
 	}
-	return s.deps.WorkflowTools.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
+	return s.Deps.WorkflowTools.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
 }
 
-func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Completion, iteration int) (*workflowPause, *fault.Error) {
+func (s *Server) pauseWorkflow(ctx context.Context, x *Call, completion *wire.Completion, iteration int) (*workflowPause, *fault.Error) {
 	for _, call := range completion.ToolCalls {
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
 		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
@@ -217,7 +217,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
 	deadline, _ := ctx.Deadline()
-	token, err := s.deps.WorkflowRuns.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
+	token, err := s.Deps.WorkflowRuns.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

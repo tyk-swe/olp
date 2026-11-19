@@ -45,65 +45,65 @@ type batchPlan struct {
 }
 
 func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, wire.Batch)
+	x, authority, done := s.StateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	request, e := s.batchCreateRequest(w, r)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	file, contract, e := s.batchInputFile(r.Context(), authority.ID, request.localFile)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	if candidate, exists := x.snapshot().FindRoute(file.RouteSlug); exists {
-		x.route = &candidate
+		x.Route = &candidate
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch", retainedNewWork)
+	p, route, e := s.ResolveResource(r.Context(), x, authority, file, "batch", RetainedNewWork)
 	if e != nil {
-		if refusal := fireworksBatchRefusal(x, x.route); refusal != nil {
+		if refusal := fireworksBatchRefusal(x, x.Route); refusal != nil {
 			e = refusal
 		}
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
-	x.route = route
+	x.Route = route
 	plan, e := s.planBatch(r.Context(), x, authority, request, file, contract, p, route)
 	if e != nil {
-		s.releaseHold(r.Context(), p.hold)
-		s.refuse(x, w, e)
+		s.ReleaseHold(r.Context(), p.Hold)
+		s.Refuse(x, w, e)
 		return
 	}
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
-		s.refuse(x, w, e)
+	defer s.ResourceSettle(ctx, x, p)
+	if e := s.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
 	resource, exchange, e := s.submitBatch(ctx, x, authority, p, request, plan)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	out, err := s.batchObject(r.Context(), resource)
 	if err != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."))
+		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."))
 		return
 	}
-	s.writeStateJSON(w, x, out, exchange)
+	s.WriteStateJSON(w, x, out, exchange)
 }
 
 func (s *Server) batchCreateRequest(w http.ResponseWriter, r *http.Request) (batchCreateRequest, *fault.Error) {
-	body, e := s.readResourceBody(w, r)
+	body, e := s.ReadResourceBody(w, r)
 	if e != nil {
 		return batchCreateRequest{}, e
 	}
-	source, err := ingress.ParseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err := ingress.ParseObjectRequest(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
 	if err != nil || source.Root().Kind() != oif.Object {
 		return batchCreateRequest{}, fault.InvalidRequest("invalid_json", "The request body must be one JSON object.", nil)
 	}
@@ -130,19 +130,19 @@ func (s *Server) batchInputFile(ctx context.Context, owner, localFile string) (*
 	return file, contract, nil
 }
 
-func (s *Server) planBatch(ctx context.Context, x *call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *pin, route *routing.Route) (batchPlan, *fault.Error) {
-	window, e := batchCompletionWindow(request.source, p.provider.VendorID)
+func (s *Server) planBatch(ctx context.Context, x *Call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *Pin, route *routing.Route) (batchPlan, *fault.Error) {
+	window, e := batchCompletionWindow(request.source, p.Provider.VendorID)
 	if e != nil {
 		return batchPlan{}, e
 	}
-	if p.provider.VendorID == "groq" && request.endpoint != "/v1/chat/completions" {
+	if p.Provider.VendorID == "groq" && request.endpoint != "/v1/chat/completions" {
 		return batchPlan{}, fault.InvalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", new("endpoint"))
 	}
-	adapter, ok := p.provider.Connector().FilesBatchesAdapter()
+	adapter, ok := p.Provider.Connector().FilesBatchesAdapter()
 	if !ok {
 		return batchPlan{}, fault.InvalidRequest("target_capability", "The selected target does not support batches.", nil)
 	}
-	if e := managedBatchShape(request.source, p.provider.VendorID, adapter); e != nil {
+	if e := managedBatchShape(request.source, p.Provider.VendorID, adapter); e != nil {
 		return batchPlan{}, e
 	}
 	if x.strict() {
@@ -157,10 +157,10 @@ func (s *Server) planBatch(ctx context.Context, x *call, authority keyauthority.
 	if _, supplied := request.source.Root().Lookup("id"); supplied && adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
 		return batchPlan{}, fault.InvalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", new("id"))
 	}
-	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(authority), p, route); e != nil {
 		return batchPlan{}, e
 	}
-	if e := x.guardrailSurfaceGate(route); e != nil {
+	if e := x.GuardrailSurfaceGate(route); e != nil {
 		return batchPlan{}, e
 	}
 	plan := batchPlan{
@@ -194,14 +194,14 @@ func managedBatchShape(source oif.Document, vendor string, adapter connectors.Ba
 	return nil
 }
 
-func (s *Server) strictBatchAdmission(ctx context.Context, x *call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *pin) *fault.Error {
+func (s *Server) strictBatchAdmission(ctx context.Context, x *Call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *Pin) *fault.Error {
 	if refusal := strictBatchTargetRefusal(p); refusal != nil {
 		return refusal
 	}
-	if durableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.deps.Resources.Encrypted() {
+	if durableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.Deps.Resources.Encrypted() {
 		return fault.InvalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", new("input_file_id"))
 	}
-	if e := s.authorizeDurable(ctx, x, authority, file, contract, "batch", retainedNewWork); e != nil {
+	if e := s.authorizeDurable(ctx, x, authority, file, contract, "batch", RetainedNewWork); e != nil {
 		return e
 	}
 	if contract.Asset == nil || contract.Asset.Endpoint != request.endpoint || contract.Asset.ItemCount < 1 {
@@ -237,8 +237,8 @@ func (m batchManifest) usable(adapter connectors.BatchAdapter) bool {
 	return m.Adapter == adapter && m.Endpoint != "" && m.LineCount >= 1 && m.ManifestDigest != ""
 }
 
-func (s *Server) planStrictBatch(x *call, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *pin, route *routing.Route, plan batchPlan) (batchPlan, *fault.Error) {
-	template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
+func (s *Server) planStrictBatch(x *Call, request batchCreateRequest, file *resources.Resource, contract *durableDocument, p *Pin, route *routing.Route, plan batchPlan) (batchPlan, *fault.Error) {
+	template, ok := x.snapshot().DurableTemplate(route.Slug, p.Target.ID)
 	if !ok {
 		return batchPlan{}, fault.InvalidRequest("target_capability", "The selected target has no strict batch contract.", nil)
 	}
@@ -246,7 +246,7 @@ func (s *Server) planStrictBatch(x *call, request batchCreateRequest, file *reso
 	if err != nil {
 		return batchPlan{}, fault.InvalidRequest("target_capability", "The batch source cannot satisfy this native target contract.", nil)
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches", nil)
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "batches", nil)
 	if err != nil {
 		return batchPlan{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -257,16 +257,16 @@ func (s *Server) planStrictBatch(x *call, request batchCreateRequest, file *reso
 	return plan, nil
 }
 
-func planFilesBatch(request batchCreateRequest, file *resources.Resource, p *pin, plan batchPlan) (batchPlan, *fault.Error) {
+func planFilesBatch(request batchCreateRequest, file *resources.Resource, p *Pin, plan batchPlan) (batchPlan, *fault.Error) {
 	body, e := filesBatchBody(request, file, p, plan)
 	if e != nil {
 		return batchPlan{}, e
 	}
 	path := upstream.JobsPath(plan.adapter, "", false)
 	if plan.adapter == connectors.BatchGeminiManaged {
-		path = "models/" + url.PathEscape(p.provider.Connector().Model(p.model)) + ":batchGenerateContent"
+		path = "models/" + url.PathEscape(p.Provider.Connector().Model(p.Model)) + ":batchGenerateContent"
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, strings.TrimSuffix(path, "/"), nil)
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, strings.TrimSuffix(path, "/"), nil)
 	if err != nil {
 		return batchPlan{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -276,7 +276,7 @@ func planFilesBatch(request batchCreateRequest, file *resources.Resource, p *pin
 		plan.submission = filesSubmission(request, file, plan)
 		return plan, nil
 	}
-	pending, err := geminiManagedBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.model, newGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
+	pending, err := geminiManagedBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.Model, newGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
 	if err != nil {
 		return batchPlan{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini submission metadata could not be prepared.")
 	}
@@ -296,24 +296,24 @@ func filesSubmission(request batchCreateRequest, file *resources.Resource, plan 
 	return submission
 }
 
-func filesBatchBody(request batchCreateRequest, file *resources.Resource, p *pin, plan batchPlan) ([]byte, *fault.Error) {
+func filesBatchBody(request batchCreateRequest, file *resources.Resource, p *Pin, plan batchPlan) ([]byte, *fault.Error) {
 	if plan.adapter == connectors.BatchOpenAI {
 		return openAIBatchBody(request.source, file.UpstreamID, p, plan.window)
 	}
-	return managedBatchRequestBody(request.source, plan.adapter, request.endpoint, plan.window, file.UpstreamID, p.provider.Connector().Model(p.model), plan.manifest, plan.id)
+	return managedBatchRequestBody(request.source, plan.adapter, request.endpoint, plan.window, file.UpstreamID, p.Provider.Connector().Model(p.Model), plan.manifest, plan.id)
 }
 
-func openAIBatchBody(source oif.Document, upstreamFile string, p *pin, window batchWindow) ([]byte, *fault.Error) {
+func openAIBatchBody(source oif.Document, upstreamFile string, p *Pin, window batchWindow) ([]byte, *fault.Error) {
 	upstreamWindow := "24h"
-	if p.provider.VendorID == "groq" {
+	if p.Provider.VendorID == "groq" {
 		upstreamWindow = window.label
 	}
 	changes := []oif.Change{
-		{Pointer: "/input_file_id", Value: string(mustJSON(upstreamFile)), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"},
-		{Pointer: "/completion_window", Value: string(mustJSON(upstreamWindow)), Origin: oif.ResourceBinding, Reason: "provider batch completion window"},
+		{Pointer: "/input_file_id", Value: string(MustJSON(upstreamFile)), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"},
+		{Pointer: "/completion_window", Value: string(MustJSON(upstreamWindow)), Origin: oif.ResourceBinding, Reason: "provider batch completion window"},
 	}
-	if deployment := p.provider.Connector().Model(p.model); p.provider.Kind == "azure_openai" && deployment != "" {
-		changes = append(changes, oif.Change{Pointer: "/model", Value: string(mustJSON(deployment)), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
+	if deployment := p.Provider.Connector().Model(p.Model); p.Provider.Kind == "azure_openai" && deployment != "" {
+		changes = append(changes, oif.Change{Pointer: "/model", Value: string(MustJSON(deployment)), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
 	}
 	effective, err := oif.Apply(source, changes)
 	if err != nil {
@@ -322,16 +322,16 @@ func openAIBatchBody(source oif.Document, upstreamFile string, p *pin, window ba
 	return effective.Bytes(), nil
 }
 
-func (s *Server) submitBatch(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *pinnedExchange, *fault.Error) {
-	submission, e := s.beginBatch(ctx, x, authority.ID, p, batchIntent{
-		resourceID: plan.id, kind: plan.kind, adapter: plan.adapter, surface: batches.SurfaceOpenAI,
-		operation: request.operation, window: plan.window.length, expected: plan.expected, submission: plan.submission,
-		source: request.source, canonical: request.source.Bytes(), effective: plan.body, serving: plan.serving,
+func (s *Server) submitBatch(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *pinnedExchange, *fault.Error) {
+	submission, e := s.BeginBatch(ctx, x, authority.ID, p, BatchIntent{
+		resourceID: plan.id, Kind: plan.kind, Adapter: plan.adapter, Surface: batches.SurfaceOpenAI,
+		Operation: request.operation, Window: plan.window.length, Expected: plan.expected, Submission: plan.submission,
+		Source: request.source, Canonical: request.source.Bytes(), Effective: plan.body, serving: plan.serving,
 	})
 	if e != nil {
 		return nil, nil, e
 	}
-	result, exchange, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
+	result, exchange, e := s.SendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -339,111 +339,111 @@ func (s *Server) submitBatch(ctx context.Context, x *call, authority keyauthorit
 	if e != nil {
 		return nil, nil, e
 	}
-	exchange.complete(classSuccess)
-	resource, activationErr := s.activateBatch(ctx, submission, accepted)
+	exchange.Complete(ClassSuccess)
+	resource, activationErr := s.ActivateBatch(ctx, submission, accepted)
 	return resource, exchange, activationErr
 }
 
-func (s *Server) acceptFilesBatch(ctx context.Context, p *pin, request batchCreateRequest, plan batchPlan, result []byte) (acceptedBatch, *fault.Error) {
+func (s *Server) acceptFilesBatch(ctx context.Context, p *Pin, request batchCreateRequest, plan batchPlan, result []byte) (AcceptedBatch, *fault.Error) {
 	switch {
 	case plan.kind == resources.KindStrictBatch:
 		return s.acceptStrictBatch(ctx, p, request, plan, result)
 	case plan.adapter == connectors.BatchGeminiManaged:
 		batch, err := upstream.DecodeGeminiBatch(result)
 		if err != nil {
-			return acceptedBatch{}, s.batchSubmissionUnknown(ctx, plan.id, "The provider accepted a batch with an invalid operation name.")
+			return AcceptedBatch{}, s.BatchSubmissionUnknown(ctx, plan.id, "The provider accepted a batch with an invalid operation name.")
 		}
-		managed, err := geminiManagedBatchMetadata(result, p.model, newGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
+		managed, err := geminiManagedBatchMetadata(result, p.Model, newGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
 		if err != nil {
-			return acceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid Gemini batch object."))
+			return AcceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid Gemini batch object."))
 		}
-		return acceptedBatch{upstreamID: batch.ID, state: managed.status, metadata: managed.metadata}, nil
+		return AcceptedBatch{UpstreamID: batch.ID, State: managed.status, Metadata: managed.metadata}, nil
 	case plan.adapter.Managed():
 		projected, upstreamID, err := upstream.ProjectManagedBatch(plan.adapter, result, plan.window.label)
 		if err != nil {
-			return acceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."))
+			return AcceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."))
 		}
-		adoption, err := upstream.FilesMetadata(plan.adapter, projected, p.model, request.localFile, plan.clientMetadata)
+		adoption, err := upstream.FilesMetadata(plan.adapter, projected, p.Model, request.localFile, plan.clientMetadata)
 		if err != nil {
-			return acceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."))
+			return AcceptedBatch{}, s.markBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."))
 		}
-		return acceptedBatch{upstreamID: upstreamID, state: adoption.State, metadata: adoption.Metadata}, nil
+		return AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: adoption.Metadata}, nil
 	default:
-		upstreamID, valid := nativeResourceID(result, s.cfg.MaxResponseBytes)
-		adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, p.model, request.localFile, nil)
+		upstreamID, valid := NativeResourceID(result, s.Config.MaxResponseBytes)
+		adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, p.Model, request.localFile, nil)
 		if !valid || err != nil {
-			return acceptedBatch{}, s.batchSubmissionUnknown(ctx, plan.id, "The provider returned a malformed batch object. The batch may have been accepted.")
+			return AcceptedBatch{}, s.BatchSubmissionUnknown(ctx, plan.id, "The provider returned a malformed batch object. The batch may have been accepted.")
 		}
-		return acceptedBatch{upstreamID: upstreamID, state: adoption.State, metadata: adoption.Metadata, expected: batchExpectedResults(result)}, nil
+		return AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: adoption.Metadata, expected: batchExpectedResults(result)}, nil
 	}
 }
 
-func (s *Server) acceptStrictBatch(ctx context.Context, p *pin, request batchCreateRequest, plan batchPlan, result []byte) (acceptedBatch, *fault.Error) {
+func (s *Server) acceptStrictBatch(ctx context.Context, p *Pin, request batchCreateRequest, plan batchPlan, result []byte) (AcceptedBatch, *fault.Error) {
 	validated, upstreamID, err := strictBatchResult(result, "")
 	if err != nil || !strictBatchInputMatches(validated, plan.body) {
-		return acceptedBatch{}, s.batchSubmissionUnknown(ctx, plan.id, "The provider returned an invalid native batch result. The batch may have been accepted.")
+		return AcceptedBatch{}, s.BatchSubmissionUnknown(ctx, plan.id, "The provider returned an invalid native batch result. The batch may have been accepted.")
 	}
-	adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, p.model, request.localFile, nil)
+	adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, p.Model, request.localFile, nil)
 	if err != nil {
-		return acceptedBatch{}, s.batchSubmissionUnknown(ctx, plan.id, "The provider returned an invalid native batch result. The batch may have been accepted.")
+		return AcceptedBatch{}, s.BatchSubmissionUnknown(ctx, plan.id, "The provider returned an invalid native batch result. The batch may have been accepted.")
 	}
 	contract, err := json.Marshal(durableDocument{
 		Version: resources.DurableContractVersion, Source: request.source.Bytes(), Effective: plan.body,
-		Result: result, Binding: p.model, Serving: plan.serving,
+		Result: result, Binding: p.Model, Serving: plan.serving,
 	})
 	if err != nil {
-		return acceptedBatch{}, s.batchSubmissionUnknown(ctx, plan.id, "The accepted batch contract could not be encoded.")
+		return AcceptedBatch{}, s.BatchSubmissionUnknown(ctx, plan.id, "The accepted batch contract could not be encoded.")
 	}
-	return acceptedBatch{upstreamID: upstreamID, state: adoption.State, metadata: durableMetadata(p.model), expected: batchExpectedResults(result), contract: contract}, nil
+	return AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: durableMetadata(p.Model), expected: batchExpectedResults(result), contract: contract}, nil
 }
 
-func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin, *routing.Route) *fault.Error) {
-	x, authority, done := s.stateBegin(w, r, wire.Batch)
+func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use RetainedUse, op func(context.Context, *Call, keyauthority.Authority, *resources.Resource, *Pin, *routing.Route) *fault.Error) {
+	x, authority, done := s.StateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	kind := durableKind(resources.KindBatch, r.PathValue("id"))
 	if kind == resources.KindStrictBatch && !authority.Policy.AllowProviderState {
-		s.refuse(x, w, providerStateForbidden())
+		s.Refuse(x, w, providerStateForbidden())
 		return
 	}
 	res, contract, err := s.readDurable(r.Context(), kind, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.refuse(x, w, fault.NotFoundError("not_found", "No batch with this identifier exists for this key."))
+		s.Refuse(x, w, fault.NotFoundError("not_found", "No batch with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."))
+		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."))
 		return
 	}
 	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
-	x.route = route
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	x.Route = route
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
-		s.refuse(x, w, e)
+	defer s.ResourceSettle(ctx, x, p)
+	if e := s.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
 	if e := op(ctx, x, authority, res, p, route); e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 	}
 }
 
 func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, wire.Batch)
+	x, authority, done := s.StateBegin(w, r, wire.Batch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	limit, after, e := listArgs(r)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	kinds := []string{resources.KindBatch}
@@ -452,9 +452,9 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra row reports whether another page follows; it is never
 	// authorized or projected.
-	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
+	rows, err := s.Deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.refuse(x, w, resourceListError(err, "The batch list could not be read."))
+		s.Refuse(x, w, resourceListError(err, "The batch list could not be read."))
 		return
 	}
 	hasMore := len(rows) > limit
@@ -466,24 +466,24 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
-				s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."))
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", RetainedHousekeeping) != nil {
+				s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."))
 				return
 			}
 		}
 		obj, err := s.batchObject(r.Context(), row)
 		if err != nil {
-			s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."))
+			s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."))
 			return
 		}
 		items = append(items, obj)
 		ids = append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, listBody(items, ids, hasMore))
+	s.WriteStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *fault.Error {
+	s.batchCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
 		adapter, e := storedAdapter(res)
 		if e != nil {
 			return e
@@ -493,7 +493,7 @@ func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *fault.Error {
+	s.batchCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
 		adapter, e := storedAdapter(res)
 		if e != nil {
 			return e
@@ -513,7 +513,7 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted cancellation could not be projected.")
 				}
-				s.writeStateJSON(w, x, out)
+				s.WriteStateJSON(w, x, out)
 				return nil
 			}
 		}
@@ -529,18 +529,18 @@ func storedAdapter(res *resources.Resource) (connectors.BatchAdapter, *fault.Err
 	return adapter, nil
 }
 
-func (s *Server) cancelGeminiManagedBatch(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, upstream.JobsPath(connectors.BatchGeminiManaged, res.UpstreamID, true), nil)
+func (s *Server) cancelGeminiManagedBatch(ctx context.Context, x *Call, res *resources.Resource, p *Pin) *fault.Error {
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, upstream.JobsPath(connectors.BatchGeminiManaged, res.UpstreamID, true), nil)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
-	response, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, []byte(`{}`), "application/json")
+	response, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, []byte(`{}`), "application/json")
 	if failure != nil {
-		return upstreamError(failure)
+		return UpstreamError(failure)
 	}
 	_ = response.Body.Close()
 
-	response.exchange.complete(classSuccess)
+	response.Exchange.Complete(ClassSuccess)
 	return nil
 }
 
@@ -549,18 +549,18 @@ type refreshedBatch struct {
 	metadata json.RawMessage
 }
 
-func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resource, p *pin, adapter connectors.BatchAdapter, method, path string, body []byte, w http.ResponseWriter) *fault.Error {
+func (s *Server) batchRefresh(ctx context.Context, x *Call, res *resources.Resource, p *Pin, adapter connectors.BatchAdapter, method, path string, body []byte, w http.ResponseWriter) *fault.Error {
 	result, exchange, e := s.fetchBatch(ctx, x, p, method, path, body)
 	if e != nil {
 		return e
 	}
-	refreshed, e := refreshBatchMetadata(res, adapter, result, s.cfg.MaxResponseBytes)
+	refreshed, e := refreshBatchMetadata(res, adapter, result, s.Config.MaxResponseBytes)
 	if e != nil {
 		return e
 	}
 	commitCtx, stopCommit := ctx, func() {}
 	if method == http.MethodPost {
-		commitCtx, stopCommit = resourceCommitContext(ctx)
+		commitCtx, stopCommit = ResourceCommitContext(ctx)
 	}
 	defer stopCommit()
 	current := *res
@@ -569,8 +569,8 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 			return e
 		}
 	} else {
-		exchange.complete(classSuccess)
-		if err := s.deps.Resources.Update(commitCtx, res.ID, refreshed.state, refreshed.metadata, nil); err != nil {
+		exchange.Complete(ClassSuccess)
+		if err := s.Deps.Resources.Update(commitCtx, res.ID, refreshed.state, refreshed.metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}
 		current.State, current.Metadata = refreshed.state, refreshed.metadata
@@ -579,29 +579,29 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
 	}
-	s.writeStateJSON(w, x, out, exchange)
+	s.WriteStateJSON(w, x, out, exchange)
 	return nil
 }
 
-func (s *Server) fetchBatch(ctx context.Context, x *call, p *pin, method, path string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
+func (s *Server) fetchBatch(ctx context.Context, x *Call, p *Pin, method, path string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, path, nil)
 	if err != nil {
 		return nil, nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
-	resp, failure := s.pinnedDo(ctx, x, p, method, endpoint, body, "application/json")
+	resp, failure := s.PinnedDo(ctx, x, p, method, endpoint, body, "application/json")
 	if failure != nil {
-		if failure.status == http.StatusNotFound {
+		if failure.Status == http.StatusNotFound {
 			return nil, nil, fault.NotFoundError("not_found", "No batch with this identifier exists for this key.")
 		}
-		return nil, nil, upstreamError(failure)
+		return nil, nil, UpstreamError(failure)
 	}
 	defer resp.Body.Close()
 
-	result, err := resp.readBody(s.cfg.MaxResponseBytes)
+	result, err := resp.ReadBody(s.Config.MaxResponseBytes)
 	if err != nil {
 		return nil, nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	return result, resp.exchange, nil
+	return result, resp.Exchange, nil
 }
 
 func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapter, result []byte, maxBytes int64) (refreshedBatch, *fault.Error) {
@@ -621,7 +621,7 @@ func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapt
 		if upstreamID != res.UpstreamID {
 			return refreshedBatch{}, malformed
 		}
-		adoption, err := upstream.FilesMetadata(adapter, projected, resourceModel(res), record.LocalInputFileID, record.Metadata)
+		adoption, err := upstream.FilesMetadata(adapter, projected, ResourceModel(res), record.LocalInputFileID, record.Metadata)
 		if err != nil {
 			return refreshedBatch{}, malformed
 		}
@@ -630,7 +630,7 @@ func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapt
 		if res.Kind != resources.KindStrictBatch && !retainedIdentityMatches(result, res.UpstreamID, maxBytes) {
 			return refreshedBatch{}, malformed
 		}
-		adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, resourceModel(res), record.LocalInputFileID, nil)
+		adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, ResourceModel(res), record.LocalInputFileID, nil)
 		if err != nil {
 			return refreshedBatch{}, malformed
 		}
@@ -647,7 +647,7 @@ func refreshGeminiManagedBatch(res *resources.Resource, result []byte) (refreshe
 	if err != nil {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored Gemini batch could not be projected.")
 	}
-	managed, err := geminiManagedBatchMetadata(result, resourceModel(res), base)
+	managed, err := geminiManagedBatchMetadata(result, ResourceModel(res), base)
 	if errors.Is(err, errGeminiManagedBatchState) {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unknown Gemini batch status.")
 	}
@@ -670,13 +670,13 @@ func (s *Server) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 	if !strictBatchInputMatches(validated, contract.Effective) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider changed the batch input file identity.")
 	}
-	exchange.complete(classSuccess)
+	exchange.Complete(ClassSuccess)
 	contract.Result = result
 	payload, err := json.Marshal(contract)
 	if err != nil {
 		return durableError(err)
 	}
-	if _, _, err = s.deps.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
+	if _, _, err = s.Deps.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
 		return durableError(err)
 	}
 	return nil

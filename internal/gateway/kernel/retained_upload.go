@@ -45,14 +45,14 @@ func retainedFilePurposeOperation(purpose string) string {
 
 // Native retained-family uploads keep file bytes in the existing bounded spool
 // and persist their at-most-once submission identity before the provider sees it.
-func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
+func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
 	status := http.StatusInternalServerError
-	var p *pin
-	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	var p *Pin
+	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
 	fail := func(err *fault.Error) {
 		copy := *err
 		copy.NoRetry = true
-		x.failure = &copy
+		x.Failure = &copy
 		status = err.Status
 		fault.WriteSurfaceError(w, &copy, "openai")
 	}
@@ -65,7 +65,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(fault.InvalidRequest("unsupported_parameter", "This file purpose requires a route which permits the corresponding native operation.", nil))
 		return
 	}
-	if len(extra) > 0 || file.Size > s.cfg.MaxBodyBytes {
+	if len(extra) > 0 || file.Size > s.Config.MaxBodyBytes {
 		fail(fault.InvalidRequest("unsupported_parameter", "Native retained uploads require one bounded file and a supported purpose.", nil))
 		return
 	}
@@ -75,8 +75,8 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
-	x.retained = retainedOperation{use: retainedNewWork, usage: retainedTokenlessUsage}
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	x.retained = retainedOperation{use: RetainedNewWork, usage: retainedTokenlessUsage}
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
 	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
 	if encodeErr != nil {
@@ -89,7 +89,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(digestErr)
 		return
 	}
-	prior, lookupErr := s.deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
+	prior, lookupErr := s.Deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
 	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
 		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -116,9 +116,9 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	version := retainedapi.Revision
-	meta, _ := json.Marshal(map[string]any{"upstream_model": p.model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
-	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, ContractVersion: &version, Metadata: meta}
-	lifecycle, prepareErr := s.deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
+	meta, _ := json.Marshal(map[string]any{"upstream_model": p.Model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
+	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, ContractVersion: &version, Metadata: meta}
+	lifecycle, prepareErr := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
 	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -133,7 +133,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
 	}
-	endpoint, endpointErr := p.provider.Connector().ResourceURL(p.model, "files", nil)
+	endpoint, endpointErr := p.Provider.Connector().ResourceURL(p.Model, "files", nil)
 	if endpointErr != nil {
 		fail(pinUnavailable())
 		return
@@ -147,7 +147,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 }
 
 func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {
-	opened, err := s.deps.Staging.Open(file.Handle)
+	opened, err := s.Deps.Staging.Open(file.Handle)
 	if err != nil {
 		return nil, "", err
 	}
@@ -168,8 +168,8 @@ func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte,
 	if err != nil {
 		return nil, "", err
 	}
-	n, err := io.Copy(part, io.LimitReader(opened.File, s.cfg.MaxBodyBytes+1))
-	if err != nil || n != file.Size || n > s.cfg.MaxBodyBytes {
+	n, err := io.Copy(part, io.LimitReader(opened.File, s.Config.MaxBodyBytes+1))
+	if err != nil || n != file.Size || n > s.Config.MaxBodyBytes {
 		return nil, "", resources.ErrContract
 	}
 	if err := writer.Close(); err != nil {

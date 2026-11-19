@@ -19,7 +19,7 @@ type attemptAdapter[Result any] struct {
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *attemptFailure)
 }
 
-func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *attemptFailure, *fault.Error) {
+func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *attemptFailure, *fault.Error) {
 	dispatchCtx, finish, err := hold.authorize(ctx, s, x)
 	if err != nil {
 		var result Result
@@ -44,7 +44,7 @@ type attemptOutcome[Result any] struct {
 // When a route's attempts fail for a condition one of its fallbacks names,
 // the loop continues on the fallback route within the same deadline and
 // attempt budget.
-func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
+func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -70,7 +70,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter at
 // runRoute tries the attempts planned for the request's current route. When
 // they all fail before anything is committed, it also returns the fallback
 // conditions the route met.
-func runRoute[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
+func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
 	deadline, _ := ctx.Deadline()
 	snapshot := x.snapshot()
 	unmeterable := false
@@ -212,13 +212,13 @@ func meet(met []string, class string) []string {
 // retryWait reports how long to wait before retrying a failed attempt on the
 // same slot, when the route's retry policy allows another try within the
 // request's attempt budget and deadline. An open circuit ends retries.
-func (s *Server) retryWait(x *call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
-	rule, ok := x.route.Retry.Retries(failure.class)
+func (s *Server) retryWait(x *Call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
+	rule, ok := x.Route.Retry.Retries(failure.class)
 	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.Open(providerID) {
 		return 0, false
 	}
 	wait := rule.Backoff(retries+1, rand.Float64(), failure.retryAfter)
-	if !deadline.IsZero() && s.now().Add(wait).After(deadline) {
+	if !deadline.IsZero() && s.Now().Add(wait).After(deadline) {
 		return 0, false
 	}
 	return wait, true

@@ -109,7 +109,7 @@ var surfaceRefusalHeaders = []string{"Allow", "Retry-After", "Www-Authenticate",
 var volatileSurfaceText = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|req_[A-Za-z0-9]+|"created":[0-9]+`)
 
 func surfaceEntries() []surfaceEntry {
-	stateRoute := map[string]string{stateRouteHeader: "{route}"}
+	stateRoute := map[string]string{StateRouteHeader: "{route}"}
 	chat := `{"model":"{route}","messages":[{"role":"user","content":"hi"}]}`
 	return []surfaceEntry{
 		{name: "chat completions", method: "POST", path: "/v1/chat/completions", body: chat},
@@ -132,10 +132,10 @@ func surfaceEntries() []surfaceEntry {
 		{name: "vector store create", method: "POST", path: "/v1/vector_stores", body: `{"name":"docs"}`, headers: stateRoute},
 		{name: "retrieval query", method: "POST", path: "/v1/retrieval/binding-1/query", body: `{"query":"hi"}`, headers: stateRoute},
 		{name: "anthropic file list", method: "GET", path: "/anthropic/v1/files", headers: stateRoute, readsStore: true},
-		{name: "anthropic file upload", method: "POST", path: "/anthropic/v1/files", body: "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--b--\r\n", headers: map[string]string{stateRouteHeader: "{route}", "Content-Type": "multipart/form-data; boundary=b"}},
+		{name: "anthropic file upload", method: "POST", path: "/anthropic/v1/files", body: "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--b--\r\n", headers: map[string]string{StateRouteHeader: "{route}", "Content-Type": "multipart/form-data; boundary=b"}},
 		{name: "anthropic batch create", method: "POST", path: "/anthropic/v1/messages/batches", body: `{"requests":[{"custom_id":"a","params":{"model":"{route}","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}}]}`, headers: stateRoute},
 		{name: "gemini file list", method: "GET", path: "/gemini/v1beta/files", headers: stateRoute, readsStore: true},
-		{name: "gemini upload start", method: "POST", path: "/gemini/upload/v1beta/files", body: `{"file":{"display_name":"a"}}`, headers: map[string]string{stateRouteHeader: "{route}", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start", "X-Goog-Upload-Header-Content-Length": "2", "X-Goog-Upload-Header-Content-Type": "text/plain"}},
+		{name: "gemini upload start", method: "POST", path: "/gemini/upload/v1beta/files", body: `{"file":{"display_name":"a"}}`, headers: map[string]string{StateRouteHeader: "{route}", "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start", "X-Goog-Upload-Header-Content-Length": "2", "X-Goog-Upload-Header-Content-Type": "text/plain"}},
 		{name: "gemini batch list", method: "GET", path: "/gemini/v1beta/batches", headers: stateRoute, readsStore: true},
 		{name: "cloud batch create", method: "POST", path: "/native/vertex-batch-prediction/batch-jobs", body: `{"displayName":"a"}`, headers: stateRoute},
 		{name: "realtime handshake", method: "GET", path: "/v1/realtime?model={route}"},
@@ -200,12 +200,12 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
+	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
 		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
 	})}
-	h.gateway.deps.Staging = spool
-	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
+	h.gateway.Deps.Staging = spool
+	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	requests := int64(60)
 	for secret, authority := range h.rt.keys {
 		authority.Policy.AllowProviderState = true
@@ -316,7 +316,7 @@ func surfaceCaseApplies(entry surfaceEntry, condition surfaceCondition) bool {
 	switch {
 	case condition.body != "" && entry.body == "":
 		return false
-	case condition.state && entry.headers[stateRouteHeader] == "":
+	case condition.state && entry.headers[StateRouteHeader] == "":
 		return false
 	case entry.readsStore && !condition.entry:
 		return false

@@ -116,7 +116,7 @@ func enableTestCache(t *testing.T, h *harness) (*harness, *cacheMemory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.gateway.deps.Cache = &cache.Store{Client: m, Keys: keys, Auth: secrets.NewAuthKey(bytes.Repeat([]byte{2}, 32), "test"), Installation: "test"}
+	h.gateway.Deps.Cache = &cache.Store{Client: m, Keys: keys, Auth: secrets.NewAuthKey(bytes.Repeat([]byte{2}, 32), "test"), Installation: "test"}
 	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		r := s.Routes[routeSlug]
 		r.Cache = &cache.Policy{Mode: "exact"}

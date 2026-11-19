@@ -46,14 +46,14 @@ type pruningResponse struct {
 	} `json:"answers"`
 }
 
-func (s *Server) pruneWorkflow(ctx context.Context, x *call, request *wire.Request) (*wire.Request, *fault.Error) {
+func (s *Server) pruneWorkflow(ctx context.Context, x *Call, request *wire.Request) (*wire.Request, *fault.Error) {
 	if x.guard.engine == nil || x.workflow == nil {
 		return request, nil
 	}
 	return s.pruneWorkflowPolicies(ctx, x, request, x.guard.engine.TypeSafePolicies())
 }
 
-func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wire.Request, policies []guardrails.TypeSafePolicy) (*wire.Request, *fault.Error) {
+func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *Call, request *wire.Request, policies []guardrails.TypeSafePolicy) (*wire.Request, *fault.Error) {
 	if len(policies) == 0 {
 		return request, nil
 	}
@@ -125,7 +125,7 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 	return s.pruneWorkflowPolicies(ctx, x, pruned, policies[1:])
 }
 
-func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *fault.Error) {
+func (x *Call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *fault.Error) {
 	document := request.OIF().Document()
 	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guard.engine.OnlyTypeSafe() {
 		result, err := x.guard.engine.Unavailable()
@@ -144,7 +144,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 			segments[index].Text = surface.Replacement(index, "[recovered content omitted]")
 		}
 	}
-	compiled, problem := compiledPolicy(x.route)
+	compiled, problem := compiledPolicy(x.Route)
 	if problem != nil {
 		return nil, nil, problem
 	}
@@ -189,7 +189,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	return processed, system, nil
 }
 
-func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *fault.Error) {
+func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *fault.Error) {
 	route, ok := parent.request.release.Snapshot().FindRoute(policy.Config.Route)
 	if !ok || !slices.Contains(route.Operations, "decision") {
 		if policy.Revision.OnError == guardrails.FailOpen {
@@ -227,7 +227,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	if err != nil {
 		return nil, guardrailError(err)
 	}
-	if len(body) > int(s.cfg.MaxBodyBytes) && len(candidates) > 1 {
+	if len(body) > int(s.Config.MaxBodyBytes) && len(candidates) > 1 {
 		middle := len(candidates) / 2
 		first, problem := s.typeSafeRelevance(ctx, parent, policy, request, system, candidates[:middle])
 		if problem != nil {
@@ -246,7 +246,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	if !ok {
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
-	source, err := operationplan.Parse(decision.SystemOne, body, int(s.cfg.MaxBodyBytes))
+	source, err := operationplan.Parse(decision.SystemOne, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		if policy.Revision.OnError == guardrails.FailOpen {
 			return nil, nil
@@ -254,14 +254,14 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 		return nil, guardrailError(err)
 	}
 	accountingID := parent.request.accountingID()
-	x := &call{
+	x := &Call{
 		request: requestMetadataForPruning(parent, body), family: wire.SystemOne, mode: "unary",
 		actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID,
 		authority: *current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
 		userID: parent.userID, origin: usage.OriginClassifier, parent: accountingID,
 		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
 		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
-		routeLeg: routeLeg{route: &route}, workflow: parent.workflow,
+		routeLeg: routeLeg{Route: &route}, workflow: parent.workflow,
 		generation: generationCall{runLimits: parent.generation.runLimits},
 		unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
 	}
@@ -273,8 +273,8 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	stepCtx, cancel := x.routeContext(ctx)
 	defer cancel()
 	x.estimate = requestEstimate(x)
-	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
-	lease, problem := s.deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
+	authority := cacheAuthority(x.AdmissionAuthority(x.authority), false, true, false)
+	lease, problem := s.Deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
 	if problem != nil {
 		return nil, problem
 	}
@@ -315,7 +315,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	}), nil
 }
 
-func requestMetadataForPruning(parent *call, body []byte) request {
+func requestMetadataForPruning(parent *Call, body []byte) request {
 	return request{id: parent.request.id, durableID: parent.request.durableID, minted: parent.request.minted,
 		clientIP: parent.request.clientIP, startedAt: parent.request.startedAt, release: parent.request.release,
 		delegationAssertion: parent.request.delegationAssertion, callerCredential: parent.request.callerCredential,

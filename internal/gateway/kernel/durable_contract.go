@@ -44,7 +44,7 @@ type durableAsset struct {
 // rewrites its bytes; it only refuses unqualified mixed endpoints/models and
 // ambiguous per-item identities before an effectful provider upload.
 func (s *Server) validateBatchInput(part *staging.Part, model string, provider *routing.Provider, route *routing.Route) (string, int, error) {
-	opened, err := s.deps.Staging.Open(part.Handle)
+	opened, err := s.Deps.Staging.Open(part.Handle)
 	if err != nil {
 		return "", 0, err
 	}
@@ -123,7 +123,7 @@ func durableKind(prefix string, id string) string {
 }
 
 func validDurableDocument(doc durableDocument, r *resources.Resource) bool {
-	if doc.Version != resources.DurableContractVersion || doc.Binding == "" || doc.Binding != resourceModel(r) || doc.Serving.ProviderID != r.ProviderID || doc.Serving.RevisionID != r.ProviderRevisionID || doc.Serving.Model != doc.Binding || len(doc.Source) == 0 {
+	if doc.Version != resources.DurableContractVersion || doc.Binding == "" || doc.Binding != ResourceModel(r) || doc.Serving.ProviderID != r.ProviderID || doc.Serving.RevisionID != r.ProviderRevisionID || doc.Serving.Model != doc.Binding || len(doc.Source) == 0 {
 		return false
 	}
 	if _, err := oif.ParseJSON(doc.Source, oif.Limits{MaxBytes: resources.MaxContinuationBytes}); err != nil {
@@ -144,10 +144,10 @@ func validDurableDocument(doc durableDocument, r *resources.Resource) bool {
 
 func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*resources.Resource, *durableDocument, error) {
 	if kind != resources.KindStrictBatch && kind != resources.KindStrictFile {
-		r, err := s.deps.Resources.Get(ctx, kind, owner, id)
+		r, err := s.Deps.Resources.Get(ctx, kind, owner, id)
 		return r, nil, err
 	}
-	r, payload, err := s.deps.Resources.ReadDurableContract(ctx, kind, owner, id)
+	r, payload, err := s.Deps.Resources.ReadDurableContract(ctx, kind, owner, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,7 +229,7 @@ func strictBatchInputMatches(result oif.Document, effective []byte) bool {
 }
 
 func (s *Server) durableExpiry(provider *time.Time) *time.Time {
-	expires := s.now().Add(resources.DurableLifetime - time.Second)
+	expires := s.Now().Add(resources.DurableLifetime - time.Second)
 	if provider != nil && provider.Before(expires) {
 		expires = *provider
 	}

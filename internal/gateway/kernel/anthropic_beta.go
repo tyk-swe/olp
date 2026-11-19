@@ -28,7 +28,7 @@ func anthropicBeta(header http.Header) (beta string, ok bool) {
 
 // carriesAnthropicSource is whether the caller's request is in the Anthropic
 // Messages dialect, so that its Anthropic-Beta header has meaning.
-func carriesAnthropicSource(x *call) bool {
+func carriesAnthropicSource(x *Call) bool {
 	return x.generation.parsed.Family == wire.Anthropic || x.generation.parsed.Family == wire.AnthropicCount
 }
 
@@ -45,9 +45,9 @@ func takesAnthropicBeta(cfg connectors.Config) bool {
 
 // servesAnthropicBeta is whether a target of the route is a provider that
 // takes the header.
-func (x *call) servesAnthropicBeta() bool {
+func (x *Call) servesAnthropicBeta() bool {
 	snapshot := x.snapshot()
-	return slices.ContainsFunc(x.route.Targets, func(t routing.Target) bool {
+	return slices.ContainsFunc(x.Route.Targets, func(t routing.Target) bool {
 		provider := snapshot.Provider(t.ProviderID)
 		return takesAnthropicBeta(provider.Connector())
 	})
@@ -56,7 +56,7 @@ func (x *call) servesAnthropicBeta() bool {
 // sendsAnthropicBeta is whether the caller sent an Anthropic-Beta header at all,
 // which is all a request that sent none has to learn: its providers' own betas
 // are sent as the provider publishes them.
-func (x *call) sendsAnthropicBeta() bool {
+func (x *Call) sendsAnthropicBeta() bool {
 	return len(x.semanticHeaders.Values("Anthropic-Beta")) > 0
 }
 
@@ -90,7 +90,7 @@ func anthropicBetaFor(cfg connectors.Config, caller string) (beta string, ok boo
 // a provider publishes. Dropping it would send the beta fields of the body
 // without their header, which the upstream refuses. A strict route validates the
 // header when its profile binds it.
-func (x *call) checkAnthropicBeta() *fault.Error {
+func (x *Call) checkAnthropicBeta() *fault.Error {
 	if x.strict() || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !x.servesAnthropicBeta() {
 		return nil
 	}
@@ -100,7 +100,7 @@ func (x *call) checkAnthropicBeta() *fault.Error {
 		return fault.InvalidRequest("invalid_request", "The Anthropic-Beta header must be a valid header value of at most 2048 bytes.", &param)
 	}
 	snapshot := x.snapshot()
-	for _, target := range x.route.Targets {
+	for _, target := range x.Route.Targets {
 		provider := snapshot.Provider(target.ProviderID)
 		cfg := provider.Connector()
 		if !takesAnthropicBeta(cfg) {
@@ -126,7 +126,7 @@ func (x *call) checkAnthropicBeta() *fault.Error {
 // A provider whose profile publishes betas of its own has them applied when the
 // request is hosted, which would replace a header set here, so the list to send
 // is published in the connector the request is hosted by instead.
-func forwardAnthropicBeta(header http.Header, x *call, encodedWire wire.Format, cfg connectors.Config) connectors.Config {
+func forwardAnthropicBeta(header http.Header, x *Call, encodedWire wire.Format, cfg connectors.Config) connectors.Config {
 	if encodedWire != x.generation.parsed.Family || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !takesAnthropicBeta(cfg) {
 		return cfg
 	}

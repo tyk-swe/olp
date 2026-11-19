@@ -21,20 +21,20 @@ func (s *Server) registerRetrieval(mux *http.ServeMux) {
 // binding is loaded under current authority on every query; it does not grant
 // callers discovery of backend resources or permission to mutate an index.
 func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, wire.File)
+	x, authority, done := s.StateBegin(w, r, wire.File)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	x.operationOverride = "retrieval"
 	x.mode = "unary"
 	x.actor = "api_key_resource"
-	x.retained = retainedOperation{use: retainedNewWork, billing: retainedMeteredWork}
-	var p *pin
+	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+	var p *Pin
 	status := http.StatusInternalServerError
-	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
 	fail := func(err *fault.Error) {
-		x.failure = err
+		x.Failure = err
 		status = err.Status
 		fault.WriteSurfaceError(w, err, "openai")
 	}
@@ -51,11 +51,11 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(fault.InvalidRequest("invalid_parameter", "Retrieval does not accept query parameters.", nil))
 		return
 	}
-	if s.deps.Resources == nil {
+	if s.Deps.Resources == nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Retrieval bindings are unavailable."))
 		return
 	}
-	tx, readErr := s.deps.Resources.Begin(r.Context())
+	tx, readErr := s.Deps.Resources.Begin(r.Context())
 	if readErr != nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Retrieval bindings are unavailable."))
 		return
@@ -72,8 +72,8 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	route := candidate
-	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+	x.Route = &route
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 		fail(fault.PermissionError("route_forbidden", "The API key cannot use this route."))
 		return
 	}
@@ -85,16 +85,16 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(policyUnavailable("unsupported_transformation", "Cloud retrieval requires a transformed route."))
 		return
 	}
-	if gateErr := x.guardrailSurfaceGate(&route); gateErr != nil {
+	if gateErr := x.GuardrailSurfaceGate(&route); gateErr != nil {
 		fail(gateErr)
 		return
 	}
-	body, bodyErr := s.gate.ReadBody(r)
+	body, bodyErr := s.Gate.ReadBody(r)
 	if bodyErr != nil {
 		fail(bodyErr)
 		return
 	}
-	doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
 	if parseErr != nil || doc.Root().Kind() != oif.Object {
 		fail(fault.InvalidRequest("invalid_request", "A valid unambiguous JSON query is required.", nil))
 		return
@@ -119,20 +119,20 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(pinErr)
 		return
 	}
-	endpoint, urlErr := p.provider.Connector().RetrievalURL(binding.Resource)
+	endpoint, urlErr := p.Provider.Connector().RetrievalURL(binding.Resource)
 	if urlErr != nil {
 		fail(policyUnavailable("retrieval_binding_unavailable", "The backend binding is unavailable."))
 		return
 	}
-	ctx, cancel := s.stateDeadline(r.Context(), &route)
+	ctx, cancel := s.StateDeadline(r.Context(), &route)
 	defer cancel()
 	if admissionErr := s.admitRetainedRequest(ctx, x, authority, p, &route, false); admissionErr != nil {
 		fail(admissionErr)
 		return
 	}
-	native, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, encoded, "application/json")
+	native, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, encoded, "application/json")
 	if failure != nil {
-		fail(retainedPublicError(upstreamError(failure), failure.status))
+		fail(retainedPublicError(UpstreamError(failure), failure.Status))
 		return
 	}
 	defer native.Body.Close()
@@ -142,11 +142,11 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status = http.StatusOK
-	s.writeStateJSONStatus(w, x, projected, status, native.exchange)
+	s.writeStateJSONStatus(w, x, projected, status, native.Exchange)
 }
 
 func (s *Server) retrievalResult(binding *retrieval.Binding, native *pinnedResponse) ([]byte, *fault.Error) {
-	response, responseErr := native.readBody(s.retainedResponseLimit())
+	response, responseErr := native.ReadBody(s.retainedResponseLimit())
 	if responseErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported retrieval response.")
 	}
@@ -154,7 +154,7 @@ func (s *Server) retrievalResult(binding *retrieval.Binding, native *pinnedRespo
 	if decodeErr != nil {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned invalid retrieval results.")
 	}
-	native.exchange.completeRetainedControl()
+	native.Exchange.completeRetainedControl()
 	projected, marshalErr := json.Marshal(map[string]any{"object": "list", "binding_id": binding.ID, "binding_revision_id": binding.RevisionID, "data": results})
 	if marshalErr != nil {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned invalid retrieval results.")

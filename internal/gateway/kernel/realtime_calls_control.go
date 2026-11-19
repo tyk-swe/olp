@@ -104,7 +104,7 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 func (s *Server) webrtcAuthority(sess *webrtcSession) *fault.Error {
 	x := sess.x
 	authority, err := s.reauthenticateSession(sess.ctx, x, sess.token)
-	if err != nil || authority == nil || authority.ID != sess.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
+	if err != nil || authority == nil || authority.ID != sess.keyID || !authority.Allows("inference", x.Route.Slug, x.Route.ProjectID, s.Now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 		return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
 	}
 	if eligibility := s.pinEligibility(sess.p); eligibility != routing.Eligible {
@@ -112,7 +112,7 @@ func (s *Server) webrtcAuthority(sess *webrtcSession) *fault.Error {
 	}
 	current := *authority
 	current.EndUserDigest = x.endUserDigest
-	if e := s.unboundedPinLimits(x.admissionAuthority(current), sess.p, x.route); e != nil {
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(current), sess.p, x.Route); e != nil {
 		return e
 	}
 	return nil
@@ -201,18 +201,18 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 			}
 		}
 		status := http.StatusOK
-		var out *outcome
+		var out *Outcome
 		if failure != nil {
-			x.failure = failure
+			x.Failure = failure
 			status = failure.Status
-			out = &outcome{err: failure, committed: x.dispatched, cancelled: cancelled}
+			out = &Outcome{Err: failure, Committed: x.dispatched, Cancelled: cancelled}
 		} else {
-			out = &outcome{committed: true}
+			out = &Outcome{Committed: true}
 		}
-		s.finish(x, out, status)
+		s.Finish(x, out, status)
 		settled := sessionSettlement(x)
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
-		s.settleSessionHold(settleCtx, x, sess.p.hold, settled)
+		s.settleSessionHold(settleCtx, x, sess.p.Hold, settled)
 		s.recordCost(x)
 		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
 		s.settleCaps(settleCtx, x)

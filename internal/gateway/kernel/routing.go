@@ -13,18 +13,18 @@ import (
 
 // selectionOptions supplies the shared routing authority and measurements.
 // Each operation adds its own source demand and semantic preparation.
-func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options {
-	inputs := s.deps.Runtime.RoutingInputs()
+func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options {
+	inputs := s.Deps.Runtime.RoutingInputs()
 	x.routingInputs = inputs
 	options := routing.Options{
-		Region: s.cfg.Region,
+		Region: s.Config.Region,
 		KeyID:  x.keyID, Preferences: x.legPreferences(),
-		Inputs: inputs, Now: s.now(),
-		CheckSlots: true, CredentialEligibility: s.deps.Runtime.Eligibility,
-		UnconfinedPlugins: s.cfg.UnconfinedPlugins, Context: ctx,
+		Inputs: inputs, Now: s.Now(),
+		CheckSlots: true, CredentialEligibility: s.Deps.Runtime.Eligibility,
+		UnconfinedPlugins: s.Config.UnconfinedPlugins, Context: ctx,
 	}
-	if s.deps.Admission.Ready() {
-		options.Supply = s.deps.Admission
+	if s.Deps.Admission.Ready() {
+		options.Supply = s.Deps.Admission
 	}
 	if s.fleet.Marked() {
 		options.Unhealthy = s.unhealthy
@@ -34,7 +34,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 		return x.targetCostBound(provider, target, price, discount)
 	}
 	// Only a route with selectors pays to describe the request to them.
-	if x.route != nil && len(x.route.Selectors) > 0 {
+	if x.Route != nil && len(x.Route.Selectors) > 0 {
 		options.Features = x.features()
 		options.Evaluate = s.evaluator(ctx, x, options.Features)
 		if x.authorize != nil || x.fixed {
@@ -50,7 +50,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 // admission already computed: its estimated size, whether it streams, and the
 // tools, modalities, structured output and reasoning effort it asks for.
 // Attribution labels never take part.
-func (x *call) features() *routing.Features {
+func (x *Call) features() *routing.Features {
 	if x.generation.parsed == nil {
 		return routing.DescribeRequest(x.operationName(), nil, nil)
 	}
@@ -68,7 +68,7 @@ const (
 
 type planningSession struct {
 	server    *Server
-	call      *call
+	call      *Call
 	route     *routing.Route
 	kind      planningKind
 	operation string
@@ -79,7 +79,7 @@ type planningSession struct {
 	unbounded bool
 }
 
-func (s *Server) planning(x *call, kind planningKind, route *routing.Route, operation, surface, mode string) *planningSession {
+func (s *Server) planning(x *Call, kind planningKind, route *routing.Route, operation, surface, mode string) *planningSession {
 	return &planningSession{server: s, call: x, kind: kind, route: route, operation: operation, surface: surface, mode: mode}
 }
 

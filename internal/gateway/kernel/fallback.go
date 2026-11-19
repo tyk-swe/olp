@@ -26,24 +26,24 @@ const (
 // bind makes x.route the request's primary route: its deadline and attempt
 // budget bound the request, whichever routes it moves on to. A fixed request
 // belongs to its route and never leaves it.
-func (x *call) bind(p planner, authorize func(*routing.Route) *fault.Error, fixed bool) {
-	x.primary, x.planner, x.authorize, x.fixed = x.route, p, authorize, fixed
-	x.walk = routing.NewRouteWalk(x.route)
+func (x *Call) bind(p planner, authorize func(*routing.Route) *fault.Error, fixed bool) {
+	x.primary, x.planner, x.authorize, x.fixed = x.Route, p, authorize, fixed
+	x.walk = routing.NewRouteWalk(x.Route)
 	x.seed = x.affinity
-	x.affinity = x.routeSeed(x.route)
+	x.affinity = x.routeSeed(x.Route)
 }
 
 // named is the route the caller named.
-func (x *call) named() *routing.Route {
+func (x *Call) named() *routing.Route {
 	if x.primary != nil {
 		return x.primary
 	}
-	return x.route
+	return x.Route
 }
 
 // planNamed plans the primary route. A route that cannot plan any attempt for
 // a reason one of its fallbacks names moves the request on before dispatch.
-func (s *Server) planNamed(ctx context.Context, x *call) *fault.Error {
+func (s *Server) planNamed(ctx context.Context, x *Call) *fault.Error {
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	e := s.replan(ctx, x)
@@ -55,7 +55,7 @@ func (s *Server) planNamed(ctx context.Context, x *call) *fault.Error {
 
 // routeContext starts the named route's deadline once, before classifiers and
 // other dynamic planning. Admission, dispatch and fallback share what remains.
-func (x *call) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func (x *Call) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if x.deadline.IsZero() {
 		timeout := time.Duration(x.named().OverallTimeout) * time.Millisecond
 		if x.named().ToolExecution == "gateway" {
@@ -68,9 +68,9 @@ func (x *call) routeContext(ctx context.Context) (context.Context, context.Cance
 }
 
 // replan plans x.route with the request's own planner.
-func (s *Server) replan(ctx context.Context, x *call) *fault.Error {
+func (s *Server) replan(ctx context.Context, x *Call) *fault.Error {
 	x.planConditions = nil
-	if e := x.checkBody(x.route); e != nil {
+	if e := x.checkBody(x.Route); e != nil {
 		return e
 	}
 	switch x.planner {
@@ -85,13 +85,13 @@ func (s *Server) replan(ctx context.Context, x *call) *fault.Error {
 // adoptPlan takes the plan of the route the request is on. The primary
 // route's attempt budget bounds the request, so a later route receives what
 // remains of it.
-func (x *call) initAllowance(budget int) {
+func (x *Call) initAllowance(budget int) {
 	if x.allowance == 0 {
 		x.allowance = x.spent + budget
 	}
 }
 
-func (x *call) adoptPlan(plan routing.Plan) {
+func (x *Call) adoptPlan(plan routing.Plan) {
 	x.initAllowance(plan.Budget)
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
 	x.preparation().finishPlanning(plan.Attempts)
@@ -107,7 +107,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 
 // delegate moves the request to the route its matched selector names. The
 // planner has already checked that the route exists and the key may use it.
-func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *fault.Error {
+func (s *Server) delegate(ctx context.Context, x *Call, plan routing.Plan) *fault.Error {
 	x.initAllowance(plan.Budget)
 	selector := plan.Selected()
 	outcome, e := s.adopt(ctx, x, plan.Delegate, usage.ViaSelector)
@@ -118,7 +118,7 @@ func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *faul
 		if x.costExcluded {
 			return costLimitExceeded()
 		}
-		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, x.route.Slug)
+		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, x.Route.Slug)
 	}
 	if x.selector == "" {
 		x.selector = selector
@@ -128,7 +128,7 @@ func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *faul
 
 // adopt moves the request to the named route and plans it, returning the
 // outcome a fallback step records and the route's planning refusal.
-func (s *Server) adopt(ctx context.Context, x *call, slug string, via usage.LegVia) (string, *fault.Error) {
+func (s *Server) adopt(ctx context.Context, x *Call, slug string, via usage.LegVia) (string, *fault.Error) {
 	if x.walk.Visited(slug) {
 		return routing.FallbackRepeated, nil
 	}
@@ -146,7 +146,7 @@ func (s *Server) adopt(ctx context.Context, x *call, slug string, via usage.LegV
 	return routing.FallbackPlanned, nil
 }
 
-func (s *Server) fallBack(ctx context.Context, x *call, conditions []string) bool {
+func (s *Server) fallBack(ctx context.Context, x *Call, conditions []string) bool {
 	if x.primary == nil || x.fixed {
 		return false
 	}
@@ -172,9 +172,9 @@ func (s *Server) fallBack(ctx context.Context, x *call, conditions []string) boo
 // useRoute moves the request to route. Provider preparation depends on the
 // route's fidelity and content policy, and the session seed on its affinity,
 // so both start over.
-func (x *call) useRoute(route *routing.Route, via usage.LegVia) {
+func (x *Call) useRoute(route *routing.Route, via usage.LegVia) {
 	x.walk = x.walk.Move(route, via == usage.ViaSelector)
-	x.routeLeg = routeLeg{route: route}
+	x.routeLeg = routeLeg{Route: route}
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}
 	x.affinity = x.routeSeed(route)
 }
@@ -183,15 +183,15 @@ func (x *call) useRoute(route *routing.Route, via usage.LegVia) {
 // seeds selection with the request's session key, so requests of one session
 // keep reaching the target and slot that hold their prompt cache; any other
 // route keeps the seed the request's surface chose.
-func (x *call) routeSeed(route *routing.Route) []byte {
+func (x *Call) routeSeed(route *routing.Route) []byte {
 	return route.Affinity.Seed(x.attribution, x.generation.parsed, x.seed)
 }
 
 // legPreferences are the caller's preferences for planning x.route. A caller's
 // attempt budget is judged against the primary route only; later routes
 // share what remains of it.
-func (x *call) legPreferences() *routing.Preferences {
-	if x.preferences == nil || x.preferences.MaxAttempts == nil || x.route == x.primary {
+func (x *Call) legPreferences() *routing.Preferences {
+	if x.preferences == nil || x.preferences.MaxAttempts == nil || x.Route == x.primary {
 		return x.preferences
 	}
 	preferences := *x.preferences
@@ -201,7 +201,7 @@ func (x *call) legPreferences() *routing.Preferences {
 
 // mayLeaveRoute reports whether the request can move on to another route
 // after its own attempts fail, so admission reserves its whole budget.
-func (x *call) mayLeaveRoute() bool {
+func (x *Call) mayLeaveRoute() bool {
 	return x.primary != nil && !x.fixed && x.walk.MayLeave()
 }
 
@@ -211,7 +211,7 @@ func (s *Server) keyAuthorizer(authority keyauthority.Authority) func(*routing.R
 		if authority.TaskCapability != nil && !slices.Contains(authority.TaskCapability.RouteRevisions, route.RevisionID) {
 			return fault.PermissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")
 		}
-		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 			return fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 		}
 		return nil

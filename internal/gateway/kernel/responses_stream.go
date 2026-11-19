@@ -173,9 +173,9 @@ func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]by
 	return out, nil
 }
 
-func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *call, res *resources.Resource, p *pin, query url.Values) *fault.Error {
+func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *Call, res *resources.Resource, p *Pin, query url.Values) *fault.Error {
 	if res.Kind == resources.KindStrictResponse &&
-		(!p.provider.Supports(p.model, "generation", "openai", "streaming") || !p.provider.Connector().Supports("generation", "openai", "streaming")) {
+		(!p.Provider.Supports(p.Model, "generation", "openai", "streaming") || !p.Provider.Connector().Supports("generation", "openai", "streaming")) {
 		return fault.InvalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
 	}
 	projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
@@ -186,34 +186,34 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			return fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
 	}
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
 	x.mode = "streaming"
-	resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+	resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 	if failure != nil {
-		if failure.status == http.StatusNotFound {
+		if failure.Status == http.StatusNotFound {
 			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
 		}
-		return upstreamError(failure)
+		return UpstreamError(failure)
 	}
 	defer resp.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
 	}
-	limit := int(s.cfg.MaxEventBytes)
+	limit := int(s.Config.MaxEventBytes)
 	if limit <= 0 {
 		limit = 1 << 20
 	}
 	committed := false
 	nativeIncomplete := false
 	nativeTerminalFailure := false
-	exchange := resp.exchange
+	exchange := resp.Exchange
 	credentialValues := x.sensitive
 	previous := func(upstream string) string {
-		lookupCtx, stopLookup := resourceCommitContext(ctx)
+		lookupCtx, stopLookup := ResourceCommitContext(ctx)
 		defer stopLookup()
 		return s.previousResponseLocal(lookupCtx, res.NativeIdentity(), nil, upstream)
 	}
@@ -245,13 +245,13 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		}
 		switch {
 		case nativeTerminalFailure:
-			exchange.complete(classUpstreamServer)
+			exchange.Complete(classUpstreamServer)
 		case nativeIncomplete && res.Kind == resources.KindStrictResponse:
-			exchange.complete(classProtocol)
+			exchange.Complete(classProtocol)
 		case wire.ResponseStatusFinished(status):
-			exchange.complete(classSuccess)
+			exchange.Complete(ClassSuccess)
 		}
-		commitCtx, stopCommit := resourceCommitContext(ctx)
+		commitCtx, stopCommit := ResourceCommitContext(ctx)
 		reconcileErr := s.applyResponseObservation(commitCtx, res.ID, observation)
 		stopCommit()
 		if reconcileErr != nil {
@@ -283,15 +283,15 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if !committed {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-store")
-			x.responseHeaders(w.Header(), true)
+			x.ResponseHeaders(w.Header(), true)
 			w.WriteHeader(http.StatusOK)
 			committed = true
-			exchange.delivery(usage.ClientUnobserved)
+			exchange.Delivery(usage.ClientUnobserved)
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		if n, err := w.Write(projected); err != nil || n != len(projected) {
 			if n > 0 {
-				exchange.delivery(usage.ClientPartial)
+				exchange.Delivery(usage.ClientPartial)
 			}
 			if err == nil {
 				err = io.ErrShortWrite
@@ -301,51 +301,51 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if err := http.NewResponseController(w).Flush(); err != nil {
 			return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 		}
-		x.delivered(s.now())
-		exchange.delivery(usage.ClientPartial)
+		x.Delivered(s.Now())
+		exchange.Delivery(usage.ClientPartial)
 		return nil
 	}
 	_, streamErr := protocols.StreamWithEvents(wire.Responses, wire.Responses,
-		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, observe)
+		p.Provider.Connector().StreamPayload(resp.Body, limit), limit, x.Route.Slug, true, emit, observe)
 	if streamErr != nil && (errors.Is(streamErr, fault.ErrClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
 		// The client left; the provider is not at fault.
-		x.failure = (&attemptFailure{class: classCancelled}).toError()
+		x.Failure = (&attemptFailure{class: classCancelled}).toError()
 		exchange.interrupt(classCancelled, true)
-		s.finish(x, &outcome{err: x.failure, committed: committed, cancelled: true}, 0)
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: committed, Cancelled: true}, 0)
 		return nil
 	}
 	if streamErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		x.failure = (&attemptFailure{class: classTimeout}).toError()
+		x.Failure = (&attemptFailure{class: classTimeout}).toError()
 		exchange.interrupt(classTimeout, false)
 		if !committed {
-			return x.failure
+			return x.Failure
 		}
-		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
 		return nil
 	}
 	if streamErr != nil {
 		var upstream *wire.UpstreamError
 		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
-			x.failure = fault.ServerError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
+			x.Failure = fault.ServerError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 		} else {
-			x.failure = fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
+			x.Failure = fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
 			_, local := errors.AsType[*responseLocalRefusal](streamErr)
 			exchange.interrupt(classProtocol, local)
 		}
 		if !committed {
-			return x.failure
+			return x.Failure
 		}
-		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
 		return nil
 	}
 	if nativeIncomplete && res.Kind == resources.KindStrictResponse {
-		x.failure = fault.ServerError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
-		exchange.delivery(usage.ClientTerminal)
-		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
+		x.Failure = fault.ServerError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
+		exchange.Delivery(usage.ClientTerminal)
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
 		return nil
 	}
-	exchange.complete(classSuccess)
-	exchange.delivery(usage.ClientTerminal)
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	exchange.Complete(ClassSuccess)
+	exchange.Delivery(usage.ClientTerminal)
+	s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
 	return nil
 }

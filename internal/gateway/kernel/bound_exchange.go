@@ -18,15 +18,15 @@ type boundExchange struct {
 	egress  *egress.Policy
 	auth    *connectors.Auth
 	plugins connectors.Carrier
-	call    *call
+	call    *Call
 	config  connectors.Config
 	target  providerinvoke.Binding
 	state   *attemptState
 	carrier bool
 }
 
-func (s *Server) bindExchange(x *call, provider *routing.Provider, slot routing.Slot, model string, config connectors.Config, state *attemptState) *boundExchange {
-	return &boundExchange{egress: s.egress, auth: s.auth, plugins: s.cfg.Carrier, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
+func (s *Server) bindExchange(x *Call, provider *routing.Provider, slot routing.Slot, model string, config connectors.Config, state *attemptState) *boundExchange {
+	return &boundExchange{egress: s.egress, auth: s.auth, plugins: s.Config.Carrier, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
 }
 
 func (e *boundExchange) validateBaseEndpoint(endpoint string) error {

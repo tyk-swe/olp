@@ -62,7 +62,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		if encoding := r.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
 			return nil, source, "", fault.ServerError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
 		}
-		body, err := readBounded(r.Body, s.cfg.MaxBodyBytes)
+		body, err := readBounded(r.Body, s.Config.MaxBodyBytes)
 		if errors.Is(err, errResponseTooLarge) {
 			return nil, source, "", ingress.BodyTooLarge()
 		}
@@ -110,12 +110,12 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		}
 		return body, source, r.Header.Get("Content-Type"), nil
 	}
-	body, failure := s.gate.ReadBody(r)
+	body, failure := s.Gate.ReadBody(r)
 	if failure != nil {
 		return nil, source, "", failure
 	}
 	var err error
-	source, err = oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err = oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
 	if err != nil || source.Root().Kind() != oif.Object {
 		return nil, source, "", fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
 	}
@@ -146,7 +146,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	if !strings.HasPrefix(contentType, "multipart/") {
 		return s.retainedSubmissionDigest(e, slug, body)
 	}
-	digester := s.deps.Digester
+	digester := s.Deps.Digester
 	if digester == nil {
 		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
@@ -181,11 +181,11 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	return digester.Digest(secrets.RetainedSubmissionDigest, e.Operation+"\x00"+e.Kind+"\x00"+slug+"\x00"+string(canonical)), nil
 }
 
-func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *pin) (oif.Document, error) {
+func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *Pin) (oif.Document, error) {
 	if e.Operation == "eval" {
 		var changes []oif.Change
 		err := walkRetainedEvalModels(source.Root(), "", func(pointer, model string) error {
-			changes = append(changes, oif.Change{Pointer: pointer, Value: strconv.Quote(p.provider.Connector().Model(model)), Origin: oif.ResourceBinding, Reason: "authorized evaluation serving model"})
+			changes = append(changes, oif.Change{Pointer: pointer, Value: strconv.Quote(p.Provider.Connector().Model(model)), Origin: oif.ResourceBinding, Reason: "authorized evaluation serving model"})
 			return nil
 		})
 		if err != nil {
@@ -202,7 +202,7 @@ func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *pin) (oif
 	if e.Action != "create" && e.Operation != "compaction" {
 		return source, nil
 	}
-	model := p.provider.Connector().Model(p.model)
+	model := p.Provider.Connector().Model(p.Model)
 	if e.Kind == "context_cache" {
 		model = "models/" + strings.TrimPrefix(model, "models/")
 	}
@@ -278,7 +278,7 @@ func retainedFileIDs(v oif.Value) []string {
 // referencedResources resolves the retained resources a request body
 // names through the endpoint's declared references, so pin selection
 // can bind to their serving identity before dispatch.
-func (s *Server) referencedResources(ctx context.Context, x *call, source oif.Document, e retainedapi.Endpoint) ([]*resources.Resource, error) {
+func (s *Server) referencedResources(ctx context.Context, x *Call, source oif.Document, e retainedapi.Endpoint) ([]*resources.Resource, error) {
 	var out []*resources.Resource
 	seen := map[string]bool{}
 	resolve := func(kind, id string) error {
@@ -299,9 +299,9 @@ func (s *Server) referencedResources(ctx context.Context, x *call, source oif.Do
 			if localErr != nil {
 				return localErr
 			}
-			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, local)
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, local)
 		default:
-			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, id)
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, id)
 		}
 		if err != nil {
 			return err
@@ -326,12 +326,12 @@ func samePin(a, b *resources.Resource) bool {
 	return a.ProviderID == b.ProviderID && a.ProviderRevisionID == b.ProviderRevisionID && a.TargetID == b.TargetID && a.SlotID == b.SlotID && sameCredential(a.CredentialID, b.CredentialID)
 }
 
-func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyauthority.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
+func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyauthority.Authority, p *Pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
 	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
 		return oif.Document{}, errors.New("item_reference inputs are not supported")
 	}
 	rewritten, err := retainedapi.Rewrite(source, retainedRequestRefsForSource(e, source), func(kind, id string) (string, error) {
-		if s.deps.Resources == nil {
+		if s.Deps.Resources == nil {
 			return "", resources.ErrNotFound
 		}
 		var bound *resources.Resource
@@ -340,7 +340,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 			var contract *storedResponseContract
 			bound, contract, err = s.readResponseResource(ctx, x.keyID, id)
 			if err == nil {
-				_, _, failure := s.admitStoredResponse(ctx, x, a, bound, contract, retainedNewWork)
+				_, _, failure := s.admitStoredResponse(ctx, x, a, bound, contract, RetainedNewWork)
 				if failure != nil {
 					err = resources.ErrNotFound
 				}
@@ -354,9 +354,9 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 			if err == nil {
 				var failure *fault.Error
 				if contract != nil {
-					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), retainedNewWork)
+					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), RetainedNewWork)
 				} else {
-					_, _, failure = s.resolveResource(ctx, x, a, bound, x.operationName(), retainedNewWork)
+					_, _, failure = s.ResolveResource(ctx, x, a, bound, x.operationName(), RetainedNewWork)
 				}
 				if failure != nil {
 					err = resources.ErrNotFound
@@ -370,9 +370,9 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 					return "", err
 				}
 			}
-			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, local)
+			bound, err = s.Deps.Resources.Get(ctx, kind, x.keyID, local)
 			if err == nil {
-				_, _, failure := s.resolveResource(ctx, x, a, bound, x.operationName(), retainedNewWork)
+				_, _, failure := s.ResolveResource(ctx, x, a, bound, x.operationName(), RetainedNewWork)
 				if failure != nil {
 					err = resources.ErrNotFound
 				}
@@ -394,7 +394,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 
 // Only declared pagination/filter fields reach the provider. ID cursors have
 // exactly the same owner, parent and serving affinity checks as path IDs.
-func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpoint, resource *resources.Resource, raw url.Values) (url.Values, *fault.Error) {
+func (s *Server) retainedQuery(ctx context.Context, x *Call, e retainedapi.Endpoint, resource *resources.Resource, raw url.Values) (url.Values, *fault.Error) {
 	out := url.Values{}
 	for name, values := range raw {
 		if len(values) != 1 {
@@ -424,7 +424,7 @@ func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpo
 			if e.Action != "list" {
 				return nil, fault.InvalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
 			}
-			bound, err := s.deps.Resources.Get(ctx, e.Kind, x.keyID, v)
+			bound, err := s.Deps.Resources.Get(ctx, e.Kind, x.keyID, v)
 			if err != nil || resource == nil || bound.ParentID == nil || *bound.ParentID != resource.UUID || bound.RouteRevisionID != resource.RouteRevisionID || !samePin(bound, resource) {
 				return nil, fault.InvalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
 			}
@@ -674,7 +674,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			identity.ParentID = &resource.UUID
 		} else if resource.ParentID != nil && len(e.Ancestors) > 0 && kind == e.Ancestors[len(e.Ancestors)-1] {
 			// The parent's own parent may not be nil (eval runs, for example).
-			parent, findErr := s.deps.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
+			parent, findErr := s.Deps.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
 			if findErr != nil {
 				return "", retainedBindingStoreError(findErr)
 			}
@@ -683,23 +683,23 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			}
 			return parent.ID, nil
 		}
-		bound, findErr := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		bound, findErr := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
 			// An echoed file reference may name the strict durable
 			// kind under the same serving identity.
 			strictIdentity := identity
 			strictIdentity.Kind = resources.KindStrictFile
-			bound, findErr = s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
+			bound, findErr = s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
 		}
 		resultFile := kind == resources.KindFile && resultFiles[id]
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {
-			child, childErr := retainedDiscoveredChild(resource, kind, id, nativeItems[id], e, s.now())
+			child, childErr := retainedDiscoveredChild(resource, kind, id, nativeItems[id], e, s.Now())
 			if childErr != nil {
 				return "", childErr
 			}
 			if resultFile {
 				child.ContractVersion = nil
-				child.Metadata, _ = json.Marshal(map[string]string{"upstream_model": resourceModel(resource), "file_operation": "fine_tuning", "purpose": "fine-tune-results"})
+				child.Metadata, _ = json.Marshal(map[string]string{"upstream_model": ResourceModel(resource), "file_operation": "fine_tuning", "purpose": "fine-tune-results"})
 			}
 			var submission []uuid.UUID
 			if kind == "eval_run" {
@@ -713,7 +713,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 					submission = append(submission, original)
 				}
 			}
-			bound, findErr = s.deps.Resources.BindDiscovered(ctx, child, submission...)
+			bound, findErr = s.Deps.Resources.BindDiscovered(ctx, child, submission...)
 		}
 		if findErr != nil {
 			return "", retainedBindingStoreError(findErr)
@@ -723,7 +723,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			if err != nil {
 				return "", err
 			}
-			if err := s.deps.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
+			if err := s.Deps.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
 				return "", retainedBindingStoreError(err)
 			}
 		}

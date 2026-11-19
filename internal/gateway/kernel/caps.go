@@ -38,7 +38,7 @@ type capCheck struct {
 // holdCaps reserves the attempt's estimated cost against every spend cap it
 // is subject to. An exhausted cap refuses the attempt; a cap whose state
 // cannot be read skips the target, as an unreadable quota does.
-func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, deadline time.Time) capCheck {
+func (s *Server) holdCaps(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, deadline time.Time) capCheck {
 	var check capCheck
 	if x.freeRetainedControl() {
 		return check
@@ -47,17 +47,17 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 		return check
 	}
 	checked := false
-	for _, owner := range quota.AttemptCaps(x.route, provider, slot) {
+	for _, owner := range quota.AttemptCaps(x.Route, provider, slot) {
 		if owner.Limits == nil {
 			continue
 		}
 		if !checked {
-			if e := s.deps.Admission.CheckCostAccounting(ctx); e != nil {
+			if e := s.Deps.Admission.CheckCostAccounting(ctx); e != nil {
 				return capCheck{quota: owner.Quota}
 			}
 			checked = true
 		}
-		if e := s.deps.Admission.CheckPendingCostAccounting(ctx, owner.ID); e != nil {
+		if e := s.Deps.Admission.CheckPendingCostAccounting(ctx, owner.ID); e != nil {
 			return capCheck{quota: owner.Quota}
 		}
 		check.owners = append(check.owners, owner.ID)
@@ -69,7 +69,7 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 				continue
 			}
 		}
-		if !s.deps.Admission.Ready() {
+		if !s.Deps.Admission.Ready() {
 			return capCheck{quota: owner.Quota}
 		}
 		ttl := max(time.Until(deadline), time.Second)
@@ -80,7 +80,7 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 			return capCheck{quota: owner.Quota, refusal: &attemptFailure{class: classBudget, quota: owner.Quota, retryAfter: exceeded.RetryAfter}}
 		}
 		if err != nil {
-			s.deps.Admission.Logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.ID, "error", err.Error())
+			s.Deps.Admission.Logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.ID, "error", err.Error())
 			return capCheck{quota: owner.Quota}
 		}
 		if index < 0 {
@@ -92,13 +92,13 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 	return check
 }
 
-func (s *Server) holdCap(ctx context.Context, x *call, index int, owner quota.CappedOwner, bound rates.Cost, ttl time.Duration) (*admission.Lease, error) {
+func (s *Server) holdCap(ctx context.Context, x *Call, index int, owner quota.CappedOwner, bound rates.Cost, ttl time.Duration) (*admission.Lease, error) {
 	amount := quota.CostReservation{RequestID: x.request.accountingID()}
 	if !bound.IsZero() {
 		amount.Amount = bound.String()
 	}
 	if index < 0 || !x.caps[index].lease.HasCostReservation() {
-		return s.deps.Admission.Reserve(ctx, amount.On(quota.CapRequest(owner, ttl)))
+		return s.Deps.Admission.Reserve(ctx, amount.On(quota.CapRequest(owner, ttl)))
 	}
 	held := x.caps[index].lease
 	return held, held.GrowCost(ctx, amount.Amount, amount.Amount, amount.RequestID, ttl)
@@ -106,7 +106,7 @@ func (s *Server) holdCap(ctx context.Context, x *call, index int, owner quota.Ca
 
 // spendCaps marks the caps an attempt was dispatched against, whose
 // reservations settle at cost rather than being given back.
-func (x *call) spendCaps(owners []string, attempt routing.Attempt) {
+func (x *Call) spendCaps(owners []string, attempt routing.Attempt) {
 	bound := x.attemptCostBound(attempt)
 	x.spentCost = x.spentCost.Add(bound)
 	x.spentCharge = x.spentCharge.Add(x.attemptChargeBound(attempt, bound))
@@ -120,7 +120,7 @@ func (x *call) spendCaps(owners []string, attempt routing.Attempt) {
 
 // settleCaps replaces each cap reservation with what the attempts counted
 // against its owner cost, or gives it back when none of them was dispatched.
-func (s *Server) settleCaps(ctx context.Context, x *call) {
+func (s *Server) settleCaps(ctx context.Context, x *Call) {
 	for _, hold := range x.caps {
 		if hold.dispatched && hold.lease.HasCostReservation() {
 			actual := x.costOf(hold.owner).String()

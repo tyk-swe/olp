@@ -366,10 +366,10 @@ func projectGeminiBatchInput(object map[string]json.RawMessage, names geminiInpu
 				if json.Unmarshal(rawName, &name) != nil || names.Local == "" || name != names.Upstream {
 					return errGeminiBatchFidelity
 				}
-				config[nameField] = mustJSON(names.Local)
+				config[nameField] = MustJSON(names.Local)
 			}
 		}
-		object[field] = mustJSON(config)
+		object[field] = MustJSON(config)
 	}
 	return nil
 }
@@ -400,13 +400,13 @@ func geminiBatchOutputNames(object map[string]json.RawMessage) ([]string, error)
 }
 
 func (b geminiBatchObject) project(localID, routeSlug string, outputFiles map[string]string) ([]byte, error) {
-	localName := mustJSON("batches/" + localID)
+	localName := MustJSON("batches/" + localID)
 	for _, layer := range []map[string]json.RawMessage{b.outer, b.metadata} {
 		if _, present := layer["name"]; present {
 			layer["name"] = localName
 		}
 		if _, present := layer["model"]; present {
-			layer["model"] = mustJSON("models/" + routeSlug)
+			layer["model"] = MustJSON("models/" + routeSlug)
 		}
 		for _, field := range upstream.GeminiOutputFields() {
 			if raw, present := layer[field]; present {
@@ -419,14 +419,14 @@ func (b geminiBatchObject) project(localID, routeSlug string, outputFiles map[st
 					if json.Unmarshal(file, &upstreamName) != nil || outputFiles[upstreamName] == "" {
 						return nil, errGeminiBatchFidelity
 					}
-					destination["responsesFile"] = mustJSON(outputFiles[upstreamName])
+					destination["responsesFile"] = MustJSON(outputFiles[upstreamName])
 				}
-				layer[field] = mustJSON(destination)
+				layer[field] = MustJSON(destination)
 			}
 		}
 	}
 	if b.metadata != nil {
-		b.outer["metadata"] = mustJSON(b.metadata)
+		b.outer["metadata"] = MustJSON(b.metadata)
 	}
 	return json.Marshal(b.outer)
 }
@@ -440,52 +440,52 @@ func settleGeminiBatchResult(exchange *pinnedExchange, body []byte, batch upstre
 	if err != nil {
 		return geminiBatchObject{}, nil, err
 	}
-	exchange.complete(classSuccess)
+	exchange.Complete(ClassSuccess)
 	return object, metadata, nil
 }
 
 func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
+	x, authority, done := s.StateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	slug := r.PathValue("model")
-	if header := strings.TrimSpace(r.Header.Get(stateRouteHeader)); header != "" && header != slug {
-		s.refuse(x, w, fault.InvalidRequest("invalid_request", "The Gemini batch model path must match X-OLP-Route.", nil))
+	if header := strings.TrimSpace(r.Header.Get(StateRouteHeader)); header != "" && header != slug {
+		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "The Gemini batch model path must match X-OLP-Route.", nil))
 		return
 	}
-	route, err := s.nativeStateRoute(x, authority, r, slug)
+	route, err := s.NativeStateRoute(x, authority, r, slug)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
-	body, err := s.readResourceBody(w, r)
+	body, err := s.ReadResourceBody(w, r)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	input, err := validateGeminiBatchRequest(body, route.Slug)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	p, pinnedRoute, file, err := s.geminiBatchPin(r.Context(), x, authority, route, input)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	if pinnedRoute != nil {
 		route = pinnedRoute
 	}
-	x.route = route
+	x.Route = route
 	if file != nil {
 		var metadata struct {
 			Manifest batchManifest `json:"batch_manifest"`
 		}
 		if json.Unmarshal(file.Metadata, &metadata) != nil || metadata.Manifest.Adapter != geminiNativeManifest || metadata.Manifest.LineCount < 1 || metadata.Manifest.ManifestDigest == "" {
-			s.releaseHold(r.Context(), p.hold)
-			s.refuse(x, w, policyUnavailable("target_capability", "File-backed Gemini batches require qualified JSONL uploaded in one complete final chunk."))
+			s.ReleaseHold(r.Context(), p.Hold)
+			s.Refuse(x, w, policyUnavailable("target_capability", "File-backed Gemini batches require qualified JSONL uploaded in one complete final chunk."))
 			return
 		}
 		input.Expected = new(int64(metadata.Manifest.LineCount))
@@ -493,66 +493,66 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 		input.UpstreamFile = "files/" + file.UpstreamID
 		rewritten, rewriteErr := rewriteGeminiBatchInputFile(input.Upstream, input.UpstreamFile)
 		if rewriteErr != nil {
-			s.releaseHold(r.Context(), p.hold)
-			s.refuse(x, w, fault.InvalidRequest("invalid_request", "The input file name could not be bound.", nil))
+			s.ReleaseHold(r.Context(), p.Hold)
+			s.Refuse(x, w, fault.InvalidRequest("invalid_request", "The input file name could not be bound.", nil))
 			return
 		}
 		input.Upstream = rewritten
 	}
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
+	defer s.ResourceSettle(ctx, x, p)
 	if err := s.geminiResourceGates(ctx, x, authority, p, route, true); err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	source, sourceErr := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
 	if sourceErr != nil {
-		s.refuse(x, w, fault.InvalidRequest("invalid_request", "The Gemini batch request is invalid.", nil))
+		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "The Gemini batch request is invalid.", nil))
 		return
 	}
 	localInputFile, upstreamFile := geminiInputFiles(file)
-	endpoint, endpointErr := resourceURL(p.provider.Connector(), p.model, "models/"+url.PathEscape(p.provider.Connector().Model(p.model))+":batchGenerateContent", nil)
+	endpoint, endpointErr := ResourceURL(p.Provider.Connector(), p.Model, "models/"+url.PathEscape(p.Provider.Connector().Model(p.Model))+":batchGenerateContent", nil)
 	if endpointErr != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch address could not be resolved."))
+		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch address could not be resolved."))
 		return
 	}
-	submission, e := s.beginBatch(ctx, x, authority.ID, p, batchIntent{
-		kind: resources.KindGeminiBatch, adapter: connectors.BatchGemini, surface: batches.SurfaceGemini,
-		operation: wire.LineGeneration, window: 48 * time.Hour, expected: input.Expected,
-		submission: geminiSubmission(localInputFile, upstreamFile), source: source, canonical: input.Canonical, effective: input.Upstream,
+	submission, e := s.BeginBatch(ctx, x, authority.ID, p, BatchIntent{
+		Kind: resources.KindGeminiBatch, Adapter: connectors.BatchGemini, Surface: batches.SurfaceGemini,
+		Operation: wire.LineGeneration, Window: 48 * time.Hour, Expected: input.Expected,
+		Submission: geminiSubmission(localInputFile, upstreamFile), Source: source, Canonical: input.Canonical, Effective: input.Upstream,
 	})
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
-	id := submission.resource.UUID
-	result, exchange, e := s.sendBatch(ctx, x, p, id, endpoint, input.Upstream)
+	id := submission.Resource.UUID
+	result, exchange, e := s.SendBatch(ctx, x, p, id, endpoint, input.Upstream)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	batch, decodeErr := upstream.DecodeGeminiBatch(result)
 	if decodeErr != nil {
-		s.refuse(x, w, s.batchSubmissionUnknown(ctx, id, "The provider returned an invalid batch object. The batch may have been accepted."))
+		s.Refuse(x, w, s.BatchSubmissionUnknown(ctx, id, "The provider returned an invalid batch object. The batch may have been accepted."))
 		return
 	}
-	object, metadata, metadataErr := settleGeminiBatchResult(exchange, result, batch, p.model, geminiInputNames{Local: localInputFile, Upstream: upstreamFile})
+	object, metadata, metadataErr := settleGeminiBatchResult(exchange, result, batch, p.Model, geminiInputNames{Local: localInputFile, Upstream: upstreamFile})
 	if metadataErr != nil {
-		s.refuse(x, w, s.batchSubmissionUnknown(ctx, id, "The provider returned an invalid batch object. The batch may have been accepted."))
+		s.Refuse(x, w, s.BatchSubmissionUnknown(ctx, id, "The provider returned an invalid batch object. The batch may have been accepted."))
 		return
 	}
-	resource, e := s.activateBatch(ctx, submission, acceptedBatch{upstreamID: batch.ID, state: batch.State, metadata: metadata})
+	resource, e := s.ActivateBatch(ctx, submission, AcceptedBatch{UpstreamID: batch.ID, State: batch.State, Metadata: metadata})
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	projected, projectErr := s.projectGeminiBatchResource(ctx, resource, object)
 	if projectErr != nil {
-		s.refuse(x, w, geminiBatchProjectionError(projectErr))
+		s.Refuse(x, w, geminiBatchProjectionError(projectErr))
 		return
 	}
-	s.writeStateJSON(w, x, projected, exchange)
+	s.WriteStateJSON(w, x, projected, exchange)
 }
 
 func geminiInputFiles(file *resources.Resource) (string, string) {
@@ -607,25 +607,25 @@ func rewriteGeminiBatchInputFile(body []byte, upstreamName string) ([]byte, erro
 	if json.Unmarshal(batch["inputConfig"], &input) != nil {
 		return nil, errGeminiBatchFidelity
 	}
-	input["fileName"] = mustJSON(upstreamName)
-	batch["inputConfig"] = mustJSON(input)
-	root["batch"] = mustJSON(batch)
+	input["fileName"] = MustJSON(upstreamName)
+	batch["inputConfig"] = MustJSON(input)
+	root["batch"] = MustJSON(batch)
 	return json.Marshal(root)
 }
 
-func (s *Server) geminiBatchPin(ctx context.Context, x *call, authority keyauthority.Authority, route *routing.Route, input geminiBatchInput) (*pin, *routing.Route, *resources.Resource, *fault.Error) {
+func (s *Server) geminiBatchPin(ctx context.Context, x *Call, authority keyauthority.Authority, route *routing.Route, input geminiBatchInput) (*Pin, *routing.Route, *resources.Resource, *fault.Error) {
 	if input.LocalFileID == "" {
-		p, err := s.nativeStatePin(ctx, x, route)
+		p, err := s.NativeStatePin(ctx, x, route)
 		return p, route, nil, err
 	}
-	file, err := s.deps.Resources.Get(ctx, resources.KindGeminiFile, authority.ID, input.LocalFileID)
+	file, err := s.Deps.Resources.Get(ctx, resources.KindGeminiFile, authority.ID, input.LocalFileID)
 	if err != nil {
 		return nil, nil, nil, fault.NotFoundError("not_found", "No Gemini file with this identifier exists for this key.")
 	}
 	if file.RouteSlug != route.Slug {
 		return nil, nil, nil, fault.NotFoundError("not_found", "No Gemini file with this identifier exists for this key.")
 	}
-	p, pinnedRoute, pinErr := s.resolveResource(ctx, x, authority, file, "batch", retainedNewWork)
+	p, pinnedRoute, pinErr := s.ResolveResource(ctx, x, authority, file, "batch", RetainedNewWork)
 	if pinErr != nil || pinnedRoute == nil || pinnedRoute.Slug != route.Slug {
 		if pinErr != nil && pinErr.Code != "not_found" {
 			return nil, nil, nil, pinErr
@@ -649,76 +649,76 @@ func (s *Server) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Res
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = resources.KindGeminiFile, upstreamID
-	if existing, err := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity); err == nil {
+	if existing, err := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
 	}
 	metadata := map[string]json.RawMessage{}
-	metadata["upstream_model"] = mustJSON(resourceModel(owner))
-	metadata["name"] = mustJSON(upstreamName)
+	metadata["upstream_model"] = MustJSON(ResourceModel(owner))
+	metadata["name"] = MustJSON(upstreamName)
 	resource := &resources.Resource{
 		Kind: resources.KindGeminiFile, APIKeyID: owner.APIKeyID, RouteSlug: owner.RouteSlug,
 		ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID,
 		RouteRevisionID: owner.RouteRevisionID, TargetID: owner.TargetID, SlotID: owner.SlotID,
 		CredentialID: owner.CredentialID, UpstreamID: upstreamID, State: "processed",
-		Metadata: mustJSON(metadata), ParentID: new(owner.UUID),
+		Metadata: MustJSON(metadata), ParentID: new(owner.UUID),
 	}
 	if owner.ExpiresAt != nil {
 		expires := *owner.ExpiresAt
 		resource.ExpiresAt = &expires
 	}
-	commitCtx, stop := resourceCommitContext(ctx)
+	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
-	created, err := s.deps.Resources.Put(commitCtx, resource)
+	created, err := s.Deps.Resources.Put(commitCtx, resource)
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.deps.Resources.GetByUpstreamIncludingDeleted(commitCtx, identity); readErr == nil {
+	if existing, readErr := s.Deps.Resources.GetByUpstreamIncludingDeleted(commitCtx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err
 }
 
-func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin) *fault.Error) {
-	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
+func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use RetainedUse, op func(context.Context, *Call, keyauthority.Authority, *resources.Resource, *Pin) *fault.Error) {
+	x, authority, done := s.StateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "batches/")
-	resource, err := s.deps.Resources.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
+	resource, err := s.Deps.Resources.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
-		s.refuse(x, w, fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key."))
+		s.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key."))
 		return
 	}
 	if err != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini batch mapping could not be read."))
+		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini batch mapping could not be read."))
 		return
 	}
-	p, route, pinErr := s.resolveResource(r.Context(), x, authority, resource, "batch", use)
+	p, route, pinErr := s.ResolveResource(r.Context(), x, authority, resource, "batch", use)
 	if pinErr != nil {
-		s.refuse(x, w, pinErr)
+		s.Refuse(x, w, pinErr)
 		return
 	}
-	if !p.provider.Connector().Supports("batch", "gemini", "unary") || !p.provider.Supports(p.model, "batch", "gemini", "unary") {
-		s.refuse(x, w, fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key."))
+	if !p.Provider.Connector().Supports("batch", "gemini", "unary") || !p.Provider.Supports(p.Model, "batch", "gemini", "unary") {
+		s.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key."))
 		return
 	}
 	if route.Fidelity.Strict() {
-		s.refuse(x, w, policyUnavailable("target_capability", "Strict routes do not serve Gemini batches."))
+		s.Refuse(x, w, policyUnavailable("target_capability", "Strict routes do not serve Gemini batches."))
 		return
 	}
-	x.route = route
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	x.Route = route
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
+	defer s.ResourceSettle(ctx, x, p)
 	if err := s.geminiResourceGates(ctx, x, authority, p, route, false); err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	if err := op(ctx, x, authority, resource, p); err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 	}
 }
 
@@ -751,18 +751,18 @@ func (s *Server) projectGeminiBatchResource(ctx context.Context, resource *resou
 }
 
 func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
+	x, authority, done := s.StateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	pageSize, pageToken, cursorErr := geminiBatchPageCursor(r.URL.Query())
 	if cursorErr != nil {
-		s.refuse(x, w, cursorErr)
+		s.Refuse(x, w, cursorErr)
 		return
 	}
-	rows, continuation, listErr := s.listedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor, false)
+	rows, continuation, listErr := s.ListedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
+		batch, err := s.Deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor, false)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
 			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini batch owned by this key.", &param)
@@ -772,17 +772,17 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 		}
 		return batch, nil
 	}, func(row *resources.Resource) *fault.Error {
-		return s.authorizeListedResource(r.Context(), authority, row)
+		return s.AuthorizeListedResource(r.Context(), authority, row)
 	})
 	if listErr != nil {
-		s.refuse(x, w, listErr)
+		s.Refuse(x, w, listErr)
 		return
 	}
 	operations := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
 		operation, projectErr := s.geminiBatchResourceObject(r.Context(), row, row.Metadata)
 		if projectErr != nil {
-			s.refuse(x, w, geminiBatchProjectionError(projectErr))
+			s.Refuse(x, w, geminiBatchProjectionError(projectErr))
 			return
 		}
 		operations = append(operations, operation)
@@ -791,40 +791,40 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 	if continuation != "" {
 		response["nextPageToken"] = continuation
 	}
-	s.writeStateJSON(w, x, mustJSON(response))
+	s.WriteStateJSON(w, x, MustJSON(response))
 }
 
-func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use retainedUse, method string, cancel bool) {
-	s.geminiBatchCall(w, r, use, func(ctx context.Context, x *call, _ keyauthority.Authority, resource *resources.Resource, p *pin) *fault.Error {
+func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use RetainedUse, method string, cancel bool) {
+	s.geminiBatchCall(w, r, use, func(ctx context.Context, x *Call, _ keyauthority.Authority, resource *resources.Resource, p *Pin) *fault.Error {
 		path := "batches/" + url.PathEscape(resource.UpstreamID)
 		if cancel {
 			path += ":cancel"
 		}
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, path, nil)
+		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, path, nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch address could not be resolved.")
 		}
-		response, failure := s.pinnedDo(ctx, x, p, method, endpoint, nil, "")
+		response, failure := s.PinnedDo(ctx, x, p, method, endpoint, nil, "")
 		if failure != nil {
-			if failure.status == http.StatusNotFound {
-				_ = s.deps.Resources.Tombstone(ctx, resource.ID)
+			if failure.Status == http.StatusNotFound {
+				_ = s.Deps.Resources.Tombstone(ctx, resource.ID)
 				return fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key.")
 			}
-			return upstreamError(failure)
+			return UpstreamError(failure)
 		}
 		defer response.Body.Close()
-		body, err := response.readBody(s.cfg.MaxResponseBytes)
+		body, err := response.ReadBody(s.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch response could not be read.")
 		}
 		if cancel && geminiBatchCancelAcknowledgement(body) {
-			response.exchange.complete(classSuccess)
+			response.Exchange.Complete(ClassSuccess)
 
 			projected, projectErr := s.geminiBatchResourceObject(ctx, resource, resource.Metadata)
 			if projectErr != nil {
 				return geminiBatchProjectionError(projectErr)
 			}
-			s.writeStateJSON(w, x, projected, response.exchange)
+			s.WriteStateJSON(w, x, projected, response.Exchange)
 			return nil
 		}
 		batch, decodeErr := upstream.DecodeGeminiBatch(body)
@@ -833,14 +833,14 @@ func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		}
 		names, namesErr := geminiBatchInputNames(resource)
 		if namesErr != nil {
-			response.exchange.interrupt(classProtocol, true)
+			response.Exchange.interrupt(classProtocol, true)
 			return geminiBatchProjectionError(errGeminiBatchFidelity)
 		}
-		object, metadata, metadataErr := settleGeminiBatchResult(response.exchange, body, batch, resourceModel(resource), names)
+		object, metadata, metadataErr := settleGeminiBatchResult(response.Exchange, body, batch, ResourceModel(resource), names)
 		if metadataErr != nil {
 			return geminiBatchProjectionError(errGeminiBatchFidelity)
 		}
-		if err := s.deps.Resources.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
+		if err := s.Deps.Resources.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch refresh could not be committed.")
 		}
 
@@ -848,55 +848,55 @@ func (s *Server) geminiBatchRequest(w http.ResponseWriter, r *http.Request, use 
 		if projectErr != nil {
 			return geminiBatchProjectionError(projectErr)
 		}
-		s.writeStateJSON(w, x, projected, response.exchange)
+		s.WriteStateJSON(w, x, projected, response.Exchange)
 		return nil
 	})
 }
 
 func (s *Server) geminiGetBatch(w http.ResponseWriter, r *http.Request) {
-	s.geminiBatchRequest(w, r, retainedRetrieval, http.MethodGet, false)
+	s.geminiBatchRequest(w, r, RetainedRetrieval, http.MethodGet, false)
 }
 
 func (s *Server) geminiBatchCancel(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "cancel" || localID == "" {
-		x, _, done := s.stateBegin(w, r, wire.GeminiBatch)
+		x, _, done := s.StateBegin(w, r, wire.GeminiBatch)
 		if !done {
-			defer s.gate.Release(r.Context())
-			s.refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini batch action."))
+			defer s.Gate.Release(r.Context())
+			s.Refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini batch action."))
 		}
 		return
 	}
 	r.SetPathValue("name", localID)
-	s.geminiBatchRequest(w, r, retainedHousekeeping, http.MethodPost, true)
+	s.geminiBatchRequest(w, r, RetainedHousekeeping, http.MethodPost, true)
 }
 
 func (s *Server) geminiDeleteBatch(w http.ResponseWriter, r *http.Request) {
-	s.geminiBatchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, _ keyauthority.Authority, resource *resources.Resource, p *pin) *fault.Error {
-		if err := s.requireBatchEvidenceSettled(ctx, resource.UUID); err != nil {
+	s.geminiBatchCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, _ keyauthority.Authority, resource *resources.Resource, p *Pin) *fault.Error {
+		if err := s.RequireBatchEvidenceSettled(ctx, resource.UUID); err != nil {
 			return err
 		}
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches/"+url.PathEscape(resource.UpstreamID), nil)
+		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "batches/"+url.PathEscape(resource.UpstreamID), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini batch address could not be resolved.")
 		}
-		response, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
-		if failure != nil && failure.status != http.StatusNotFound {
-			return upstreamError(failure)
+		response, failure := s.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
+		if failure != nil && failure.Status != http.StatusNotFound {
+			return UpstreamError(failure)
 		}
 		if response != nil {
 			_ = response.Body.Close()
-			response.exchange.complete(classSuccess)
+			response.Exchange.Complete(ClassSuccess)
 		}
-		if err := s.deps.Resources.Tombstone(ctx, resource.ID); err != nil {
+		if err := s.Deps.Resources.Tombstone(ctx, resource.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch mapping could not be deleted.")
 		}
 
 		if response == nil {
-			s.writeStateJSON(w, x, []byte(`{}`))
+			s.WriteStateJSON(w, x, []byte(`{}`))
 			return nil
 		}
-		s.writeStateJSON(w, x, []byte(`{}`), response.exchange)
+		s.WriteStateJSON(w, x, []byte(`{}`), response.Exchange)
 		return nil
 	})
 }
@@ -912,7 +912,7 @@ func geminiBatchPageCursor(query url.Values) (int, string, *fault.Error) {
 		pageSize = parsed
 	}
 	token := query.Get("pageToken")
-	if token != "" && !strings.HasPrefix(token, retainedListCursorPrefix) && !validGeminiResourceID(token, resources.KindGeminiBatch) {
+	if token != "" && !strings.HasPrefix(token, RetainedListCursorPrefix) && !validGeminiResourceID(token, resources.KindGeminiBatch) {
 		param := "pageToken"
 		return 0, "", fault.InvalidRequest("invalid_value", "pageToken must be a local Gemini batch identifier.", &param)
 	}

@@ -2,13 +2,13 @@ package kernel
 
 import "encoding/json"
 
-func (x *call) promptCacheKey() string {
-	if x.route == nil || x.route.PromptCache == nil {
+func (x *Call) promptCacheKey() string {
+	if x.Route == nil || x.Route.PromptCache == nil {
 		return ""
 	}
 	session := ""
-	if x.route.PromptCache.KeySource == "session" {
-		session = x.attribution[x.route.PromptCache.SessionLabel]
+	if x.Route.PromptCache.KeySource == "session" {
+		session = x.attribution[x.Route.PromptCache.SessionLabel]
 		if session == "" {
 			return ""
 		}

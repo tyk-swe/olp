@@ -28,30 +28,30 @@ import (
 
 const defaultBatchCompletionWindow = 24 * time.Hour
 
-type batchIntent struct {
+type BatchIntent struct {
 	resourceID uuid.UUID
-	kind       string
-	adapter    connectors.BatchAdapter
-	surface    batches.Surface
-	operation  wire.LineOperation
-	window     time.Duration
-	expected   *int64
-	submission batches.Submission
-	source     oif.Document
-	canonical  []byte
-	effective  []byte
+	Kind       string
+	Adapter    connectors.BatchAdapter
+	Surface    batches.Surface
+	Operation  wire.LineOperation
+	Window     time.Duration
+	Expected   *int64
+	Submission batches.Submission
+	Source     oif.Document
+	Canonical  []byte
+	Effective  []byte
 	serving    oif.ServingIdentity
 }
 
 type batchSubmission struct {
-	resource resources.Resource
+	Resource resources.Resource
 	expected *int64
 }
 
-type acceptedBatch struct {
-	upstreamID string
-	state      string
-	metadata   json.RawMessage
+type AcceptedBatch struct {
+	UpstreamID string
+	State      string
+	Metadata   json.RawMessage
 	expected   *int64
 	contract   []byte
 }
@@ -125,36 +125,36 @@ func completionWindowRange(vendor string) (int, int) {
 	}
 }
 
-func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p *pin, intent batchIntent) (batchSubmission, *fault.Error) {
-	if s.deps.Batches == nil {
+func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p *Pin, intent BatchIntent) (batchSubmission, *fault.Error) {
+	if s.Deps.Batches == nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
-	if p.provider.CredentialSource == "caller" {
+	if p.Provider.CredentialSource == "caller" {
 		return batchSubmission{}, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
 	}
-	digester := s.deps.Digester
+	digester := s.Deps.Digester
 	if digester == nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
 	}
-	now := s.now()
-	template, err := s.settlementTemplate(x, p, string(intent.surface), string(intent.operation), now)
+	now := s.Now()
+	template, err := s.settlementTemplate(x, p, string(intent.Surface), string(intent.Operation), now)
 	if err != nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
-	canonical, err := canonicalBatchJSON(intent.canonical)
+	canonical, err := canonicalBatchJSON(intent.Canonical)
 	if err != nil {
 		return batchSubmission{}, fault.InvalidRequest("invalid_json", "The batch submission must be valid JSON.", nil)
 	}
-	identity, err := json.Marshal([]string{authorityID, x.route.Slug, string(intent.surface), intent.kind, string(intent.operation), string(canonical)})
+	identity, err := json.Marshal([]string{authorityID, x.Route.Slug, string(intent.Surface), intent.Kind, string(intent.Operation), string(canonical)})
 	if err != nil {
 		return batchSubmission{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be encoded.")
 	}
 	resource := s.batchResource(x, authorityID, p, intent)
-	err = s.deps.Batches.BeginSubmission(ctx, batches.Intent{
-		ResourceID: resource.UUID, Adapter: intent.adapter, Binding: batchBinding(resource), Surface: intent.surface,
-		SubmissionDigest: digester.Digest(secrets.BatchSubmissionDigest, string(identity)), LineOperation: intent.operation,
-		Template: template, ExpectedResults: intent.expected, Submission: intent.submission,
-		CreatorDeadline: creatorDeadline(ctx, now, x.route.OverallTimeout), CloseAfter: now.Add(intent.window + 48*time.Hour),
+	err = s.Deps.Batches.BeginSubmission(ctx, batches.Intent{
+		ResourceID: resource.UUID, Adapter: intent.Adapter, Binding: batchBinding(resource), Surface: intent.Surface,
+		SubmissionDigest: digester.Digest(secrets.BatchSubmissionDigest, string(identity)), LineOperation: intent.Operation,
+		Template: template, ExpectedResults: intent.Expected, Submission: intent.Submission,
+		CreatorDeadline: creatorDeadline(ctx, now, x.Route.OverallTimeout), CloseAfter: now.Add(intent.Window + 48*time.Hour),
 	})
 	if errors.Is(err, batches.ErrSubmissionInFlight) {
 		return batchSubmission{}, fault.ServerError(http.StatusConflict, "submission_unknown",
@@ -163,41 +163,41 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 	if err != nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch submission intent could not be stored.")
 	}
-	submission := batchSubmission{resource: resource, expected: intent.expected}
-	if intent.kind != resources.KindStrictBatch {
+	submission := batchSubmission{Resource: resource, expected: intent.Expected}
+	if intent.Kind != resources.KindStrictBatch {
 		return submission, nil
 	}
 	payload, err := json.Marshal(durableDocument{
-		Version: *resource.ContractVersion, Source: intent.source.Bytes(), Effective: intent.effective,
-		Binding: p.model, Serving: intent.serving,
+		Version: *resource.ContractVersion, Source: intent.Source.Bytes(), Effective: intent.Effective,
+		Binding: p.Model, Serving: intent.serving,
 	})
 	if err != nil {
 		s.abandonBatch(ctx, resource.UUID)
 		return batchSubmission{}, durableError(err)
 	}
-	if err = s.deps.Resources.StageDurableContract(ctx, resource.UUID, payload, resource.ExpiresAt); err != nil {
+	if err = s.Deps.Resources.StageDurableContract(ctx, resource.UUID, payload, resource.ExpiresAt); err != nil {
 		s.abandonBatch(ctx, resource.UUID)
 		return batchSubmission{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The native batch contract could not be staged.")
 	}
 	return submission, nil
 }
 
-func (s *Server) batchResource(x *call, authorityID string, p *pin, intent batchIntent) resources.Resource {
+func (s *Server) batchResource(x *Call, authorityID string, p *Pin, intent BatchIntent) resources.Resource {
 	id := intent.resourceID
 	if id == uuid.Nil {
 		id = uuid.Must(uuid.NewV7())
 	}
 	resource := resources.Resource{
-		UUID: id, Kind: intent.kind, APIKeyID: authorityID, RouteSlug: x.route.Slug,
-		ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID,
-		RouteRevisionID: x.route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID,
-		CredentialID: p.slot.CredentialID, Metadata: json.RawMessage(`{}`),
+		UUID: id, Kind: intent.Kind, APIKeyID: authorityID, RouteSlug: x.Route.Slug,
+		ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID,
+		RouteRevisionID: x.Route.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID,
+		CredentialID: p.Slot.CredentialID, Metadata: json.RawMessage(`{}`),
 	}
-	if intent.kind != resources.KindStrictBatch {
+	if intent.Kind != resources.KindStrictBatch {
 		return resource
 	}
 	version := resources.DurableContractVersion
-	resource.ContractVersion, resource.ExpiresAt, resource.Metadata = &version, s.durableExpiry(nil), durableMetadata(p.model)
+	resource.ContractVersion, resource.ExpiresAt, resource.Metadata = &version, s.durableExpiry(nil), durableMetadata(p.Model)
 	return resource
 }
 
@@ -219,51 +219,51 @@ func creatorDeadline(ctx context.Context, now time.Time, overallTimeoutMillis in
 }
 
 func (s *Server) abandonBatch(ctx context.Context, resourceID uuid.UUID) {
-	commitCtx, stop := resourceCommitContext(ctx)
+	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
-	if err := s.deps.Batches.DeleteSubmission(commitCtx, resourceID); err != nil {
+	if err := s.Deps.Batches.DeleteSubmission(commitCtx, resourceID); err != nil {
 		s.log.Warn("batch submission intent could not be removed", "resource_id", resourceID, "error", err)
 	}
 }
 
-func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
-	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
+func (s *Server) SendBatch(ctx context.Context, x *Call, p *Pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
+	resp, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
 		if failure.acceptance.Unresolved() {
-			return nil, nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider may have accepted this batch, but its outcome is unknown.")
+			return nil, nil, s.BatchSubmissionUnknown(ctx, resourceID, "The provider may have accepted this batch, but its outcome is unknown.")
 		}
 		s.abandonBatch(ctx, resourceID)
-		return nil, nil, upstreamError(failure)
+		return nil, nil, UpstreamError(failure)
 	}
 	defer resp.Body.Close()
 
-	result, err := resp.readBody(s.cfg.MaxResponseBytes)
+	result, err := resp.ReadBody(s.Config.MaxResponseBytes)
 	if err != nil {
-		return nil, nil, s.batchSubmissionUnknown(ctx, resourceID, "The provider response could not be read. The batch may have been accepted.")
+		return nil, nil, s.BatchSubmissionUnknown(ctx, resourceID, "The provider response could not be read. The batch may have been accepted.")
 	}
-	return result, resp.exchange, nil
+	return result, resp.Exchange, nil
 }
 
-func (s *Server) activateBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, *fault.Error) {
-	commitCtx, stop := resourceCommitContext(ctx)
+func (s *Server) ActivateBatch(ctx context.Context, submission batchSubmission, accepted AcceptedBatch) (*resources.Resource, *fault.Error) {
+	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
 	stored, err := s.commitAcceptedBatch(commitCtx, submission, accepted)
 	if err == nil {
 		return stored, nil
 	}
-	if markErr := s.deps.Batches.MarkUnknown(commitCtx, submission.resource.UUID, batches.ErrorSubmissionCommitUnavailable, s.now()); markErr != nil {
-		s.log.Warn("accepted batch intent could not be marked unknown", "resource_id", submission.resource.UUID, "error", markErr)
+	if markErr := s.Deps.Batches.MarkUnknown(commitCtx, submission.Resource.UUID, batches.ErrorSubmissionCommitUnavailable, s.Now()); markErr != nil {
+		s.log.Warn("accepted batch intent could not be marked unknown", "resource_id", submission.Resource.UUID, "error", markErr)
 	}
 	return nil, fault.ServerError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed.")
 }
 
-func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, error) {
-	resource := submission.resource
-	resource.UpstreamID, resource.State = accepted.upstreamID, accepted.state
-	if accepted.metadata != nil {
-		resource.Metadata = accepted.metadata
+func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmission, accepted AcceptedBatch) (*resources.Resource, error) {
+	resource := submission.Resource
+	resource.UpstreamID, resource.State = accepted.UpstreamID, accepted.State
+	if accepted.Metadata != nil {
+		resource.Metadata = accepted.Metadata
 	}
-	tx, err := s.deps.Resources.Begin(ctx)
+	tx, err := s.Deps.Resources.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmis
 	if expected == nil {
 		expected = accepted.expected
 	}
-	if err = s.deps.Batches.ActivateTx(ctx, tx, resource.UUID, accepted.upstreamID, expected); err != nil {
+	if err = s.Deps.Batches.ActivateTx(ctx, tx, resource.UUID, accepted.UpstreamID, expected); err != nil {
 		return nil, err
 	}
 	return stored, tx.Commit(ctx)
@@ -284,16 +284,16 @@ func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmis
 
 func (s *Server) putAcceptedBatch(ctx context.Context, tx pgx.Tx, resource *resources.Resource, contract []byte) (*resources.Resource, error) {
 	if contract != nil {
-		return s.deps.Resources.PutDurableContractTx(ctx, tx, resource, contract)
+		return s.Deps.Resources.PutDurableContractTx(ctx, tx, resource, contract)
 	}
-	return s.deps.Resources.PutTx(ctx, tx, resource)
+	return s.Deps.Resources.PutTx(ctx, tx, resource)
 }
 
-func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *fault.Error {
-	if s.deps.Batches == nil {
+func (s *Server) RequireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *fault.Error {
+	if s.Deps.Batches == nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state is unavailable.")
 	}
-	pending, err := s.deps.Batches.Pending(ctx, resourceID)
+	pending, err := s.Deps.Batches.Pending(ctx, resourceID)
 	if err != nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state could not be read.")
 	}
@@ -303,29 +303,29 @@ func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uui
 	return nil
 }
 
-func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation string, now time.Time) (*usage.Event, error) {
-	if x == nil || x.request.release == nil || x.route == nil || p == nil {
+func (s *Server) settlementTemplate(x *Call, p *Pin, surface, lineOperation string, now time.Time) (*usage.Event, error) {
+	if x == nil || x.request.release == nil || x.Route == nil || p == nil {
 		return nil, errors.New("batch accounting identity is incomplete")
 	}
-	if s.deps.Runtime == nil {
+	if s.Deps.Runtime == nil {
 		return nil, errors.New("batch pricing inputs are unavailable")
 	}
-	inputs := s.deps.Runtime.RoutingInputs()
+	inputs := s.Deps.Runtime.RoutingInputs()
 	if inputs == nil || now.Sub(inputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
 		return nil, errors.New("batch pricing inputs are unavailable or stale")
 	}
 	attemptCount, attemptVendor, routingInputs := x.attemptCount, x.attemptVendor, x.routingInputs
-	fact := s.newFact(x, p.attempt, p.slot, 1, &p.provider)
+	fact := s.newFact(x, p.attempt, p.Slot, 1, &p.Provider)
 	x.attemptCount, x.attemptVendor, x.routingInputs = attemptCount, attemptVendor, routingInputs
-	pricingCall := call{
+	pricingCall := Call{
 		request: request{release: x.request.release}, authority: x.authority,
 		cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs,
-		routeLeg: routeLeg{route: x.route},
+		routeLeg: routeLeg{Route: x.Route},
 	}
-	fact.CardRev = pricingCall.attemptCardRevision(p.provider.ID, now)
+	fact.CardRev = pricingCall.attemptCardRevision(p.Provider.ID, now)
 	fact.StartedAt = now
 	fact.Status = http.StatusOK
-	fact.Class = classSuccess
+	fact.Class = ClassSuccess
 	fact.Committed = true
 	fact.UsageObserved = false
 	fact.UsageComplete = false
@@ -334,11 +334,11 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 		fact.Interaction.UpstreamState = upstream.Accepted
 		fact.Interaction.ClientState = usage.ClientUnobserved
 	}
-	if p.hold != nil {
-		fact.Budgets = append([]string(nil), p.hold.budgets...)
+	if p.Hold != nil {
+		fact.Budgets = append([]string(nil), p.Hold.budgets...)
 	}
-	fact.Price = inputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
-	fact.Discount = inputs.Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, now)
+	fact.Price = inputs.Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, lineOperation, now)
+	fact.Discount = inputs.Discount(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, now)
 	fact.PricingPinned = true
 	fact.CardPinned = true
 	accountingID := x.request.accountingID()
@@ -347,7 +347,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(),
-		PolicyDecisions: x.policyDecisions, Route: x.route.Slug, RouteRevisionID: x.route.RevisionID,
+		PolicyDecisions: x.policyDecisions, Route: x.Route.Slug, RouteRevisionID: x.Route.RevisionID,
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt: now, CompletedAt: now, Attempts: []events.AttemptFact{fact},
 	})
@@ -357,9 +357,9 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	if event == nil {
 		return nil, errors.New("batch usage event is unavailable")
 	}
-	if p.provider.ProfileID == connectors.BedrockBatchProfile {
+	if p.Provider.ProfileID == connectors.BedrockBatchProfile {
 		uncertain := aggregateTariffNeedsPerRecordUsage(fact.Price) ||
-			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(string(p.provider.Kind), p.provider.VendorID, p.model, lineOperation))
+			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(string(p.Provider.Kind), p.Provider.VendorID, p.Model, lineOperation))
 		policy, err := withPolicyFlag(*event.Attempts[0].Routing.Policy, "batch_aggregate_pricing_uncertain", uncertain)
 		if err != nil {
 			return nil, err
@@ -420,14 +420,14 @@ func batchExpectedResults(body []byte) *int64 {
 	return &count
 }
 
-func (s *Server) batchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *fault.Error {
+func (s *Server) BatchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *fault.Error {
 	return s.markBatchUnknown(ctx, resourceID, fault.ServerError(http.StatusBadGateway, "submission_unknown", message))
 }
 
 func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, failure *fault.Error) *fault.Error {
-	commitCtx, stop := resourceCommitContext(ctx)
+	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
-	if err := s.deps.Batches.MarkUnknown(commitCtx, resourceID, batches.ErrorSubmissionUnknown, s.now()); err != nil {
+	if err := s.Deps.Batches.MarkUnknown(commitCtx, resourceID, batches.ErrorSubmissionUnknown, s.Now()); err != nil {
 		s.log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
 	}
 	return failure

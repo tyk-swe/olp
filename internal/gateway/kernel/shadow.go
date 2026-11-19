@@ -69,7 +69,7 @@ func (s *Server) DrainShadows(ctx context.Context) error {
 // embeddings and rerank, whose repetition at another target has no effect a
 // caller could observe. Stateful Responses, pinned resources, files,
 // batches, realtime and media never are.
-func (x *call) mirrorable() bool {
+func (x *Call) mirrorable() bool {
 	if !x.mirrors || x.fixed || x.unary != nil || x.generation.parsed == nil {
 		return false
 	}
@@ -84,8 +84,8 @@ func (x *call) mirrorable() bool {
 // durable identity, so the decision is stable for the request and uniform
 // across requests. It is nil unless the route has a shadow target, which
 // keeps the sampling out of every other request.
-func (x *call) mirrorSeed() []byte {
-	if x.route == nil || !x.route.Shadowed() || !x.mirrorable() {
+func (x *Call) mirrorSeed() []byte {
+	if x.Route == nil || !x.Route.Shadowed() || !x.mirrorable() {
 		return nil
 	}
 	return []byte(x.request.accountingID())
@@ -95,7 +95,7 @@ func (x *call) mirrorSeed() []byte {
 // caller has its response. Each mirror is a request of its own: a fresh
 // identity that names the caller's request as its parent, its own deadline and
 // attempt, and accounting to the route rather than to the caller's key.
-func (s *Server) mirror(x *call) {
+func (s *Server) mirror(x *Call) {
 	if len(x.shadows) == 0 {
 		return
 	}
@@ -128,15 +128,15 @@ func (s *Server) mirror(x *call) {
 // runShadow serves one mirror. It shares the caller's parsed request, which is
 // no longer written once the caller's response is complete; everything the
 // attempt prepares from it is built afresh.
-func (s *Server) runShadow(parent *call, attempt routing.Attempt) {
+func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
 	id := uuid.Must(uuid.NewV7()).String()
-	route := parent.route
-	x := &call{
+	route := parent.Route
+	x := &Call{
 		request: request{
 			id:        id,
 			minted:    true,
 			clientIP:  parent.request.clientIP,
-			startedAt: s.now(),
+			startedAt: s.Now(),
 			release:   parent.request.release,
 		},
 		prompt:  parent.prompt,
@@ -162,7 +162,7 @@ func (s *Server) runShadow(parent *call, attempt routing.Attempt) {
 		origin:    usage.OriginShadow,
 		parent:    parent.request.accountingID(),
 		priority:  routing.PriorityLow, routeLeg: routeLeg{affinity: parent.affinity,
-			route: route,
+			Route: route,
 
 			policy:   parent.policy,
 			attempts: []routing.Attempt{attempt},
@@ -170,20 +170,20 @@ func (s *Server) runShadow(parent *call, attempt routing.Attempt) {
 	}
 	if x.generation.parsed.Stream {
 		x.generation.emit = func([]byte) error {
-			x.delivered(s.now())
+			x.Delivered(s.Now())
 			return nil
 		}
 	}
 	ctx := s.shadows.ctx
 	defer s.settleAdmission(ctx, x)
 	if e := s.reserveSystemBudgets(ctx, x); e != nil {
-		s.finish(x, &outcome{err: e}, e.Status)
+		s.Finish(x, &Outcome{Err: e}, e.Status)
 		return
 	}
 	out := s.execute(ctx, x)
 	status := 200
-	if out.err != nil {
-		status = out.err.Status
+	if out.Err != nil {
+		status = out.Err.Status
 	}
-	s.finish(x, out, status)
+	s.Finish(x, out, status)
 }

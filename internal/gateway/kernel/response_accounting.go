@@ -26,14 +26,14 @@ func backgroundResponseRequested(parsed *wire.Request) bool {
 // A background response may outlive its POST or stream. Keep a content-free
 // accounting template on the resource so polling uses the generation's key,
 // attribution, pricing and request identity.
-func (s *Server) pendingResponseUsage(x *call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
+func (s *Server) pendingResponseUsage(x *Call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
 	if !backgroundResponseRequested(x.generation.parsed) {
 		return false
 	}
 	return s.pendingGenerationUsage(x, fact, metadata)
 }
 
-func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
+func (s *Server) pendingGenerationUsage(x *Call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
 	copyFact := *fact
 	if decisions, active := x.guard.ledger.duringAttempt(); active {
 		copyFact.GuardrailDecisions = decisions
@@ -61,7 +61,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metad
 	} else {
 		facts = append(facts, copyFact)
 	}
-	now := s.now()
+	now := s.Now()
 	ev, err := events.UsageEvent(events.Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
@@ -92,7 +92,7 @@ type generationHTTPFinalizer struct {
 
 // Attach only the generation identity actually published by this execution.
 // Reused native mappings may belong to another original request.
-func attachGenerationHTTP(x *call, resource *resources.Resource) error {
+func attachGenerationHTTP(x *Call, resource *resources.Resource) error {
 	if x.generation.generationHTTP == nil || resource == nil {
 		return errors.New("deferred generation HTTP owner is unavailable")
 	}
@@ -118,9 +118,9 @@ func attachGenerationHTTP(x *call, resource *resources.Resource) error {
 	return nil
 }
 
-func (s *Server) finalizeGenerationHTTP(x *call, env events.Envelope) {
+func (s *Server) finalizeGenerationHTTP(x *Call, env events.Envelope) {
 	owner := x.generation.generationHTTP
-	if owner == nil || owner.localID == "" || s.deps.Resources == nil || len(env.Attempts) == 0 {
+	if owner == nil || owner.localID == "" || s.Deps.Resources == nil || len(env.Attempts) == 0 {
 		return
 	}
 	last := &owner.event.Attempts[len(owner.event.Attempts)-1]
@@ -139,7 +139,7 @@ func (s *Server) finalizeGenerationHTTP(x *call, env events.Envelope) {
 			StartedAt: last.StartedAt, CompletedAt: fact.StartedAt.Add(max(fact.Duration, 0)), StatusCode: events.OptionalStatus(fact.Status),
 			Committed: fact.Committed, LatencyMS: events.Milliseconds(fact.Duration), FirstByteMS: events.OptionalMilliseconds(fact.FirstByte)},
 	}
-	if fact.Class != classSuccess {
+	if fact.Class != ClassSuccess {
 		completion.Attempt.ErrorClass = events.OptionalText(fact.Class)
 	}
 	if fact.Interaction != nil {
@@ -147,7 +147,7 @@ func (s *Server) finalizeGenerationHTTP(x *call, env events.Envelope) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := s.deps.Resources.CompleteGenerationHTTP(ctx, owner.localID, completion); err != nil {
+	if err := s.Deps.Resources.CompleteGenerationHTTP(ctx, owner.localID, completion); err != nil {
 		// A crash or failed bounded finalization leaves explicit missing HTTP
 		// metadata. Never manufacture success or replay its financial event.
 		s.log.Warn("deferred generation HTTP outcome not recorded", "request_id", env.RequestID, "error", err)
@@ -167,11 +167,11 @@ func (s *Server) applyResponseObservation(ctx context.Context, localID string, o
 	if observation.Usage != nil {
 		evidence = events.ObservedUsage(observation.Usage, observation.Complete, "generation")
 	}
-	result, err := s.deps.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
+	result, err := s.Deps.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.Now())
 	if err != nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
 	}
-	if err := s.deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
+	if err := s.Deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
 		s.log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
 	}
 	return nil

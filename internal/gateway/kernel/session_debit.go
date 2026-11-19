@@ -115,7 +115,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 				return
 			case <-ticker.C:
 				checkCtx, stop := context.WithTimeout(callCtx, time.Second)
-				err := s.deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
+				err := s.Deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
 				stop()
 				if err != nil {
 					if callCtx.Err() != nil {
@@ -140,7 +140,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 		case <-debit.leaseStarted:
 			checkCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 			defer stop()
-			if err := s.deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
+			if err := s.Deps.Debits.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
 				return fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 			}
 		default:
@@ -169,29 +169,29 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	if s.webrtcExposureHeld(keyID) {
 		return true, nil
 	}
-	if s.deps.Debits == nil {
+	if s.Deps.Debits == nil {
 		return false, nil
 	}
-	held, err := s.deps.Debits.HasUnknownDebit(ctx, keyID, max(webRTCBound, nativeDuplexSession))
+	held, err := s.Deps.Debits.HasUnknownDebit(ctx, keyID, max(webRTCBound, nativeDuplexSession))
 	if err != nil {
 		return false, fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
-	if s.deps.Debits == nil || x.callerCostExempt() && x.workflow == nil {
+	if s.Deps.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
 	snapshot := x.snapshot()
-	if snapshot == nil || x.route == nil {
+	if snapshot == nil || x.Route == nil {
 		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}
 	releaseID := canonicalSessionID(snapshot.Generation().ID)
-	routeRevisionID := canonicalSessionID(x.route.RevisionID)
+	routeRevisionID := canonicalSessionID(x.Route.RevisionID)
 	if releaseID == "" {
 		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}
@@ -204,7 +204,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		currency = attempt.Price.Currency
 	}
 	if currency == "" {
-		resolved, err := s.deps.Debits.Currency(ctx)
+		resolved, err := s.Deps.Debits.Currency(ctx)
 		if err != nil || resolved == "" {
 			return quota.LimitsUnavailable()
 		}
@@ -243,7 +243,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		debit.runID, debit.stepID = x.workflow.runID, stepID
 		intent.Kind, intent.RunID, intent.StepID = debits.KindModel, debit.runID, debit.stepID
 	}
-	boundaries := x.admissionAuthority(authority).CostBoundaries(x.limitRoute())
+	boundaries := x.AdmissionAuthority(authority).CostBoundaries(x.limitRoute())
 	if !boundaries.Resolved {
 		return quota.LimitsUnavailable()
 	}
@@ -256,9 +256,9 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	}
 	var state debits.State
 	if x.workflow != nil {
-		state, err = s.deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
+		state, err = s.Deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
 	} else {
-		state, err = s.deps.Debits.Prepare(ctx, intent, owners)
+		state, err = s.Deps.Debits.Prepare(ctx, intent, owners)
 	}
 	if err != nil || state != debits.Prepared {
 		return quota.LimitsUnavailable()
@@ -266,13 +266,13 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	if x.workflow != nil {
 		x.workflow.ordinal++
 	}
-	if err := s.deps.Debits.Admit(ctx, dispatchID, claimID, admissions); err != nil {
+	if err := s.Deps.Debits.Admit(ctx, dispatchID, claimID, admissions); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-		_ = s.deps.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
+		_ = s.Deps.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			if s.deps.Admission != nil {
-				s.deps.Admission.RecordRejection(exceeded.Dimension)
+			if s.Deps.Admission != nil {
+				s.Deps.Admission.RecordRejection(exceeded.Dimension)
 			}
 			return quota.RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		}
@@ -282,15 +282,15 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	return nil
 }
 
-func (s *Server) markSessionDispatched(ctx context.Context, x *call) *fault.Error {
-	if x.sessionDebit == nil || s.deps.Debits == nil {
+func (s *Server) markSessionDispatched(ctx context.Context, x *Call) *fault.Error {
+	if x.sessionDebit == nil || s.Deps.Debits == nil {
 		return nil
 	}
 	err := func() error {
 		if x.workflow == nil {
-			return s.deps.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+			return s.Deps.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 		}
-		return s.deps.Debits.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+		return s.Deps.Debits.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
@@ -302,12 +302,12 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *fault.Erro
 	return nil
 }
 
-func (s *Server) abandonSessionDebit(ctx context.Context, x *call) {
-	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.deps.Debits == nil {
+func (s *Server) abandonSessionDebit(ctx context.Context, x *Call) {
+	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Deps.Debits == nil {
 		return
 	}
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+	if err := s.Deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
 		s.log.Warn("session debit release failed", "error", err.Error())
 	}
 	cancel()
@@ -317,18 +317,18 @@ func (s *Server) abandonSessionDebit(ctx context.Context, x *call) {
 	x.sessionDebit = nil
 }
 
-func (s *Server) markSessionUnknown(ctx context.Context, x *call) {
-	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.deps.Debits == nil {
+func (s *Server) markSessionUnknown(ctx context.Context, x *Call) {
+	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Deps.Debits == nil {
 		return
 	}
 	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+	if err := s.Deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
 		s.log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
 	}
 	cancel()
 }
 
-func (s *Server) finishSessionDebit(ctx context.Context, x *call, failed bool) {
+func (s *Server) finishSessionDebit(ctx context.Context, x *Call, failed bool) {
 	if x.sessionDebit == nil {
 		return
 	}

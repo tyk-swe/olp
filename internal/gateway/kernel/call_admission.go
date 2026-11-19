@@ -12,12 +12,12 @@ import (
 )
 
 // System work has no key/group/end-user spend but shares aggregate invoice caps.
-func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *fault.Error {
-	source := s.deps.BudgetAuthority
+func (s *Server) reserveSystemBudgets(ctx context.Context, x *Call) *fault.Error {
+	source := s.Deps.BudgetAuthority
 	if source == nil {
 		return nil
 	}
-	authority, err := source.BudgetAuthority(x.route.ProjectID)
+	authority, err := source.BudgetAuthority(x.Route.ProjectID)
 	if err != nil {
 		return quota.LimitsUnavailable()
 	}
@@ -35,16 +35,16 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *fault.Error
 	}
 	costChecked := callerCostBudgeted(&authority, x.limitRoute())
 	if costChecked {
-		if failure := s.deps.Admission.CheckCostAccounting(ctx); failure != nil {
+		if failure := s.Deps.Admission.CheckCostAccounting(ctx); failure != nil {
 			return failure
 		}
 	}
 	var failure *fault.Error
-	x.lease, failure = s.deps.Admission.ReserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
+	x.lease, failure = s.Deps.Admission.ReserveAggregateBudgets(ctx, &authority, time.Duration(x.Route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
 	return failure
 }
 
-func (x *call) admissionAuthority(authority keyauthority.Authority) keyauthority.Authority {
+func (x *Call) AdmissionAuthority(authority keyauthority.Authority) keyauthority.Authority {
 	if x == nil {
 		return authority
 	}
@@ -60,7 +60,7 @@ func (x *call) admissionAuthority(authority keyauthority.Authority) keyauthority
 
 // limitRoute matches the route used by request accounting. Collection reads have
 // no single route; collection readers admit each represented route separately.
-func (x *call) limitRoute() string {
+func (x *Call) limitRoute() string {
 	if route := x.named(); route != nil {
 		return route.Slug
 	}
@@ -71,7 +71,7 @@ func (x *call) limitRoute() string {
 // defaults affect what is actually sent, even when the client omitted a bound.
 // Each attempt is priced once, for its own provider and model, so the cost
 // grows with the targets of a route and not with their square.
-func requestEstimate(x *call) int64 {
+func requestEstimate(x *Call) int64 {
 	var reserved int64
 	for _, attempt := range x.attempts {
 		provider := x.snapshot().Provider(attempt.ProviderID)
@@ -82,11 +82,11 @@ func requestEstimate(x *call) int64 {
 
 // settledTokens accounts for every attempted provider, not just the last one.
 // Uncertain attempts retain an estimate rather than refunding unknown work.
-func (x *call) settledTokens() *int64 {
+func (x *Call) settledTokens() *int64 {
 	return x.settledTokensFor(x.facts, x.estimate)
 }
 
-func (x *call) settledTokensFor(facts []events.AttemptFact, estimate int64) *int64 {
+func (x *Call) settledTokensFor(facts []events.AttemptFact, estimate int64) *int64 {
 	var total int64
 	for index := range facts {
 		fact := &facts[index]

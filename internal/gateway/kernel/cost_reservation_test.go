@@ -64,7 +64,7 @@ func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				x := &call{family: wire.Chat, historicalSnapshot: snapshot.ReadOnly(), workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
+				x := &Call{family: wire.Chat, historicalSnapshot: snapshot.ReadOnly(), workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
 				err := x.workflowModelCost(routing.Attempt{ProviderID: id, UpstreamModel: "model", Price: costPrice()})
 				if tc.want == "" {
 					if err != nil {
@@ -80,7 +80,7 @@ func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
 	}
 }
 
-func costExecution(t *testing.T, body string, family wire.Format, budget int, attempts ...routing.Attempt) *call {
+func costExecution(t *testing.T, body string, family wire.Format, budget int, attempts ...routing.Attempt) *Call {
 	t.Helper()
 	request, err := protocols.Parse(family, []byte(body), "team-chat")
 	if err != nil {
@@ -97,9 +97,9 @@ func costExecution(t *testing.T, body string, family wire.Format, budget int, at
 			ID: id, AuthMode: "none", Slots: []routing.Slot{{ID: uuid.NewString(), Enabled: true}},
 		}
 	}
-	return &call{
+	return &Call{
 		family:             family,
-		historicalSnapshot: snapshot.ReadOnly(), routeLeg: routeLeg{route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
+		historicalSnapshot: snapshot.ReadOnly(), routeLeg: routeLeg{Route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
 			attempts: attempts, budget: budget}, generation: generationCall{parsed: request},
 	}
 }
@@ -234,7 +234,7 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 		}, "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &call{facts: tc.facts, family: wire.Chat}
+			x := &Call{facts: tc.facts, family: wire.Chat}
 			if tc.operation == "embeddings" {
 				x.family = wire.Embeddings
 			}
@@ -255,7 +255,7 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
 	}})}
 	x := costExecution(t, `{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2, cheap, dear)
-	x.route.Retry = routing.Retry{classRateLimit: {MaxRetries: 1}}
+	x.Route.Retry = routing.Retry{classRateLimit: {MaxRetries: 1}}
 	x.cardPinned = true
 	x.cardRev = loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1", Prices: []rates.RoutingPrice{*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		Model: "dear", Operation: "generation",
@@ -279,7 +279,7 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 	}
 	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
 		Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}})}
-	videoExec := &call{
+	videoExec := &Call{
 		family:             wire.Format("video_create"),
 		media:              video,
 		request:            request{id: "video-charge", minted: true},
@@ -313,18 +313,18 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				snapshot.Providers[provider.ID] = provider
 				x.historicalSnapshot = snapshot.ReadOnly()
 			case "route":
-				x.route.ProjectID = &project
+				x.Route.ProjectID = &project
 			case "installation":
 				card.ProjectID = nil
 			case "authority":
 				authority.ProjectID = &project
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}}
-			s := &Server{now: func() time.Time { return now }, fleet: &health.Fleet{}, deps: Dependencies{Runtime: rt}}
+			s := &Server{Now: func() time.Time { return now }, fleet: &health.Fleet{}, Deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, authority)
 			dispatch := func() {
 				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
-				fact.Class, fact.UsageObserved, fact.UsageComplete = classSuccess, true, true
+				fact.Class, fact.UsageObserved, fact.UsageComplete = ClassSuccess, true, true
 				fact.Usage = &wire.Usage{InputTokens: 100, OutputTokens: 50}
 				x.facts = append(x.facts, fact)
 			}
@@ -367,9 +367,9 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 	now := time.Now()
 	provider := routing.Provider{ID: uuid.NewString(), Kind: "openai"}
-	x := &call{
+	x := &Call{
 		actor: "api_key_resource", operationOverride: "fine_tuning",
-		retained:           retainedOperation{use: retainedHousekeeping, usage: retainedTokenlessUsage},
+		retained:           retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage},
 		request:            request{startedAt: now},
 		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
 		routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
@@ -377,12 +377,12 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
 		}},
 	}
-	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &quota.Admission{
+	s := &Server{Now: func() time.Time { return now }, Deps: Dependencies{Admission: &quota.Admission{
 		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },
 	}}}
 	prepare := func(model string) retainedListEntry {
 		t.Helper()
-		pin := &pin{provider: provider, model: model, attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: model}}
+		pin := &Pin{Provider: provider, Model: model, attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: model}}
 		admission, err := s.prepareRetainedAdmission(x, pin, false)
 		if err != nil {
 			t.Fatal(err)
@@ -427,7 +427,7 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 			provider := x.snapshot().Provider(attempt.ProviderID)
 			provider.Kind = "openai_compatible"
 			if transformed {
-				x.route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
+				x.Route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
 					ID: "redact", Phase: contentpolicy.PhaseInput, Pattern: "first|second",
 					Action: contentpolicy.ActionRedact, Replacement: "filtered",
 				}}}
@@ -507,7 +507,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 				refreshed = now.Add(-routinginputs.PerformanceMaxAge - time.Second)
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: refreshed}}
-			s := &Server{now: func() time.Time { return now }, fleet: &health.Fleet{}, deps: Dependencies{Runtime: rt}}
+			s := &Server{Now: func() time.Time { return now }, fleet: &health.Fleet{}, Deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, keyauthority.Authority{})
 			provider := x.snapshot().Provider(x.attempts[0].ProviderID)
 			fact := s.newFact(x, x.attempts[0], provider.Slots[0], 1)

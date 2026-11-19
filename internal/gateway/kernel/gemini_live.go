@@ -95,39 +95,39 @@ func geminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Er
 }
 
 func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
-	x := &call{request: s.begin(w, r), family: wire.GeminiLive, actor: "api_key", mode: "realtime"}
+	x := &Call{request: s.begin(w, r), family: wire.GeminiLive, actor: "api_key", mode: "realtime"}
 	status := http.StatusInternalServerError
-	var out *outcome
-	defer func() { s.finish(x, out, status) }()
-	if !s.gate.Admit(r.Context()) {
-		x.failure, status = fault.Overloaded, fault.Overloaded.Status
+	var out *Outcome
+	defer func() { s.Finish(x, out, status) }()
+	if !s.Gate.Admit(r.Context()) {
+		x.Failure, status = fault.Overloaded, fault.Overloaded.Status
 		fault.WriteSurfaceError(w, fault.Overloaded, "gemini")
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	if !s.browserOriginAllowed(r) {
 		e := fault.PermissionError("origin_forbidden", "This origin is not allowed to open Live sessions.")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		fault.WriteSurfaceError(w, e, "gemini")
 		return
 	}
 	if !realtimeUpgrade(r) {
 		e := fault.InvalidRequest("websocket_upgrade_required", "Gemini Live requires a WebSocket upgrade.", nil)
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		fault.WriteSurfaceError(w, e, "gemini")
 		return
 	}
 	token, e := geminiClientKey(r)
 	if e == nil {
 		var authority keyauthority.Authority
-		authority, e = s.gate.AuthenticateRequest(r, token, "inference")
+		authority, e = s.Gate.AuthenticateRequest(r, token, "inference")
 		if e == nil {
 			s.bindAuthority(x, authority)
 			x.attribution, e = ingress.ParseAttribution(r, authority)
 		}
 	}
 	if e != nil {
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		fault.WriteSurfaceError(w, e, "gemini")
 		return
 	}
@@ -137,12 +137,12 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		e := fault.ServerError(http.StatusBadRequest, "websocket_upgrade_failed", "The Live WebSocket upgrade failed.")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		fault.WriteSurfaceError(w, e, "gemini")
 		return
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
-	limit := s.cfg.MaxEventBytes
+	limit := s.Config.MaxEventBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
@@ -152,85 +152,85 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
 		client.Close(websocket.StatusPolicyViolation, "setup required")
-		x.failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live requires a setup message first.", nil), http.StatusBadRequest
+		x.Failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live requires a setup message first.", nil), http.StatusBadRequest
 		return
 	}
 	setup, err := geminilifecycle.ParseLiveSetup(initial, int(limit))
 	if err != nil || !routeidentity.ValidSlug(setup.Model) {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
-		x.failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live setup is malformed.", nil), http.StatusBadRequest
+		x.Failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live setup is malformed.", nil), http.StatusBadRequest
 		return
 	}
 	route, ok := x.request.release.Snapshot().FindRoute(setup.Model)
-	if !ok || !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) || !slices.Contains(route.Operations, "realtime") {
+	if !ok || !x.authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) || !slices.Contains(route.Operations, "realtime") {
 		client.Close(websocket.StatusPolicyViolation, "route unavailable")
-		x.failure, status = fault.ModelNotFound(setup.Model), http.StatusNotFound
+		x.Failure, status = fault.ModelNotFound(setup.Model), http.StatusNotFound
 		return
 	}
-	x.route = &route
+	x.Route = &route
 	if route.MaxBodyBytes != nil && int64(len(initial)) > *route.MaxBodyBytes {
 		client.Close(websocket.StatusMessageTooBig, "request body limit exceeded")
-		x.failure, status = ingress.BodyTooLarge(), http.StatusRequestEntityTooLarge
+		x.Failure, status = ingress.BodyTooLarge(), http.StatusRequestEntityTooLarge
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
-	if e := x.guardrailSurfaceGate(&route); e != nil {
+	if e := x.GuardrailSurfaceGate(&route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "policy unavailable")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
 	if x.preferences, x.priority, e = routingControls(r, x.authority.Policy); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "invalid routing")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
-	if e := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &route); e != nil {
+	if e := unboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
 	x.estimate = resourceEstimate
 	if e := s.reserveState(ctx, x, x.authority, geminiLiveSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
-	var p *pin
+	var p *Pin
 	defer func() { s.settleSession(r.Context(), x, p) }()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == "gemini-live" && provider.Connector().Supports("realtime", "gemini", "realtime") && provider.Supports(model, "realtime", "gemini", "realtime")
 	})
 	if e != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
-	if e := s.unboundedPinLimits(x.admissionAuthority(x.authority), p, &route); e != nil {
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(x.authority), p, &route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
 	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, geminiLiveSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
-	endpoint, err := p.provider.Connector().GeminiLiveURL()
+	endpoint, err := p.Provider.Connector().GeminiLiveURL()
 	if err != nil {
 		client.Close(websocket.StatusPolicyViolation, "profile unavailable")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live profile cannot address this model."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live profile cannot address this model."), http.StatusBadGateway
 		return
 	}
 	check := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
 	if _, err := s.egress.ValidateEndpoint(check); err != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live provider address is not permitted."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live provider address is not permitted."), http.StatusBadGateway
 		return
 	}
-	bound, err := setup.BindModel(p.provider.Connector().Model(p.model))
+	bound, err := setup.BindModel(p.Provider.Connector().Model(p.Model))
 	if err != nil || int64(len(bound)) > limit {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
-		x.failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live setup could not be bound.", nil), http.StatusBadRequest
+		x.Failure, status = fault.InvalidRequest("invalid_live_setup", "Gemini Live setup could not be bound.", nil), http.StatusBadRequest
 		return
 	}
 	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
@@ -238,7 +238,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	dialTimer.Stop()
 	if e != nil {
 		client.Close(websocket.StatusInternalError, "provider unavailable")
-		x.failure, status = e, e.Status
+		x.Failure, status = e, e.Status
 		return
 	}
 	defer upstream.Close(websocket.StatusNormalClosure, "")
@@ -248,7 +248,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = true
 	if err := writeGeminiLiveFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
 		client.Close(websocket.StatusInternalError, "setup uncertain")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The Live setup outcome is unknown."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The Live setup outcome is unknown."), http.StatusBadGateway
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classAmbiguous, true
@@ -263,7 +263,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	stopAck()
 	if err != nil {
 		client.Close(websocket.StatusInternalError, "setup uncertain")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The Live provider did not acknowledge setup."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The Live provider did not acknowledge setup."), http.StatusBadGateway
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classAmbiguous, true
@@ -275,7 +275,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	if ackType != websocket.MessageText || geminilifecycle.ValidateLiveServerFrame(ack, int(limit)) != nil {
 		client.Close(websocket.StatusProtocolError, "invalid setup acknowledgement")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent a malformed setup acknowledgement."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent a malformed setup acknowledgement."), http.StatusBadGateway
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classProtocol, true
@@ -288,19 +288,19 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	ackDocument, err := oif.ParseJSON(ack, oif.Limits{MaxBytes: int(limit)})
 	if err != nil {
 		client.Close(websocket.StatusProtocolError, "invalid setup acknowledgement")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent an invalid setup acknowledgement."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent an invalid setup acknowledgement."), http.StatusBadGateway
 		return
 	}
 	if _, ok := ackDocument.Root().Lookup("setupComplete"); !ok {
 		client.Close(websocket.StatusProtocolError, "setup acknowledgement required")
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent content before setup completion."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent content before setup completion."), http.StatusBadGateway
 		return
 	}
 	if err := writeGeminiLiveFrame(ctx, client, websocket.MessageText, ack); err != nil {
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Live setup acknowledgement could not be delivered."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Live setup acknowledgement could not be delivered."), http.StatusBadGateway
 		return
 	}
-	x.delivered(s.now())
+	x.Delivered(s.Now())
 	if len(x.facts) > 0 && x.facts[len(x.facts)-1].Interaction != nil {
 		x.facts[len(x.facts)-1].Interaction.UpstreamState = acceptance.Accepted
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
@@ -347,34 +347,34 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if relayErr != nil {
-		x.failure, status = fault.ServerError(http.StatusBadGateway, "live_incomplete", "The Live session ended without a complete transport contract."), http.StatusBadGateway
+		x.Failure, status = fault.ServerError(http.StatusBadGateway, "live_incomplete", "The Live session ended without a complete transport contract."), http.StatusBadGateway
 		if x.strict() {
 			switch {
 			case errors.Is(relayErr, errGeminiLiveProviderError):
-				x.failure = fault.ServerError(http.StatusBadGateway, "live_provider_error", "The Live provider reported an error.")
+				x.Failure = fault.ServerError(http.StatusBadGateway, "live_provider_error", "The Live provider reported an error.")
 			case errors.Is(relayErr, errGeminiLiveProtocol):
-				x.failure = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent an invalid frame.")
+				x.Failure = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent an invalid frame.")
 			case errors.Is(relayErr, errGeminiLiveClientProtocol):
-				x.failure = fault.InvalidRequest("invalid_live_frame", "The Live client sent an invalid frame.", nil)
+				x.Failure = fault.InvalidRequest("invalid_live_frame", "The Live client sent an invalid frame.", nil)
 			case errors.Is(relayErr, errGeminiLiveAuthority):
-				x.failure = fault.PermissionError("key_revoked", "The Live session no longer has route authority.")
+				x.Failure = fault.PermissionError("key_revoked", "The Live session no longer has route authority.")
 			case class == classCancelled:
-				x.failure = (&attemptFailure{class: classCancelled}).toError()
+				x.Failure = (&attemptFailure{class: classCancelled}).toError()
 			case class == classTimeout:
-				x.failure = (&attemptFailure{class: classTimeout}).toError()
+				x.Failure = (&attemptFailure{class: classTimeout}).toError()
 			}
 			status = http.StatusSwitchingProtocols
-			out = &outcome{err: x.failure, committed: true, cancelled: cancelled}
+			out = &Outcome{Err: x.Failure, Committed: true, Cancelled: cancelled}
 		}
 		return
 	}
-	status, out = http.StatusOK, &outcome{committed: true}
+	status, out = http.StatusOK, &Outcome{Committed: true}
 	if x.strict() {
 		status = http.StatusSwitchingProtocols
 	}
 }
 
-func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, upstream duplexPeer, token string, maxBytes int) (*wire.Usage, bool, error) {
+func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, upstream duplexPeer, token string, maxBytes int) (*wire.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var mu sync.Mutex
@@ -513,7 +513,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, u
 				return relayEnd{err: err, fromProvider: fromProvider, deliveryFailed: fromProvider}
 			}
 			if fromProvider {
-				x.delivered(s.now())
+				x.Delivered(s.Now())
 				if x.strict() && providerError {
 					return end(errGeminiLiveProviderError)
 				}
@@ -541,14 +541,14 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.reauthenticateSession(ctx, x, token)
-			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != routing.Eligible {
+			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.Route.Slug, x.Route.ProjectID, s.Now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != routing.Eligible {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
 			}
 			current := *authority
 			current.EndUserDigest = x.endUserDigest
-			if e := s.unboundedPinLimits(x.admissionAuthority(current), p, x.route); e != nil {
+			if e := s.UnboundedPinLimits(x.AdmissionAuthority(current), p, x.Route); e != nil {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "consumption budget changed")
 				break loop

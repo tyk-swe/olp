@@ -117,29 +117,29 @@ func responseParentProjection(res *resources.Resource, contract *storedResponseC
 	return contract.PreviousUpstreamID, resources.LocalID(resources.KindStrictResponse, *res.ParentID), nil
 }
 
-func responseResourceKind(x *call) string {
+func responseResourceKind(x *Call) string {
 	if x.strict() {
 		return resources.KindStrictResponse
 	}
 	return resources.KindResponse
 }
 
-func responseNativeIdentity(x *call, fact *events.AttemptFact, upstream string) resources.NativeIdentity {
+func responseNativeIdentity(x *Call, fact *events.AttemptFact, upstream string) resources.NativeIdentity {
 	var credential *string
 	if fact.CredentialID != "" {
 		credential = &fact.CredentialID
 	}
 	return resources.NativeIdentity{Kind: responseResourceKind(x), APIKeyID: x.keyID,
-		RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID,
-		RouteRevisionID: x.route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID,
+		RouteSlug: x.Route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID,
+		RouteRevisionID: x.Route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID,
 		CredentialID: credential, UpstreamID: upstream}
 }
 func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*resources.Resource, *storedResponseContract, error) {
 	if !strings.HasPrefix(id, resources.KindStrictResponse+"_") {
-		r, err := s.deps.Resources.Get(ctx, resources.KindResponse, owner, id)
+		r, err := s.Deps.Resources.Get(ctx, resources.KindResponse, owner, id)
 		return r, nil, err
 	}
-	r, payload, err := s.deps.Resources.ReadContract(ctx, resources.KindStrictResponse, owner, id)
+	r, payload, err := s.Deps.Resources.ReadContract(ctx, resources.KindStrictResponse, owner, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -149,7 +149,7 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	}
 	return r, &contract, nil
 }
-func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *events.AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
+func (s *Server) putStrictResponse(ctx context.Context, x *Call, fact *events.AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
 	provider, ok := x.snapshot().FindProvider(fact.ProviderID)
 	if !ok {
 		return nil, resources.ErrContract
@@ -158,14 +158,14 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *events.At
 	if err != nil || prepared.plan == nil || prepared.plan.Obligations().Continuation != "native_response_resource" {
 		return nil, resources.ErrContract
 	}
-	existing, err := s.deps.Resources.GetByUpstream(ctx, responseNativeIdentity(x, fact, upstream))
+	existing, err := s.Deps.Resources.GetByUpstream(ctx, responseNativeIdentity(x, fact, upstream))
 	if err == nil {
 		return existing, nil
 	}
 	if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
 	}
-	expires := s.now().Add(resources.ContinuationLifetime - time.Second)
+	expires := s.Now().Add(resources.ContinuationLifetime - time.Second)
 	if providerExpiry != nil && providerExpiry.Before(expires) {
 		expires = *providerExpiry
 	}
@@ -195,9 +195,9 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *events.At
 		return nil, resources.ErrContract
 	}
 	metadata, _ = json.Marshal(billing)
-	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
+	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.Route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.Route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
 	if previous := x.previousResponse(); previous != nil {
 		r.ParentID = &previous.UUID
 	}
-	return s.deps.Resources.PutContract(ctx, r, payload)
+	return s.Deps.Resources.PutContract(ctx, r, payload)
 }

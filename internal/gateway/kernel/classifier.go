@@ -54,7 +54,7 @@ type RoutePredicates interface {
 // evaluator answers the dynamic predicates of a request's route selectors,
 // over the features the selectors already see. A classifier is asked before a
 // plugin, and both must match.
-func (s *Server) evaluator(ctx context.Context, x *call, features *routing.Features) func(routing.Selector) routing.PredicateResult {
+func (s *Server) evaluator(ctx context.Context, x *Call, features *routing.Features) func(routing.Selector) routing.PredicateResult {
 	return func(selector routing.Selector) routing.PredicateResult {
 		var result routing.PredicateResult
 		if c := selector.When.Classifier; c != nil {
@@ -68,7 +68,7 @@ func (s *Server) evaluator(ctx context.Context, x *call, features *routing.Featu
 			}
 		}
 		if p := selector.When.Plugin; p != nil {
-			verdict := s.pluginPredicate(ctx, x.route.Slug, selector.ID, p, features)
+			verdict := s.pluginPredicate(ctx, x.Route.Slug, selector.ID, p, features)
 			verdict.Label = result.Label
 			return verdict
 		}
@@ -80,12 +80,12 @@ func (s *Server) evaluator(ctx context.Context, x *call, features *routing.Featu
 // failure, including a missing or unconfined plugin, falls through to the
 // next selector.
 func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p *routing.PluginPredicate, features *routing.Features) routing.PredicateResult {
-	if s.cfg.Predicates == nil || features == nil {
+	if s.Config.Predicates == nil || features == nil {
 		return routing.PredicateResult{Failure: pluginFailed}
 	}
 	ctx, cancel := context.WithTimeout(ctx, pluginPredicateTimeout)
 	defer cancel()
-	match, err := s.cfg.Predicates.RoutePredicate(ctx, p.Digest, abi.RoutePredicate{
+	match, err := s.Config.Predicates.RoutePredicate(ctx, p.Digest, abi.RoutePredicate{
 		Route: route, Selector: selector, Operation: features.Operation,
 		InputTokens: features.InputTokens, OutputTokens: features.OutputTokens,
 		Streaming: features.Streaming, Tools: features.Tools, Modalities: features.Modalities,
@@ -99,7 +99,7 @@ func (s *Server) pluginPredicate(ctx context.Context, route, selector string, p 
 
 // classify asks a classifier route about the caller's request, once per
 // route and request however many selectors consult it.
-func (s *Server) classify(ctx context.Context, x *call, c *routing.ClassifierPredicate) classification {
+func (s *Server) classify(ctx context.Context, x *Call, c *routing.ClassifierPredicate) classification {
 	if answer, ok := x.classified[c.Route]; ok {
 		return answer
 	}
@@ -117,7 +117,7 @@ func (s *Server) classify(ctx context.Context, x *call, c *routing.ClassifierPre
 // predicate's deadline. The caller is still being planned and has no lease. A
 // classification route answers with its highest-scoring label, a generation
 // route with its trimmed reply.
-func (s *Server) callClassifier(ctx context.Context, parent *call, c *routing.ClassifierPredicate) classification {
+func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.ClassifierPredicate) classification {
 	route, ok := parent.snapshot().FindRoute(c.Route)
 	switch {
 	case !ok || parent.generation.parsed == nil:
@@ -132,8 +132,8 @@ func (s *Server) callClassifier(ctx context.Context, parent *call, c *routing.Cl
 	timeout := time.Duration(min(c.TimeoutMS, route.OverallTimeout)) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	x := &call{
-		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
+	x := &Call{
+		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
 		actor:          parent.actor,
 		keyID:          parent.keyID,
 		budgetGroupID:  parent.budgetGroupID,
@@ -150,17 +150,17 @@ func (s *Server) callClassifier(ctx context.Context, parent *call, c *routing.Cl
 		parent:   parent.request.accountingID(),
 		priority: parent.priority, routeLeg: routeLeg{affinity: []byte(parent.keyID),
 
-			route: &route},
+			Route: &route},
 	}
 	defer s.settleAdmission(ctx, x)
 	var answer classification
-	var out *outcome
+	var out *Outcome
 	if slices.Contains(route.Operations, "classification") {
 		answer, out = s.predict(ctx, x, route.Slug, text)
 	} else {
 		answer, out = s.generateLabel(ctx, x, route.Slug, text)
 	}
-	s.finish(x, out, cmp.Or(errorStatus(out.err), 200))
+	s.Finish(x, out, cmp.Or(errorStatus(out.Err), 200))
 	return answer
 }
 
@@ -172,7 +172,7 @@ type prediction struct {
 
 // predict asks a strict classification route, in the TEI dialect, for the
 // labels of the text.
-func (s *Server) predict(ctx context.Context, x *call, slug, text string) (classification, *outcome) {
+func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (classification, *Outcome) {
 	failed := classification{failure: classifierFailed}
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
@@ -181,35 +181,35 @@ func (s *Server) predict(ctx context.Context, x *call, slug, text string) (class
 	}
 	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
-	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.cfg.MaxBodyBytes))
+	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
-		return failed, &outcome{err: requestError(err)}
+		return failed, &Outcome{Err: requestError(err)}
 	}
 	x.unary.source = source
 	if e := s.prepareUnary(ctx, x); e != nil {
-		return failed, &outcome{err: e}
+		return failed, &Outcome{Err: e}
 	}
 	if e := s.admitClassifier(ctx, x); e != nil {
-		return failed, &outcome{err: e}
+		return failed, &Outcome{Err: e}
 	}
 	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {
-		return failed, &outcome{err: result.err, committed: result.committed, cancelled: result.cancelled}
+		return failed, &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}
 	}
 	x.facts[len(x.facts)-1].Committed = true
 	var predictions []prediction
 	if json.Unmarshal(result.result.Body, &predictions) != nil || len(predictions) == 0 {
-		return failed, &outcome{committed: true}
+		return failed, &Outcome{Committed: true}
 	}
 	top := slices.MaxFunc(predictions, func(a, b prediction) int { return cmp.Compare(a.Score, b.Score) })
-	return classification{label: top.Label, score: &top.Score}, &outcome{committed: true}
+	return classification{label: top.Label, score: &top.Score}, &Outcome{Committed: true}
 }
 
 // generateLabel asks a generation route for a reply to the text and takes the
 // reply as the label.
-func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) (classification, *outcome) {
+func (s *Server) generateLabel(ctx context.Context, x *Call, slug, text string) (classification, *Outcome) {
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
 	if x.snapshot().HasBodyLimits() {
@@ -217,20 +217,20 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 	}
 	parsed, err := protocols.Parse(wire.Chat, body, "")
 	if err != nil {
-		return failed, &outcome{err: requestError(err)}
+		return failed, &Outcome{Err: requestError(err)}
 	}
 	x.family, x.generation.parsed = wire.Chat, parsed
 	if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
-		return failed, &outcome{err: e}
+		return failed, &Outcome{Err: e}
 	}
 	if e := s.admitClassifier(ctx, x); e != nil {
-		return failed, &outcome{err: e}
+		return failed, &Outcome{Err: e}
 	}
 	out := s.execute(ctx, x)
-	if out.err != nil || out.completion == nil {
+	if out.Err != nil || out.completion == nil {
 		return failed, out
 	}
-	out.committed = true
+	out.Committed = true
 	x.facts[len(x.facts)-1].Committed = true
 	label := strings.TrimSpace(out.completion.OutputText)
 	if label == "" {
@@ -243,8 +243,8 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 // cannot finish planning until the label is known. It shares the caller's
 // admission permit, awaiting it before any upstream work.
 // Keyless evaluations share the installation, organization and project budgets.
-func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
-	if e := s.gate.AwaitAdmission(ctx, x.priority); e != nil {
+func (s *Server) admitClassifier(ctx context.Context, x *Call) *fault.Error {
+	if e := s.Gate.AwaitAdmission(ctx, x.priority); e != nil {
 		return e
 	}
 	x.estimate = requestEstimate(x)
@@ -253,7 +253,7 @@ func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
 	}
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *fault.Error
-	admitted := x.admissionAuthority(x.authority)
-	x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	admitted := x.AdmissionAuthority(x.authority)
+	x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

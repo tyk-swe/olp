@@ -24,14 +24,14 @@ import (
 )
 
 func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
-	x := &call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
+	x := &Call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
 	fail := func(e *fault.Error) { s.refuseOn(x, w, e, "openai") }
-	if !s.gate.Admit(r.Context()) {
+	if !s.Gate.Admit(r.Context()) {
 		fail(fault.Overloaded)
 		return
 	}
-	defer s.gate.Release(r.Context())
-	authority, e := s.gate.Authenticate(r, "inference")
+	defer s.Gate.Release(r.Context())
+	authority, e := s.Gate.Authenticate(r, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -52,11 +52,11 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	snapshot := x.request.release.Snapshot()
 	slug := r.PathValue("route")
 	route, ok := snapshot.FindRoute(slug)
-	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.now()) || !slices.Contains(authority.Policy.AllowedRoutes, slug) {
+	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.Now()) || !slices.Contains(authority.Policy.AllowedRoutes, slug) {
 		fail(fault.ModelNotFound(slug))
 		return
 	}
-	x.route = &route
+	x.Route = &route
 	if e := s.reserveState(r.Context(), x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
 		fail(e)
 		return
@@ -111,7 +111,7 @@ func passthroughSuffix(r *http.Request) (string, bool) {
 	return "/" + strings.Join(parts[5:], "/"), true
 }
 
-func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *call, route *routing.Route, normalized string, query url.Values, fail func(*fault.Error)) {
+func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Call, route *routing.Route, normalized string, query url.Values, fail func(*fault.Error)) {
 	target := route.Targets[0]
 	provider, ok := x.snapshot().FindProvider(target.ProviderID)
 	if !ok || !provider.Enabled {
@@ -145,7 +145,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	_ = http.NewResponseController(w).SetWriteDeadline(deadline)
-	limit := s.cfg.MaxBodyBytes
+	limit := s.Config.MaxBodyBytes
 	if route.MaxBodyBytes != nil {
 		limit = min(limit, *route.MaxBodyBytes)
 	}
@@ -258,14 +258,14 @@ slots:
 	x.facts = append(x.facts, fact)
 	factP = &x.facts[len(x.facts)-1]
 	if err := s.applySlotCredential(ctx, x, req, provider.Connector(), slot, body, &provider, target.ProviderModel); err != nil {
-		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = classCredential, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound credential could not be applied."))
 		return
 	}
 	client, err := s.providerClient(ctx, x.request.release, &provider, slot)
 	if err != nil {
-		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = classCredential, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound connection could not be reached."))
 		return
@@ -273,7 +273,7 @@ slots:
 	x.dispatched = true
 	resp, err := client.Do(req)
 	if err != nil {
-		factP.Duration = s.now().Sub(factP.StartedAt)
+		factP.Duration = s.Now().Sub(factP.StartedAt)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode < 400 || errors.Is(err, egress.ErrRedirect) || strings.Contains(err.Error(), egress.ErrRedirect.Error()) {
 			if resp != nil {
 				factP.Status = resp.StatusCode
@@ -292,28 +292,28 @@ slots:
 		return
 	}
 	defer resp.Body.Close()
-	received := s.now().Sub(factP.StartedAt)
+	received := s.Now().Sub(factP.StartedAt)
 	factP.FirstByte, factP.Status = &received, resp.StatusCode
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 		return
 	}
-	responseLimit := s.cfg.MaxResponseBytes
+	responseLimit := s.Config.MaxResponseBytes
 	if responseLimit <= 0 {
 		responseLimit = 1 << 20
 	}
 	if r.Method != http.MethodHead && resp.ContentLength > responseLimit {
-		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
 	responseBody, responseError := passthroughResponseBody(resp, x.sensitive, responseLimit)
 	if responseError != nil {
-		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
@@ -337,9 +337,9 @@ slots:
 		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 	}
 	w.WriteHeader(resp.StatusCode)
-	x.delivered(s.now())
+	x.Delivered(s.Now())
 	readErr, copyErr := copyPassthroughResponse(w, responseBody, responseLimit)
-	factP.Duration = s.now().Sub(factP.StartedAt)
+	factP.Duration = s.Now().Sub(factP.StartedAt)
 	providerSuccess := readErr == nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified)
 	switch {
 	case readErr != nil:
@@ -349,7 +349,7 @@ slots:
 		}
 		factP.RecordEvidence(true)
 	case providerSuccess:
-		factP.Class = classSuccess
+		factP.Class = ClassSuccess
 		factP.ObserveUsage(&wire.Usage{}, true)
 		factP.TokenlessUsage = true
 		factP.RecordEvidence(false)
@@ -363,14 +363,14 @@ slots:
 		factP.Class = classProtocol
 		factP.RecordEvidence(true)
 	}
-	out := &outcome{committed: providerSuccess && copyErr == nil}
+	out := &Outcome{Committed: providerSuccess && copyErr == nil}
 	switch {
 	case readErr != nil || copyErr != nil:
-		out.err = fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
+		out.Err = fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
 	case !providerSuccess:
-		out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
+		out.Err = UpstreamError(&attemptFailure{Status: resp.StatusCode})
 	}
-	s.finish(x, out, resp.StatusCode)
+	s.Finish(x, out, resp.StatusCode)
 	if readErr != nil || copyErr != nil {
 		panic(http.ErrAbortHandler)
 	}

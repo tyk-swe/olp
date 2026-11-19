@@ -18,26 +18,26 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) ([]float32, string, error) {
+func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) ([]float32, string, error) {
 	route, ok := parent.snapshot().FindRoute(parent.cache.policy.EmbeddingRoute)
-	if !ok || !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+	if !ok || !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 		return nil, "", errors.New("embedding route unavailable")
 	}
 	authority := cacheAuthority(parent.authority, false, true, true)
 	// The parent owns the shared caller concurrency slot. The distinct
 	// embeddings route still enforces its own per-route request/concurrency caps.
 	authority.Policy.RouteLimits = parent.authority.Policy.RouteLimits
-	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{route: &route}}
-	var out *outcome
+	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{Route: &route}}
+	var out *Outcome
 	defer func() {
 		parent.cache.embeddingDispatched = parent.cache.embeddingDispatched || x.dispatched
 		status := http.StatusOK
 		if out == nil {
 			status = 500
-		} else if out.err != nil {
-			status = out.err.Status
+		} else if out.Err != nil {
+			status = out.Err.Status
 		}
-		s.finish(x, out, status)
+		s.Finish(x, out, status)
 		s.settleAdmission(context.WithoutCancel(ctx), x)
 	}()
 	body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": text, "encoding_format": "float"})
@@ -45,25 +45,25 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 	var raw []byte
 	if route.Fidelity.Strict() {
 		codec, _ := operationregistry.Lookup("openai-embeddings")
-		source, err := operationplan.Parse("openai-embeddings", body, int(s.cfg.MaxBodyBytes))
+		source, err := operationplan.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
 		if err != nil {
 			return nil, "", err
 		}
 		x.unary = &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "openai"}
 		if e := s.prepareUnary(ctx, x); e != nil {
-			out = &outcome{err: e}
+			out = &Outcome{Err: e}
 			return nil, "", e
 		}
 		ctx, cancel := x.routeContext(ctx)
 		defer cancel()
 		if e := s.admitClassifier(ctx, x); e != nil {
-			out = &outcome{err: e}
+			out = &Outcome{Err: e}
 			return nil, "", e
 		}
 		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
-		out = &outcome{err: result.err, committed: result.committed, cancelled: result.cancelled}
+		out = &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}
 		raw = result.result.Body
 	} else {
 		parsed, err := protocols.Parse(wire.Embeddings, body, "")
@@ -72,11 +72,11 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		}
 		x.generation.parsed = parsed
 		if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
-			out = &outcome{err: e}
+			out = &Outcome{Err: e}
 			return nil, "", e
 		}
 		if e := s.admitClassifier(ctx, x); e != nil {
-			out = &outcome{err: e}
+			out = &Outcome{Err: e}
 			return nil, "", e
 		}
 		out = s.execute(ctx, x)
@@ -84,8 +84,8 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 			raw = out.completion.Body
 		}
 	}
-	if out.err != nil {
-		return nil, "", out.err
+	if out.Err != nil {
+		return nil, "", out.Err
 	}
 	var response struct {
 		Data []struct {
@@ -99,7 +99,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 	if err := cache.ValidateVector(vector); err != nil {
 		return nil, "", err
 	}
-	if len(x.facts) == 0 || x.facts[len(x.facts)-1].Class != classSuccess {
+	if len(x.facts) == 0 || x.facts[len(x.facts)-1].Class != ClassSuccess {
 		return nil, "", errors.New("missing embedding provenance")
 	}
 	// The successful attempt may be a weighted or failover target. Pin the

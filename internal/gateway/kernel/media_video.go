@@ -27,62 +27,62 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	form, parseError := s.parseMediaForm(w, r, authority.ID, media.DefaultVideoReferenceLimit, 1)
+	form, parseError := s.ParseMediaForm(w, r, authority.ID, media.DefaultVideoReferenceLimit, 1)
 	if parseError != nil {
-		s.gate.Release(r.Context())
-		s.refuse(x, w, parseError)
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, parseError)
 		return
 	}
 	request, failure := media.DecodeVideoCreate(form)
 	if failure != nil {
 		form.Cleanup()
-		s.gate.Release(r.Context())
-		s.refuse(x, w, mediaError(failure))
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, mediaError(failure))
 		return
 	}
 	x.family = wire.Format(request.Op())
 	x.media = request
 	x.estimate = mediaMultipartTokens
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	defer s.cleanupUploads(request)
 
 	jobID, err := uuid.NewV7()
 	if err != nil {
 		form.Cleanup()
-		s.refuse(x, w, jobError(err))
+		s.Refuse(x, w, jobError(err))
 		return
 	}
 	localJobID := jobID.String()
 	x.affinity = []byte(localJobID)
 	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	form.Disarm()
 	attempt := x.attempts[0]
 	provider, ok := x.request.release.Snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
-		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
+		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.Route.Slug+"`."))
 		return
 	}
 	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	slots := s.slots(x, attempt, &provider)
 	if len(slots) == 0 {
-		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
+		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.Route.Slug+"`."))
 		return
 	}
 
-	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+	overall := time.Duration(x.Route.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	var e *fault.Error
-	admitted := x.admissionAuthority(authority)
-	if x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
-		s.refuse(x, w, e)
+	admitted := x.AdmissionAuthority(authority)
+	if x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
 	defer s.settleAdmission(ctx, x)
@@ -90,12 +90,12 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)
 	if hold == nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
 	defer func() { hold.settle(ctx, x.dispatched, x.settledTokens()) }()
 
-	reserved, jobErr := s.deps.Media.Store.Reserve(ctx, jobs.Reservation{
+	reserved, jobErr := s.Deps.Media.Store.Reserve(ctx, jobs.Reservation{
 		ID:                  localJobID,
 		StrictContract:      x.strict(),
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
@@ -103,15 +103,15 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		APIKeyID:            authority.ID,
 		ProviderID:          attempt.ProviderID,
 		UpstreamModel:       attempt.UpstreamModel,
-		RouteSlug:           x.route.Slug,
+		RouteSlug:           x.Route.Slug,
 		Surface:             "openai",
 		CredentialVersionID: slot.CredentialID,
 		SlotID:              slot.ID,
 		StaleAfter:          deadline.Add(jobs.LeaseSlack),
 	})
 	if jobErr != nil {
-		s.releaseHold(ctx, hold)
-		s.refuse(x, w, jobError(jobErr))
+		s.ReleaseHold(ctx, hold)
+		s.Refuse(x, w, jobError(jobErr))
 		return
 	}
 
@@ -126,10 +126,10 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	x.facts = append(x.facts, fact)
 	s.health.Record(provider.ID, fact, hold.probed)
-	commitCtx, stopCommit := resourceCommitContext(ctx)
+	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
 	if dispatchFailure != nil {
-		s.deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == classAmbiguous)
+		s.Deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == classAmbiguous)
 		out := &mediaOutcome{err: dispatchFailure.toError(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == classCancelled}
 		s.finishMedia(x, out, out.err.Status)
 		fault.WriteSurfaceError(w, out.err, "openai")
@@ -145,7 +145,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slots []routing.Slot, deadline time.Time) (*dispatchHold, routing.Slot, *fault.Error) {
+func (s *Server) admitVideoSlot(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slots []routing.Slot, deadline time.Time) (*dispatchHold, routing.Slot, *fault.Error) {
 	used := 0
 	unmeterable := false
 	var last *attemptFailure
@@ -178,7 +178,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.At
 	return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 }
 
-func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attemptFailure, unmeterable bool) *fault.Error {
+func (s *Server) videoAdmissionError(ctx context.Context, x *Call, last *attemptFailure, unmeterable bool) *fault.Error {
 	switch {
 	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		return (&attemptFailure{class: classTimeout}).toError()
@@ -189,12 +189,12 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attempt
 	case unmeterable:
 		return quota.LimitsUnavailable()
 	}
-	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
+	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.Route.Slug+"`.")
 }
 
-func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Record, result *transport.Result) *mediaOutcome {
+func (s *Server) attachCreated(ctx context.Context, x *Call, reserved jobs.Record, result *transport.Result) *mediaOutcome {
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: reserved.ID}
-	err := s.deps.Media.Jobs.Attach(ctx, reserved, mediaVideo(result), &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
+	err := s.Deps.Media.Jobs.Attach(ctx, reserved, mediaVideo(result), &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
 	rejected, isRejected := errors.AsType[*jobs.Rejected](err)
 	switch {
 	case isRejected:
@@ -228,7 +228,7 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 	if err != nil {
 		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
-	record, err := s.deps.Media.Store.Get(ctx, id.String())
+	record, err := s.Deps.Media.Store.Get(ctx, id.String())
 	if err != nil {
 		return nil, jobError(err)
 	}
@@ -247,12 +247,12 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 	if e != nil {
 		return nil, e
 	}
-	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {
+	if !authority.Allows("inference", record.RouteSlug, projectID, s.Now()) {
 		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
-	use := retainedRetrieval
+	use := RetainedRetrieval
 	if op == media.OpVideoDelete {
-		use = retainedHousekeeping
+		use = RetainedHousekeeping
 	}
 	if e := retainedContract(record.StrictContract, current, use); e != nil {
 		return nil, e
@@ -261,14 +261,14 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 }
 
 func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.RouteFidelity, *fault.Error) {
-	projectID, current, err := s.deps.Media.Store.RouteAuthority(ctx, slug)
+	projectID, current, err := s.Deps.Media.Store.RouteAuthority(ctx, slug)
 	if err != nil {
 		return nil, routing.RouteFidelity{}, fault.ServerError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
 	}
 	return projectID, current, nil
 }
 
-func strictVideoResourceContext(x *call, record *jobs.Record, allowVariant bool) *fault.Error {
+func strictVideoResourceContext(x *Call, record *jobs.Record, allowVariant bool) *fault.Error {
 	if !record.StrictContract {
 		return nil
 	}
@@ -289,12 +289,12 @@ func videoJobRoute(record *jobs.Record) *routing.Route {
 	return route
 }
 
-func (s *Server) admitVideoRequest(parent context.Context, x *call, authority keyauthority.Authority) (context.Context, func(), *fault.Error) {
+func (s *Server) admitVideoRequest(parent context.Context, x *Call, authority keyauthority.Authority) (context.Context, func(), *fault.Error) {
 	ttl := maxStreamDuration + jobs.LeaseSlack
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *fault.Error
-	x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
 	if e != nil {
 		cancel()
 		return nil, nil, e
@@ -305,7 +305,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 	}, nil
 }
 
-func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*transport.Result, *attemptFailure, events.AttemptFact) {
+func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record, job media.JobCall) (*transport.Result, *attemptFailure, events.AttemptFact) {
 	fact := events.AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -313,12 +313,12 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		UpstreamModel:      record.UpstreamModel,
 		ModelFamily:        string(estimate.FamilyOf(record.UpstreamModel)),
 		Mode:               "unary",
-		StartedAt:          s.now(),
+		StartedAt:          s.Now(),
 	}
 	if record.CredentialVersionID != nil {
 		fact.CredentialID = *record.CredentialVersionID
 	}
-	target, err := s.deps.Media.Jobs.Target(ctx, *record)
+	target, err := s.Deps.Media.Jobs.Target(ctx, *record)
 	if err != nil {
 		return s.jobRefused(fact, &attemptFailure{class: classConnect})
 	}
@@ -370,7 +370,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		}
 	}
 	fact.SlotID = slot.ID
-	reservation, refusal, skip := s.deps.Admission.ReserveTarget(ctx, &provider, &slot, 0, target.Timeout+jobs.LeaseSlack, "")
+	reservation, refusal, skip := s.Deps.Admission.ReserveTarget(ctx, &provider, &slot, 0, target.Timeout+jobs.LeaseSlack, "")
 	if skip {
 		return s.jobRefused(fact, &attemptFailure{class: classLimitsUnavailable})
 	}
@@ -380,7 +380,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	dispatched := false
 	defer func() { reservation.Settle(ctx, dispatched, nil) }()
 	if _, deleting := job.(media.VideoDelete); deleting {
-		if _, err := s.deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
+		if _, err := s.Deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
 			return s.jobRefused(fact, &attemptFailure{class: classConnect})
 		}
 	}
@@ -390,9 +390,9 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	callCtx, cancel := context.WithTimeout(attemptCtx, target.Timeout+jobs.LeaseSlack)
 	defer cancel()
 	target.Sensitive = &sensitive
-	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, transport.Options{Strict: strictTemplate != nil, Headers: headers})
+	result, failure := s.Deps.Media.Transport.Do(callCtx, target.Target, call, transport.Options{Strict: strictTemplate != nil, Headers: headers})
 	dispatched = failure == nil || failure.Dispatched
-	fact.Duration = s.now().Sub(fact.StartedAt)
+	fact.Duration = s.Now().Sub(fact.StartedAt)
 	if failure != nil {
 		fact.Class = mediaClass(failure)
 		fact.Status = failure.Status
@@ -402,7 +402,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		}
 		f := &attemptFailure{
 			class:      mediaClass(failure),
-			status:     failure.Status,
+			Status:     failure.Status,
 			retryAfter: failure.RetryAfter,
 			upstream:   failure.Upstream,
 			dispatched: failure.Dispatched,
@@ -438,15 +438,15 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		}
 		if contractErr != nil {
 			if artifact := mediaArtifact(result.Payload); artifact != nil {
-				if err := s.deps.Staging.Remove(artifact.Handle); err != nil {
+				if err := s.Deps.Staging.Remove(artifact.Handle); err != nil {
 					s.log.Warn("staged video content cleanup failed", "error", err)
 				}
 			}
 			fact.Class = classProtocol
-			fact.Duration = s.now().Sub(fact.StartedAt)
+			fact.Duration = s.Now().Sub(fact.StartedAt)
 			fact.RecordEvidence(true)
 			atr.Finish(fact.Class, result.Status)
-			return nil, &attemptFailure{class: classProtocol, status: result.Status, dispatched: true}, fact
+			return nil, &attemptFailure{class: classProtocol, Status: result.Status, dispatched: true}, fact
 		}
 	}
 	fact.Class = "success"
@@ -466,17 +466,17 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 
 func (s *Server) jobRefused(fact events.AttemptFact, failure *attemptFailure) (*transport.Result, *attemptFailure, events.AttemptFact) {
 	fact.Class = failure.class
-	fact.Duration = s.now().Sub(fact.StartedAt)
+	fact.Duration = s.Now().Sub(fact.StartedAt)
 	fact.RecordEvidence(false)
 	return nil, failure, fact
 }
 
-func (x *call) noteJobAttempt(fact events.AttemptFact) {
+func (x *Call) noteJobAttempt(fact events.AttemptFact) {
 	x.facts = append(x.facts, fact)
 	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
 }
 
-func (x *call) notePolls() {
+func (x *Call) notePolls() {
 	x.attemptCount, x.attemptVendor = len(x.facts), ""
 	if len(x.facts) == 0 {
 		return

@@ -60,7 +60,7 @@ type requestSummary struct {
 	prompt     *estimate.Prompt
 }
 
-func (x *call) summarize(request *wire.Request) requestSummary {
+func (x *Call) summarize(request *wire.Request) requestSummary {
 	prompt := estimate.Walk(request)
 	if x.generation.resources != nil && x.generation.resources.cacheInput > 0 {
 		prompt = prompt.WithRetainedInputTokens(x.generation.resources.cacheInput)
@@ -71,7 +71,7 @@ func (x *call) summarize(request *wire.Request) requestSummary {
 	return requestSummary{request: request, parameters: sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), prompt: prompt}
 }
 
-func (x *call) summarizeSource() requestSummary {
+func (x *Call) summarizeSource() requestSummary {
 	return x.preparation().summary(x.generation.parsed, func() requestSummary {
 		return x.summarize(x.generation.parsed)
 	})
@@ -79,7 +79,7 @@ func (x *call) summarizeSource() requestSummary {
 
 // sourceDemand is what routing weighs a target's context window against: the
 // caller's request as the model that would serve it counts it.
-func (x *call) sourceDemand(model string) *routing.TokenDemand {
+func (x *Call) sourceDemand(model string) *routing.TokenDemand {
 	return demandOf(x.summarizeSource().prompt.Estimate(estimate.ForModel(model), nil))
 }
 
@@ -87,23 +87,23 @@ func demandOf(e estimate.Estimate) *routing.TokenDemand {
 	return &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 }
 
-func (x *call) strict() bool {
-	return x.route != nil && x.route.Fidelity.Strict()
+func (x *Call) strict() bool {
+	return x.Route != nil && x.Route.Fidelity.Strict()
 }
 
-func (x *call) preparedProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
+func (x *Call) preparedProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
 	return x.preparation().provider(providerPreparationKey(provider, targetID, model), true, func() (preparedProvider, error) {
 		return x.buildProvider(provider, targetID, model)
 	})
 }
 
-func (x *call) providerAdmission(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
+func (x *Call) providerAdmission(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
 	return x.preparation().provider(providerPreparationKey(provider, targetID, model), false, func() (preparedProvider, error) {
 		return x.buildProvider(provider, targetID, model)
 	})
 }
 
-func (x *call) preparedGuardrailInput(format wire.Format, document oif.Document) (guardrailInput, error) {
+func (x *Call) preparedGuardrailInput(format wire.Format, document oif.Document) (guardrailInput, error) {
 	if x.guard.engine == nil {
 		return guardrailInput{document: document}, nil
 	}
@@ -117,9 +117,9 @@ func (x *call) preparedGuardrailInput(format wire.Format, document oif.Document)
 	return result, err
 }
 
-func (x *call) buildProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
+func (x *Call) buildProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
 	if x.strict() {
-		template, _ := x.snapshot().InteractionTemplate(x.route.Slug, targetID)
+		template, _ := x.snapshot().InteractionTemplate(x.Route.Slug, targetID)
 		if template == nil {
 			return preparedProvider{}, &oif.Incompatibility{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 		}
@@ -167,11 +167,11 @@ func (x *call) buildProvider(provider *routing.Provider, targetID, model string)
 		return preparedProvider{}, err
 	}
 	var decisions []contentpolicy.Decision
-	compiled, policyErr := compiledPolicy(x.route)
+	compiled, policyErr := compiledPolicy(x.Route)
 	if policyErr != nil {
 		return preparedProvider{}, policyErr
 	}
-	if e := inputPolicyWireGate(x.route, compiled, invocation.Wire); e != nil {
+	if e := inputPolicyWireGate(x.Route, compiled, invocation.Wire); e != nil {
 		return preparedProvider{}, e
 	}
 	if compiled != nil {
@@ -238,7 +238,7 @@ func (x *call) buildProvider(provider *routing.Provider, targetID, model string)
 // attempt records is the larger input with the less trustworthy provenance of
 // the two counts. When the provider's request reads the same as the caller's,
 // which it usually does, the family is counted once for both.
-func (x *call) preparedEstimate(model string, effective requestSummary) (admittedEstimate, *routing.TokenDemand) {
+func (x *Call) preparedEstimate(model string, effective requestSummary) (admittedEstimate, *routing.TokenDemand) {
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
 	counter := estimate.ForModel(model)
@@ -266,8 +266,8 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 // automatic reports that a provider is sent the caller's request with its own
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
-func (x *call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guard.engine == nil
+func (x *Call) automatic(provider *routing.Provider) bool {
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.Route == nil || x.Route.ContentPolicy == nil) && x.guard.engine == nil
 }
 
 type encodedRequest struct {
@@ -297,7 +297,7 @@ type generationRequest struct {
 	guardrailSegments []guardrails.Segment
 }
 
-func (x *call) prepareCandidate(provider *routing.Provider, targetID, model string) (candidatePreparation, error) {
+func (x *Call) prepareCandidate(provider *routing.Provider, targetID, model string) (candidatePreparation, error) {
 	if x.unary != nil {
 		prepared, err := x.unaryAdmission(provider, targetID, model)
 		return candidatePreparation{candidate: &routing.CandidatePreparation{Parameters: prepared.parameters}}, err
@@ -315,7 +315,7 @@ func (x *call) prepareCandidate(provider *routing.Provider, targetID, model stri
 	}, err
 }
 
-func (x *call) buildEncoding(provider *routing.Provider, model string) (encodedRequest, error) {
+func (x *Call) buildEncoding(provider *routing.Provider, model string) (encodedRequest, error) {
 	invocation, err := x.prepareTransformed(provider, provider.Connector(), model)
 	if err != nil {
 		return encodedRequest{}, err
@@ -331,7 +331,7 @@ func (x *call) buildEncoding(provider *routing.Provider, model string) (encodedR
 	}, nil
 }
 
-func (x *call) generationRequest(provider *routing.Provider, targetID, model string) (generationRequest, error) {
+func (x *Call) generationRequest(provider *routing.Provider, targetID, model string) (generationRequest, error) {
 	if x.automatic(provider) {
 		encoded, err := x.preparation().encoded(providerPreparationKey(provider, targetID, model), func() (encodedRequest, error) {
 			return x.buildEncoding(provider, model)
@@ -360,7 +360,7 @@ func (x *call) generationRequest(provider *routing.Provider, targetID, model str
 // reserves each target's own count, and a translated target is counted for the
 // family it is sent to and not the dialect the caller spoke. Every count is
 // made at most once per family for the request.
-func (x *call) attemptEstimate(provider *routing.Provider, targetID, model string) (admittedEstimate, error) {
+func (x *Call) attemptEstimate(provider *routing.Provider, targetID, model string) (admittedEstimate, error) {
 	if x.unary != nil {
 		admission, err := x.unaryAdmission(provider, targetID, model)
 		if err != nil {
@@ -390,7 +390,7 @@ func (x *call) attemptEstimate(provider *routing.Provider, targetID, model strin
 }
 
 // attemptReservation is what the gate holds for one attempt.
-func (x *call) attemptReservation(a routing.Attempt, provider *routing.Provider) int64 {
+func (x *Call) attemptReservation(a routing.Attempt, provider *routing.Provider) int64 {
 	admitted, err := x.attemptEstimate(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
 		return limits.MaxCounter
@@ -404,7 +404,7 @@ func (x *call) attemptReservation(a routing.Attempt, provider *routing.Provider)
 // family is recorded whether or not an estimate was. Requests the gateway reads
 // no prompt of, such as a stored-response lifecycle call, a realtime session
 // or a job poll, record none.
-func (x *call) recordEstimate(fact *events.AttemptFact, a routing.Attempt) {
+func (x *Call) recordEstimate(fact *events.AttemptFact, a routing.Attempt) {
 	fact.ModelFamily = string(estimate.FamilyOf(a.UpstreamModel))
 	if x.sizedInput != nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = *x.sizedInput, string(estimate.ProvenanceHeuristic)
@@ -431,13 +431,13 @@ func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled,
 // prepareTransformed applies key retention policy after translation and provider
 // defaults/rewrites, to the native dialect that will actually receive the call.
 // Stateless dialects cannot represent store and must keep its omission.
-func (x *call) prepareTransformed(provider *routing.Provider, cfg connectors.Config, model string) (providerinvoke.Invocation, error) {
+func (x *Call) prepareTransformed(provider *routing.Provider, cfg connectors.Config, model string) (providerinvoke.Invocation, error) {
 	invocation, err := providerinvoke.Prepare(x.generation.parsed, cfg, model, provider.ParameterDefaults)
 	if err == nil {
 		err = x.checkGenerationResourceDestination(provider, model, invocation.Wire, invocation.Prepared.Document())
 	}
-	if err == nil && x.route != nil && x.route.PromptCache != nil {
-		invocation, err = providerinvoke.ApplyPromptCache(invocation, cfg, x.route.PromptCache, x.promptCacheKey())
+	if err == nil && x.Route != nil && x.Route.PromptCache != nil {
+		invocation, err = providerinvoke.ApplyPromptCache(invocation, cfg, x.Route.PromptCache, x.promptCacheKey())
 	}
 	if err != nil || invocation.Wire != wire.Responses || x.authority.Policy.AllowProviderState {
 		return invocation, err

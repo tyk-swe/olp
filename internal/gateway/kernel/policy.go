@@ -36,7 +36,7 @@ func policySurfaceGate(route *routing.Route) *fault.Error {
 	return nil
 }
 
-func recordDecision(x *call, d contentpolicy.Decision) {
+func recordDecision(x *Call, d contentpolicy.Decision) {
 	for _, existing := range x.policyDecisions {
 		if existing == d {
 			return
@@ -45,17 +45,17 @@ func recordDecision(x *call, d contentpolicy.Decision) {
 	x.policyDecisions = append(x.policyDecisions, d)
 }
 
-func (s *Server) enforceContentPolicy(x *call) *fault.Error {
-	compiled, e := compiledPolicy(x.route)
+func (s *Server) enforceContentPolicy(x *Call) *fault.Error {
+	compiled, e := compiledPolicy(x.Route)
 	if compiled == nil || e != nil {
 		return e
 	}
 	if compiled.HasOutput() {
 		if x.generation.parsed.Stream {
-			return policyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
+			return policyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.Route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
 		}
 		if x.providerState {
-			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
+			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.Route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
 	if x.strict() || x.preparation().hasProviders() {
@@ -93,7 +93,7 @@ func (s *Server) enforceContentPolicy(x *call) *fault.Error {
 	return nil
 }
 
-func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, value *string) bool {
+func applySlotRules(x *Call, rules []contentpolicy.CompiledRule, phase string, value *string) bool {
 	if value == nil {
 		return false
 	}
@@ -112,8 +112,8 @@ func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, v
 	return false
 }
 
-func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *fault.Error {
-	compiled, e := compiledPolicy(x.route)
+func (s *Server) enforceCompletionOutput(x *Call, completion *wire.Completion) *fault.Error {
+	compiled, e := compiledPolicy(x.Route)
 	if compiled == nil || e != nil {
 		return e
 	}
@@ -125,8 +125,8 @@ func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *
 	return nil
 }
 
-func (s *Server) enforceContentOutput(x *call, body []byte) ([]byte, *fault.Error) {
-	compiled, e := compiledPolicy(x.route)
+func (s *Server) enforceContentOutput(x *Call, body []byte) ([]byte, *fault.Error) {
+	compiled, e := compiledPolicy(x.Route)
 	if compiled == nil || e != nil {
 		return body, e
 	}

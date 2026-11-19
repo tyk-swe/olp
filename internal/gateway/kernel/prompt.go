@@ -33,7 +33,7 @@ type parsedRequest struct {
 	decoded   int64
 }
 
-func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *fault.Error) (parsedRequest, *fault.Error) {
+func (s *Server) parsePrompt(x *Call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *fault.Error) (parsedRequest, *fault.Error) {
 	doc, err := protocols.ParseSource(family, body)
 	if err != nil {
 		return parsedRequest{}, requestError(err)
@@ -41,7 +41,7 @@ func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel
 	return s.parsePromptDocument(x, family, doc, pathModel, authorize, nil)
 }
 
-func (s *Server) parsePromptDocument(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error, bindings []oif.Change) (parsedRequest, *fault.Error) {
+func (s *Server) parsePromptDocument(x *Call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error, bindings []oif.Change) (parsedRequest, *fault.Error) {
 	expanded, prompt, promptErr := s.expandPrompt(x, family, doc, pathModel, authorize)
 	if promptErr != nil {
 		return parsedRequest{}, promptErr
@@ -329,7 +329,7 @@ func promptInputLimit(routeLimit *int64, installationLimit int64) int64 {
 	return min(*routeLimit, installationLimit)
 }
 
-func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error) (oif.Document, *usage.PromptReference, *fault.Error) {
+func (s *Server) expandPrompt(x *Call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error) (oif.Document, *usage.PromptReference, *fault.Error) {
 	ref, param, input, ok := promptReference(doc, family)
 	if !ok {
 		return doc, nil, nil
@@ -385,7 +385,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		if selection.RevisionID != "" && revision.ID != selection.RevisionID || selection.Label != "" && !slices.Contains(revision.Labels, selection.Label) {
 			continue
 		}
-		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables, promptInputLimit(route.MaxBodyBytes, s.cfg.MaxBodyBytes))
+		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables, promptInputLimit(route.MaxBodyBytes, s.Config.MaxBodyBytes))
 		if errors.Is(err, prompts.ErrRenderTooLarge) {
 			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
@@ -411,7 +411,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		if err != nil {
 			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
-		if int64(expanded.Len()) > s.cfg.MaxBodyBytes {
+		if int64(expanded.Len()) > s.Config.MaxBodyBytes {
 			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
 		return expanded, &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil

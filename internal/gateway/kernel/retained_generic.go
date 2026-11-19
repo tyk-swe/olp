@@ -87,25 +87,25 @@ func retainedUpstreamPath(e retainedapi.Endpoint, ids map[string]string) string 
 
 func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retainedapi.Endpoint) {
 	format := retainedSurfaceFormat(e.Surface)
-	x, authority, done := s.stateBegin(w, r, format)
+	x, authority, done := s.StateBegin(w, r, format)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	x.operationOverride = e.Operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
 	x.retained = retainedOperationForAction(e.Action)
-	var p *pin
+	var p *Pin
 	status := http.StatusInternalServerError
-	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
 	fail := func(err *fault.Error) {
 		if e.Action == "create" {
 			c := *err
 			c.NoRetry = true
 			err = &c
 		}
-		x.failure = err
+		x.Failure = err
 		status = err.Status
 		fault.WriteSurfaceError(w, err, e.Surface)
 	}
@@ -133,14 +133,14 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 		if displayOnly {
 			e.Metered = false
-			x.retained = retainedOperation{use: retainedHousekeeping}
+			x.retained = retainedOperation{use: RetainedHousekeeping}
 		}
 	}
 	// Resolve ancestors (parents) in path order; foreign parents are missing.
 	var parent *resources.Resource
 	ids := map[string]string{}
 	for i, kind := range e.Ancestors {
-		got, getErr := s.deps.Resources.Get(r.Context(), kind, x.keyID, r.PathValue("parent"+strconv.Itoa(i)))
+		got, getErr := s.Deps.Resources.Get(r.Context(), kind, x.keyID, r.PathValue("parent"+strconv.Itoa(i)))
 		if getErr != nil {
 			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
@@ -149,7 +149,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
-		if _, _, parentErr := s.resolveResource(r.Context(), x, authority, got, e.Operation, retainedHousekeeping); parentErr != nil {
+		if _, _, parentErr := s.ResolveResource(r.Context(), x, authority, got, e.Operation, RetainedHousekeeping); parentErr != nil {
 			fail(parentErr)
 			return
 		}
@@ -161,7 +161,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		// continue to belong to the store, so the same attachment remains
 		// addressable through /vector_stores/{store}/files/{file}.
 		var parentErr error
-		parent, parentErr = s.deps.Resources.GetByUUID(r.Context(), *parent.ParentID, x.keyID)
+		parent, parentErr = s.Deps.Resources.GetByUUID(r.Context(), *parent.ParentID, x.keyID)
 		if parentErr != nil || parent.Kind != "vector_store" {
 			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
@@ -174,7 +174,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	var err *fault.Error
 
 	if e.Action == "create" {
-		slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
+		slug := strings.TrimSpace(r.Header.Get(StateRouteHeader))
 		var selected *resources.Resource
 		if parent != nil {
 			slug = parent.RouteSlug
@@ -198,13 +198,13 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(derr)
 			return
 		}
-		prior, lookupErr := s.deps.Resources.LookupLifecycle(r.Context(), x.keyID, e.Operation, idempotency, digest)
+		prior, lookupErr := s.Deps.Resources.LookupLifecycle(r.Context(), x.keyID, e.Operation, idempotency, digest)
 		if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
 			fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
 		}
 		if lookupErr == nil {
-			x.route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
+			x.Route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
 			w.Header().Set("X-OLP-Resource-ID", prior.ID)
 			fail(fault.ServerError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
@@ -219,8 +219,8 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			return
 		}
 		route = &candidate
-		x.route = route
-		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		x.Route = route
+		if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 			fail(fault.PermissionError("route_forbidden", "The API key cannot use this route."))
 			return
 		}
@@ -228,7 +228,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(policyUnavailable("operation_unavailable", "The route does not allow this operation."))
 			return
 		}
-		if err = x.guardrailSurfaceGate(route); err != nil {
+		if err = x.GuardrailSurfaceGate(route); err != nil {
 			fail(err)
 			return
 		}
@@ -282,7 +282,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			}
 		}
 
-		ctx, cancel := s.stateDeadline(r.Context(), route)
+		ctx, cancel := s.StateDeadline(r.Context(), route)
 		defer cancel()
 		if err := s.admitRetainedRequest(ctx, x, authority, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
 			fail(err)
@@ -293,7 +293,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(queryErr)
 			return
 		}
-		endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, retainedUpstreamPath(e, ids), query)
+		endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(e, ids), query)
 		if urlErr != nil {
 			fail(fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable."))
 			return
@@ -305,7 +305,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 		meta, _ := json.Marshal(fields)
 		version := retainedapi.Revision
-		candidateRes := &resources.Resource{Kind: e.Kind, APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, Metadata: meta, ContractVersion: &version}
+		candidateRes := &resources.Resource{Kind: e.Kind, APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, Metadata: meta, ContractVersion: &version}
 		if parent != nil {
 			// A child shares its parent's serving revision so listing,
 			// projection, and cursor checks keep one identity even
@@ -318,7 +318,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(err)
 			return
 		}
-		lifecycle, prepareErr = s.deps.Resources.BeginCreate(ctx, candidateRes, resources.Submission{Operation: e.Operation, Key: idempotency, Digest: digest})
+		lifecycle, prepareErr = s.Deps.Resources.BeginCreate(ctx, candidateRes, resources.Submission{Operation: e.Operation, Key: idempotency, Digest: digest})
 		if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 			fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
@@ -356,7 +356,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		resource = parent
 	} else {
 		var getErr error
-		lifecycle, getErr = s.deps.Resources.OpenOwned(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
+		lifecycle, getErr = s.Deps.Resources.OpenOwned(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
 		if getErr != nil {
 			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
@@ -371,24 +371,24 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		fail(pinUnavailable())
 		return
 	}
-	use := retainedRetrieval
+	use := RetainedRetrieval
 	if e.Metered && (e.Action == "update" || e.Action == "patch") {
-		use = retainedNewWork
+		use = RetainedNewWork
 	} else if e.Action == "delete" || e.Action == "cancel" || e.Action == "list" {
-		use = retainedHousekeeping
+		use = RetainedHousekeeping
 	}
-	p, route, err = s.resolveResource(r.Context(), x, authority, resource, e.Operation, use)
+	p, route, err = s.ResolveResource(r.Context(), x, authority, resource, e.Operation, use)
 	if err != nil {
 		fail(err)
 		return
 	}
-	x.route = route
-	if !p.provider.Connector().Supports(e.Operation, e.Surface, "unary") {
+	x.Route = route
+	if !p.Provider.Connector().Supports(e.Operation, e.Surface, "unary") {
 		fail(pinUnavailable())
 		return
 	}
 	if e.Action != "delete" {
-		if err = x.guardrailSurfaceGate(route); err != nil {
+		if err = x.GuardrailSurfaceGate(route); err != nil {
 			fail(err)
 			return
 		}
@@ -427,7 +427,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 	}
 	ids["id"] = resource.UpstreamID
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
 	if err := s.admitRetainedRequest(ctx, x, authority, p, route, e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")); err != nil {
 		fail(err)
@@ -438,7 +438,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		fail(queryErr)
 		return
 	}
-	endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, retainedUpstreamPath(e, ids), query)
+	endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(e, ids), query)
 	if urlErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable."))
 		return
@@ -453,11 +453,11 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 }
 
 // retainedDispatch performs the pinned call and projects identities.
-func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
+func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Call, p *Pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
 	isCreate := e.Action == "create"
 	deletion := e.Action == "delete" && resource.Kind == "context_cache"
 	if deletion {
-		deletionLifecycle, err := s.deps.Resources.BeginDeletion(r.Context(), resource)
+		deletionLifecycle, err := s.Deps.Resources.BeginDeletion(r.Context(), resource)
 		lifecycle = deletionLifecycle
 		if err != nil {
 			s.settleFence(r.Context(), lifecycle.Reject)
@@ -467,10 +467,10 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		defer s.settleFence(r.Context(), lifecycle.Close)
 	}
 
-	native, failure := s.pinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
+	native, failure := s.PinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
 	if failure != nil {
 		if resource != nil && (isCreate || deletion || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
-			commit, cancel := resourceCommitContext(r.Context())
+			commit, cancel := ResourceCommitContext(r.Context())
 			rejectErr := lifecycle.Reject(commit)
 			cancel()
 			if rejectErr != nil {
@@ -478,25 +478,25 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 				return 503
 			}
 		}
-		if resource != nil && !isCreate && failure.status == http.StatusNotFound {
-			commitCtx, cancel := resourceCommitContext(r.Context())
+		if resource != nil && !isCreate && failure.Status == http.StatusNotFound {
+			commitCtx, cancel := ResourceCommitContext(r.Context())
 			defer cancel()
-			if removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); removeErr == nil {
+			if removeErr := s.Deps.Resources.Tombstone(commitCtx, resource.ID); removeErr == nil {
 				fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 				return http.StatusNotFound
 			}
 		}
-		public := retainedPublicError(upstreamError(failure), failure.status)
+		public := retainedPublicError(UpstreamError(failure), failure.Status)
 		fail(public)
 		return public.Status
 	}
 	defer native.Body.Close()
-	response, readErr := native.readBody(s.retainedResponseLimit())
+	response, readErr := native.ReadBody(s.retainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return 502
 	}
-	commitCtx, commitCancel := resourceCommitContext(r.Context())
+	commitCtx, commitCancel := ResourceCommitContext(r.Context())
 	defer commitCancel()
 	var parsed oif.Document
 	var parseErr error
@@ -517,10 +517,10 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			referenceErr = resources.ErrContract
 		}
 		if parseErr == nil && parsed.Root().Kind() == oif.Object && referenceErr == nil {
-			_ = observeRetainedUsage(native.exchange, parsed, false)
-			native.exchange.complete(classSuccess)
+			_ = observeRetainedUsage(native.Exchange, parsed, false)
+			native.Exchange.Complete(ClassSuccess)
 		}
-		if putErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
+		if putErr := s.Deps.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
 			fail(fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return 503
 		}
@@ -531,39 +531,39 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			}
 		}
 		if native.StatusCode == http.StatusNoContent {
-			observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.now())
-			if observeErr != nil || s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
+			observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.Now())
+			if observeErr != nil || s.Deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
 				fail(fault.ServerError(503, "provider_state_unavailable", "Deletion evidence could not be committed."))
 				return 503
 			}
-			s.writeStateJSONStatus(w, x, nil, native.StatusCode, native.exchange)
+			s.writeStateJSONStatus(w, x, nil, native.StatusCode, native.Exchange)
 			return native.StatusCode
 		}
 	}
 	if e.Action == "content" {
-		_ = observeRetainedUsage(native.exchange, oif.Document{}, false)
-		native.exchange.complete(classSuccess)
+		_ = observeRetainedUsage(native.Exchange, oif.Document{}, false)
+		native.Exchange.Complete(ClassSuccess)
 		// Binary delivery finalizes like the JSON path: a successful
 		// write commits the envelope, a failed one cancels it.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		w.Header().Set("Content-Type", "application/octet-stream")
-		x.responseHeaders(w.Header(), false)
+		x.ResponseHeaders(w.Header(), false)
 		w.WriteHeader(native.StatusCode)
 		n, writeErr := w.Write(response)
 		if writeErr == nil && n == len(response) {
 			writeErr = http.NewResponseController(w).Flush()
 		}
 		if writeErr != nil || n != len(response) {
-			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
-			native.exchange.delivery(deliveryState(n))
-			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+			x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
+			native.Exchange.Delivery(DeliveryState(n))
+			s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, 0)
 			return native.StatusCode
 		}
 		if n > 0 {
-			x.delivered(s.now())
+			x.Delivered(s.Now())
 		}
-		native.exchange.delivery(usage.ClientTerminal)
-		s.finish(x, &outcome{committed: true}, native.StatusCode)
+		native.Exchange.Delivery(usage.ClientTerminal)
+		s.Finish(x, &Outcome{Committed: true}, native.StatusCode)
 		return native.StatusCode
 	}
 	if parseErr != nil || parsed.Root().Kind() != oif.Object {
@@ -585,29 +585,29 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			return 502
 		}
 		prepared, prepareErr := lifecycle.PrepareCreated(resources.CreationResult{
-			IDs: ids, Observation: &resources.CreationObservation{Endpoint: e, Document: parsed, At: s.now()},
+			IDs: ids, Observation: &resources.CreationObservation{Endpoint: e, Document: parsed, At: s.Now()},
 		})
 		if errors.Is(prepareErr, resources.ErrRetainedMetadata) {
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid resource billing metadata."))
 			return 502
 		}
 		if prepareErr != nil {
-			native.exchange.interrupt(classProtocol, true)
+			native.Exchange.interrupt(classProtocol, true)
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
 		}
 		creation, resource = prepared, prepared.Resource()
 	} else if e.Action != "list" && e.Action != "delete" {
-		if err := resources.EnrichRetained(resource, e, parsed, s.now()); err != nil {
+		if err := resources.EnrichRetained(resource, e, parsed, s.Now()); err != nil {
 			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 			return 503
 		}
 	}
-	observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.now())
+	observation, observeErr := resources.ObserveRetained(resource, e, parsed, s.Now())
 	if creation != nil {
 		if err := creation.Commit(commitCtx); err != nil {
 			if referenceErr == nil && observeErr == nil {
-				native.exchange.interrupt(classProtocol, true)
+				native.Exchange.interrupt(classProtocol, true)
 			}
 			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
@@ -622,7 +622,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		return 503
 	}
 	if s.persistRetainedResult(commitCtx, resource, e, parsed) != nil {
-		native.exchange.interrupt(classProtocol, true)
+		native.Exchange.interrupt(classProtocol, true)
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 		return 503
 	}
@@ -632,15 +632,15 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
 			return 502
 		}
-		public := retainedProjectionError(native.exchange, projectErr)
+		public := retainedProjectionError(native.Exchange, projectErr)
 		fail(public)
 		return public.Status
 	}
 	if e.Action != "delete" {
-		_ = observeRetainedUsage(native.exchange, parsed, false)
-		native.exchange.complete(classSuccess)
+		_ = observeRetainedUsage(native.Exchange, parsed, false)
+		native.Exchange.Complete(ClassSuccess)
 	}
-	if s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
+	if s.Deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil) != nil {
 		fail(fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed."))
 		return 503
 	}
@@ -650,7 +650,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			return 503
 		}
 	}
-	s.writeStateJSONStatus(w, x, projected, native.StatusCode, native.exchange)
+	s.writeStateJSONStatus(w, x, projected, native.StatusCode, native.Exchange)
 	return native.StatusCode
 }
 
@@ -667,7 +667,7 @@ func retainedDeleteIdentityMatches(e retainedapi.Endpoint, document oif.Document
 	return valid && expected != nil && id == expected.UpstreamID
 }
 
-func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
+func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
 	pageSizeParam, cursorParam := "limit", "after"
 	if e.Surface == "gemini" || e.Surface == "native" {
 		pageSizeParam, cursorParam = "pageSize", "pageToken"
@@ -706,7 +706,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		limit = parsed
 	}
 	ready := make([]retainedListEntry, 0, limit+1)
-	requestedRoute := strings.TrimSpace(r.Header.Get(stateRouteHeader))
+	requestedRoute := strings.TrimSpace(r.Header.Get(StateRouteHeader))
 	cursor := r.URL.Query().Get(cursorParam)
 	exhausted := false
 	var pending []*resources.Resource
@@ -722,7 +722,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	fill := func(ctx context.Context, target int) int {
 		for len(ready) <= target && !exhausted {
 			if len(pending) == 0 {
-				rows, err := s.deps.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc", requestedRoute)
+				rows, err := s.Deps.Resources.ListLifecycleOrdered(ctx, e.Kind, x.keyID, 101, cursor, order == "asc", requestedRoute)
 				if err != nil {
 					if errors.Is(err, resources.ErrNotFound) {
 						fail(fault.InvalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
@@ -744,7 +744,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 				if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 					continue
 				}
-				p, route, resolveErr := s.resolveResource(ctx, x, a, resource, e.Operation, retainedRetrieval)
+				p, route, resolveErr := s.ResolveResource(ctx, x, a, resource, e.Operation, RetainedRetrieval)
 				if resolveErr != nil {
 					if resolveErr.Status != http.StatusNotFound && resolveErr.Status != http.StatusConflict {
 						fail(resolveErr)
@@ -752,8 +752,8 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 					}
 					continue
 				}
-				x.route = route
-				if gateErr := x.guardrailSurfaceGate(route); gateErr != nil {
+				x.Route = route
+				if gateErr := x.GuardrailSurfaceGate(route); gateErr != nil {
 					fail(gateErr)
 					return gateErr.Status
 				}
@@ -815,7 +815,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			// Earlier free reads reserved only this route's rates.
 			authority = retainedCostAuthority(authority)
 		}
-		lease, gateErr := s.deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, quota.CostReservation{}, &costChecked)
+		lease, gateErr := s.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, quota.CostReservation{}, &costChecked)
 		if gateErr != nil {
 			fail(gateErr)
 			return gateErr.Status
@@ -866,7 +866,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		readIdx++
 		x.retainedAdmission = &entry.admission
 		entry.pin.attempt = entry.admission.attempt
-		x.route = entry.route
+		x.Route = entry.route
 		if entry.admission.billing != retainedFree && !callerCostsAdmitted {
 			if failure := s.admitRetainedPageCost(ctx, x, a, overall); failure != nil {
 				fail(failure)
@@ -878,7 +878,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return status
 		}
 		resource, p, route := entry.resource, entry.pin, entry.route
-		x.route = route
+		x.Route = route
 		bound := x.attemptCostBound(p.attempt)
 		charge := x.attemptChargeBound(p.attempt, bound)
 		if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
@@ -899,18 +899,18 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			fail(gateErr)
 			return gateErr.Status
 		}
-		endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, retainedUpstreamPath(retainedapi.Endpoint{Family: e.Family, Action: "get", Method: "GET", Pattern: e.Path + "/{id}"}, map[string]string{"id": resource.UpstreamID}), nil)
+		endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(retainedapi.Endpoint{Family: e.Family, Action: "get", Method: "GET", Pattern: e.Path + "/{id}"}, map[string]string{"id": resource.UpstreamID}), nil)
 		if urlErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(pinUnavailable())
 			return 409
 		}
-		native, callErr := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		native, callErr := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if callErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
-			if callErr.status == http.StatusNotFound {
-				commitCtx, commitCancel := resourceCommitContext(ctx)
-				removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID)
+			s.settlePinnedHold(ctx, p.Hold)
+			if callErr.Status == http.StatusNotFound {
+				commitCtx, commitCancel := ResourceCommitContext(ctx)
+				removeErr := s.Deps.Resources.Tombstone(commitCtx, resource.ID)
 				commitCancel()
 				if removeErr != nil {
 					fail(fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
@@ -918,12 +918,12 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 				}
 				continue
 			}
-			public := retainedPublicError(upstreamError(callErr), callErr.status)
+			public := retainedPublicError(UpstreamError(callErr), callErr.Status)
 			fail(public)
 			return public.Status
 		}
-		lastRouteRead[route.Slug] = native.exchange
-		body, readErr := native.readBody(s.retainedResponseLimit())
+		lastRouteRead[route.Slug] = native.Exchange
+		body, readErr := native.ReadBody(s.retainedResponseLimit())
 		native.Body.Close()
 		if readErr == nil {
 			objectEndpoint := e
@@ -934,50 +934,50 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			}
 		}
 		if readErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
 		}
 		objectEndpoint := retainedapi.Endpoint{Family: e.Family, Action: "get"}
 		source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
 		if parseErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
 		}
-		if err := resources.EnrichRetained(resource, objectEndpoint, source, s.now()); err != nil {
-			s.settlePinnedHold(ctx, p.hold)
+		if err := resources.EnrichRetained(resource, objectEndpoint, source, s.Now()); err != nil {
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 			return 503
 		}
-		observation, observeErr := resources.ObserveRetained(resource, objectEndpoint, source, s.now())
+		observation, observeErr := resources.ObserveRetained(resource, objectEndpoint, source, s.Now())
 		if observeErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
 			return 503
 		}
 		rewrite, referenceErr := retainedapi.PrepareRewrite(source, retainedResponseRefs(objectEndpoint, source))
 		if referenceErr != nil {
-			s.settlePinnedHold(ctx, p.hold)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
 		}
 		projected, projectErr := s.projectRetainedGeneric(ctx, resource, objectEndpoint, source, rewrite)
 		if projectErr != nil {
-			public := retainedProjectionError(native.exchange, projectErr)
-			s.settlePinnedHold(ctx, p.hold)
+			public := retainedProjectionError(native.Exchange, projectErr)
+			s.settlePinnedHold(ctx, p.Hold)
 			fail(public)
 			return public.Status
 		}
-		_ = observeRetainedUsage(native.exchange, source, false)
-		native.exchange.complete(classSuccess)
-		s.settlePinnedHold(ctx, p.hold)
+		_ = observeRetainedUsage(native.Exchange, source, false)
+		native.Exchange.Complete(ClassSuccess)
+		s.settlePinnedHold(ctx, p.Hold)
 		routeActual[route.Slug] = routeActual[route.Slug].Add(bound)
 		routeActualCharge[route.Slug] = routeActualCharge[route.Slug].Add(charge)
-		commitCtx, commitCancel := resourceCommitContext(ctx)
+		commitCtx, commitCancel := ResourceCommitContext(ctx)
 		persistErr := s.persistRetainedResult(commitCtx, resource, objectEndpoint, source)
 		if persistErr == nil {
-			persistErr = s.deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil)
+			persistErr = s.Deps.Resources.RecordRetainedObservation(commitCtx, resource, observation, nil)
 		}
 		commitCancel()
 		if persistErr != nil {
@@ -990,7 +990,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			return 502
 		}
 		items = append(items, projected)
-		delivered = append(delivered, native.exchange)
+		delivered = append(delivered, native.Exchange)
 		lastItem = resource
 	}
 	hasMore := readIdx < len(ready) || !exhausted
@@ -1048,20 +1048,20 @@ func (s *Server) retainedCompact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation, upstreamTemplate, storeKind string) {
-	x, authority, done := s.stateBegin(w, r, wire.File)
+	x, authority, done := s.StateBegin(w, r, wire.File)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	x.operationOverride = operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
-	x.retained = retainedOperation{use: retainedNewWork, billing: retainedMeteredWork}
-	var p *pin
+	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+	var p *Pin
 	status := http.StatusInternalServerError
-	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
 	fail := func(err *fault.Error) {
-		x.failure = err
+		x.Failure = err
 		status = err.Status
 		fault.WriteSurfaceError(w, err, "openai")
 	}
@@ -1069,12 +1069,12 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(providerStateForbidden())
 		return
 	}
-	body, err := s.gate.ReadBody(r)
+	body, err := s.Gate.ReadBody(r)
 	if err != nil {
 		fail(err)
 		return
 	}
-	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
 	if parseErr != nil || source.Root().Kind() != oif.Object {
 		fail(fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil))
 		return
@@ -1092,7 +1092,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	upstreamPath := upstreamTemplate
 	if storeKind != "" {
 		var getErr error
-		resource, getErr = s.deps.Resources.Get(r.Context(), storeKind, x.keyID, r.PathValue("id"))
+		resource, getErr = s.Deps.Resources.Get(r.Context(), storeKind, x.keyID, r.PathValue("id"))
 		if getErr != nil {
 			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
@@ -1101,14 +1101,14 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		// Searching a retained store starts new billable work, so it
 		// must satisfy current new-work restrictions rather than the
 		// historical retrieval contract that created the binding.
-		p, route, resolveErr = s.resolveResource(r.Context(), x, authority, resource, operation, retainedNewWork)
+		p, route, resolveErr = s.ResolveResource(r.Context(), x, authority, resource, operation, RetainedNewWork)
 		if resolveErr != nil {
 			fail(resolveErr)
 			return
 		}
 		upstreamPath = strings.Replace(upstreamTemplate, "{id}", url.PathEscape(resource.UpstreamID), 1)
 	} else {
-		slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
+		slug := strings.TrimSpace(r.Header.Get(StateRouteHeader))
 		if slug == "" {
 			fail(fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil))
 			return
@@ -1119,8 +1119,8 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			return
 		}
 		route = &candidate
-		x.route = route
-		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		x.Route = route
+		if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
 			fail(fault.PermissionError("route_forbidden", "The API key cannot use this route."))
 			return
 		}
@@ -1128,7 +1128,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			fail(policyUnavailable("operation_unavailable", "The route does not allow this operation."))
 			return
 		}
-		if gateErr := x.guardrailSurfaceGate(route); gateErr != nil {
+		if gateErr := x.GuardrailSurfaceGate(route); gateErr != nil {
 			fail(gateErr)
 			return
 		}
@@ -1178,8 +1178,8 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 			return
 		}
 	}
-	x.route = route
-	if gateErr := x.guardrailSurfaceGate(route); gateErr != nil {
+	x.Route = route
+	if gateErr := x.GuardrailSurfaceGate(route); gateErr != nil {
 		fail(gateErr)
 		return
 	}
@@ -1190,24 +1190,24 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	}
 	body = rewritten.Bytes()
 	x.estimate = int64(len(body))
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
 	if err := s.admitRetainedRequest(ctx, x, authority, p, route, false); err != nil {
 		fail(err)
 		return
 	}
-	endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, upstreamPath, nil)
+	endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, upstreamPath, nil)
 	if urlErr != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable."))
 		return
 	}
-	native, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
+	native, failure := s.PinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
-		fail(retainedPublicError(upstreamError(failure), failure.status))
+		fail(retainedPublicError(UpstreamError(failure), failure.Status))
 		return
 	}
 	defer native.Body.Close()
-	response, readErr := native.readBody(s.retainedResponseLimit())
+	response, readErr := native.ReadBody(s.retainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return
@@ -1218,7 +1218,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 	generation := storeKind == ""
-	if generation && observeRetainedUsage(native.exchange, responseSource, true) != nil {
+	if generation && observeRetainedUsage(native.Exchange, responseSource, true) != nil {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned invalid usage."))
 		return
 	}
@@ -1231,20 +1231,20 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	// references against the serving pin's owner-scoped identity.
 	projectAs := resource
 	if projectAs == nil && p != nil && route != nil {
-		projectAs = &resources.Resource{APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID}
+		projectAs = &resources.Resource{APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID}
 	}
 	projected, projectErr := s.projectRetainedGeneric(ctx, projectAs, codec, responseSource, rewrite)
 	if projectErr != nil {
-		fail(retainedProjectionError(native.exchange, projectErr))
+		fail(retainedProjectionError(native.Exchange, projectErr))
 		return
 	}
 	if !generation {
-		_ = observeRetainedUsage(native.exchange, responseSource, false)
+		_ = observeRetainedUsage(native.Exchange, responseSource, false)
 	}
-	native.exchange.complete(classSuccess)
+	native.Exchange.Complete(ClassSuccess)
 	response = projected
 	status = native.StatusCode
-	s.writeStateJSONStatus(w, x, response, status, native.exchange)
+	s.writeStateJSONStatus(w, x, response, status, native.Exchange)
 }
 
 func retainedRejectedWithoutWork(failure *attemptFailure) bool {
@@ -1257,7 +1257,7 @@ func retainedRejectedWithoutWork(failure *attemptFailure) bool {
 	if failure.acceptance != upstream.Terminal || failure.accepted {
 		return false
 	}
-	switch failure.status {
+	switch failure.Status {
 	case 400, 401, 403, 404, 405, 413, 415, 422, 429:
 		return true
 	}

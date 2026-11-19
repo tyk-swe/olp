@@ -46,14 +46,14 @@ func (s *Server) registerAnthropicState(mux *http.ServeMux) {
 	mux.HandleFunc("GET /anthropic/v1/messages/batches/{id}/results", s.anthropicBatchResults)
 }
 
-func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
-	x, authority, done := s.stateBegin(w, r, family)
+func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*Call, keyauthority.Authority, bool) {
+	x, authority, done := s.StateBegin(w, r, family)
 	if done {
 		return x, authority, true
 	}
 	if err := validateAnthropicFilesBeta(r.Header); err != nil {
-		s.gate.Release(r.Context())
-		s.refuse(x, w, err)
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, err)
 		return x, authority, true
 	}
 	return x, authority, false
@@ -64,236 +64,236 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
-	route, err := s.nativeStateRoute(x, authority, r, "")
+	defer s.Gate.Release(r.Context())
+	route, err := s.NativeStateRoute(x, authority, r, "")
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
-	form, err := s.parseMediaForm(w, r, authority.ID, s.cfg.MaxMediaBodyBytes, 1)
+	form, err := s.ParseMediaForm(w, r, authority.ID, s.Config.MaxMediaBodyBytes, 1)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	defer form.Cleanup()
 	file := form.TakeSingleFile("file")
 	if form.Err() != nil || file == nil {
-		s.refuse(x, w, fault.InvalidRequest("invalid_request", "Upload exactly one file part.", nil))
+		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "Upload exactly one file part.", nil))
 		return
 	}
 	if extra := form.TakeExtensions(); form.Err() != nil || len(extra) != 0 {
-		s.refuse(x, w, fault.InvalidRequest("invalid_request", "Anthropic file uploads accept only one file part.", nil))
+		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "Anthropic file uploads accept only one file part.", nil))
 		return
 	}
 	form.Disarm()
-	defer s.deps.Staging.Remove(file.Handle)
-	p, err := s.nativeStatePin(r.Context(), x, route)
+	defer s.Deps.Staging.Remove(file.Handle)
+	p, err := s.NativeStatePin(r.Context(), x, route)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
-	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
-		s.refuse(x, w, e)
+	defer s.ResourceSettle(ctx, x, p)
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(authority), p, route); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
-	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
-		s.refuse(x, w, e)
+	if e := s.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
-	x.pinnedHeaders = anthropicFilesHeaders()
-	endpoint, urlErr := resourceURL(p.provider.Connector(), p.model, "files", anthropicFilesQuery())
+	x.PinnedHeaders = anthropicFilesHeaders()
+	endpoint, urlErr := ResourceURL(p.Provider.Connector(), p.Model, "files", anthropicFilesQuery())
 	if urlErr != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
+		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 		return
 	}
-	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, "", nil, file, false)
+	resp, failure := s.UploadMultipart(ctx, x, p, endpoint, "", nil, file, false)
 	if failure != nil {
-		s.refuse(x, w, upstreamError(failure))
+		s.Refuse(x, w, UpstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
 
-	body, readErr := resp.readBody(s.cfg.MaxResponseBytes)
+	body, readErr := resp.ReadBody(s.Config.MaxResponseBytes)
 	if readErr != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
+		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
 	}
-	upstreamID, valid := nativeResourceID(body, s.cfg.MaxResponseBytes)
+	upstreamID, valid := NativeResourceID(body, s.Config.MaxResponseBytes)
 	if !valid {
-		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
+		s.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
-	metadata, state, expires := anthropicFileMetadata(body, p.model)
-	resp.exchange.complete(classSuccess)
-	commitCtx, stopCommit := resourceCommitContext(ctx)
+	metadata, state, expires := anthropicFileMetadata(body, p.Model)
+	resp.Exchange.Complete(ClassSuccess)
+	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
-	res, putErr := s.deps.Resources.Put(commitCtx, &resources.Resource{
+	res, putErr := s.Deps.Resources.Put(commitCtx, &resources.Resource{
 		Kind: resources.KindAnthropicFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
-		ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID,
-		TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID,
+		ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID,
+		TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID,
 		UpstreamID: upstreamID, State: state, Metadata: metadata, ExpiresAt: expires,
 	})
 	if putErr != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."))
+		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."))
 		return
 	}
-	out, _ := rewriteID(body, "id", res.ID)
-	s.writeStateJSON(w, x, out, resp.exchange)
+	out, _ := RewriteID(body, "id", res.ID)
+	s.WriteStateJSON(w, x, out, resp.Exchange)
 }
 
-func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, *resources.Resource, *pin) *fault.Error) {
+func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use RetainedUse, op func(context.Context, *Call, *resources.Resource, *Pin) *fault.Error) {
 	x, authority, done := s.anthropicBegin(w, r, wire.AnthropicFile)
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
-	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
+	defer s.Gate.Release(r.Context())
+	res, err := s.Deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
+		s.Refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."))
+		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."))
 		return
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
+	p, route, e := s.ResolveResource(r.Context(), x, authority, res, "batch", use)
 	if e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 		return
 	}
-	if !p.provider.Connector().Supports("batch", "anthropic", "unary") || !p.provider.Supports(p.model, "batch", "anthropic", "unary") {
-		s.refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
+	if !p.Provider.Connector().Supports("batch", "anthropic", "unary") || !p.Provider.Supports(p.Model, "batch", "anthropic", "unary") {
+		s.Refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
 		return
 	}
-	x.route = route
-	ctx, cancel := s.stateDeadline(r.Context(), route)
+	x.Route = route
+	ctx, cancel := s.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.resourceSettle(ctx, x, p)
-	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
-		s.refuse(x, w, e)
+	defer s.ResourceSettle(ctx, x, p)
+	if e = s.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.Refuse(x, w, e)
 		return
 	}
 	if e = op(ctx, x, res, p); e != nil {
-		s.refuse(x, w, e)
+		s.Refuse(x, w, e)
 	}
 }
 
 func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
-	s.anthropicFileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.pinnedHeaders = anthropicFilesHeaders()
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
+	s.anthropicFileCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, res *resources.Resource, p *Pin) *fault.Error {
+		x.PinnedHeaders = anthropicFilesHeaders()
+		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			if failure.status == http.StatusNotFound {
-				_ = s.deps.Resources.Tombstone(ctx, res.ID)
+			if failure.Status == http.StatusNotFound {
+				_ = s.Deps.Resources.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 			}
-			return upstreamError(failure)
+			return UpstreamError(failure)
 		}
 		defer resp.Body.Close()
-		body, err := resp.readBody(s.cfg.MaxResponseBytes)
+		body, err := resp.ReadBody(s.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		upstreamID, valid := nativeResourceID(body, s.cfg.MaxResponseBytes)
+		upstreamID, valid := NativeResourceID(body, s.Config.MaxResponseBytes)
 		if !valid || upstreamID != res.UpstreamID {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched file identity.")
 		}
-		metadata, state, expires := anthropicFileMetadata(body, p.model)
-		resp.exchange.complete(classSuccess)
-		if err := s.deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+		metadata, state, expires := anthropicFileMetadata(body, p.Model)
+		resp.Exchange.Complete(ClassSuccess)
+		if err := s.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file refresh could not be committed.")
 		}
 		res.Metadata = metadata
 
-		out, err := rewriteID(body, "id", res.ID)
+		out, err := RewriteID(body, "id", res.ID)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
 		}
-		s.writeStateJSON(w, x, out, resp.exchange)
+		s.WriteStateJSON(w, x, out, resp.Exchange)
 		return nil
 	})
 }
 
 func (s *Server) anthropicDeleteFile(w http.ResponseWriter, r *http.Request) {
-	s.anthropicFileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.pinnedHeaders = anthropicFilesHeaders()
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
+	s.anthropicFileCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, res *resources.Resource, p *Pin) *fault.Error {
+		x.PinnedHeaders = anthropicFilesHeaders()
+		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID), anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		resp, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
+		resp, failure := s.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
-			if failure.status == http.StatusNotFound {
-				_ = s.deps.Resources.Tombstone(ctx, res.ID)
+			if failure.Status == http.StatusNotFound {
+				_ = s.Deps.Resources.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 			}
-			return upstreamError(failure)
+			return UpstreamError(failure)
 		}
 		_ = resp.Body.Close()
-		resp.exchange.complete(classSuccess)
-		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
+		resp.Exchange.Complete(ClassSuccess)
+		if err := s.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file mapping could not be deleted.")
 		}
 
-		s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "type": "file_deleted"}), resp.exchange)
+		s.WriteStateJSON(w, x, MustJSON(map[string]any{"id": res.ID, "type": "file_deleted"}), resp.Exchange)
 		return nil
 	})
 }
 
 func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
-	s.anthropicFileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, res *resources.Resource, p *pin) *fault.Error {
-		x.pinnedHeaders = anthropicFilesHeaders()
-		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+"/content", anthropicFilesQuery())
+	s.anthropicFileCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, res *resources.Resource, p *Pin) *fault.Error {
+		x.PinnedHeaders = anthropicFilesHeaders()
+		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID)+"/content", anthropicFilesQuery())
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		x.pinnedBinary = true
-		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		x.PinnedBinary = true
+		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			return upstreamError(failure)
+			return UpstreamError(failure)
 		}
 		defer resp.Body.Close()
 		contentType := resp.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := resp.stageBody(ctx, s.deps.Staging, "file-content", contentType, s.cfg.MaxResponseBytes)
+		artifact, err := resp.StageBody(ctx, s.Deps.Staging, "file-content", contentType, s.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
-		resp.exchange.complete(classSuccess)
-		defer s.deps.Staging.Remove(artifact.Handle)
-		opened, err := s.deps.Staging.Open(artifact.Handle)
+		resp.Exchange.Complete(ClassSuccess)
+		defer s.Deps.Staging.Remove(artifact.Handle)
+		opened, err := s.Deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged provider file could not be read.")
 		}
 		defer opened.File.Close()
-		setFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
+		SetFileDownloadHeaders(w.Header(), contentType, artifact.ContentLength)
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The results response could not be bounded.")
 		}
-		x.responseHeaders(w.Header(), false)
+		x.ResponseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		written, copyErr := copyResourceContent(w, opened.File, artifact.ContentLength)
+		written, copyErr := CopyResourceContent(w, opened.File, artifact.ContentLength)
 
 		if copyErr != nil || written != artifact.ContentLength {
-			resp.exchange.delivery(deliveryState(written))
-			x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
-			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
+			resp.Exchange.Delivery(DeliveryState(written))
+			x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
+			s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
 			return nil
 		}
 		if written > 0 {
-			x.delivered(s.now())
+			x.Delivered(s.Now())
 		}
-		resp.exchange.delivery(usage.ClientTerminal)
-		s.finish(x, &outcome{committed: true}, http.StatusOK)
+		resp.Exchange.Delivery(usage.ClientTerminal)
+		s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
 		return nil
 	})
 }
@@ -321,10 +321,10 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	if done {
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer s.Gate.Release(r.Context())
 	limit, before, cursor, err := anthropicListCursor(r.URL.Query(), kind)
 	if err != nil {
-		s.refuse(x, w, err)
+		s.Refuse(x, w, err)
 		return
 	}
 	ctx := r.Context()
@@ -339,7 +339,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		param = "before_id"
 	}
 	fetch := func(anchor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.deps.Resources.ListKindsPage(ctx, []string{kind}, authority.ID, count, anchor, backwards)
+		batch, err := s.Deps.Resources.ListKindsPage(ctx, []string{kind}, authority.ID, count, anchor, backwards)
 		if errors.Is(err, resources.ErrNotFound) {
 			return nil, fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param)
 		}
@@ -349,23 +349,23 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 		return batch, nil
 	}
 	authorize := func(row *resources.Resource) *fault.Error {
-		return s.authorizeListedResource(ctx, authority, row)
+		return s.AuthorizeListedResource(ctx, authority, row)
 	}
 	var rows []*resources.Resource
 	var continuation string
 	var listErr *fault.Error
 	for token := cursor; ; token = continuation {
-		rows, continuation, listErr = s.listedResourcePage(authority.ID, param, limit, token, fetch, authorize)
+		rows, continuation, listErr = s.ListedResourcePage(authority.ID, param, limit, token, fetch, authorize)
 		if kind != resources.KindAnthropicBatch || len(rows) != 0 || continuation == "" || listErr != nil || ctx.Err() != nil {
 			break
 		}
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		s.refuse(x, w, fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The resource list could not be read within the deadline."))
+		s.Refuse(x, w, fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The resource list could not be read within the deadline."))
 		return
 	}
 	if listErr != nil {
-		s.refuse(x, w, listErr)
+		s.Refuse(x, w, listErr)
 		return
 	}
 	if backwards {
@@ -375,12 +375,12 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	for _, row := range rows {
 		object, err := s.anthropicResourceObject(row, kind, r)
 		if err != nil {
-			s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."))
+			s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."))
 			return
 		}
 		items, ids = append(items, object), append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, anthropicListBody(items, ids, continuation, backwards))
+	s.WriteStateJSON(w, x, anthropicListBody(items, ids, continuation, backwards))
 }
 
 func anthropicListBody(items []json.RawMessage, ids []string, continuation string, backwards bool) []byte {
@@ -395,7 +395,7 @@ func anthropicListBody(items []json.RawMessage, ids []string, continuation strin
 			body["last_id"] = continuation
 		}
 	}
-	return mustJSON(body)
+	return MustJSON(body)
 }
 
 func (s *Server) anthropicResourceObject(res *resources.Resource, kind string, r *http.Request) ([]byte, error) {
@@ -404,10 +404,10 @@ func (s *Server) anthropicResourceObject(res *resources.Resource, kind string, r
 		return nil, errors.New("stored Anthropic resource metadata is not an object")
 	}
 	delete(fields, "upstream_model")
-	fields["id"] = mustJSON(res.ID)
+	fields["id"] = MustJSON(res.ID)
 	if kind == resources.KindAnthropicBatch {
 		if raw, ok := fields["results_url"]; ok && string(raw) != "null" {
-			fields["results_url"] = mustJSON(s.gatewayOrigin(r) + "/anthropic/v1/messages/batches/" + url.PathEscape(res.ID) + "/results")
+			fields["results_url"] = MustJSON(s.GatewayOrigin(r) + "/anthropic/v1/messages/batches/" + url.PathEscape(res.ID) + "/results")
 		}
 		return json.Marshal(fields)
 	}
@@ -528,7 +528,7 @@ func anthropicListCursor(query url.Values, kind string) (int, string, string, *f
 	if cursor == "" {
 		cursor = after
 	}
-	if cursor != "" && !strings.HasPrefix(cursor, retainedListCursorPrefix) && !validAnthropicCursor(kind, cursor) {
+	if cursor != "" && !strings.HasPrefix(cursor, RetainedListCursorPrefix) && !validAnthropicCursor(kind, cursor) {
 		param := "after_id"
 		if before != "" {
 			param = "before_id"

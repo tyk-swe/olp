@@ -26,7 +26,7 @@ type responseMCPError struct {
 	Content json.RawMessage `json:"content"`
 }
 
-func (x *call) responseMCPContractCertified() bool {
+func (x *Call) responseMCPContractCertified() bool {
 	if len(x.facts) == 0 {
 		return false
 	}

@@ -164,10 +164,10 @@ func generationReferences(source oif.Document, family wire.Format) ([]generation
 }
 
 func sameGenerationAffinity(a, b *resources.Resource) bool {
-	return a != nil && b != nil && a.APIKeyID == b.APIKeyID && a.RouteSlug == b.RouteSlug && a.RouteRevisionID == b.RouteRevisionID && samePin(a, b) && strings.TrimPrefix(resourceModel(a), "models/") == strings.TrimPrefix(resourceModel(b), "models/")
+	return a != nil && b != nil && a.APIKeyID == b.APIKeyID && a.RouteSlug == b.RouteSlug && a.RouteRevisionID == b.RouteRevisionID && samePin(a, b) && strings.TrimPrefix(ResourceModel(a), "models/") == strings.TrimPrefix(ResourceModel(b), "models/")
 }
 
-func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.Error {
+func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.Error {
 	parsed := x.generation.parsed
 	refs, err := generationReferences(parsed.OIF().Document(), parsed.Family)
 	if err != nil {
@@ -176,7 +176,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.E
 	if len(refs) == 0 && x.previousResponse() == nil {
 		return nil
 	}
-	if s.deps.Resources == nil {
+	if s.Deps.Resources == nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider resource authority is unavailable.")
 	}
 	if len(refs) > 0 && !x.authority.Policy.AllowProviderState {
@@ -188,7 +188,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.E
 	}
 	bindings := &generationResources{resolved: map[string]string{}, bound: map[string]*resources.Resource{}}
 	if prior := x.previousResponse(); prior != nil {
-		p, route, failure := s.resolveResource(ctx, x, x.authority, prior, "generation", retainedNewWork)
+		p, route, failure := s.ResolveResource(ctx, x, x.authority, prior, "generation", RetainedNewWork)
 		if failure != nil {
 			return failure
 		}
@@ -215,20 +215,20 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.E
 		if ref.kind == resources.KindFile {
 			resource, durable, err = s.readDurable(ctx, durableKind(resources.KindFile, ref.id), x.keyID, ref.id)
 		} else {
-			resource, err = s.deps.Resources.Get(ctx, ref.kind, x.keyID, localID)
+			resource, err = s.Deps.Resources.Get(ctx, ref.kind, x.keyID, localID)
 		}
-		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.now()) {
+		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.Now()) {
 			return fault.InvalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.pointer)
 		}
 		if ref.kind != resources.KindFile && (resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision) {
 			return fault.InvalidRequest("resource_affinity", "The resource has no compatible native reference contract.", &ref.pointer)
 		}
-		var p *pin
+		var p *Pin
 		var route *routing.Route
 		if durable != nil {
-			p, route, _ = s.admitDurable(ctx, x, x.authority, resource, durable, "generation", retainedNewWork)
+			p, route, _ = s.admitDurable(ctx, x, x.authority, resource, durable, "generation", RetainedNewWork)
 		} else {
-			p, route, _ = s.resolveResource(ctx, x, x.authority, resource, "generation", retainedNewWork)
+			p, route, _ = s.ResolveResource(ctx, x, x.authority, resource, "generation", RetainedNewWork)
 		}
 		if p == nil || x.pin != nil && !sameGenerationAffinity(x.pin, resource) {
 			return fault.InvalidRequest("resource_affinity", "Generation references must share one authorized model, connection and credential.", &ref.pointer)
@@ -268,56 +268,56 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.E
 	return nil
 }
 
-func generationCacheInput(resource *resources.Resource, p *pin) (int64, bool) {
+func generationCacheInput(resource *resources.Resource, p *Pin) (int64, bool) {
 	var metadata struct {
 		Model         string `json:"model"`
 		Tokens        *int64 `json:"total_token_count"`
 		NoCachedTools bool   `json:"no_cached_tools"`
 	}
-	if json.Unmarshal(resource.Metadata, &metadata) != nil || p.provider.Kind != "gemini" || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.provider.Connector().Model(p.model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
+	if json.Unmarshal(resource.Metadata, &metadata) != nil || p.Provider.Kind != "gemini" || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.Provider.Connector().Model(p.Model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
 		return 0, false
 	}
 	return *metadata.Tokens, true
 }
 
-func (x *call) bindGenerationServing(p *pin, resource *resources.Resource, pointer string) *fault.Error {
-	serving := p.provider.Connector().ServingIdentity(p.provider.ID, p.provider.RevisionID, p.model)
+func (x *Call) bindGenerationServing(p *Pin, resource *resources.Resource, pointer string) *fault.Error {
+	serving := p.Provider.Connector().ServingIdentity(p.Provider.ID, p.Provider.RevisionID, p.Model)
 	if x.serving != nil && *x.serving != serving {
 		return fault.InvalidRequest("resource_affinity", "Generation references require the same native serving contract.", &pointer)
 	}
-	x.serving, x.servingSlot, x.servingBinding = &serving, resource.SlotID, p.model
+	x.serving, x.servingSlot, x.servingBinding = &serving, resource.SlotID, p.Model
 	return nil
 }
 
-func (s *Server) generationReferenceBudget(x *call, p *pin, route *routing.Route, bindings *generationResources) *fault.Error {
+func (s *Server) generationReferenceBudget(x *Call, p *Pin, route *routing.Route, bindings *generationResources) *fault.Error {
 	if bindings == nil || !bindings.unknownInput {
 		return nil
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
-	if s.deps.Runtime == nil {
-		return unboundedWorkLimits(authority, &p.provider, &p.slot, route)
+	if s.Deps.Runtime == nil {
+		return unboundedWorkLimits(authority, &p.Provider, &p.Slot, route)
 	}
-	return s.unboundedPinLimits(authority, p, route)
+	return s.UnboundedPinLimits(authority, p, route)
 }
 
 // A connection pin can also belong to a file, conversation or vector store.
 // Only an actual prior response supplies the response parent relationship.
-func (x *call) previousResponse() *resources.Resource {
+func (x *Call) previousResponse() *resources.Resource {
 	if x.pin != nil && (x.pin.Kind == resources.KindResponse || x.pin.Kind == resources.KindStrictResponse) {
 		return x.pin
 	}
 	return nil
 }
 
-func (x *call) resolvedGenerationResources() map[string]string {
+func (x *Call) resolvedGenerationResources() map[string]string {
 	if x.generation.resources == nil {
 		return nil
 	}
 	return x.generation.resources.resolved
 }
 
-func (x *call) checkGenerationResourceDestination(provider *routing.Provider, model string, destination wire.Format, source oif.Document) error {
+func (x *Call) checkGenerationResourceDestination(provider *routing.Provider, model string, destination wire.Format, source oif.Document) error {
 	refs, err := generationReferences(source, destination)
 	if err != nil {
 		return &oif.Incompatibility{Code: "resource_affinity", Requirement: "native_resource_destination", Message: "The destination contains an invalid resource reference."}

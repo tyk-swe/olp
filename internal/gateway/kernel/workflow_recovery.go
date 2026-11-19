@@ -26,7 +26,7 @@ type workflowRecoveryResult struct {
 	Content []workflowRecoveryBlock `json:"content"`
 }
 
-func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority keyauthority.Authority, callID string, arguments json.RawMessage) (json.RawMessage, error) {
+func (s *Server) recoverWorkflowContent(ctx context.Context, x *Call, authority keyauthority.Authority, callID string, arguments json.RawMessage) (json.RawMessage, error) {
 	surface, err := guardrails.NativeSurface(x.generation.parsed.OIF().Document(), false)
 	if err != nil || callID == "" || slices.Contains(x.workflowRecoveryCalls, callID) || slices.ContainsFunc(surface.Segments, func(segment guardrails.Segment) bool {
 		return segment.Kind == guardrails.ToolResult && segment.ToolCallID == callID
@@ -44,7 +44,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	if err := decoder.Decode(new(struct{})); err != io.EOF {
 		return nil, &mcp.WorkflowError{Status: 400, Code: "invalid_tool_call", Message: "The recovery identifier is invalid."}
 	}
-	if authority.ProjectID == nil || x.route == nil || x.snapshot() == nil {
+	if authority.ProjectID == nil || x.Route == nil || x.snapshot() == nil {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
 	runID, err := uuid.Parse(x.workflow.runID)
@@ -61,7 +61,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 			}
 		}
 	})
-	settled, pending, err := s.deps.Debits.PreviousRecovery(ctx, x.workflow.runID, authority.ID, previousIDs)
+	settled, pending, err := s.Deps.Debits.PreviousRecovery(ctx, x.workflow.runID, authority.ID, previousIDs)
 	if err != nil || pending {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
@@ -78,7 +78,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	if err != nil {
 		return nil, err
 	}
-	currency, err := s.deps.Debits.Currency(ctx)
+	currency, err := s.Deps.Debits.Currency(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -86,33 +86,33 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 		ID: dispatchID, APIKeyID: authority.ID, ProjectID: *authority.ProjectID,
 		RunID: x.workflow.runID, StepID: stepID, Kind: debits.KindTool, ClaimID: claimID,
 		Currency: currency, CostBound: "0", ChargeBound: "0", PreparedUntil: time.Now().Add(90 * time.Second),
-		Affinity: debits.Affinity{ReleaseID: canonicalSessionID(x.snapshot().Generation().ID), RevisionID: canonicalSessionID(x.route.RevisionID), RouteRevisionID: canonicalSessionID(x.route.RevisionID)},
+		Affinity: debits.Affinity{ReleaseID: canonicalSessionID(x.snapshot().Generation().ID), RevisionID: canonicalSessionID(x.Route.RevisionID), RouteRevisionID: canonicalSessionID(x.Route.RevisionID)},
 	}
-	boundaries := x.admissionAuthority(authority).CostBoundaries(x.limitRoute())
+	boundaries := x.AdmissionAuthority(authority).CostBoundaries(x.limitRoute())
 	if !boundaries.Resolved {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
-	state, err := s.deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, boundaries.Owners())
+	state, err := s.Deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, boundaries.Owners())
 	if err != nil || state != debits.Prepared {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
-	if err := s.deps.Debits.Admit(ctx, dispatchID, claimID, boundaries.Admissions()); err != nil {
-		_ = s.deps.Debits.ReleaseUndispatched(context.WithoutCancel(ctx), dispatchID, claimID)
+	if err := s.Deps.Debits.Admit(ctx, dispatchID, claimID, boundaries.Admissions()); err != nil {
+		_ = s.Deps.Debits.ReleaseUndispatched(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}
-	if err := s.deps.Debits.MarkDispatched(ctx, dispatchID, claimID); err != nil {
+	if err := s.Deps.Debits.MarkDispatched(ctx, dispatchID, claimID); err != nil {
 		return nil, err
 	}
 	eventID, err := newSessionDebitID()
 	if err != nil {
-		_ = s.deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
+		_ = s.Deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}
 	resultDigest := sha256.Sum256([]byte("recovery-result:" + dispatchID))
 	evidenceDigest := sha256.Sum256([]byte("recovery-evidence:" + dispatchID))
 	result := debits.Result{DispatchID: dispatchID, EventID: eventID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:], Cost: "0", Charge: "0", Final: true, Complete: true}
-	if err := s.deps.Debits.SettleRecovery(ctx, result); err != nil {
-		_ = s.deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
+	if err := s.Deps.Debits.SettleRecovery(ctx, result); err != nil {
+		_ = s.Deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}
 	x.workflowRecoveryCalls = append(x.workflowRecoveryCalls, callID)

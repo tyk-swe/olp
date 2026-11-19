@@ -53,7 +53,7 @@ type preparationEvidence struct {
 	document   oif.Document
 }
 
-func (x *call) requestDocument() oif.Document {
+func (x *Call) requestDocument() oif.Document {
 	if x.unary != nil {
 		return x.unary.source.Document()
 	}
@@ -63,10 +63,10 @@ func (x *call) requestDocument() oif.Document {
 	return oif.Document{}
 }
 
-func (x *call) preparation() *requestPreparation {
+func (x *Call) preparation() *requestPreparation {
 	source := x.requestDocument()
-	if x.prepared == nil || x.prepared.source != source || x.prepared.route != x.route {
-		x.prepared = &requestPreparation{source: source, route: x.route, requiresParameters: x.requiresParameters()}
+	if x.prepared == nil || x.prepared.source != source || x.prepared.route != x.Route {
+		x.prepared = &requestPreparation{source: source, route: x.Route, requiresParameters: x.requiresParameters()}
 	}
 	return x.prepared
 }
@@ -263,7 +263,7 @@ func (p *requestPreparation) hasProviders() bool {
 
 // requiresParameters is fixed by the policies of this route leg. Only those
 // policies need parameter metadata after an evicted plan has been released.
-func (x *call) requiresParameters() bool {
+func (x *Call) requiresParameters() bool {
 	requested := func(p *bool) bool { return p != nil && *p }
 	if x.preferences != nil && requested(x.preferences.RequireParameters) {
 		return true
@@ -271,7 +271,7 @@ func (x *call) requiresParameters() bool {
 	requires := func(p *routing.Policy) bool {
 		return p != nil && (requested(p.Constraints.RequireParameters) || requested(p.Defaults.RequireParameters))
 	}
-	if x.route != nil && requires(x.route.Policy) {
+	if x.Route != nil && requires(x.Route.Policy) {
 		return true
 	}
 	var snapshot *routing.View

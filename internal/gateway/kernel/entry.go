@@ -9,9 +9,9 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 )
 
-func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {
-	if !s.gate.Admit(r.Context()) {
-		s.refuse(x, w, fault.Overloaded)
+func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *Call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {
+	if !s.Gate.Admit(r.Context()) {
+		s.Refuse(x, w, fault.Overloaded)
 		return keyauthority.Authority{}, false
 	}
 	authority, e := authenticate(r)
@@ -23,15 +23,15 @@ func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *call, authenti
 		x.attribution, e = ingress.ParseAttribution(r, authority)
 	}
 	if e != nil {
-		s.gate.Release(r.Context())
-		s.refuse(x, w, e)
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, e)
 		return keyauthority.Authority{}, false
 	}
 	return authority, true
 }
 
 func (s *Server) authenticateInference(r *http.Request) (keyauthority.Authority, *fault.Error) {
-	return s.gate.Authenticate(r, "inference")
+	return s.Gate.Authenticate(r, "inference")
 }
 
 func providerStatePermitted(family wire.Format, authority keyauthority.Authority) *fault.Error {
@@ -44,12 +44,12 @@ func providerStatePermitted(family wire.Format, authority keyauthority.Authority
 	return nil
 }
 
-func (s *Server) refuse(x *call, w http.ResponseWriter, e *fault.Error) {
+func (s *Server) Refuse(x *Call, w http.ResponseWriter, e *fault.Error) {
 	s.refuseOn(x, w, e, x.family.Surface())
 }
 
-func (s *Server) refuseOn(x *call, w http.ResponseWriter, e *fault.Error, surface string) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
+func (s *Server) refuseOn(x *Call, w http.ResponseWriter, e *fault.Error, surface string) {
+	x.Failure = e
+	s.Finish(x, nil, e.Status)
 	fault.WriteSurfaceError(w, e, surface)
 }

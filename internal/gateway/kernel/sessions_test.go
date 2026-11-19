@@ -343,7 +343,7 @@ func TestRealtimeResponseDoneSettlesModalityShares(t *testing.T) {
 func TestHoldWebRTCExposureSweepsExpired(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := &Server{now: func() time.Time { return now }}
+	s := &Server{Now: func() time.Time { return now }}
 	s.holdWebRTCExposure("live", now.Add(time.Hour))
 	s.holdWebRTCExposure("expired", now.Add(-time.Hour))
 	s.holdWebRTCExposure("other", now.Add(time.Hour))

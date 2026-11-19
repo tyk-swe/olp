@@ -138,7 +138,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	}
 	view := func(role string) *resources.Resource {
 		metadata := managedFileRecord{
-			batchManifest: batch.batchManifest.withAdapter(connectors.BatchGeminiManaged), UpstreamModel: resourceModel(owner), Role: role,
+			batchManifest: batch.batchManifest.withAdapter(connectors.BatchGeminiManaged), UpstreamModel: ResourceModel(owner), Role: role,
 			ResponsesFile: fileName, CompletionWindow: batch.CompletionWindow,
 			ProviderFile: managedFileObject{Filename: new(fileID + ".jsonl"), Purpose: new("batch")},
 		}
@@ -147,12 +147,12 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 			ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID, RouteRevisionID: owner.RouteRevisionID,
 			TargetID: owner.TargetID, SlotID: owner.SlotID, CredentialID: owner.CredentialID,
 			ParentID:   new(owner.UUID),
-			UpstreamID: fileName + "#" + role, State: "processed", Metadata: mustJSON(metadata),
+			UpstreamID: fileName + "#" + role, State: "processed", Metadata: MustJSON(metadata),
 		}
 	}
-	commitCtx, stop := resourceCommitContext(ctx)
+	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
-	return s.deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, view("output"), view("error"))
+	return s.Deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, view("output"), view("error"))
 }
 
 func geminiManagedFileName(resource *resources.Resource) (string, error) {
@@ -203,7 +203,7 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	return json.Marshal(object)
 }
 
-func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *call, resource *resources.Resource, p *pin) *fault.Error {
+func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *Call, resource *resources.Resource, p *Pin) *fault.Error {
 	record, err := decodeManagedFileRecord(resource.Metadata)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
@@ -212,7 +212,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
-	generation, err := p.provider.Connector().URL(wire.Gemini, p.model, false)
+	generation, err := p.Provider.Connector().URL(wire.Gemini, p.Model, false)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 	}
@@ -221,23 +221,23 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 	}
 	endpoint := parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media"
-	x.pinnedBinary = true
-	response, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+	x.PinnedBinary = true
+	response, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 	if failure != nil {
-		return upstreamError(failure)
+		return UpstreamError(failure)
 	}
 	defer response.Body.Close()
-	spool := s.deps.Staging
+	spool := s.Deps.Staging
 	if spool == nil {
-		response.exchange.interrupt(classProtocol, true)
+		response.Exchange.interrupt(classProtocol, true)
 		return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 	}
 	contentType := response.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/jsonl"
 	}
-	limit := min(s.cfg.MaxResponseBytes, batches.MaxBatchBytes)
-	raw, err := response.stageBody(ctx, spool, "gemini-managed-results", contentType, limit)
+	limit := min(s.Config.MaxResponseBytes, batches.MaxBatchBytes)
+	raw, err := response.StageBody(ctx, spool, "gemini-managed-results", contentType, limit)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
 	}
@@ -246,7 +246,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if record.Role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
-			response.exchange.interrupt(classProtocol, !errors.Is(err, errGeminiBatchFidelity))
+			response.Exchange.interrupt(classProtocol, !errors.Is(err, errGeminiBatchFidelity))
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
@@ -256,30 +256,30 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		defer spool.Remove(part.Handle)
 		contentType = "application/jsonl"
 	}
-	response.exchange.complete(classSuccess)
+	response.Exchange.Complete(ClassSuccess)
 	opened, err := spool.Open(part.Handle)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
 	}
 	defer opened.File.Close()
-	setFileDownloadHeaders(w.Header(), contentType, part.Size)
+	SetFileDownloadHeaders(w.Header(), contentType, part.Size)
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file response could not be bounded.")
 	}
-	x.responseHeaders(w.Header(), false)
+	x.ResponseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
-	written, err := copyResourceContent(w, opened.File, part.Size)
+	written, err := CopyResourceContent(w, opened.File, part.Size)
 	if err != nil || written != part.Size {
-		response.exchange.delivery(deliveryState(written))
-		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
-		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
+		response.Exchange.Delivery(DeliveryState(written))
+		x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
+		s.Finish(x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
 		return nil
 	}
 	if written > 0 {
-		x.delivered(s.now())
+		x.Delivered(s.Now())
 	}
-	response.exchange.delivery(usage.ClientTerminal)
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	response.Exchange.Delivery(usage.ClientTerminal)
+	s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
 	return nil
 }
 
@@ -287,13 +287,13 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 	if role != "output" && role != "error" {
 		return nil, errGeminiBatchFidelity
 	}
-	opened, err := s.deps.Staging.Open(source.Handle)
+	opened, err := s.Deps.Staging.Open(source.Handle)
 	if err != nil {
 		return nil, err
 	}
 	defer opened.File.Close()
 	reader, writer := io.Pipe()
-	limit := min(s.cfg.MaxResponseBytes, source.Limit, batches.MaxBatchBytes)
+	limit := min(s.Config.MaxResponseBytes, source.Limit, batches.MaxBatchBytes)
 	done := make(chan error, 1)
 	go func() {
 		defer panics.Recover(s.log, "gemini batch results", func(err error) {
@@ -337,7 +337,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 						return
 					}
 					delete(fields, "id")
-					body = mustJSON(fields)
+					body = MustJSON(fields)
 				}
 				var decoded any
 				if json.Unmarshal(body, &decoded) != nil {
@@ -393,14 +393,14 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		done <- nil
 		_ = writer.Close()
 	}()
-	artifact, spoolErr := s.deps.Staging.Put(ctx, staging.Upload{
+	artifact, spoolErr := s.Deps.Staging.Put(ctx, staging.Upload{
 		Filename: source.Filename, ContentType: "application/jsonl", MaximumLength: limit, Body: reader,
 	})
 	_ = reader.Close()
 	translateErr := <-done
 	if spoolErr != nil || translateErr != nil {
 		if spoolErr == nil {
-			_ = s.deps.Staging.Remove(artifact.Handle)
+			_ = s.Deps.Staging.Remove(artifact.Handle)
 		}
 		if spoolErr != nil {
 			return nil, spoolErr

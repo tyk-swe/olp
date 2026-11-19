@@ -11,13 +11,13 @@ import (
 // grant enrollment, is the same for every slot of the provider revision, so
 // later attempts may use its other slots; an unknown principal pins the
 // credential slot. A secret refresh alone does not change a principal.
-func (x *call) servingAllowed(provider *routing.Provider, targetID, model string, slot routing.Slot, selectBaseline bool) bool {
+func (x *Call) servingAllowed(provider *routing.Provider, targetID, model string, slot routing.Slot, selectBaseline bool) bool {
 	if !x.strict() {
 		return true
 	}
 	var serving oif.ServingIdentity
 	if x.media != nil {
-		template, found := x.snapshot().MediaTemplate(x.route.Slug, targetID, string(x.media.Op()))
+		template, found := x.snapshot().MediaTemplate(x.Route.Slug, targetID, string(x.media.Op()))
 		if found {
 			serving = template.Serving()
 		}

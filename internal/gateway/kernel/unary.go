@@ -27,7 +27,7 @@ type unaryCall struct {
 	route, surface string
 }
 
-func (x *call) operationName() string {
+func (x *Call) operationName() string {
 	if x.operationOverride != "" {
 		return x.operationOverride
 	}
@@ -36,7 +36,7 @@ func (x *call) operationName() string {
 	}
 	return x.family.Operation()
 }
-func (x *call) surfaceName() string {
+func (x *Call) surfaceName() string {
 	if x.unary != nil {
 		return x.unary.surface
 	}
@@ -46,7 +46,7 @@ func (x *call) surfaceName() string {
 // clientSurface is the wire surface the caller speaks, which shapes error
 // envelopes and credential query parameters. It can differ from surfaceName,
 // the capability surface: Gemini embeddings match OpenAI embedding targets.
-func (x *call) clientSurface() string {
+func (x *Call) clientSurface() string {
 	if x.unary != nil && x.unary.surface == "native" {
 		return "native"
 	}
@@ -55,7 +55,7 @@ func (x *call) clientSurface() string {
 	}
 	return x.surfaceName()
 }
-func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body []byte, pathModel, routeHeader string) (bool, error) {
+func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body []byte, pathModel, routeHeader string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
 		ids := map[wire.Format]string{wire.Decisions: "openai-decisions", wire.GeminiDecisions: wire.Dialect(wire.GeminiDecisions), wire.SystemOne: "systemone", wire.Embeddings: "openai-embeddings", wire.Rerank: "rerank", wire.Moderation: "openai-moderation", wire.OCR: "mistral-ocr", wire.Search: "perplexity-search", wire.InputTokens: "openai-input-tokens", wire.AnthropicCount: "anthropic-count-tokens", wire.GeminiCount: "gemini-count-tokens", wire.GeminiEmbeddings: "gemini-embeddings", wire.GeminiEmbeddingsBatch: "gemini-batch-embeddings", wire.BedrockCount: "bedrock-count-tokens"}
@@ -91,7 +91,7 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	if !exists {
 		return true, fault.ModelNotFound(model)
 	}
-	x.route = &route
+	x.Route = &route
 	if !x.strict() && !serving {
 		return true, operations.Error("target_capability", "/route", "strict_native_operation", "Registered native operation endpoints require a strict route.")
 	}
@@ -107,31 +107,31 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	// this dialect's operation on its native surface in the terminal envelope.
 	x.unary = &unaryCall{dialect: codec, route: model, surface: surface}
 	x.mode = "unary"
-	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
+	source, err := operationplan.Parse(dialect, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		return true, err
 	}
-	if err := protocols.ValidateOperationInlineMedia(source.Document(), codec.Identity, s.cfg.InlineMedia); err != nil {
+	if err := protocols.ValidateOperationInlineMedia(source.Document(), codec.Identity, s.Config.InlineMedia); err != nil {
 		return true, err
 	}
 	x.unary.source = source
 	return true, nil
 }
-func (x *call) unaryPlan(provider *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
+func (x *Call) unaryPlan(provider *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
 	prepared, err := x.preparation().operation(providerPreparationKey(provider, targetID, model), true, func() (unaryAdmission, error) {
 		return x.buildUnary(targetID)
 	})
 	return prepared.plan, err
 }
 
-func (x *call) unaryAdmission(provider *routing.Provider, targetID, model string) (unaryAdmission, error) {
+func (x *Call) unaryAdmission(provider *routing.Provider, targetID, model string) (unaryAdmission, error) {
 	return x.preparation().operation(providerPreparationKey(provider, targetID, model), false, func() (unaryAdmission, error) {
 		return x.buildUnary(targetID)
 	})
 }
 
-func (x *call) buildUnary(targetID string) (unaryAdmission, error) {
-	template, _ := x.snapshot().OperationTemplate(x.route.Slug, targetID, x.operationName())
+func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
+	template, _ := x.snapshot().OperationTemplate(x.Route.Slug, targetID, x.operationName())
 	if template == nil {
 		return unaryAdmission{}, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
 	}
@@ -164,7 +164,7 @@ func (x *call) buildUnary(targetID string) (unaryAdmission, error) {
 	}, nil
 }
 
-func (x *call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
+func (x *Call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
 	if !x.guard.engine.HasPhase(guardrails.Input) && !x.guard.engine.HasPhase(guardrails.InputParallel) {
 		return nil, nil
 	}
@@ -188,9 +188,9 @@ func (x *call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrail
 	return evidence, parallelErr
 }
 
-func (s *Server) prepareUnary(ctx context.Context, x *call) *fault.Error {
+func (s *Server) prepareUnary(ctx context.Context, x *Call) *fault.Error {
 	authorize := guardrailAuthorizer(s, x)
-	if e := authorize(x.route); e != nil {
+	if e := authorize(x.Route); e != nil {
 		return e
 	}
 	if x.semanticQueryInvalid {
@@ -204,33 +204,33 @@ func (s *Server) prepareUnary(ctx context.Context, x *call) *fault.Error {
 }
 
 // planUnary plans x.route for a registered native operation.
-func (s *Server) planUnary(ctx context.Context, x *call) *fault.Error {
+func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
 	}
-	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
+	if e := s.checkRouteFidelity(ctx, x.Route); e != nil {
 		return e
 	}
-	budgetRoute := *x.route
+	budgetRoute := *x.Route
 	budgetRoute.CallerCostExempt = x.callerCostExempt()
 	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
-		if err := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
+		if err := unboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
 			return err
 		}
 	}
-	session := s.planning(x, unaryPlanning, x.route, x.operationName(), x.surfaceName(), "unary")
+	session := s.planning(x, unaryPlanning, x.Route, x.operationName(), x.surfaceName(), "unary")
 	session.unbounded = !operationregistry.PolicyFor(x.operationName()).BoundedWork
 	options := s.selectionOptions(ctx, x)
 	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		// Decisions does not expose a provider-enforced output bound. An input
 		// estimate alone cannot enforce a token or spend cap on this request.
 		if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
-			authority := x.admissionAuthority(x.authority)
+			authority := x.AdmissionAuthority(x.authority)
 			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
 				session.semantic = err
 				return nil, err
 			}
-			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
+			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.Route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
 				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
 					continue
 				}
@@ -250,8 +250,8 @@ func (s *Server) planUnary(ctx context.Context, x *call) *fault.Error {
 	_, _, failure := session.selectPlan(ctx, options)
 	return failure
 }
-func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, body []byte) (*outcome, int) {
-	fail := func(e *fault.Error) (*outcome, int) {
+func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call, body []byte) (*Outcome, int) {
+	fail := func(e *fault.Error) (*Outcome, int) {
 		if x.dispatched && e.Status >= 500 {
 			copy := *e
 			copy.NoRetry = true
@@ -261,7 +261,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		if e.Status > 0 {
 			fault.WriteSurfaceError(w, e, x.clientSurface())
 		}
-		return &outcome{err: e, cancelled: e.Status == 0}, e.Status
+		return &Outcome{Err: e, Cancelled: e.Status == 0}, e.Status
 	}
 	var e *fault.Error
 	x.preferences, x.priority, e = routingControls(r, x.authority.Policy)
@@ -275,10 +275,10 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
-	if e = s.gate.AwaitAdmission(ctx, x.priority); e != nil {
+	if e = s.Gate.AwaitAdmission(ctx, x.priority); e != nil {
 		return fail(e)
 	}
-	admitted := x.admissionAuthority(x.authority)
+	admitted := x.AdmissionAuthority(x.authority)
 	e = s.admitCacheAware(ctx, x, &admitted, quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)
@@ -297,7 +297,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 	}
 	if result.err != nil {
 		out, status := fail(result.err)
-		out.committed, out.cancelled = result.committed, out.cancelled || result.cancelled
+		out.Committed, out.Cancelled = result.committed, out.Cancelled || result.cancelled
 		return out, status
 	}
 	rc := http.NewResponseController(w)
@@ -305,9 +305,9 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		return fail(fault.ServerError(500, "internal_error", "The result could not be written."))
 	}
 	w.Header().Set("Content-Type", "application/json")
-	x.responseHeaders(w.Header(), false)
+	x.ResponseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
-	out := &outcome{committed: true}
+	out := &Outcome{Committed: true}
 	fact := &x.facts[len(x.facts)-1]
 	fact.Committed = true
 	if fact.Interaction != nil {
@@ -318,10 +318,10 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		err = rc.Flush()
 	}
 	if err != nil {
-		out.err = (&attemptFailure{class: classCancelled}).toError()
-		out.cancelled = true
+		out.Err = (&attemptFailure{class: classCancelled}).toError()
+		out.Cancelled = true
 	} else {
-		x.delivered(s.now())
+		x.Delivered(s.Now())
 		if fact.Interaction != nil {
 			fact.Interaction.ClientState = usage.ClientTerminal
 		}

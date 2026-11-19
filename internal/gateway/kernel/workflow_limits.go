@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (x *call) workflowModelCost(attempt routing.Attempt) *fault.Error {
+func (x *Call) workflowModelCost(attempt routing.Attempt) *fault.Error {
 	if x.workflow == nil || x.generation.runLimits.MaxRunCost == nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *fault.Error {
 	return x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *fault.Error) {
+func (x *Call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *fault.Error) {
 	if tool.Definition.UnitPrice == nil {
 		if x.generation.runLimits.MaxRunCost == nil {
 			return rates.Cost{}, false, nil
@@ -65,7 +65,7 @@ func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *fault.Err
 	return bound, true, x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowCheckCost(next rates.Cost) *fault.Error {
+func (x *Call) workflowCheckCost(next rates.Cost) *fault.Error {
 	limit, ok := rates.ParseCost(*x.generation.runLimits.MaxRunCost)
 	if !ok || x.workflow.unknownCost {
 		return workflowUnboundedCost()
@@ -80,11 +80,11 @@ func workflowUnboundedCost() *fault.Error {
 	return fault.InvalidRequest("run_cost_unbounded", "The workflow step cannot be bounded under the run cost limit.", nil)
 }
 
-func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Lease, *fault.Error) {
+func (s *Server) reserveWorkflowRun(ctx context.Context, x *Call) (*admission.Lease, *fault.Error) {
 	if x.workflow == nil {
 		return nil, nil
 	}
-	if !s.deps.Admission.Ready() {
+	if !s.Deps.Admission.Ready() {
 		if x.generation.runLimits.MaxConcurrentRuns == nil {
 			return nil, nil
 		}
@@ -92,7 +92,7 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Le
 	}
 	reserveCtx, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
-	lease, err := s.deps.Admission.Reserve(reserveCtx, admission.Request{
+	lease, err := s.Deps.Admission.Reserve(reserveCtx, admission.Request{
 		Lookup:   "run_" + strings.ReplaceAll(x.keyID, "-", ""),
 		LeaseTTL: time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
 		Rate:     admission.RateLimits{MaxConcurrency: x.generation.runLimits.MaxConcurrentRuns, TrackConcurrency: true},
@@ -104,5 +104,5 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Le
 	if errors.As(err, &exceeded) {
 		return nil, quota.RateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, s.deps.Admission.Outage(x.keyID, false, err)
+	return nil, s.Deps.Admission.Outage(x.keyID, false, err)
 }

@@ -31,9 +31,9 @@ type unaryFailure struct {
 
 type unaryExchange struct {
 	now        func() time.Time
-	dispatched func(context.Context, *call) *fault.Error
+	dispatched func(context.Context, *Call) *fault.Error
 	ctx        context.Context
-	x          *call
+	x          *Call
 	state      *attemptState
 	plan       *operationplan.Plan
 	client     *http.Client
@@ -84,7 +84,7 @@ func (e *unaryExchange) rejected(response *http.Response) *unaryFailure {
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
 	response.Body.Close()
 	e.fact.Status = response.StatusCode
-	failure := &attemptFailure{status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
+	failure := &attemptFailure{Status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
 	class := e.state.rejected(response.StatusCode, failure.upstream)
 	if class == classRateLimit {
 		failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), e.now())
@@ -154,7 +154,7 @@ func (e *unaryExchange) terminal(raw []byte, location string) ([]byte, *unaryFai
 	case operations.PollSucceeded:
 		return raw, nil
 	case operations.PollFailed:
-		return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{status: http.StatusOK}}
+		return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{Status: http.StatusOK}}
 	}
 	return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
 }
@@ -195,7 +195,7 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 				return raw, nil
 			}
 			if state == operations.PollFailed {
-				return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{status: http.StatusOK}}
+				return nil, &unaryFailure{class: classUpstreamServer, failure: &attemptFailure{Status: http.StatusOK}}
 			}
 		case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500:
 			io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))

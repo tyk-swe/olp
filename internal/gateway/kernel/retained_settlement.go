@@ -16,11 +16,11 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *fault.Error {
+func (s *Server) prepareRetainedAccounting(x *Call, p *Pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *fault.Error {
 	if !e.Metered {
 		return nil
 	}
-	models := []string{p.model}
+	models := []string{p.Model}
 	var metadata struct {
 		AuthorizedModels []string `json:"authorized_models"`
 	}
@@ -31,26 +31,26 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 	templates := map[string]*usage.Event{}
 	for _, model := range models {
 		cp := *p
-		cp.model = model
+		cp.Model = model
 		cp.attempt = p.attempt
 		cp.attempt.UpstreamModel = model
 		operation := e.Operation
 		if operation == "eval" {
 			operation = "generation"
 		}
-		price := x.routingInputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, model, operation, s.now())
+		price := x.routingInputs.Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, model, operation, s.Now())
 		if price == nil || !retainedPriceCovers(price, e.Operation, r.Metadata) {
 			return fault.ServerError(503, "pricing_unavailable", "Every retained billing component and model needs a published price before acceptance.")
 		}
-		if e.Operation == "eval" && !retainedEvalPricingSupported(price, x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt), string(p.provider.Kind), p.provider.VendorID, model) {
+		if e.Operation == "eval" && !retainedEvalPricingSupported(price, x.attemptCardRevisionForRoute(p.Provider.ID, route, x.request.startedAt), string(p.Provider.Kind), p.Provider.VendorID, model) {
 			return policyUnavailable("unsupported_metered_operation", "Evaluation totals cannot establish per-invocation input tiers; publish prices and rate cards without those tiers.")
 		}
-		template, err := s.settlementTemplate(x, &cp, e.Surface, operation, s.now())
+		template, err := s.settlementTemplate(x, &cp, e.Surface, operation, s.Now())
 		if err != nil {
 			return fault.ServerError(503, "pricing_unavailable", "Retained accounting could not be pinned.")
 		}
 		template.Origin = usage.OriginRetainedSettlement
-		template.Attempts[0].Routing.Budgets = append(template.Attempts[0].Routing.Budgets, p.provider.ID, p.slot.ID, route.ID)
+		template.Attempts[0].Routing.Budgets = append(template.Attempts[0].Routing.Budgets, p.Provider.ID, p.Slot.ID, route.ID)
 		templates[model] = template
 	}
 	r.RetainedAccounting = &resources.RetainedAccounting{Operation: e.Operation, Templates: templates, TokenConsuming: e.Operation == "fine_tuning" || (e.Operation == "eval" && len(models) > 0)}
@@ -65,7 +65,7 @@ func retainedEvalPricingSupported(price *rates.RoutingPrice, card *rates.Routing
 	return explicit == nil || len(explicit.Tiers) == 0
 }
 
-func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
+func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *Call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
 		return nil, nil
 	}
@@ -75,7 +75,7 @@ func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *
 	}
 	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
 	digest := sha256.Sum256(payload)
-	lifecycle, err := s.deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
+	lifecycle, err := s.Deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
 	if err != nil {
 		if errors.Is(err, resources.ErrSubmissionConflict) {
 			return nil, fault.ServerError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
@@ -85,29 +85,29 @@ func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *
 	return lifecycle, nil
 }
 
-func (s *Server) retainedUnboundedLimits(x *call, p *pin) *fault.Error {
-	if x.route == nil {
+func (s *Server) retainedUnboundedLimits(x *Call, p *Pin) *fault.Error {
+	if x.Route == nil {
 		return fault.ServerError(503, "provider_state_unavailable", "A retained operation requires a pinned route.")
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
 	if x.operationName() == "fine_tuning" || x.operationName() == "eval" {
-		return s.unboundedPinLimits(authority, p, x.route)
+		return s.UnboundedPinLimits(authority, p, x.Route)
 	}
 	monetary := func(provider *routing.Provider, slot *routing.Slot, route *routing.Route) bool {
 		return route != nil && route.Budget != nil && (route.Budget.DailyCostLimit != nil || route.Budget.MonthlyCostLimit != nil) || provider != nil && provider.Limits != nil && provider.Limits.Costs() != nil || slot != nil && slot.Costs() != nil
 	}
-	capped := authority.CostBudgetedForRoute(x.route.Slug) || monetary(&p.provider, &p.slot, x.route)
-	if s.deps.Runtime != nil {
-		if release := s.deps.Runtime.Release(); release != nil {
+	capped := authority.CostBudgetedForRoute(x.Route.Slug) || monetary(&p.Provider, &p.Slot, x.Route)
+	if s.Deps.Runtime != nil {
+		if release := s.Deps.Runtime.Release(); release != nil {
 			var route *routing.Route
-			if current, ok := release.Snapshot().FindRoute(x.route.Slug); ok {
+			if current, ok := release.Snapshot().FindRoute(x.Route.Slug); ok {
 				route = &current
 			}
-			if provider, ok := release.Snapshot().FindProvider(p.provider.ID); ok {
+			if provider, ok := release.Snapshot().FindProvider(p.Provider.ID); ok {
 				var slot *routing.Slot
 				for _, candidate := range provider.Slots {
-					if candidate.ID == p.slot.ID {
+					if candidate.ID == p.Slot.ID {
 						v := candidate
 						slot = &v
 					}

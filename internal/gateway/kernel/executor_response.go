@@ -15,11 +15,11 @@ import (
 
 var errResponseTooLarge = providerinvoke.ErrResponseTooLarge
 
-// finish emits the terminal envelope exactly once.
-func (s *Server) finish(x *call, out *outcome, status int) {
+// Finish emits the terminal envelope exactly once.
+func (s *Server) Finish(x *Call, out *Outcome, status int) {
 	x.once.Do(func() {
 		s.storeCache(x, out, status)
-		completedAt := s.now()
+		completedAt := s.Now()
 		x.finalizePinned()
 		env := events.Envelope{
 			RequestID:            x.request.id,
@@ -53,7 +53,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 				env.RuntimeGenerationID = x.request.release.Snapshot().Generation().ID
 			}
 		}
-		if x.route != nil {
+		if x.Route != nil {
 			env.Route = x.named().Slug
 			env.RouteRevisionID = x.named().RevisionID
 		}
@@ -72,20 +72,20 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		env.Usage = x.usage()
 		switch {
-		case out != nil && out.err != nil:
-			env.ErrorClass = out.err.Code
-			env.BudgetBoundary = quota.BudgetBoundary(out.err)
-		case out == nil && x.failure != nil:
-			env.ErrorClass = x.failure.Code
-			env.BudgetBoundary = quota.BudgetBoundary(x.failure)
+		case out != nil && out.Err != nil:
+			env.ErrorClass = out.Err.Code
+			env.BudgetBoundary = quota.BudgetBoundary(out.Err)
+		case out == nil && x.Failure != nil:
+			env.ErrorClass = x.Failure.Code
+			env.BudgetBoundary = quota.BudgetBoundary(x.Failure)
 		}
 		if out != nil {
-			env.Committed = out.committed
+			env.Committed = out.Committed
 			switch {
-			case out.cancelled:
+			case out.Cancelled:
 				env.Outcome = "cancelled"
 				env.Status = 0
-			case out.err == nil:
+			case out.Err == nil:
 				env.Outcome = "success"
 			}
 		}
@@ -135,11 +135,11 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		s.finalizeGenerationHTTP(x, env)
 		s.recordBusiness(env, x)
-		s.deps.Sink.Terminal(env)
+		s.Deps.Sink.Terminal(env)
 	})
 }
 
-func (x *call) captureInputDocument() map[string]json.RawMessage {
+func (x *Call) captureInputDocument() map[string]json.RawMessage {
 	var body []byte
 	if len(x.facts) != 0 {
 		fact := &x.facts[len(x.facts)-1]
@@ -147,7 +147,7 @@ func (x *call) captureInputDocument() map[string]json.RawMessage {
 			body = document.Bytes()
 		}
 	}
-	if len(body) == 0 && x.generation.parsed != nil && (x.route == nil || x.route.ContentPolicy == nil) {
+	if len(body) == 0 && x.generation.parsed != nil && (x.Route == nil || x.Route.ContentPolicy == nil) {
 		if document := x.generation.parsed.OIF().Document(); document.Valid() {
 			body = document.Bytes()
 		}
@@ -162,31 +162,31 @@ func (x *call) captureInputDocument() map[string]json.RawMessage {
 	return document
 }
 
-func (x *call) captureProject() string {
+func (x *Call) captureProject() string {
 	if x.authority.ProjectID != nil {
 		return *x.authority.ProjectID
 	}
-	if x.route != nil && x.route.ProjectID != nil {
-		return *x.route.ProjectID
+	if x.Route != nil && x.Route.ProjectID != nil {
+		return *x.Route.ProjectID
 	}
 	return ""
 }
 
-func (s *Server) recordBusiness(env events.Envelope, x *call) {
-	if s.deps.Business == nil {
+func (s *Server) recordBusiness(env events.Envelope, x *Call) {
+	if s.Deps.Business == nil {
 		return
 	}
 	project := ""
 	if x.authority.ProjectID != nil {
 		project = *x.authority.ProjectID
-	} else if x.route != nil && x.route.ProjectID != nil {
-		project = *x.route.ProjectID
+	} else if x.Route != nil && x.Route.ProjectID != nil {
+		project = *x.Route.ProjectID
 	}
 	if x.cache != nil {
-		s.deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
+		s.Deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
 	}
 	for _, decision := range env.GuardrailDecisions {
-		s.deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, string(decision.Phase), string(decision.Action), string(decision.Outcome), decision.LatencyMS)
+		s.Deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, string(decision.Phase), string(decision.Action), string(decision.Outcome), decision.LatencyMS)
 	}
 	var snapshot *routing.View
 	if x.historicalSnapshot != nil {
@@ -207,7 +207,7 @@ func (s *Server) recordBusiness(env events.Envelope, x *call) {
 			}
 		}
 		if u := fact.Usage; u != nil && fact.UsageObserved {
-			s.deps.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
+			s.Deps.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
 				if cost, ok := fact.Price.Cost(events.AttemptUsage(fact, env.Operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 					// A committed attempt prices but owes nothing: record its
@@ -216,17 +216,17 @@ func (s *Server) recordBusiness(env events.Envelope, x *call) {
 						if x.factCommitted(fact) {
 							amount = 0
 						}
-						s.deps.Business.Cost(labels, fact.Price.Currency, amount)
+						s.Deps.Business.Cost(labels, fact.Price.Currency, amount)
 					}
 				}
 			}
 		}
 		if fact.FirstOutput != nil {
 			elapsed := fact.StartedAt.Add(*fact.FirstOutput).Sub(env.StartedAt).Seconds()
-			s.deps.Business.FirstToken(labels, elapsed)
+			s.Deps.Business.FirstToken(labels, elapsed)
 			if u := fact.Usage; u != nil && fact.UsageObserved && u.OutputTokens > 0 {
 				if seconds := fact.Duration.Seconds() - fact.FirstOutput.Seconds(); seconds > 0 {
-					s.deps.Business.OutputRate(labels, u.OutputTokens, seconds)
+					s.Deps.Business.OutputRate(labels, u.OutputTokens, seconds)
 				}
 			}
 		}
@@ -244,7 +244,7 @@ func credentialHealthKey(slot *routing.Slot, generation int64) string {
 	return "credential:ambient"
 }
 
-func completionBody(out *outcome) []byte {
+func completionBody(out *Outcome) []byte {
 	if out == nil || out.completion == nil || len(out.completion.Body) == 0 {
 		return nil
 	}

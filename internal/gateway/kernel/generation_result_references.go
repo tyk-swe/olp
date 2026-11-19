@@ -164,7 +164,7 @@ func projectGenerationReferences(source oif.Document, resolve func(string, strin
 	return oif.Apply(source, changes)
 }
 
-func (s *Server) generationResultResolver(ctx context.Context, x *call, identity resources.NativeIdentity) func(string, string) (string, error) {
+func (s *Server) generationResultResolver(ctx context.Context, x *Call, identity resources.NativeIdentity) func(string, string) (string, error) {
 	return func(kind, upstream string) (string, error) {
 		key := kind + "\x00" + upstream
 		if x.generation.resources != nil {
@@ -172,14 +172,14 @@ func (s *Server) generationResultResolver(ctx context.Context, x *call, identity
 				return bound.ID, nil
 			}
 		}
-		if s.deps.Resources == nil {
+		if s.Deps.Resources == nil {
 			return "", resources.ErrNotFound
 		}
 		identity.Kind, identity.UpstreamID, identity.ParentID = kind, upstream, nil
-		resource, err := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		resource, err := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if errors.Is(err, resources.ErrNotFound) && kind == resources.KindFile {
 			identity.Kind = resources.KindStrictFile
-			resource, err = s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+			resource, err = s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		}
 		if err != nil {
 			return "", err
@@ -191,8 +191,8 @@ func (s *Server) generationResultResolver(ctx context.Context, x *call, identity
 	}
 }
 
-func (s *Server) mapGenerationResultReferences(ctx context.Context, x *call, identity resources.NativeIdentity, body []byte) ([]byte, error) {
-	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+func (s *Server) mapGenerationResultReferences(ctx context.Context, x *Call, identity resources.NativeIdentity, body []byte) ([]byte, error) {
+	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (s *Server) mapGenerationResultReferences(ctx context.Context, x *call, ide
 	return projected.Bytes(), nil
 }
 
-func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *call, identity resources.NativeIdentity, frame []byte) ([]byte, error) {
+func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, identity resources.NativeIdentity, frame []byte) ([]byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
 		return frame, nil
@@ -212,7 +212,7 @@ func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *call, ident
 	if len(payload) == 0 || payload[0] != '{' {
 		return frame, nil
 	}
-	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.cfg.MaxEventBytes)})
+	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.Config.MaxEventBytes)})
 	if err != nil {
 		return nil, err
 	}

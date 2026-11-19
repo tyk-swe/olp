@@ -103,7 +103,7 @@ func (s *Server) removeImages(images *media.ImageResult) {
 		if image.Handle == nil {
 			continue
 		}
-		if err := s.deps.Staging.Remove(*image.Handle); err != nil {
+		if err := s.Deps.Staging.Remove(*image.Handle); err != nil {
 			s.log.Warn("staged media image cleanup failed", "error", err)
 		}
 	}
@@ -115,7 +115,7 @@ func tokenUsage(tokens *media.ImageUsage) *wire.Usage {
 		ImageInputTokens: tokens.ImageInputTokens, ImageOutputTokens: tokens.ImageOutputTokens}
 }
 
-func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutcome) {
+func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutcome) {
 	result := out.result
 	switch payload := result.Payload.(type) {
 	case transport.Images:
@@ -172,7 +172,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 	}
 }
 
-func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome, contentType string, write func() error) {
+func (s *Server) deliverMedia(w http.ResponseWriter, x *Call, out *mediaOutcome, contentType string, write func() error) {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 		out.err = fault.ServerError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
@@ -182,7 +182,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	x.responseHeaders(w.Header(), false)
+	x.ResponseHeaders(w.Header(), false)
 	w.WriteHeader(out.status)
 	out.committed = true
 	var attempt *events.AttemptFact
@@ -202,13 +202,13 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome,
 		}
 		return
 	}
-	x.delivered(s.now())
+	x.Delivered(s.Now())
 	if attempt != nil && attempt.Interaction != nil {
 		attempt.Interaction.ClientState = usage.ClientTerminal
 	}
 }
 
-func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *call, out *mediaOutcome, body []byte) {
+func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *Call, out *mediaOutcome, body []byte) {
 	s.deliverMedia(w, x, out, "application/json", func() error {
 		_, err := w.Write(body)
 		return err
@@ -225,7 +225,7 @@ func outJobID(out *mediaOutcome) string {
 	return ""
 }
 
-func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutcome, images *media.ImageResult) {
+func (s *Server) writeImageResult(w http.ResponseWriter, x *Call, out *mediaOutcome, images *media.ImageResult) {
 	defer s.removeImages(images)
 	body, markers, failure := media.EncodeImageResponse(images)
 	if failure != nil {
@@ -265,7 +265,7 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 }
 
 func (s *Server) streamBase64(w io.Writer, handle staging.Handle) error {
-	opened, err := s.deps.Staging.Open(handle)
+	opened, err := s.Deps.Staging.Open(handle)
 	if err != nil {
 		return err
 	}
@@ -278,16 +278,16 @@ func (s *Server) streamBase64(w io.Writer, handle staging.Handle) error {
 	return err
 }
 
-func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcome, artifact *staging.Artifact) {
-	opened, err := s.deps.Staging.Open(artifact.Handle)
+func (s *Server) streamArtifact(w http.ResponseWriter, x *Call, out *mediaOutcome, artifact *staging.Artifact) {
+	opened, err := s.Deps.Staging.Open(artifact.Handle)
 	if err != nil {
-		s.deps.Staging.Remove(artifact.Handle)
+		s.Deps.Staging.Remove(artifact.Handle)
 		out.err = fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
 		out.status, out.committed = out.err.Status, false
 		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
-	defer s.deps.Staging.Remove(artifact.Handle)
+	defer s.Deps.Staging.Remove(artifact.Handle)
 	defer opened.File.Close()
 	if artifact.ContentLength > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(artifact.ContentLength, 10))
@@ -298,13 +298,13 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcom
 	})
 }
 
-func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
+func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *Call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
 	defer events.Close()
 	sw := &fault.StreamWriter{W: w, Family: x.family, Headers: streamedHeaders{x}}
 	var usage *wire.Usage
 	var sequence uint64
 	terminal := errors.New("media stream completed")
-	decodeErr := sse.Decode(events, int(s.cfg.MaxEventBytes), func(frame sse.Frame) error {
+	decodeErr := sse.Decode(events, int(s.Config.MaxEventBytes), func(frame sse.Frame) error {
 		var payload struct {
 			Type  string          `json:"type"`
 			Error json.RawMessage `json:"error"`
@@ -379,7 +379,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		if err := sw.Emit(buf.Bytes()); err != nil {
 			return err
 		}
-		x.delivered(s.now())
+		x.Delivered(s.Now())
 		if completed {
 			return terminal
 		}

@@ -32,7 +32,7 @@ import (
 // Failure classes shared with the routing retry taxonomy fixture. Upstream
 // exchanges are classified by internal/upstream.
 const (
-	classSuccess        = events.ClassSuccess
+	ClassSuccess        = events.ClassSuccess
 	classConnect        = string(upstream.Connect)
 	classTimeout        = string(upstream.Timeout)
 	classRateLimit      = string(upstream.RateLimit)
@@ -66,13 +66,13 @@ const (
 
 // redacted removes this execution's applied credentials from every field of a
 // provider error before it can reach a client, a log, or accounting.
-func (x *call) redacted(e *wire.UpstreamError) *wire.UpstreamError {
+func (x *Call) redacted(e *wire.UpstreamError) *wire.UpstreamError {
 	return e.Redact(x.sensitive.Redact)
 }
 
 // usage is the metering evidence the request ends with: the usage of the
 // attempt that served it, which is the last one recorded.
-func (x *call) usage() *wire.Usage {
+func (x *Call) usage() *wire.Usage {
 	if len(x.facts) == 0 {
 		return nil
 	}
@@ -81,7 +81,7 @@ func (x *call) usage() *wire.Usage {
 
 // delivered records when the first byte of the response payload reached the
 // client. Later deliveries keep the first one.
-func (x *call) delivered(at time.Time) {
+func (x *Call) Delivered(at time.Time) {
 	if x.firstByte == nil {
 		elapsed := at.Sub(x.request.startedAt)
 		x.firstByte = &elapsed
@@ -89,18 +89,18 @@ func (x *call) delivered(at time.Time) {
 }
 
 // outcome is the terminal result of the attempt loop.
-type outcome struct {
+type Outcome struct {
 	completion *wire.Completion
 	approval   *workflowPause
-	err        *fault.Error
-	committed  bool
-	cancelled  bool
+	Err        *fault.Error
+	Committed  bool
+	Cancelled  bool
 }
 
 // dispatchableAttempts returns the most attempts this request can hand to a
 // provider, capped by its requested budget. Each target may be tried through
 // each of its usable credential slots, including bounded same-slot retries.
-func (s *Server) dispatchableAttempts(x *call) int {
+func (s *Server) dispatchableAttempts(x *Call) int {
 	n := s.walkDispatchable(x, x.attempts, nil)
 	if x.mayLeaveRoute() {
 		// Fallback and delegating routes may spend the rest of the budget.
@@ -112,12 +112,12 @@ func (s *Server) dispatchableAttempts(x *call) int {
 // walkDispatchable visits each usable credential slot in the supplied target
 // order, including its maximum same-slot retries, up to the remaining attempt
 // budget. Cost admission may use price order to cover alternate retry paths.
-func (s *Server) walkDispatchable(x *call, attempts []routing.Attempt, visit func(routing.Attempt)) int {
+func (s *Server) walkDispatchable(x *Call, attempts []routing.Attempt, visit func(routing.Attempt)) int {
 	remaining := x.budget - x.spent
 	if remaining <= 0 {
 		return 0
 	}
-	repeats := retryDispatches(x.route)
+	repeats := retryDispatches(x.Route)
 	available := 0
 	for _, attempt := range attempts {
 		provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
@@ -152,7 +152,7 @@ func retryDispatches(route *routing.Route) int {
 
 type attemptFailure struct {
 	class        string
-	status       int
+	Status       int
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *wire.UpstreamError
@@ -243,10 +243,10 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 	case classBudget:
 		return fault.ServerError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
 	case classUpstreamServer:
-		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
+		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.Status)+".")
 	case classCredential:
 		code := "upstream_authentication_failed"
-		if f.status == http.StatusForbidden {
+		if f.Status == http.StatusForbidden {
 			code = "upstream_permission_denied"
 		}
 		return fault.ServerError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
@@ -257,7 +257,7 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 		if f.upstream != nil && f.upstream.Message != "" {
 			message = f.upstream.Message
 		}
-		status := f.status
+		status := f.Status
 		if !forwardable(status) {
 			status = http.StatusBadRequest
 		}
@@ -267,8 +267,8 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 		if f.upstream != nil && f.upstream.Message != "" {
 			message = f.upstream.Message
 		}
-		if forwardable(f.status) {
-			return &fault.Error{Status: f.status, Type: "invalid_request_error", Code: "upstream_rejected", Message: message}
+		if forwardable(f.Status) {
+			return &fault.Error{Status: f.Status, Type: "invalid_request_error", Code: "upstream_rejected", Message: message}
 		}
 		return fault.ServerError(http.StatusBadGateway, "upstream_rejected", message)
 	}
@@ -286,7 +286,7 @@ func forwardable(status int) bool {
 }
 
 // A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
-func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request, current keyauthority.Authority) *outcome {
+func (s *Server) executeModelStep(ctx context.Context, x *Call, source *wire.Request, current keyauthority.Authority) *Outcome {
 	if x.generation.firstStep == nil {
 		x.generation.parsed = source
 		out := s.execute(ctx, x)
@@ -294,15 +294,15 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 		return out
 	}
 	if source.Route != x.named().Slug || source.Family != x.generation.parsed.Family || x.cache != nil && x.cache.result != "bypass" {
-		return &outcome{err: fault.InvalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
+		return &Outcome{Err: fault.InvalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
 	}
 	stepCtx, cancel := x.routeContext(ctx)
 	defer cancel()
 	first := x.generation.firstStep
 	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
 	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
-		if e := s.deps.Admission.Outage(x.authority.ID, false, err); e != nil {
-			return &outcome{err: e}
+		if e := s.Deps.Admission.Outage(x.authority.ID, false, err); e != nil {
+			return &Outcome{Err: e}
 		}
 	}
 	x.generation.parsed = source
@@ -311,18 +311,18 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	x.walk = routing.RouteWalk{}
 	x.classified = nil
 	if e := s.prepare(stepCtx, x, x.authorize); e != nil {
-		return &outcome{err: e}
+		return &Outcome{Err: e}
 	}
 	x.estimate = requestEstimate(x)
-	authority := cacheAuthority(x.admissionAuthority(current), false, true, false)
+	authority := cacheAuthority(x.AdmissionAuthority(current), false, true, false)
 	reservation := quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-	lease, e := s.deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
+	lease, e := s.Deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
 	if e != nil {
-		return &outcome{err: e}
+		return &Outcome{Err: e}
 	}
 	if e := s.reserveFallbackCost(stepCtx, x); e != nil {
 		quota.SettleKey(ctx, lease, false, nil, s.log)
-		return &outcome{err: e}
+		return &Outcome{Err: e}
 	}
 	start := len(x.facts)
 	x.stepDispatched = false
@@ -333,7 +333,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
-func (s *Server) execute(ctx context.Context, x *call) *outcome {
+func (s *Server) execute(ctx context.Context, x *Call) *Outcome {
 	if x.cacheHit() {
 		return s.replayCache(ctx, x)
 	}
@@ -345,18 +345,18 @@ func (s *Server) execute(ctx context.Context, x *call) *outcome {
 			return s.attempt(ctx, x, attempt, provider, slot, fact)
 		},
 	})
-	return &outcome{
+	return &Outcome{
 		completion: out.result,
-		err:        out.err,
-		committed:  out.committed,
-		cancelled:  out.cancelled,
+		Err:        out.err,
+		Committed:  out.committed,
+		Cancelled:  out.cancelled,
 	}
 }
 
 // slots returns the credential slots usable for this attempt, ordered by
 // priority then by deterministic weighted rendezvous on the request's
 // affinity so sibling keys spread across a pool.
-func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provider) []routing.Slot {
+func (s *Server) slots(x *Call, attempt routing.Attempt, provider *routing.Provider) []routing.Slot {
 	if x.pinnedSlot != nil {
 
 		if !s.slotAvailable(x, attempt, x.pinnedSlot) {
@@ -364,13 +364,13 @@ func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provi
 		}
 		return []routing.Slot{*x.pinnedSlot}
 	}
-	ordered := routing.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
+	ordered := routing.SelectSlots(*provider, attempt.UpstreamModel, *x.Route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
 	if attempt.Slots != nil {
 		ordered = routing.ArrangeSlots(ordered, attempt.Slots)
 	}
 	out := make([]routing.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.Ready() && (s.health.CoolingDown(provider.ID, slot.ID) || s.health.CoolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.Deps.Admission.Ready() && (s.health.CoolingDown(provider.ID, slot.ID) || s.health.CoolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)
@@ -379,19 +379,19 @@ func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provi
 	return out
 }
 
-func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.Slot) bool {
-	if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) {
+func (s *Server) slotAvailable(x *Call, attempt routing.Attempt, slot *routing.Slot) bool {
+	if !slot.Allows(attempt.UpstreamModel, x.Route.Slug, x.keyID) {
 		return false
 	}
 	provider := x.snapshot().Provider(attempt.ProviderID)
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
-	return slot.CredentialID != nil && s.deps.Runtime.Eligibility(*slot.CredentialID) == routing.Eligible
+	return slot.CredentialID != nil && s.Deps.Runtime.Eligibility(*slot.CredentialID) == routing.Eligible
 }
 
 // attempt performs one upstream call with one credential.
-func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
+func (s *Server) attempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -434,7 +434,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		f.accepted = st.accepted
 		if x.generation.continuation != nil && x.generation.continuation.resource != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			_ = s.deps.Resources.MarkUnknown(cleanup, x.generation.continuation.resource)
+			_ = s.Deps.Resources.MarkUnknown(cleanup, x.generation.continuation.resource)
 			cancel()
 		}
 
@@ -449,10 +449,10 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		if nativeDeliveryClass != "" {
 			fact.Class = nativeDeliveryClass
 		} else if fact.LocalRefusal && st.settled {
-			fact.Class = classSuccess
+			fact.Class = ClassSuccess
 		}
 		fact.Committed = f.committed
-		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
 			retry := f.retryAfter
 			fact.RetryAfter = &retry
@@ -476,7 +476,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	cfg = prepared.config
 	body := cfg.WrapRequest(prepared.document.Bytes(), a.UpstreamModel)
 	encodedWire, contract := prepared.wire, prepared.plan
-	responseReader := providerinvoke.NewResponseReader(cfg, encodedWire, x.generation.parsed.Stream, int(s.cfg.MaxEventBytes), s.cfg.MaxResponseBytes)
+	responseReader := providerinvoke.NewResponseReader(cfg, encodedWire, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
 	responseRequest, err := wire.NewRequest(encodedWire, x.generation.parsed.Route, responseReader.Streaming(), prepared.document)
 	if err != nil {
 		return fail(classProtocol, nil)
@@ -548,16 +548,16 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	defer resp.Body.Close()
 	// The response status is the first thing the upstream sends back.
-	received := s.now().Sub(fact.StartedAt)
+	received := s.Now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 		status, raw := cfg.Rejection(resp.StatusCode, raw)
-		f := &attemptFailure{status: status, upstream: x.redacted(openai.ParseErrorBody(raw))}
+		f := &attemptFailure{Status: status, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := st.rejected(status, f.upstream)
 		if class == classRateLimit {
-			f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
+			f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
 		}
 		return fail(class, f)
 	}
@@ -568,7 +568,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	actionable := false
 	if x.generation.parsed.Stream {
 		if err := responseReader.ValidateStream(resp.Header); err != nil {
-			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
+			return fail(classProtocol, &attemptFailure{Status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
 		defer streamCap.Stop()
@@ -610,7 +610,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			} else {
 				watchdog.Reset(a.Timeout)
 			}
-			if len(frame) > int(s.cfg.MaxEventBytes) {
+			if len(frame) > int(s.Config.MaxEventBytes) {
 				return wire.ErrEventTooLarge
 			}
 			err := x.generation.emit(frame)
@@ -628,7 +628,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				}
 			}
 			if err == nil && fact.FirstOutput == nil && protocols.MeaningfulFrame(x.family, frame) {
-				elapsed := s.now().Sub(fact.StartedAt)
+				elapsed := s.Now().Sub(fact.StartedAt)
 				fact.FirstOutput = &elapsed
 			}
 			return err
@@ -685,9 +685,9 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		}
 		if contract != nil && contract.ToolContinuation() {
 			var projection *interaction.ToolProjection
-			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
+			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.Config.MaxResponseBytes)))
 			if err == nil {
-				completion, err = responseCodec.StreamNative(responseReader.Stream(resp.Body), int(s.cfg.MaxEventBytes), func([]byte) error { return nil }, func(event oif.Event) error {
+				completion, err = responseCodec.StreamNative(responseReader.Stream(resp.Body), int(s.Config.MaxEventBytes), func([]byte) error { return nil }, func(event oif.Event) error {
 					frames, e := projection.Observe(event)
 					if e != nil {
 						return e
@@ -728,7 +728,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				}
 			}
 		} else {
-			completion, err = responseCodec.Stream(responseReader.Stream(resp.Body), int(s.cfg.MaxEventBytes), emit, observe)
+			completion, err = responseCodec.Stream(responseReader.Stream(resp.Body), int(s.Config.MaxEventBytes), emit, observe)
 		}
 		if guarded != nil {
 			if err == nil {
@@ -773,7 +773,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				if err == nil && contract.ToolContinuation() {
 					var state *interaction.Continuation
 					var delivery interaction.Delivery
-					state, delivery, err = contract.ProjectUnary(native, x.generation.continuation.resource.ID, min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
+					state, delivery, err = contract.ProjectUnary(native, x.generation.continuation.resource.ID, min(resources.MaxContinuationBytes, int(s.Config.MaxResponseBytes)))
 					if err == nil {
 						err = s.validateToolDelivery(delivery)
 					}
@@ -823,12 +823,12 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		if completion.FinishReason != "" {
 			fact.FinishReasons = []string{completion.FinishReason}
 		}
-		if !x.generation.parsed.Stream && (encodedWire != x.family || x.family == wire.Embeddings || x.family == wire.Rerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
+		if !x.generation.parsed.Stream && (encodedWire != x.family || x.family == wire.Embeddings || x.family == wire.Rerank) && int64(len(completion.Body)) > s.Config.MaxResponseBytes {
 			err = errResponseTooLarge
 		}
 	}
 	if err != nil {
-		f := &attemptFailure{status: resp.StatusCode, committed: committed}
+		f := &attemptFailure{Status: resp.StatusCode, committed: committed}
 		if errors.Is(err, fault.ErrClientWrite) {
 			if terminal, nativeFailure := completion.NativeResponseOutcome(); terminal {
 				// The native result arrived before its client write failed.
@@ -838,7 +838,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				// A retained create still owns accepted work even when its
 				// terminal result never reached the original caller.
 				f.noRetry = retainedResponse && st.dispatched.Load()
-				nativeDeliveryClass = classSuccess
+				nativeDeliveryClass = ClassSuccess
 				if nativeFailure != nil {
 					nativeDeliveryClass = string(st.classifier.Classify(upstream.Evidence{Settled: true, Error: nativeFailure}).Class)
 				}
@@ -859,7 +859,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				f.noRetry = f.overall && st.dispatched.Load()
 				f.upstream = x.redacted(nativeFailure)
 				class := st.classify(nativeFailure, committed)
-				f.status = inBandStatus(class)
+				f.Status = inBandStatus(class)
 				return fail(class, f)
 			}
 			return fail(classAmbiguous, f)
@@ -884,12 +884,12 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		case errors.As(err, &ue):
 			f.upstream = x.redacted(ue)
 			class := st.classify(err, committed)
-			f.status = inBandStatus(class)
+			f.Status = inBandStatus(class)
 			return fail(class, f)
 		}
 		return fail(st.classify(err, committed), f)
 	}
-	fact.Class = classSuccess
+	fact.Class = ClassSuccess
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = upstream.Terminal
 		if x.generation.parsed.Stream {
@@ -897,7 +897,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		}
 	}
 	fact.Committed = committed
-	fact.Duration = s.now().Sub(fact.StartedAt)
+	fact.Duration = s.Now().Sub(fact.StartedAt)
 	// Moderation intentionally has no usage counters. Other successful work
 	// without usage may have been billed with nothing this gateway can meter.
 	fact.RecordEvidence(x.operationName() != "moderation")
