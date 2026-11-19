@@ -12,8 +12,8 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { listProviderKinds } from '#lib/features/providers/models.js';
   import { listProviderVendors } from '#lib/features/providers/providers.js';

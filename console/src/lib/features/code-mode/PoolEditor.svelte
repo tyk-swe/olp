@@ -6,7 +6,7 @@
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
   import { listAllProjectMembers } from '#lib/features/access/projects/api.js';
   import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     saveCodePool,
     type CodeAccount,

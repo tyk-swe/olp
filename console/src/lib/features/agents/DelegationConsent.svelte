@@ -11,7 +11,7 @@
     beginIdentityReauthentication
   } from '#lib/features/access/profile/api.js';
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { agentKeys } from './agentKeys';
   import {

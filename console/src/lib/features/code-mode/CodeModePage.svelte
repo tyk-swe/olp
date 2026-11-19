@@ -2,8 +2,8 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listProjectMemberships } from '#lib/features/access/projects/api.js';
   import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import {
     confirmDiscardChanges,
     guardUnsavedChanges

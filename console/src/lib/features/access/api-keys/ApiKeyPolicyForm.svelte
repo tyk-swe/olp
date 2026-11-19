@@ -6,7 +6,7 @@
   import NamedLimitFields from '../budgets/NamedLimitFields.svelte';
   import AttributionFields from '../attribution/AttributionFields.svelte';
   import PolicyFields from '../end-users/PolicyFields.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import {
     focusFormError,

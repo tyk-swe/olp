@@ -11,7 +11,7 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { listOrganizations } from '#lib/features/access/organizations/api.js';
   import { listProjects } from '#lib/features/access/projects/api.js';

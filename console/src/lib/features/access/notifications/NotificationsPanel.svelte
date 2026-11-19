@@ -1,9 +1,9 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { holds } from '#lib/features/access/session/authorization.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { holds } from '#lib/session/authorization.js';
   import NotificationDestinations from './NotificationDestinations.svelte';
   import NotificationRules from './NotificationRules.svelte';
   import NotificationDeliveries from './NotificationDeliveries.svelte';

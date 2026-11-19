@@ -1,6 +1,6 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
@@ -10,7 +10,7 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createApiKey,
     getApiKey,

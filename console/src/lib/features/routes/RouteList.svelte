@@ -20,7 +20,7 @@
     type ActiveRoute
   } from '#lib/features/routes/api.js';
   import { cursorPaginationProps } from '#lib/listing/pagination.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import type { RouteListState } from '#lib/features/routes/routeListState.js';
 

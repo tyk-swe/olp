@@ -24,7 +24,7 @@
   import { formatDate, stateLabel } from '#lib/format.js';
   import { downloadBlob } from '#lib/download.js';
   import MediaTimeline from './MediaTimeline.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     mediaJobFilters,
     mediaJobPending,

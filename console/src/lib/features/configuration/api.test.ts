@@ -16,7 +16,7 @@ import {
 } from './api';
 import type { ProblemDetails } from '#lib/management/http.js';
 
-vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
+vi.mock('#lib/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })

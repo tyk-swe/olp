@@ -26,7 +26,7 @@
   import { formatInteger, stateLabel } from '#lib/format.js';
   import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
   import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));

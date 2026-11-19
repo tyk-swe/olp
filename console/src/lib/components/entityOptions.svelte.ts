@@ -1,5 +1,5 @@
 import { createQuery } from '@tanstack/svelte-query';
-import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+import { useRole } from '#lib/session/useRole.svelte.js';
 import { listUsers, type User } from '#lib/features/access/users/api.js';
 import { userKeys } from '#lib/features/access/users/userKeys.js';
 import {

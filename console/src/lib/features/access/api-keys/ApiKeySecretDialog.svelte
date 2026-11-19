@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatDate } from '#lib/format.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
 

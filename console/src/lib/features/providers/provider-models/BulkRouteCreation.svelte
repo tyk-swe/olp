@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useMutationIntents } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import {

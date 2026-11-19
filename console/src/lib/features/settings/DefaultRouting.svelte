@@ -1,8 +1,8 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
 
   const INSTALLATION_ID = '00000000-0000-0000-0000-000000000000';

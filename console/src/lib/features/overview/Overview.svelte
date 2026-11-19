@@ -8,8 +8,8 @@
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { copyText } from '#lib/clipboard.js';
   import { getOverview } from '#lib/features/overview/api.js';
   import { listRequests } from '#lib/features/usage/history/api.js';

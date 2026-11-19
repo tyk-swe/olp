@@ -1,7 +1,7 @@
 <script lang="ts">
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getExposure, putExposure } from './api';
   import { catalogKeys } from './catalogKeys';

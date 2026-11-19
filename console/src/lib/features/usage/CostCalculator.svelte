@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { listProviders } from '#lib/features/providers/providers.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import { listProjects } from '#lib/features/access/projects/api.js';

@@ -5,7 +5,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '../session/useRole.svelte';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createIncrease,
     listIncreases,

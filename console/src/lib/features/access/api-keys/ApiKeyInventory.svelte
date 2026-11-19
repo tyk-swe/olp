@@ -8,7 +8,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
 
   import { currentBudgetLimit } from './budgetPresentation';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';

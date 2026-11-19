@@ -11,7 +11,7 @@
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { createProject, listProjectMemberships } from './api';
   import { projectKeys } from './projectKeys';

@@ -58,7 +58,7 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 ESLint enforces four structural rules, and `eslint.config.mjs` is their source:
 
 - The shared layers (`src/lib/*.ts`, `components/`, `editing/`, `listing/`,
-  `management/` and `shell/`) never import from `src/lib/features/`. When two
+  `management/`, `session/` and `shell/`) never import from `src/lib/features/`. When two
   features need the same thing, move it into a shared layer.
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.

@@ -55,7 +55,7 @@ import {
   validateProviderDraft,
   type ProviderDraft
 } from '#lib/features/providers/providerEditor.js';
-import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+import { useRole } from '#lib/session/useRole.svelte.js';
 import {
   useMutationIntent,
   usePrincipalLifetime

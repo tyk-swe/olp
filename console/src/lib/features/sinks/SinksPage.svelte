@@ -10,7 +10,7 @@
   import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
   import { agentKeys } from '#lib/features/agents/agentKeys.js';
   import { listProjects } from '#lib/features/agents/api.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import SinkEditor from './SinkEditor.svelte';

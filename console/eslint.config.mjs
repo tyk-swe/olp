@@ -10,11 +10,12 @@ const sourceFiles = ['src/**/*.{ts,svelte}'];
 const testFiles = ['src/**/*.test.ts', 'src/**/test/**'];
 const sharedLayers = [
   'src/lib/*.ts',
-  'src/lib/{components,editing,listing,management,shell}/**/*.{ts,svelte}'
+  'src/lib/{components,editing,listing,management,session,shell}/**/*.{ts,svelte}'
 ];
 const apiModules = [
   'src/lib/management/**',
   'src/lib/features/**/api.ts',
+  'src/lib/session/api.ts',
   'src/lib/features/providers/billing.ts',
   'src/lib/features/providers/catalog.ts',
   'src/lib/features/providers/credentials.ts',

@@ -9,7 +9,7 @@
   import { requiresGrant } from '#lib/features/providers/providerEditor.js';
   import { GrantEnrollmentState } from '#lib/features/providers/grantEnrollment.svelte.js';
   import GrantEnrollmentPanel from '#lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   let {
     providerId,

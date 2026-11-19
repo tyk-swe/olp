@@ -8,7 +8,7 @@
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { formatBytes, formatDate } from '#lib/format.js';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import UnconfinedPlugins from '#lib/features/plugins/UnconfinedPlugins.svelte';
   import MCPExecutables from '#lib/features/plugins/MCPExecutables.svelte';

@@ -19,7 +19,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import { useRole } from '../session/useRole.svelte';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     deleteProject,
     getProject,
