@@ -12,8 +12,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/access/`, `internal/access/authority/`, `internal/access/httpkit/` (management problems, replies, decoding and pagination); console `access/` |
-| Projects, installation settings and policy | `internal/projects/`, `internal/access/` (settings, branding and installation budgets), `internal/limits/`; console `access/` |
+| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
+| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
+| Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/` and `models/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
@@ -201,6 +202,9 @@ package instead.
   management kit serves the control plane. `cmd/olp` is the only place that
   knows both, so pass a collaborator in there instead of importing across.
 - Nothing under `internal` imports `cmd`.
+- `internal/access` is the management kit and holds no feature. It
+  authenticates callers, registers routes, runs write transactions and records
+  audit rows. A new resource gets its own package that imports the kit.
 - A function holds at most 100 lines and a file at most 500 lines of code.
   Tests and generated files are exempt. Split by behavior, not by line count.
 - A management write returns `access.Mutate`, `access.Remove` or
