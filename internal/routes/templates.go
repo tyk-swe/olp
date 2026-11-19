@@ -640,42 +640,36 @@ func (s *Server) replaceTemplate(r *http.Request, _ authz.Principal) (httpkit.Re
 	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadTemplate(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
-		return httpkit.Reply{}, httpkit.Invalid("project_id", "The template's project is set at creation and cannot change.")
-	}
-	if err = ValidateTemplateInput(&input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = WriteTemplate(r.Context(), tx, id, httpkit.NewID(), p.UserID(), &input, true); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_template.update", "route_template", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	updated, err := loadTemplate(r.Context(), tx, id, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result, err := s.templateDetail(r.Context(), tx, updated)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Transact(a, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := loadTemplate(r.Context(), tx, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The template's project is set at creation and cannot change.")
+		}
+		if err = ValidateTemplateInput(&input); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = WriteTemplate(r.Context(), tx, id, httpkit.NewID(), p.UserID(), &input, true); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		updated, err := loadTemplate(r.Context(), tx, id, false)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result, err := s.templateDetail(r.Context(), tx, updated)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return result, access.Event{Action: "route_template.update", Resource: "route_template", ID: id}, nil
+	})
 }
 
 func (s *Server) deleteTemplate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -684,28 +678,22 @@ func (s *Server) deleteTemplate(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadTemplate(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_templates WHERE id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_template.delete", "route_template", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
+	return access.Transact(a, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := loadTemplate(r.Context(), tx, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_templates WHERE id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: 204}, access.Event{Action: "route_template.delete", Resource: "route_template", ID: id}, nil
+	})
 }
 
 // applyTemplate applies one template to every active provider, catching up

@@ -49,30 +49,24 @@ func (m *Management) reconcileRetained(r *http.Request, _ authz.Principal) (http
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := m.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Authorize(authz.Configure); err != nil {
-		return httpkit.Reply{}, err
-	}
-	resource, err := m.retainedManagementResource(r, tx, p)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	store := New(m.Pool)
-	if err = store.RequestRetainedReconciliationTx(r.Context(), tx, resource.UUID, input.UpstreamID); errors.Is(err, ErrNotFound) {
-		return httpkit.Reply{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
-	} else if errors.Is(err, ErrSettlementClosed) {
-		return httpkit.Reply{}, httpkit.Fail(409, "settlement_closed", "This resource's retained settlement is already closed.")
-	} else if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider_resource.reconcile", "provider_resource", resource.UUID.String(), "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}), tx.Commit(r.Context())
+	return access.Transact(m.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := p.Authorize(authz.Configure); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		resource, err := m.retainedManagementResource(r, tx, p)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		store := New(m.Pool)
+		if err = store.RequestRetainedReconciliationTx(r.Context(), tx, resource.UUID, input.UpstreamID); errors.Is(err, ErrNotFound) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
+		} else if errors.Is(err, ErrSettlementClosed) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "settlement_closed", "This resource's retained settlement is already closed.")
+		} else if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}), access.Event{Action: "provider_resource.reconcile", Resource: "provider_resource", ID: resource.UUID.String()}, nil
+	})
 }
 
 type retainedEvidenceInput struct {

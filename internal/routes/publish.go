@@ -140,55 +140,49 @@ func (s *Server) validateDraft(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadDraft(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
-		return httpkit.Reply{}, err
-	}
-	live, err := s.resolve(r.Context(), tx, current.Targets)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = check(current, live); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = checkReferences(r.Context(), tx, current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if len(current.ContentPolicy) > 0 {
-		var policy contentpolicy.Policy
-		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(a, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := loadDraft(r.Context(), tx, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = contentpolicy.Compile(&policy); err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("content_policy", err.Error())
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	etag := httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.validate", "route_draft", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current.State, current.ETag = "validated", etag
-	return httpkit.Detail(current.summary(), etag), tx.Commit(r.Context())
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		live, err := s.resolve(r.Context(), tx, current.Targets)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = check(current, live); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = checkReferences(r.Context(), tx, current); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = compileDraftExecution(r.Context(), tx, current); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if len(current.ContentPolicy) > 0 {
+			var policy contentpolicy.Policy
+			if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if _, err = contentpolicy.Compile(&policy); err != nil {
+				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("content_policy", err.Error())
+			}
+		}
+		etag := httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current.State, current.ETag = "validated", etag
+		return httpkit.Detail(current.summary(), etag), access.Event{Action: "route_draft.validate", Resource: "route_draft", ID: id}, nil
+	})
 }
 
 func (s *Server) activateDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

@@ -144,33 +144,27 @@ func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, cur
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	locked, err := res.lockForChange(r.Context(), tx, p, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, locked.etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := apply(tx, current, httpkit.NewID()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	updated, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".update", res.kind, id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(updated.body, updated.etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		locked, err := res.lockForChange(r.Context(), tx, p, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, locked.etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := apply(tx, current, httpkit.NewID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		updated, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(updated.body, updated.etag), access.Event{Action: res.kind + ".update", Resource: res.kind, ID: id}, nil
+	})
 }
 
 func (s *Server) delete(res resource) access.Handler {

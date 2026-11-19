@@ -113,39 +113,33 @@ func (s *Server) updateProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = organizationProject(r, tx, p, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag, err := loadProject(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	input.Name = strings.TrimSpace(input.Name)
-	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, input.Name, etag); duplicateName(err) {
-		return httpkit.Reply{}, httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
-	} else if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.update", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id=$1", id).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(json.RawMessage(data), etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = organizationProject(r, tx, p, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag, err := loadProject(r, tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		input.Name = strings.TrimSpace(input.Name)
+		if err = httpkit.ValidText("name", input.Name, 100); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, input.Name, etag); duplicateName(err) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
+		} else if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var data []byte
+		if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id=$1", id).Scan(&data); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(json.RawMessage(data), etag), access.Event{Action: "project.update", Resource: "project", ID: id}, nil
+	})
 }
 
 const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u.email,'display_name',u.display_name,'role',u.role,'active',u.active,'added_by',m.added_by,'added_by_email',a.email,'created_at',m.created_at`

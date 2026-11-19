@@ -63,34 +63,18 @@ func (s *Server) createOrganization(r *http.Request, _ authz.Principal) (httpkit
 	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := s.access.Replay(r, tx, p, in)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	id, etag, err := CreateOrganization(r.Context(), tx, in.Name, p.UserID())
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "organization.create", "organization", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var data json.RawMessage
-	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE id=$1", id).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply := httpkit.Reply{Status: 201, Body: data, ETag: etag, Location: "/api/v1/organizations/" + id}
-	if err = s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return access.Mutate(s.access, r, in, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		id, etag, err := CreateOrganization(r.Context(), tx, in.Name, p.UserID())
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var data json.RawMessage
+		if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE id=$1", id).Scan(&data); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Reply{Status: 201, Body: data, ETag: etag, Location: "/api/v1/organizations/" + id}
+		return reply, access.Event{Action: "organization.create", Resource: "organization", ID: id}, nil
+	})
 }
 
 func (s *Server) updateOrganization(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -108,33 +92,27 @@ func (s *Server) updateOrganization(r *http.Request, _ authz.Principal) (httpkit
 	if err = httpkit.ValidText("name", in.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Organization(id, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var etag string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.organizations WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, in.Name, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "organization.update", "organization", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var data json.RawMessage
-	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE id=$1", id).Scan(&data); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(data, etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Organization(id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var etag string
+		if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.organizations WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, in.Name, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var data json.RawMessage
+		if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE id=$1", id).Scan(&data); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(data, etag), access.Event{Action: "organization.update", Resource: "organization", ID: id}, nil
+	})
 }
 
 func (s *Server) organizationMembers(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -188,63 +166,57 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 			return httpkit.Reply{}, httpkit.Invalid("role", "Use manager or viewer.")
 		}
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Organization(id, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var etag string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.organizations WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if remove {
-		tag, e := tx.Exec(r.Context(), "DELETE FROM olp.organization_members WHERE organization_id=$1 AND user_id=$2", id, user)
-		if e != nil {
-			return httpkit.Reply{}, e
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Organization(id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if tag.RowsAffected() == 0 {
-			return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+		var etag string
+		if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.organizations WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	} else {
-		var exists bool
-		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1)", user).Scan(&exists); err != nil {
-			return httpkit.Reply{}, err
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if !exists {
-			return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+		if remove {
+			tag, e := tx.Exec(r.Context(), "DELETE FROM olp.organization_members WHERE organization_id=$1 AND user_id=$2", id, user)
+			if e != nil {
+				return httpkit.Reply{}, access.Event{}, e
+			}
+			if tag.RowsAffected() == 0 {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+			}
+		} else {
+			var exists bool
+			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1)", user).Scan(&exists); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if !exists {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+			}
+			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.organization_members(organization_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role`, id, user, in.Role, p.UserID()); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
 		}
-		if _, err = tx.Exec(r.Context(), `INSERT INTO olp.organization_members(organization_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role`, id, user, in.Role, p.UserID()); err != nil {
-			return httpkit.Reply{}, err
+		var managers bool
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.organization_members WHERE organization_id=$1 AND role='manager')", id).Scan(&managers); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	var managers bool
-	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.organization_members WHERE organization_id=$1 AND role='manager')", id).Scan(&managers); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !managers {
-		return httpkit.Reply{}, httpkit.Fail(409, "last_organization_manager", "Keep at least one organization manager.")
-	}
-	etag = httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	action := "organization.member.assign"
-	if remove {
-		action = "organization.member.remove"
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "organization", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 204, ETag: etag}, tx.Commit(r.Context())
+		if !managers {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_organization_manager", "Keep at least one organization manager.")
+		}
+		etag = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		action := "organization.member.assign"
+		if remove {
+			action = "organization.member.remove"
+		}
+		return httpkit.Reply{Status: 204, ETag: etag}, access.Event{Action: action, Resource: "organization", ID: id}, nil
+	})
 }
 
 func organizationProject(r *http.Request, q database.Queryer, p authz.Principal, need authz.Need) error {

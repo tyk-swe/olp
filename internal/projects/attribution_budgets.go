@@ -63,34 +63,28 @@ func (s *Server) putProjectAttributionBudgets(r *http.Request, _ authz.Principal
 	if err = input.Budgets.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, etag, err := ReadPolicies(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	_, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: input.Budgets})
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.attribution_budgets.update", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply, err := readAttributionBudgets(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Project(&id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, etag, err := ReadPolicies(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		_, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: input.Budgets})
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply, err := readAttributionBudgets(r, tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return reply, access.Event{Action: "project.attribution_budgets.update", Resource: "project", ID: id}, nil
+	})
 }

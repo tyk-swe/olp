@@ -32,6 +32,10 @@ func (s *Server) record(r *http.Request, tx pgx.Tx, p authz.Principal, e Event) 
 	return auditForProject(r.Context(), tx, r, p.Actor(), e.Action, e.Resource, e.ID, outcome, e.Project)
 }
 
+// Unlocked is the lock step of a change that loads and authorizes nothing
+// before it applies, such as a create the route requirement already admits.
+func Unlocked(pgx.Tx, authz.Principal) (struct{}, error) { return struct{}{}, nil }
+
 // Mutate runs a change that carries an Idempotency-Key: lock loads and
 // authorizes the current state, a completed request replays its stored reply,
 // and otherwise apply makes the change.

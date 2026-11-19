@@ -3,6 +3,7 @@ package projects
 import (
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -42,35 +43,29 @@ func (s *Server) putProjectRouteGroups(r *http.Request, _ authz.Principal) (http
 	if err = input.Groups.Validate(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, etag, err := ReadPolicies(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	for _, routes := range input.Groups {
-		if err = access.ValidateRouteReferences(r, tx, routes, &id); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Project(&id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: input.Groups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: current.AttributionBudgets})
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.route_groups.update", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(map[string]any{"groups": input.Groups, "etag": etag}, etag), tx.Commit(r.Context())
+		current, etag, err := ReadPolicies(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		for _, routes := range input.Groups {
+			if err = access.ValidateRouteReferences(r, tx, routes, &id); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: input.Groups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: current.AttributionBudgets})
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(map[string]any{"groups": input.Groups, "etag": etag}, etag), access.Event{Action: "project.route_groups.update", Resource: "project", ID: id}, nil
+	})
 }

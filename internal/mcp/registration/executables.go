@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -105,36 +106,24 @@ func (s *Server) permitExecutable(r *http.Request, _ authz.Principal) (httpkit.R
 	if file.Digest != input.Digest {
 		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "executable_changed", "The executable changed. Review the installed build again.")
 	}
-	tx, principal, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := s.access.ConsumeRecent(r, tx, principal, "plugin_permit", ""); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.mcp_executable_permissions(executable,digest,approved_by) VALUES($1,$2,$3) ON CONFLICT(executable,digest) DO NOTHING", file.Name, file.Digest, principal.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "mcp_executable.permit", "mcp_executable", file.Digest, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusCreated, Body: executablePermission{ExecutableFile: file.ExecutableFile, Permitted: true}}, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := s.access.ConsumeRecent(r, tx, principal, "plugin_permit", ""); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err := tx.Exec(r.Context(), "INSERT INTO olp.mcp_executable_permissions(executable,digest,approved_by) VALUES($1,$2,$3) ON CONFLICT(executable,digest) DO NOTHING", file.Name, file.Digest, principal.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusCreated, Body: executablePermission{ExecutableFile: file.ExecutableFile, Permitted: true}}, access.Event{Action: "mcp_executable.permit", Resource: "mcp_executable", ID: file.Digest}, nil
+	})
 }
 
 func (s *Server) revokeExecutable(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, principal, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.mcp_executable_permissions WHERE executable=$1 AND digest=$2", r.PathValue("executable"), r.PathValue("digest")); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "mcp_executable.revoke", "mcp_executable", r.PathValue("digest"), "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.mcp_executable_permissions WHERE executable=$1 AND digest=$2", r.PathValue("executable"), r.PathValue("digest")); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "mcp_executable.revoke", Resource: "mcp_executable", ID: r.PathValue("digest")}, nil
+	})
 }
 
 func (e *Executables) Start(ctx context.Context, binding *routing.MCPStdioBinding, timeout time.Duration) (*plugins.NativeProcess, error) {

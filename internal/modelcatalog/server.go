@@ -155,35 +155,29 @@ func (s *Server) putPublication(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if input.Enabled == nil || input.PricesPublic == nil {
 		return httpkit.Reply{}, httpkit.Invalid("enabled", "Include enabled and prices_public explicitly.")
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var locked string
-	if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.projects WHERE id=$1 FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The resource was not found.")
-	} else if err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, err := readPublication(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result, err := SetProjectPublication(r.Context(), tx, id, *input.Enabled, *input.PricesPublic)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "catalog.publish", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(result, result.ETag), tx.Commit(r.Context())
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Project(&id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var locked string
+		if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.projects WHERE id=$1 FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+		} else if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, err := readPublication(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result, err := SetProjectPublication(r.Context(), tx, id, *input.Enabled, *input.PricesPublic)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(result, result.ETag), access.Event{Action: "catalog.publish", Resource: "project", ID: id}, nil
+	})
 }
 
 func readExposure(ctx context.Context, q database.Queryer, id string) (Exposure, *string, error) {
@@ -225,33 +219,27 @@ func (s *Server) putExposure(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	if input.ExposeUpstreamModels == nil {
 		return httpkit.Reply{}, httpkit.Invalid("expose_upstream_models", "Include expose_upstream_models explicitly.")
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var locked string
-	if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE id=$1 AND state='active' FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The resource was not found.")
-	} else if err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, project, err := readExposure(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(project, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result, err := setRoutePublication(r.Context(), tx, id, *input.ExposeUpstreamModels)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "catalog.exposure", "route", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(result, result.ETag), tx.Commit(r.Context())
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var locked string
+		if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE id=$1 AND state='active' FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+		} else if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, project, err := readExposure(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = p.Project(project, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result, err := setRoutePublication(r.Context(), tx, id, *input.ExposeUpstreamModels)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(result, result.ETag), access.Event{Action: "catalog.exposure", Resource: "route", ID: id}, nil
+	})
 }

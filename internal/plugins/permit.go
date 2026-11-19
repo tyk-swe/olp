@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -100,36 +101,30 @@ func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = s.Access.ConsumeRecent(r, tx, p, permitPurpose, ""); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var installed, count int
-	if err = tx.QueryRow(r.Context(), "SELECT count(*) FILTER (WHERE digest=$1), count(*) FROM olp.plugins", file.Digest).Scan(&installed, &count); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if installed > 0 {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "plugin_permitted", "An owner already permitted this build of the executable.")
-	}
-	if count >= maxInstalled {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,executable,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$7,now())",
-		file.Digest, abi.Version, data, file.Name, file.Size, httpkit.NewID(), p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.permit", "plugin", file.Digest, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	plugin, err := loadPlugin(r.Context(), tx, file.Digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusCreated, Body: plugin, ETag: plugin.Etag.String(), Location: "/api/v1/plugins/" + file.Digest}, tx.Commit(r.Context())
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = s.Access.ConsumeRecent(r, tx, p, permitPurpose, ""); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var installed, count int
+		if err = tx.QueryRow(r.Context(), "SELECT count(*) FILTER (WHERE digest=$1), count(*) FROM olp.plugins", file.Digest).Scan(&installed, &count); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if installed > 0 {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "plugin_permitted", "An owner already permitted this build of the executable.")
+		}
+		if count >= maxInstalled {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,executable,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$7,now())",
+			file.Digest, abi.Version, data, file.Name, file.Size, httpkit.NewID(), p.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		plugin, err := loadPlugin(r.Context(), tx, file.Digest)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusCreated, Body: plugin, ETag: plugin.Etag.String(), Location: "/api/v1/plugins/" + file.Digest}, access.Event{Action: "plugin.permit", Resource: "plugin", ID: file.Digest}, nil
+	})
 }
 
 // isPermitted reports whether an owner permitted the executable with digest.

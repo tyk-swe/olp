@@ -195,107 +195,95 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	current, err := lockSink(ctx, tx, r.PathValue("export_sink_id"))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := RequireScope(ctx, a.server, tx, p, current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	k, err := lookup(current.Type, current.Format)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	previous, err := k.parse(current.Type, current.Settings)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	filter, err := a.updatedFilter(ctx, tx, input.Filter, current)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	name := strings.TrimSpace(valueOr(input.Name, current.Name))
-	destination := valueOr(input.Destination, current.Destination)
-	enabled := valueOr(input.Enabled, current.Enabled)
-	spec, err := a.updatedSpec(ctx, tx, k, input.Settings, previous, current)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := checkName(name); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := a.checkTarget(k, destination, filter); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if destination != current.Destination && current.CredentialID != nil && input.Credential == nil {
-		return httpkit.Reply{}, httpkit.Invalid("credential", "changing the destination requires a replacement credential or null")
-	}
-	configured := present(input.Credential) || input.Credential == nil && current.CredentialID != nil
-	if err := checkCredential(spec, input.Credential, enabled, configured); err != nil {
-		return httpkit.Reply{}, err
-	}
-	settings, err := json.Marshal(spec)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag := httpkit.NewID()
-	if _, err := tx.Exec(ctx, updateSinkSQL, current.ID, name, destination, filter, enabled, etag, settings); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if input.Credential != nil {
-		if err := a.replaceCredential(ctx, tx, current.ID, current.CredentialID, input.Credential); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := lockSink(ctx, tx, r.PathValue("export_sink_id"))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if err := access.AuditForProject(ctx, tx, r, p.Actor(), "export_sink.update", "export_sink", current.ID, "success", current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	body, _, _, err := readSink(ctx, tx, current.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(body, etag), tx.Commit(ctx)
+		if err := RequireScope(ctx, a.server, tx, p, current.ProjectID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		k, err := lookup(current.Type, current.Format)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		previous, err := k.parse(current.Type, current.Settings)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		filter, err := a.updatedFilter(ctx, tx, input.Filter, current)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		name := strings.TrimSpace(valueOr(input.Name, current.Name))
+		destination := valueOr(input.Destination, current.Destination)
+		enabled := valueOr(input.Enabled, current.Enabled)
+		spec, err := a.updatedSpec(ctx, tx, k, input.Settings, previous, current)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := checkName(name); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := a.checkTarget(k, destination, filter); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if destination != current.Destination && current.CredentialID != nil && input.Credential == nil {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("credential", "changing the destination requires a replacement credential or null")
+		}
+		configured := present(input.Credential) || input.Credential == nil && current.CredentialID != nil
+		if err := checkCredential(spec, input.Credential, enabled, configured); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		settings, err := json.Marshal(spec)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag := httpkit.NewID()
+		if _, err := tx.Exec(ctx, updateSinkSQL, current.ID, name, destination, filter, enabled, etag, settings); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if input.Credential != nil {
+			if err := a.replaceCredential(ctx, tx, current.ID, current.CredentialID, input.Credential); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		body, _, _, err := readSink(ctx, tx, current.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(body, etag), access.Event{Action: "export_sink.update", Resource: "export_sink", ID: current.ID, Project: current.ProjectID}, nil
+	})
 }
 
 func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ctx := r.Context()
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	current, err := lockSink(ctx, tx, r.PathValue("export_sink_id"))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := RequireScope(ctx, a.server, tx, p, current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err := tx.Exec(ctx, deleteSinkSQL, current.ID); err != nil {
-		var constraint *pgconn.PgError
-		if errors.As(err, &constraint) && constraint.Code == "23503" {
-			return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "sink_in_use", "Remove or repoint capture policies before deleting this sink.")
+	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := lockSink(ctx, tx, r.PathValue("export_sink_id"))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{}, err
-	}
-	if err := deleteCredential(ctx, tx, current.CredentialID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(ctx, tx, r, p.Actor(), "export_sink.delete", "export_sink", current.ID, "success", current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(ctx)
+		if err := RequireScope(ctx, a.server, tx, p, current.ProjectID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err := tx.Exec(ctx, deleteSinkSQL, current.ID); err != nil {
+			var constraint *pgconn.PgError
+			if errors.As(err, &constraint) && constraint.Code == "23503" {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "sink_in_use", "Remove or repoint capture policies before deleting this sink.")
+			}
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := deleteCredential(ctx, tx, current.CredentialID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "export_sink.delete", Resource: "export_sink", ID: current.ID, Project: current.ProjectID}, nil
+	})
 }
 
 func (a *API) gaps(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

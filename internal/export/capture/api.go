@@ -148,29 +148,23 @@ func (a *API) updateConfiguration(r *http.Request, _ authz.Principal) (httpkit.R
 	if input.Enabled == nil {
 		return httpkit.Reply{}, httpkit.Invalid("enabled", "Send whether capture is enabled.")
 	}
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := p.Authorize(authz.Access); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, err := readConfiguration(r.Context(), tx, lockConfigurationSQL)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	next := configuration{Enabled: *input.Enabled, ETag: httpkit.NewID()}
-	if _, err := tx.Exec(r.Context(), updateConfigurationSQL, next.Enabled, next.ETag, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_configuration.update", "capture_configuration", "singleton", "success", nil); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(next, next.ETag), tx.Commit(r.Context())
+	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := p.Authorize(authz.Access); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, err := readConfiguration(r.Context(), tx, lockConfigurationSQL)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		next := configuration{Enabled: *input.Enabled, ETag: httpkit.NewID()}
+		if _, err := tx.Exec(r.Context(), updateConfigurationSQL, next.Enabled, next.ETag, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(next, next.ETag), access.Event{Action: "capture_configuration.update", Resource: "capture_configuration", ID: "singleton", Project: nil}, nil
+	})
 }
 
 func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -269,32 +263,26 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := a.lock(r, tx, p)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	settings := input.apply(current.Settings)
-	sink, err := revise(r.Context(), tx, input, current, settings)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err := tx.Exec(r.Context(), updatePolicySQL, current.ID, sink, settings.SampleRatio, settings.Include, settings.Redact,
-		settings.MaxBytes, settings.Enabled, httpkit.NewID(), settings.KeyIDs, settings.EndUsers); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.update", "capture_policy", current.ID, "success", current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	policy, err := readPolicy(r.Context(), tx, getPolicySQL, current.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(policy, policy.ETag), tx.Commit(r.Context())
+	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := a.lock(r, tx, p)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		settings := input.apply(current.Settings)
+		sink, err := revise(r.Context(), tx, input, current, settings)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err := tx.Exec(r.Context(), updatePolicySQL, current.ID, sink, settings.SampleRatio, settings.Include, settings.Redact,
+			settings.MaxBytes, settings.Enabled, httpkit.NewID(), settings.KeyIDs, settings.EndUsers); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		policy, err := readPolicy(r.Context(), tx, getPolicySQL, current.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(policy, policy.ETag), access.Event{Action: "capture_policy.update", Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
+	})
 }
 
 func revise(ctx context.Context, tx pgx.Tx, input updateRequest, current Policy, settings Settings) (string, error) {
@@ -316,22 +304,16 @@ func revise(ctx context.Context, tx pgx.Tx, input updateRequest, current Policy,
 }
 
 func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := a.lock(r, tx, p)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err := tx.Exec(r.Context(), deletePolicySQL, current.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.delete", "capture_policy", current.ID, "success", current.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := a.lock(r, tx, p)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err := tx.Exec(r.Context(), deletePolicySQL, current.ID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "capture_policy.delete", Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
+	})
 }
 
 func (a *API) lock(r *http.Request, tx pgx.Tx, p authz.Principal) (Policy, error) {
