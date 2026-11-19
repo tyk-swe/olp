@@ -15,7 +15,7 @@ import (
 
 func TestDecisionInspectionRejectsInvalidInlineMedia(t *testing.T) {
 	t.Parallel()
-	server := New(nil, protocols.InlineMediaLimits{Items: 1, ItemBytes: 1, TotalBytes: 1})
+	server := &Server{InlineMedia: protocols.InlineMediaLimits{Items: 1, ItemBytes: 1, TotalBytes: 1}}
 	for _, tc := range []struct {
 		name, data string
 		valid      bool

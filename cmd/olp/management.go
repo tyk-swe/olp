@@ -57,7 +57,6 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/management"
-	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
@@ -144,23 +143,12 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
-	routeServer := routes.New(m.Access, m.Gateway.InlineMediaLimits())
-	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
-		if m.Gateway == nil {
-			return nil
-		}
-		return m.Gateway.WorkflowResolver()
+	routeServer := &routes.Server{
+		Access: m.Access, InlineMedia: m.Gateway.InlineMediaLimits(),
+		Workflows: m.Gateway.WorkflowResolver(), WorkflowRelease: m.Runtime.Release,
+		Inputs: m.Runtime.RoutingInputs, Region: m.Runtime.Region(),
+		UnconfinedPlugins: m.Unconfined != nil, Catalog: m.Catalog,
 	}
-	routeServer.WorkflowRelease = m.Runtime.Release
-	routeServer.WorkflowAvailable = func() bool {
-		return m.Gateway.WorkflowResolver() != nil
-	}
-	routeServer.Inputs = m.Runtime.RoutingInputs
-	if m.Runtime != nil {
-		routeServer.Region = m.Runtime.Region()
-	}
-	routeServer.UnconfinedPlugins = m.Unconfined != nil
-	routeServer.Catalog = m.Catalog
 	if m.Limits != nil {
 		routeServer.Supply = quota.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet

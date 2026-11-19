@@ -340,7 +340,7 @@ func (s *Server) workflowInspectionReason(m *simulation, route, serving routing.
 	if route.Fidelity.Strict() || serving.Fidelity.Strict() {
 		return "tool_execution_requires_transformed"
 	}
-	if key.id == "" || s.WorkflowTools == nil || s.WorkflowTools() == nil || s.WorkflowRelease == nil || s.WorkflowAvailable == nil || !s.WorkflowAvailable() {
+	if key.id == "" || s.Workflows == nil || s.WorkflowRelease == nil {
 		return "tool_execution_unavailable"
 	}
 	if refusal := mcp.WorkflowRequestRefusal(request); refusal != "" {
@@ -357,7 +357,7 @@ func (s *Server) workflowInspectionReason(m *simulation, route, serving routing.
 	if err != nil {
 		return "toolset_not_permitted"
 	}
-	if _, err := s.WorkflowTools().Resolve(m.ctx, key.authority, s.WorkflowRelease(), selected); err != nil {
+	if _, err := s.Workflows.Resolve(m.ctx, key.authority, s.WorkflowRelease(), selected); err != nil {
 		return "toolset_not_authorized"
 	}
 	return ""
@@ -372,14 +372,14 @@ func workflowCallerBounds(request *wire.Request) (*limits.WorkflowBounds, bool) 
 }
 
 func (s *Server) workflowInspectionCapability(m *simulation, named, serving routing.Route, key inspectionKeyContext, request *wire.Request) *routing.WorkflowCapability {
-	if m.input.Operation != "generation" || s.WorkflowTools == nil || s.WorkflowRelease == nil || s.WorkflowAvailable == nil {
+	if m.input.Operation != "generation" || s.WorkflowRelease == nil {
 		return nil
 	}
 	caller, valid := workflowCallerBounds(request)
 	if !valid {
 		return nil
 	}
-	return mcp.DescribeWorkflow(m.ctx, s.WorkflowTools(), key.authority, s.WorkflowRelease(), named, serving, m.input.Surface, caller, s.WorkflowAvailable(), time.Now())
+	return mcp.DescribeWorkflow(m.ctx, s.Workflows, key.authority, s.WorkflowRelease(), named, serving, m.input.Surface, caller, s.Workflows != nil, time.Now())
 }
 
 func workflowModelInspectionCost(m *simulation, provider routing.Provider, target routing.Target, request *wire.Request, capability *routing.WorkflowCapability) error {
