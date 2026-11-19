@@ -305,85 +305,69 @@ func readBindingInput(r *http.Request) (Input, error) {
 }
 
 func (s *Server) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	retire := r.Method == http.MethodDelete
 	in, err := readBindingInput(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Authorize(authz.Configure); err != nil {
-		return httpkit.Reply{}, err
-	}
-	id := r.PathValue("binding_id")
-	var current *Binding
-	if id != "" {
-		if _, err = httpkit.IDParam(r, "binding_id"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		current, err = Load(r.Context(), tx, id, true)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err = p.Project(&current.ProjectID, authz.Change); err != nil {
-			return httpkit.Reply{}, err
-		}
-	} else {
-		if err = s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	claim, replay, err := s.Access.Replay(r, tx, p, in)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	if current != nil {
-		if err = httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if current.RetiredAt != nil {
-			return httpkit.Reply{}, httpkit.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
-		}
-	}
-	action := "retrieval_binding.update"
-	reply := httpkit.Reply{Status: http.StatusNoContent}
-	if retire {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
-		action = "retrieval_binding.retire"
-	} else {
-		var next Binding
-		next, err = Save(r.Context(), tx, p.UserID(), current, in)
-		if err == nil {
-			id = next.ID
-			reply = httpkit.Detail(next, next.ETag)
-			if current == nil {
-				action = "retrieval_binding.create"
-				reply.Status = 201
-				reply.Location = "/api/v1/retrieval-bindings/" + id
+	return access.Mutate(s.Access, r, in, s.target(r, in), func(tx pgx.Tx, p authz.Principal, current *Binding) (httpkit.Reply, access.Event, error) {
+		if current != nil {
+			if err := httpkit.Match(r, current.ETag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if current.RetiredAt != nil {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
 			}
 		}
-	}
-	if err != nil {
+		reply, event, err := change(r, tx, p, current, in)
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" {
-			return httpkit.Reply{}, httpkit.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
 		}
-		return httpkit.Reply{}, err
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		_, err = access.AdvanceAuthority(r.Context(), tx)
+		return reply, event, err
+	})
+}
+
+func (s *Server) target(r *http.Request, in Input) func(pgx.Tx, authz.Principal) (*Binding, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*Binding, error) {
+		if err := p.Authorize(authz.Configure); err != nil {
+			return nil, err
+		}
+		if r.PathValue("binding_id") == "" {
+			return nil, s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID)
+		}
+		id, err := httpkit.IDParam(r, "binding_id")
+		if err != nil {
+			return nil, err
+		}
+		current, err := Load(r.Context(), tx, id, true)
+		if err != nil {
+			return nil, err
+		}
+		return current, p.Project(&current.ProjectID, authz.Change)
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "retrieval_binding", id, "success"); err != nil {
-		return httpkit.Reply{}, err
+}
+
+func change(r *http.Request, tx pgx.Tx, p authz.Principal, current *Binding, in Input) (httpkit.Reply, access.Event, error) {
+	if r.Method == http.MethodDelete {
+		_, err := tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", current.ID, httpkit.NewID())
+		return httpkit.Reply{Status: http.StatusNoContent}, bindingEvent("retire", current.ID), err
 	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
+	next, err := Save(r.Context(), tx, p.UserID(), current, in)
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
+	reply := httpkit.Detail(next, next.ETag)
+	if current != nil {
+		return reply, bindingEvent("update", next.ID), nil
 	}
-	return reply, tx.Commit(r.Context())
+	reply.Status, reply.Location = http.StatusCreated, "/api/v1/retrieval-bindings/"+next.ID
+	return reply, bindingEvent("create", next.ID), nil
+}
+
+func bindingEvent(action, id string) access.Event {
+	return access.Event{Action: "retrieval_binding." + action, Resource: "retrieval_binding", ID: id}
 }

@@ -206,56 +206,39 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		return httpkit.Reply{}, err
 	}
 	settings := input.settings()
-	tx, p, err := a.server.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	scope, err := admit(r.Context(), tx, settings)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := destination.RequireScope(r.Context(), a.server, tx, p, scope.project); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.server.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	pins, err := pinFor(r.Context(), tx, scope, settings.Redact)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var count int64
-	if err := tx.QueryRow(r.Context(), countPoliciesSQL).Scan(&count); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if count >= maxPolicies {
-		return httpkit.Reply{}, httpkit.Invalid("capture_policies", "This installation already has 1000 capture policies.")
-	}
-	id := httpkit.NewID()
-	if _, err := tx.Exec(r.Context(), createPolicySQL, id, scope.project, settings.Route, scope.sink, settings.SampleRatio, settings.Include,
-		settings.Redact, settings.MaxBytes, settings.Enabled, httpkit.NewID(), p.UserID(), settings.KeyIDs, settings.EndUsers); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := storePins(r.Context(), tx, id, pins); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.create", "capture_policy", id, "success", scope.project); err != nil {
-		return httpkit.Reply{}, err
-	}
-	policy, err := readPolicy(r.Context(), tx, getPolicySQL, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated, ETag: policy.ETag, Location: "/api/v1/observability/capture-policies/" + id, Body: policy}
-	if err := a.server.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (resolved, error) {
+		scope, err := admit(r.Context(), tx, settings)
+		if err != nil {
+			return resolved{}, err
+		}
+		return scope, destination.RequireScope(r.Context(), a.server, tx, p, scope.project)
+	}, func(tx pgx.Tx, p authz.Principal, scope resolved) (httpkit.Reply, access.Event, error) {
+		pins, err := pinFor(r.Context(), tx, scope, settings.Redact)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var count int64
+		if err := tx.QueryRow(r.Context(), countPoliciesSQL).Scan(&count); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if count >= maxPolicies {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("capture_policies", "This installation already has 1000 capture policies.")
+		}
+		id := httpkit.NewID()
+		if _, err := tx.Exec(r.Context(), createPolicySQL, id, scope.project, settings.Route, scope.sink, settings.SampleRatio, settings.Include,
+			settings.Redact, settings.MaxBytes, settings.Enabled, httpkit.NewID(), p.UserID(), settings.KeyIDs, settings.EndUsers); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := storePins(r.Context(), tx, id, pins); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		policy, err := readPolicy(r.Context(), tx, getPolicySQL, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusCreated, ETag: policy.ETag, Location: "/api/v1/observability/capture-policies/" + id, Body: policy},
+			access.Event{Action: "capture_policy.create", Resource: "capture_policy", ID: id, Project: scope.project}, nil
+	})
 }
 
 func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

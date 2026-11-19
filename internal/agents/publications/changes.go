@@ -106,56 +106,37 @@ func (s *Server) write(r *http.Request, kind, action string) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, principal, authErr := s.access.BeginMutation(r)
-	if authErr != nil {
-		return httpkit.Reply{}, authErr
-	}
-	defer tx.Rollback(r.Context())
-	current, loadErr := s.current(r, tx, principal, kind, action, input)
-	if loadErr != nil {
-		return httpkit.Reply{}, loadErr
-	}
-	claim, replay, replayErr := s.access.Replay(r, tx, principal, input.input)
-	if replayErr != nil {
-		return httpkit.Reply{}, replayErr
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	if current != nil {
-		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if current.Retired {
-			return httpkit.Reply{}, httpkit.Fail(409, "publication_retired", "Retired history cannot be changed.")
-		}
-	}
-	next, applyErr := s.apply(r, tx, principal, current, kind, action, input)
-	if applyErr != nil {
-		var pg *pgconn.PgError
-		if errors.As(applyErr, &pg) && pg.Code == "23505" {
-			return httpkit.Reply{}, httpkit.Fail(409, "publication_exists", "Choose an unused name in this project.")
-		}
-		return httpkit.Reply{}, applyErr
-	}
-	if action == "publish" || action == "retire" || action == "label" {
-		if _, err := access.AdvanceAuthority(r.Context(), tx); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if s.access.RuntimePublisher != nil {
-			if err := s.access.RuntimePublisher(r.Context(), tx, principal.UserID()); err != nil {
-				return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, input.input, func(tx pgx.Tx, principal authz.Principal) (*agentcontract.Publication, error) {
+		return s.current(r, tx, principal, kind, action, input)
+	}, func(tx pgx.Tx, principal authz.Principal, current *agentcontract.Publication) (httpkit.Reply, access.Event, error) {
+		if current != nil {
+			if err := httpkit.Match(r, current.ETag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if current.Retired {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "publication_retired", "Retired history cannot be changed.")
 			}
 		}
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, principal.Actor(), kind+"."+action, kind, next.ID, "success", &next.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	response := publicationReply(next, action)
-	if err := s.access.CompleteReplay(r, tx, claim, response); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return response, tx.Commit(r.Context())
+		next, applyErr := s.apply(r, tx, principal, current, kind, action, input)
+		if applyErr != nil {
+			var pg *pgconn.PgError
+			if errors.As(applyErr, &pg) && pg.Code == "23505" {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "publication_exists", "Choose an unused name in this project.")
+			}
+			return httpkit.Reply{}, access.Event{}, applyErr
+		}
+		if action == "publish" || action == "retire" || action == "label" {
+			if _, err := access.AdvanceAuthority(r.Context(), tx); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if s.access.RuntimePublisher != nil {
+				if err := s.access.RuntimePublisher(r.Context(), tx, principal.UserID()); err != nil {
+					return httpkit.Reply{}, access.Event{}, err
+				}
+			}
+		}
+		return publicationReply(next, action), access.Event{Action: kind + "." + action, Resource: kind, ID: next.ID, Project: &next.ProjectID}, nil
+	})
 }
 func publicationReply(publication agentcontract.Publication, action string) httpkit.Reply {
 	if action == "retire" {
