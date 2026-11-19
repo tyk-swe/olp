@@ -29,8 +29,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-var errGeminiBatchFidelity = errors.New("Gemini batch contains an unprojected provider identifier")
-
 type geminiBatchInput struct {
 	Canonical    []byte
 	Upstream     []byte
@@ -165,58 +163,6 @@ func validateGeminiBatchItem(request oif.Value, slug string) *fault.Error {
 	return nil
 }
 
-func geminiBatchHasFileReference(request oif.Value) bool {
-	var parts func(oif.Value) bool
-	parts = func(values oif.Value) bool {
-		for _, part := range values.Elements() {
-			for _, field := range part.Members() {
-				switch field.Name {
-				case "fileData", "file_data":
-					for _, source := range field.Value.Members() {
-						if source.Name == "fileUri" || source.Name == "file_uri" {
-							return true
-						}
-					}
-				case "functionResponse", "function_response":
-					for _, response := range field.Value.Members() {
-						if response.Name == "parts" && parts(response.Value) {
-							return true
-						}
-					}
-				}
-			}
-		}
-		return false
-	}
-	content := func(value oif.Value) bool {
-		for _, field := range value.Members() {
-			if field.Name == "parts" && parts(field.Value) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, field := range request.Members() {
-		switch field.Name {
-		case "cachedContent", "cached_content":
-			if field.Value.Kind() != oif.Null {
-				return true
-			}
-		case "systemInstruction", "system_instruction":
-			if content(field.Value) {
-				return true
-			}
-		case "contents":
-			for _, item := range field.Value.Elements() {
-				if content(item) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func qualifyGeminiBatchJSONL(input io.Reader, slug string, digest func(string) ([]byte, bool)) (batchManifest, error) {
 	manifest := batchManifest{Adapter: geminiNativeManifest, LineOperation: wire.LineGeneration}
 	seen := map[[32]byte]struct{}{}
@@ -288,19 +234,6 @@ func geminiBatchAlias(object oif.Value, snake, camel string) (json.RawMessage, b
 		return json.RawMessage(right.Raw()), true, nil
 	}
 	return nil, false, nil
-}
-
-func canonicalBatchJSON(body []byte) ([]byte, error) {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, err
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, errors.New("trailing JSON")
-	}
-	return json.Marshal(value)
 }
 
 func geminiBatchCancelAcknowledgement(body []byte) bool {

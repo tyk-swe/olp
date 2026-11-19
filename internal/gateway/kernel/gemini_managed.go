@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -415,4 +416,58 @@ func geminiResultScanError(err error) error {
 		return fmt.Errorf("%w: %w", errGeminiBatchFidelity, err)
 	}
 	return err
+}
+
+var errGeminiBatchFidelity = errors.New("Gemini batch contains an unprojected provider identifier")
+
+func geminiBatchHasFileReference(request oif.Value) bool {
+	var parts func(oif.Value) bool
+	parts = func(values oif.Value) bool {
+		for _, part := range values.Elements() {
+			for _, field := range part.Members() {
+				switch field.Name {
+				case "fileData", "file_data":
+					for _, source := range field.Value.Members() {
+						if source.Name == "fileUri" || source.Name == "file_uri" {
+							return true
+						}
+					}
+				case "functionResponse", "function_response":
+					for _, response := range field.Value.Members() {
+						if response.Name == "parts" && parts(response.Value) {
+							return true
+						}
+					}
+				}
+			}
+		}
+		return false
+	}
+	content := func(value oif.Value) bool {
+		for _, field := range value.Members() {
+			if field.Name == "parts" && parts(field.Value) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, field := range request.Members() {
+		switch field.Name {
+		case "cachedContent", "cached_content":
+			if field.Value.Kind() != oif.Null {
+				return true
+			}
+		case "systemInstruction", "system_instruction":
+			if content(field.Value) {
+				return true
+			}
+		case "contents":
+			for _, item := range field.Value.Elements() {
+				if content(item) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

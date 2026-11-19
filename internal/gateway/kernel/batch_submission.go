@@ -1,9 +1,11 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -431,4 +433,17 @@ func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, fai
 		s.log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
 	}
 	return failure
+}
+
+func canonicalBatchJSON(body []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("trailing JSON")
+	}
+	return json.Marshal(value)
 }
