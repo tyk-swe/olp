@@ -2,21 +2,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 legacy=.golangci-legacy.json
-report=$(mktemp)
-log=$(mktemp)
-trap 'rm -f "$report" "$log"' EXIT
+tools=$(mktemp -d)
+trap 'rm -rf "$tools"' EXIT
+report=$tools/report.json
+GOBIN=$tools go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 status=0
-go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run \
-  --show-stats=false --output.json.path "$report" --output.text.path /dev/null ./... 2>"$log" || status=$?
-if ((status > 1)); then
-  cat "$log" >&2
+"$tools/golangci-lint" run --show-stats=false --output.json.path "$report" \
+  --output.text.path /dev/null ./... 2>"$tools/log" || status=$?
+if ((status > 1)) || ! jq -e '.Issues | type == "array" or . == null' "$report" >/dev/null; then
+  cat "$tools/log" >&2
   echo "check-lint: golangci-lint failed to run" >&2
-  exit "$status"
+  exit 1
 fi
 problems=$(jq -r --slurpfile legacy "$legacy" '
   def entry:
     if .FromLinter == "funlen" then
-      {list: "functionOverMaxLines", name: "\(.Pos.Filename) \(.Text | capture("Function \u0027(?<name>[^\u0027]+)\u0027").name)"}
+      {list: "functionOverMaxLines", name: "\(.Pos.Filename) \(.SourceLines[0] | capture("^func (\\((\\w+ )?\\*?(?<receiver>\\w+)[^)]*\\) )?(?<name>\\w+)") | [.receiver // empty, .name] | join("."))"}
     elif .FromLinter == "revive" and (.Text | startswith("file-length-limit")) then
       {list: "fileOverMaxLines", name: .Pos.Filename}
     elif .FromLinter == "depguard" and (.Text | contains("list \u0027serving\u0027")) then
