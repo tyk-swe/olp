@@ -3,8 +3,9 @@ package release
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"

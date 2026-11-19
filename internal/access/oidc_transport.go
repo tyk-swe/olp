@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func oidcURL(raw string) error {
+func CheckIdentityURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || len(raw) > 2048 {
 		return errors.New("invalid OIDC URL")
@@ -47,6 +47,11 @@ func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	}
 	return addresses, nil
 }
+
+// IdentityHTTPClient applies the independent, bounded identity egress policy.
+// Provider network exceptions never broaden this client.
+func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
+
 func oidcHTTPClient(injected *http.Client) *http.Client {
 	if injected != nil {
 		return injected
@@ -91,7 +96,7 @@ func oidcDialAddresses(ctx context.Context, network, port string, addresses []ne
 type oidcTransport struct{ base http.RoundTripper }
 
 func (t oidcTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if err := oidcURL(r.URL.String()); err != nil {
+	if err := CheckIdentityURL(r.URL.String()); err != nil {
 		return nil, err
 	}
 	response, err := t.base.RoundTrip(r)

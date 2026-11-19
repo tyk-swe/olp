@@ -1,4 +1,4 @@
-package access
+package apikeys
 
 import (
 	"net/netip"

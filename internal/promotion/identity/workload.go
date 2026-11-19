@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -55,11 +55,11 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	if err != nil {
 		return err
 	}
-	return access.ValidateWorkloadConfig(config)
+	return apikeys.ValidateWorkloadConfig(config)
 }
 
 func readWorkload(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
-	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
+	configs, err := apikeys.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -105,14 +105,14 @@ func planWorkload(ctx context.Context, q database.Queryer, d Desired) ([]promoti
 }
 
 func planIssuer(ctx context.Context, q database.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
-	current, exists, err := access.FindWorkloadIssuer(ctx, q, issuer.Issuer)
+	current, exists, err := apikeys.FindWorkloadIssuer(ctx, q, issuer.Issuer)
 	if err != nil {
 		return promotion.Item{}, err
 	}
 	if !exists {
 		return issuerItem(issuer, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	if err := access.ValidateWorkloadBindings(ctx, q, current.ID, config); err != nil {
+	if err := apikeys.ValidateWorkloadBindings(ctx, q, current.ID, config); err != nil {
 		return promotion.Item{}, err
 	}
 	return issuerItem(issuer, action(true, sameConfig(current.Config, config))), nil
@@ -196,7 +196,7 @@ func Prepare(ctx context.Context, desired Desired, principal authz.Principal, de
 }
 
 func prepareIssuer(ctx context.Context, deps Deps, issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
-	current, exists, err := access.FindWorkloadIssuer(ctx, deps.Access.Pool, issuer.Issuer)
+	current, exists, err := apikeys.FindWorkloadIssuer(ctx, deps.Access.Pool, issuer.Issuer)
 	if err != nil {
 		return preparedIssuer{}, err
 	}
@@ -227,7 +227,7 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 }
 
 func applyIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
-	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
+	current, exists, err := apikeys.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err
 	}
@@ -247,11 +247,11 @@ func applyIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, deps Deps, d
 	if exists && sameConfig(current.Config, config) {
 		return nil
 	}
-	_, stored := deps.Access.StoreWorkloadIssuer(ctx, tx, p, issuerID(current, exists), config, !exists)
+	_, stored := apikeys.StoreWorkloadIssuer(ctx, deps.Access, tx, p, issuerID(current, exists), config, !exists)
 	return stored
 }
 
-func issuerID(current access.StoredWorkloadIssuer, exists bool) string {
+func issuerID(current apikeys.StoredWorkloadIssuer, exists bool) string {
 	if exists {
 		return current.ID
 	}

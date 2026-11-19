@@ -12,10 +12,10 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/database"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -197,7 +197,7 @@ func scopeName(ctx context.Context, q database.Queryer, projectName namer, a gua
 	case contract.ConfigurationGuardrailAttachmentScopeToolset:
 		return unowned(publications.ToolsetName(ctx, q, a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeApiKey:
-		key, found, err := access.ReadAPIKey(ctx, q, a.ScopeID)
+		key, found, err := apikeys.ReadAPIKey(ctx, q, a.ScopeID)
 		if err != nil {
 			return "", "", err
 		}

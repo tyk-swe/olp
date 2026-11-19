@@ -32,10 +32,3 @@ func CheckLimitTemplates(ctx context.Context, q database.Queryer, project *strin
 	}
 	return nil
 }
-
-func endUserTemplate(p *keyauthority.EndUserPolicy) *string {
-	if p == nil {
-		return nil
-	}
-	return p.LimitTemplate
-}

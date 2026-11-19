@@ -1,18 +1,16 @@
-package access
+package apikeys
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/priority"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -42,7 +40,7 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 		groupNames[name] = true
 	}
 	policy := input.KeyPolicy.AttributionPolicy()
-	if err := ValidateAttributionPolicy(&policy); err != nil {
+	if err := access.ValidateAttributionPolicy(&policy); err != nil {
 		return err
 	}
 	if err := keyauthority.ValidateTemplateName(input.LimitTemplate); err != nil {
@@ -129,18 +127,6 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 
 // AdvanceAuthority advances key authority, so every gateway reloads API keys
 // and which credential versions may serve on its next poll.
-type AuthorityGeneration struct {
-	ID       string `json:"id"`
-	Sequence int64  `json:"sequence"`
-}
-
-func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (AuthorityGeneration, error) {
-	var id string
-	var sequence int64
-	err := tx.QueryRow(ctx, "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", httpkit.NewID()).Scan(&id, &sequence)
-	return AuthorityGeneration{ID: id, Sequence: sequence}, err
-}
-
 const keyFields = `'run_limits',k.policy->'run_limits','allowed_toolsets',COALESCE(NULLIF(k.policy->'allowed_toolsets','null'::jsonb),'[]'::jsonb),
  'allowed_agents',COALESCE(NULLIF(k.policy->'allowed_agents','null'::jsonb),'[]'::jsonb),
  'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
@@ -156,9 +142,9 @@ const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.cre
 // rollups, the amounts they are measured against come from the stored policy,
 // and enforcement_active tells the console whether this installation admits
 // requests against them at all.
-func (s *Server) keyJSON() string {
+func (a *API) keyJSON() string {
 	enforcement := "false"
-	if s.limitsEnforced {
+	if a.server.LimitsEnforced() {
 		enforcement = "true"
 	}
 	return `jsonb_build_object(` + keyFields + `,'budget',olp.budget_allowances(k.id,k.effective_limits,jsonb_set(jsonb_set(jsonb_set(` + ledger.KeyBudgetSQL("k") +
@@ -166,7 +152,7 @@ func (s *Server) keyJSON() string {
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)),'{weekly,limit}',COALESCE(k.policy->'weekly_cost_limit','null'::jsonb))))`
 }
 
-func (s *Server) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+func (a *API) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -178,14 +164,14 @@ func (s *Server) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Re
 			return httpkit.Reply{}, err
 		}
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+s.keyJSON()+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
+	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+a.keyJSON()+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	items, err := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, p), err
 }
-func (s *Server) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (a *API) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -193,24 +179,11 @@ func (s *Server) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, erro
 	var data []byte
 	var etag string
 	var projectID *string
-	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
+	if err = a.server.Pool.QueryRow(r.Context(), "SELECT "+a.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(json.RawMessage(data), etag), nil
-}
-func ValidateRouteReferences(r *http.Request, q database.Queryer, routes []string, projectID *string) error {
-	if len(routes) == 0 {
-		return nil
-	}
-	var mismatched bool
-	if err := q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)", routes, projectID).Scan(&mismatched); err != nil {
-		return err
-	}
-	if mismatched {
-		return httpkit.Invalid("allowed_routes", "Allowed routes must belong to the key's project.")
-	}
-	return nil
 }

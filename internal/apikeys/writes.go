@@ -1,4 +1,4 @@
-package access
+package apikeys
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -75,7 +76,7 @@ func budgetGroup(ctx context.Context, q database.Queryer, group, project *string
 }
 
 func checkKeyReferences(r *http.Request, q database.Queryer, policy, agentResources keyauthority.KeyPolicy, project *string) error {
-	if err := CheckLimitTemplates(r.Context(), q, project, policy.LimitTemplate, endUserTemplate(policy.EndUserPolicy)); err != nil {
+	if err := access.CheckLimitTemplates(r.Context(), q, project, policy.LimitTemplate, endUserTemplate(policy.EndUserPolicy)); err != nil {
 		return err
 	}
 	if err := checkKeyRouteGroups(r, q, policy.AllowedRouteGroups, project); err != nil {
@@ -84,14 +85,14 @@ func checkKeyReferences(r *http.Request, q database.Queryer, policy, agentResour
 	if err := checkKeyAgentResources(r.Context(), q, agentResources, project); err != nil {
 		return err
 	}
-	return ValidateRouteReferences(r, q, policy.AllowedRoutes, project)
+	return access.ValidateRouteReferences(r, q, policy.AllowedRoutes, project)
 }
 
-func keyEvent(action, id string) Event {
-	return Event{Action: action, Resource: "api_key", ID: id}
+func keyEvent(action, id string) access.Event {
+	return access.Event{Action: action, Resource: "api_key", ID: id}
 }
 
-func (s *Server) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	input := keyInput{KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -101,39 +102,39 @@ func (s *Server) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply
 		return httpkit.Reply{}, err
 	}
 	input.ProjectID = project
-	return Mutate(s, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
-		return struct{}{}, s.RequireProject(r.Context(), tx, p, project)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, Event, error) {
-		return s.insertKey(r, tx, p, input)
+	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, a.server.RequireProject(r.Context(), tx, p, project)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		return a.insertKey(r, tx, p, input)
 	})
 }
 
-func (s *Server) insertKey(r *http.Request, tx pgx.Tx, p authz.Principal, input keyInput) (httpkit.Reply, Event, error) {
+func (a *API) insertKey(r *http.Request, tx pgx.Tx, p authz.Principal, input keyInput) (httpkit.Reply, access.Event, error) {
 	if err := validateAndNormalizeKey(input, true); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	group, err := budgetGroup(r.Context(), tx, input.BudgetGroupID, input.ProjectID)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	if err := checkKeyReferences(r, tx, input.KeyPolicy, input.KeyPolicy, input.ProjectID); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	id, lookup, etag := httpkit.NewID(), secrets.Token(), httpkit.NewID()
 	secret := "olp_" + lookup + "_" + secrets.Token()
 	policy, err := json.Marshal(input.KeyPolicy)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, group, policy, etag, input.ExpiresAt); err != nil {
-		return httpkit.Reply{}, Event{}, err
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, a.server.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, group, policy, etag, input.ExpiresAt); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	if err := ensureRouteBudgetAccounts(r.Context(), tx, id, input.RouteLimits); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	generation, err := AdvanceAuthority(r.Context(), tx)
+	generation, err := access.AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}
 	return httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: body}, keyEvent("api_key.create", id), nil
@@ -158,7 +159,7 @@ func decodeKeyPatch(r *http.Request) (map[string]json.RawMessage, error) {
 	return patch, nil
 }
 
-func (s *Server) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	patch, err := decodeKeyPatch(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -167,7 +168,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return Transact(s, r, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
+	return access.Transact(a.server, r, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
 		key, err := lockKey(r, tx, p, id)
 		if err != nil {
 			return storedKey{}, err
@@ -176,7 +177,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply
 			return storedKey{}, httpkit.Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
 		}
 		return key, key.live(r, "A revoked key cannot be edited.")
-	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, Event, error) {
+	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, access.Event, error) {
 		return patchKey(r, tx, key, patch)
 	})
 }
@@ -203,52 +204,52 @@ func (k storedKey) patched(patch map[string]json.RawMessage) (keyInput, keyautho
 	return input, previous, validateAndNormalizeKey(input, expirationChanged)
 }
 
-func patchKey(r *http.Request, tx pgx.Tx, key storedKey, patch map[string]json.RawMessage) (httpkit.Reply, Event, error) {
+func patchKey(r *http.Request, tx pgx.Tx, key storedKey, patch map[string]json.RawMessage) (httpkit.Reply, access.Event, error) {
 	input, previous, err := key.patched(patch)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	group, err := key.regrouped(r.Context(), tx, patch)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	if err := checkKeyReferences(r, tx, input.KeyPolicy, addedKeyAgentResources(input.KeyPolicy, previous), key.project); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	policy, err := json.Marshal(input.KeyPolicy)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	etag := httpkit.NewID()
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), policy, input.ExpiresAt, group, etag, key.id); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	if err := ensureRouteBudgetAccounts(r.Context(), tx, key.id, input.RouteLimits); err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	generation, err := AdvanceAuthority(r.Context(), tx)
+	generation, err := access.AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	return httpkit.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag), keyEvent("api_key.update", key.id), nil
 }
 
-func (s *Server) revokeAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) revokeAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "api_key_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return Mutate(s, r, nil, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
+	return access.Mutate(a.server, r, nil, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
 		return lockKey(r, tx, p, id)
-	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, Event, error) {
+	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, access.Event, error) {
 		if err := key.live(r, "This key is already revoked."); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag := httpkit.NewID()
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		generation, err := AdvanceAuthority(r.Context(), tx)
+		generation, err := access.AdvanceAuthority(r.Context(), tx)
 		return httpkit.Detail(generation, etag), keyEvent("api_key.revoke", id), err
 	})
 }
@@ -277,7 +278,7 @@ func decodeRotation(r *http.Request) (map[string]json.RawMessage, int, error) {
 	return input, overlap, nil
 }
 
-func (s *Server) rotateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (a *API) rotateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	input, overlap, err := decodeRotation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -286,41 +287,41 @@ func (s *Server) rotateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return Mutate(s, r, input, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
+	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
 		key, err := lockKey(r, tx, p, id)
 		if err == nil && key.managed {
 			return storedKey{}, httpkit.Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
 		}
 		return key, err
-	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, Event, error) {
+	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, access.Event, error) {
 		if err := key.live(r, "This key is already revoked."); err != nil {
-			return httpkit.Reply{}, Event{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return s.rotateKey(r, tx, key, input, overlap)
+		return a.rotateKey(r, tx, key, input, overlap)
 	})
 }
 
-func (s *Server) rotateKey(r *http.Request, tx pgx.Tx, key storedKey, input map[string]json.RawMessage, overlap int) (httpkit.Reply, Event, error) {
+func (a *API) rotateKey(r *http.Request, tx pgx.Tx, key storedKey, input map[string]json.RawMessage, overlap int) (httpkit.Reply, access.Event, error) {
 	group, err := key.regrouped(r.Context(), tx, input)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	overlapUntil, err := overlapPreviousSecret(r.Context(), tx, key.id, overlap)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	policy, err := key.rebudgeted(input)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	etag, lookup := httpkit.NewID(), secrets.Token()
 	secret := "olp_" + lookup + "_" + secrets.Token()
-	if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET limit_lookup_id=COALESCE(limit_lookup_id,lookup_id),lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), etag, policy, group, key.id); err != nil {
-		return httpkit.Reply{}, Event{}, err
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET limit_lookup_id=COALESCE(limit_lookup_id,lookup_id),lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, a.server.Auth.Digest(secrets.APIKeyDigest, secret), etag, policy, group, key.id); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
 	}
-	generation, err := AdvanceAuthority(r.Context(), tx)
+	generation, err := access.AdvanceAuthority(r.Context(), tx)
 	if err != nil {
-		return httpkit.Reply{}, Event{}, err
+		return httpkit.Reply{}, access.Event{}, err
 	}
 	body := map[string]any{"id": key.id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation, "overlap_expires_at": overlapUntil}
 	return httpkit.Detail(body, etag), keyEvent("api_key.rotate", key.id), nil
@@ -368,4 +369,11 @@ func (k storedKey) rebudgeted(input map[string]json.RawMessage) ([]byte, error) 
 		return nil, err
 	}
 	return json.Marshal(normalized)
+}
+
+func endUserTemplate(p *keyauthority.EndUserPolicy) *string {
+	if p == nil {
+		return nil
+	}
+	return p.LimitTemplate
 }

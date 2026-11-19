@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/budgets"
 	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
@@ -172,6 +173,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	codeadmin.NewAPI(m.Access).Register(mux)
 	settings.NewAPI(m.Access).Register(mux)
 	budgets.NewAPI(m.Access).Register(mux)
+	apikeys.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	playground := &gateway.Playground{Gateway: m.Gateway}
 	playgroundLimits := []access.RouteOption{access.MaxBody(gateway.PlaygroundBodyLimit), access.Deadline(gateway.PlaygroundTimeout)}
