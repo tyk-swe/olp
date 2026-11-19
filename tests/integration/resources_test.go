@@ -325,6 +325,7 @@ type storedPlan struct {
 	toolsets    []string
 	tools       kernel.WorkflowToolRunner
 	secure      bool
+	streams     bool
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
@@ -374,9 +375,17 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		profileRevision = connectors.ProfileRevision
 	}
 	providerConfig := encoded(t, map[string]any{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model, "profile_id": plan.profile, "profile_revision": profileRevision, "options": map[string]any{"network": network}})
-	certified := make([]routing.RevisionCapability, len(plan.operations))
-	for i, operation := range plan.operations {
-		certified[i] = routing.RevisionCapability{Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary", Source: "certified"}
+	modes := []string{"unary"}
+	if plan.streams {
+		modes = []string{"unary", "streaming"}
+	}
+	certified := make([]routing.RevisionCapability, 0, len(plan.operations)*len(modes))
+	capabilities := make([]routing.Capability, 0, len(plan.operations)*len(modes))
+	for _, operation := range plan.operations {
+		for _, mode := range modes {
+			certified = append(certified, routing.RevisionCapability{Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: mode, Source: "certified"})
+			capabilities = append(capabilities, routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: mode, ToolCalls: plan.tools != nil})
+		}
 	}
 	models := encoded(t, []routing.RevisionModel{{ID: g.modelID, UpstreamModel: plan.model, DisplayName: plan.model, Capabilities: certified}})
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_credentials (id,provider_id,version) VALUES ($1,$2,1)`, g.credentialID, fixture.providerID); err != nil {
@@ -390,10 +399,6 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	routeID, routeRevisionID := g.seedRoute(plan.slug)
 	g.routeRevisionID = routeRevisionID
 
-	capabilities := make([]routing.Capability, len(plan.operations))
-	for i, operation := range plan.operations {
-		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary", ToolCalls: plan.tools != nil}
-	}
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
 		Providers: map[string]routing.Provider{fixture.providerID: {
@@ -804,8 +809,8 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 }
 
 type upstreamCall struct {
-	request, key, authorization, body string
-	beta, accept                      string
+	request, query, key, authorization, body string
+	beta, accept                             string
 }
 
 type retainedUpstream struct {
@@ -825,7 +830,7 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	u.calls = append(u.calls, upstreamCall{
 		request: request, key: cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key"), r.Header.Get("x-goog-api-key")),
-		authorization: r.Header.Get("Authorization"), body: string(body),
+		authorization: r.Header.Get("Authorization"), body: string(body), query: r.URL.RawQuery,
 		beta: r.Header.Get("Anthropic-Beta"), accept: r.Header.Get("Accept"),
 	})
 	nth := 0
@@ -1583,5 +1588,140 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 	if settled != 2 || runCount != 1 || run != tools.calls[0].run || !priced {
 		t.Fatalf("settled model debits=%d runs=%d run=%s priced for both turns=%t, want 2 debits on run %s",
 			settled, runCount, run, priced, tools.calls[0].run)
+	}
+}
+
+func interactionEvent(id int, body string) string {
+	return fmt.Sprintf("id: %d\ndata: %s\n\n", id, body)
+}
+
+func interactionStreamReplies(request string, nth int) map[string]string {
+	native := "interaction-" + providerOwned + "-1"
+	lifecycle := func(event, id, status string) string {
+		return `{"event_type":"` + event + `","interaction":{"id":"` + id + `","status":"` + status + `","model":"gemini-model","usage":{"total_input_tokens":3,"total_output_tokens":2,"total_tokens":5}}}`
+	}
+	start := interactionEvent(2, `{"event_type":"step.start","index":0,"step":{"type":"model_output"}}`)
+	rest := interactionEvent(3, `{"event_type":"step.delta","index":0,"delta":{"type":"text","text":"hello"}}`) +
+		interactionEvent(4, `{"event_type":"step.stop","index":0}`)
+	created := map[int]string{
+		1: interactionEvent(1, lifecycle("interaction.created", native, "in_progress")) + start + rest + interactionEvent(5, lifecycle("interaction.completed", native, "completed")),
+		2: start + rest,
+	}
+	resumed := map[int]string{
+		1: rest + interactionEvent(5, lifecycle("interaction.completed", native, "completed")),
+		2: rest + interactionEvent(5, lifecycle("interaction.completed", "interaction-"+providerOwned+"-2", "completed")),
+	}
+	return map[string]string{
+		"POST /interactions":                       created[nth],
+		"GET /interactions/" + native:              resumed[nth],
+		"POST /interactions/" + native + "/cancel": `{"id":"` + native + `","status":"cancelled","model":"gemini-model","steps":[]}`,
+	}
+}
+
+type streamedInteraction struct {
+	ids    []string
+	events []struct {
+		Type        string `json:"event_type"`
+		Interaction struct{ ID, Model, Status string }
+	}
+}
+
+func readInteractionStream(t *testing.T, header http.Header, raw []byte) streamedInteraction {
+	t.Helper()
+	if kind := header.Get("Content-Type"); kind != "text/event-stream" {
+		t.Fatalf("content type = %q, want an event stream: %s", kind, raw)
+	}
+	var stream streamedInteraction
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if id, found := strings.CutPrefix(line, "id: "); found {
+			stream.ids = append(stream.ids, id)
+		}
+		data, found := strings.CutPrefix(line, "data: ")
+		if !found {
+			continue
+		}
+		stream.events = append(stream.events, struct {
+			Type        string `json:"event_type"`
+			Interaction struct{ ID, Model, Status string }
+		}{})
+		if err := json.Unmarshal([]byte(data), &stream.events[len(stream.events)-1]); err != nil {
+			t.Fatalf("event %q: %v", data, err)
+		}
+	}
+	return stream
+}
+
+func TestGeminiInteractionStreamsBindTheirResourceResumeFromACursorCancelAndRefuseBrokenStreams(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, native = "gemini-streams", "interaction-" + providerOwned + "-1"
+	upstream := &retainedUpstream{replies: interactionStreamReplies, headers: func(r *http.Request) map[string]string {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/interactions") || r.URL.Query().Get("stream") == "true" {
+			return map[string]string{"Content-Type": "text/event-stream"}
+		}
+		return nil
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: "gemini-model", kind: "gemini", surface: "gemini", profile: "gemini-interactions", version: "/v1beta", secure: true, streams: true,
+		operations: []string{"generation"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const interactions = "/gemini/v1beta/interactions"
+	body := `{"model":"` + slug + `","input":"hi","stream":true,"store":true}`
+	json := map[string]string{"Content-Type": "application/json"}
+
+	header, raw := g.send(t, "POST", interactions, geminiKey("owner", json), body, 200)
+	created := readInteractionStream(t, header, raw)
+	if len(created.events) != 5 || !slices.Equal(created.ids, []string{"1", "2", "3", "4", "5"}) {
+		t.Fatalf("stream = %s, want the provider's five events under their event identifiers", raw)
+	}
+	first, last := created.events[0], created.events[4]
+	if !strings.HasPrefix(first.Interaction.ID, "interaction_") || last.Interaction.ID != first.Interaction.ID ||
+		first.Interaction.Model != slug || last.Type != "interaction.completed" || last.Interaction.Status != "completed" {
+		t.Fatalf("stream = %s, want one gateway identifier under the route name through to completion", raw)
+	}
+	local := interactions + "/" + first.Interaction.ID
+
+	for _, refused := range []struct{ method, path string }{
+		{"GET", local + "?last_event_id=3"},
+		{"GET", local + "?stream=maybe"},
+		{"GET", local + "?stream=true&last_event_id=" + strings.Repeat("9", 513)},
+		{"POST", local + "/cancel?stream=true"},
+		{"DELETE", local + "?include_input=true"},
+	} {
+		g.send(t, refused.method, refused.path, geminiKey("owner", nil), "", 400)
+	}
+	g.send(t, "GET", local+"?stream=true&last_event_id=3", geminiKey("stranger", nil), "", 404)
+	g.send(t, "POST", local+"/cancel", geminiKey("stranger", nil), "", 404)
+	if sent := upstream.sent("GET /interactions/" + native); len(sent) != 0 {
+		t.Fatalf("a refused retrieval reached the provider: %+v", sent)
+	}
+
+	header, raw = g.send(t, "GET", local+"?stream=true&last_event_id=3&include_input=false", geminiKey("owner", nil), "", 200)
+	resumed := readInteractionStream(t, header, raw)
+	if len(resumed.events) != 3 || !slices.Equal(resumed.ids, []string{"3", "4", "5"}) || resumed.events[2].Interaction.ID != first.Interaction.ID || resumed.events[2].Interaction.Model != slug {
+		t.Fatalf("resumed stream = %s, want the remaining events for %s", raw, first.Interaction.ID)
+	}
+	if sent := upstream.sent("GET /interactions/" + native); len(sent) != 1 || sent[0].query != "include_input=false&last_event_id=3&stream=true" || sent[0].key != "listed-secret" {
+		t.Fatalf("resume reached the provider as %+v, want the cursor on the provider's interaction", sent)
+	}
+	header, raw = g.send(t, "GET", local+"?stream=true&last_event_id=3", geminiKey("owner", nil), "", 200)
+	if cut := readInteractionStream(t, header, raw); !slices.Equal(cut.ids, []string{"3", "4"}) {
+		t.Fatalf("stream = %s, want it cut before the event that names another interaction", raw)
+	}
+
+	_, raw = g.send(t, "POST", local+"/cancel", geminiKey("owner", nil), "", 200)
+	if !strings.Contains(string(raw), `"id":"`+first.Interaction.ID+`"`) || !strings.Contains(string(raw), `"status":"cancelled"`) || !strings.Contains(string(raw), `"model":"`+slug+`"`) {
+		t.Fatalf("cancel = %s, want the cancelled interaction under its gateway identifier", raw)
+	}
+	if sent := upstream.sent("POST /interactions/" + native + "/cancel"); len(sent) != 1 || sent[0].body != "" {
+		t.Fatalf("cancel reached the provider as %+v, want one bodiless call", sent)
+	}
+
+	g.send(t, "POST", interactions, geminiKey("owner", json), body, 502)
+	var stored int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources`).Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("stored interactions = %d, %v, want only the one whose stream opened correctly", stored, err)
 	}
 }
