@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -25,216 +24,70 @@ func (g *Stream) tool(id string) *toolCall {
 	}
 	return v
 }
-func (g *Stream) collectTools(frame []byte) (bool, error) {
-	var data []byte
-	if g.config.Family == wire.Bedrock {
+
+type envelope struct {
+	binary  bool
+	message eventstream.Message
+	lines   [][]byte
+	line    int
+}
+
+func openFrame(family wire.Format, frame []byte) (envelope, []byte, error) {
+	if family == wire.Bedrock {
 		message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 		if err != nil {
-			return false, guardrails.ErrSurface
+			return envelope{}, nil, guardrails.ErrSurface
 		}
-		data = message.Payload
-	} else {
-		for _, line := range bytes.Split(frame, []byte("\n")) {
-			if bytes.HasPrefix(line, []byte("data:")) {
-				data = bytes.TrimSpace(line[5:])
-				break
-			}
+		return envelope{binary: true, message: message}, message.Payload, nil
+	}
+	lines := bytes.Split(frame, []byte("\n"))
+	for i, line := range lines {
+		if bytes.HasPrefix(line, []byte("data:")) {
+			return envelope{lines: lines, line: i}, bytes.TrimSpace(line[5:]), nil
 		}
 	}
-	if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
-		return false, nil
+	return envelope{}, nil, nil
+}
+
+func (e envelope) seal(payload []byte) ([]byte, error) {
+	if !e.binary {
+		e.lines[e.line] = append([]byte("data: "), payload...)
+		return bytes.Join(e.lines, []byte("\n")), nil
+	}
+	e.message.Payload = payload
+	var out bytes.Buffer
+	if eventstream.NewEncoder().Encode(&out, e.message) != nil {
+		return nil, guardrails.ErrSurface
+	}
+	return out.Bytes(), nil
+}
+
+func empty(data []byte) bool {
+	return len(data) == 0 || bytes.Equal(data, []byte("[DONE]"))
+}
+
+func (g *Stream) collectTools(frame []byte) (bool, error) {
+	_, data, err := openFrame(g.config.Family, frame)
+	if err != nil || empty(data) {
+		return false, err
 	}
 	var root map[string]json.RawMessage
 	if json.Unmarshal(data, &root) != nil {
 		return false, guardrails.ErrSurface
 	}
-	touched := false
 	switch g.config.Family {
 	case wire.Chat:
-		var choices []struct {
-			Index  int     `json:"index"`
-			Finish *string `json:"finish_reason"`
-			Delta  struct {
-				Tools []struct {
-					Index    int `json:"index"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-				Function *struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function_call"`
-			} `json:"delta"`
-		}
-		if json.Unmarshal(root["choices"], &choices) != nil {
-			return false, guardrails.ErrSurface
-		}
-		for _, choice := range choices {
-			if len(choice.Delta.Tools) > 0 || choice.Delta.Function != nil {
-				touched = true
-			}
-			for _, part := range choice.Delta.Tools {
-				call := g.tool(strconv.Itoa(choice.Index) + "_" + strconv.Itoa(part.Index))
-				call.name += part.Function.Name
-				call.arguments += part.Function.Arguments
-				call.chunks = true
-			}
-			if part := choice.Delta.Function; part != nil {
-				call := g.tool(strconv.Itoa(choice.Index) + "_legacy")
-				call.name += part.Name
-				call.arguments += part.Arguments
-			}
-			if choice.Finish != nil {
-				prefix := strconv.Itoa(choice.Index) + "_"
-				for id, call := range g.calls {
-					if strings.HasPrefix(id, prefix) {
-						call.done = true
-					}
-				}
-			}
-		}
+		return g.collectChat(root["choices"])
 	case wire.Anthropic:
-		var event struct {
-			Type  string `json:"type"`
-			Index int    `json:"index"`
-			Block struct {
-				Type, Name string
-				Input      json.RawMessage `json:"input"`
-			} `json:"content_block"`
-			Delta struct {
-				Partial string `json:"partial_json"`
-			} `json:"delta"`
-		}
-		if json.Unmarshal(data, &event) != nil {
-			return false, guardrails.ErrSurface
-		}
-		id := strconv.Itoa(event.Index)
-		if event.Type == "content_block_start" && event.Block.Type == "tool_use" {
-			touched = true
-			call := g.tool(id)
-			call.name = event.Block.Name
-			if len(event.Block.Input) > 0 && !bytes.Equal(event.Block.Input, []byte("{}")) {
-				call.arguments = string(event.Block.Input)
-			}
-		}
-		if event.Delta.Partial != "" {
-			touched = true
-			g.tool(id).arguments += event.Delta.Partial
-			g.tool(id).chunks = true
-		}
-		if event.Type == "content_block_stop" {
-			if call := g.calls[id]; call != nil {
-				if call.arguments == "" {
-					call.arguments = "{}"
-				}
-				call.done = true
-			}
-		}
+		return g.collectAnthropic(data)
 	case wire.Responses:
-		type item struct{ ID, Type, Name, Arguments string }
-		var event struct {
-			Type, Delta string
-			ItemID      string `json:"item_id"`
-			Arguments   string `json:"arguments"`
-			Item        item   `json:"item"`
-			Response    struct {
-				Output []item `json:"output"`
-			} `json:"response"`
-		}
-		if json.Unmarshal(data, &event) != nil {
-			return false, guardrails.ErrSurface
-		}
-		if event.Item.Type == "function_call" {
-			touched = true
-			call := g.tool(event.Item.ID)
-			call.name = event.Item.Name
-			if event.Item.Arguments != "" {
-				call.arguments = event.Item.Arguments
-			}
-			if event.Type == "response.output_item.done" {
-				call.done = true
-			}
-		}
-		if event.Type == "response.function_call_arguments.delta" {
-			touched = true
-			g.tool(event.ItemID).arguments += event.Delta
-			g.tool(event.ItemID).chunks = true
-		}
-		if event.Type == "response.function_call_arguments.done" {
-			touched = true
-			call := g.tool(event.ItemID)
-			call.arguments = event.Arguments
-			call.done = true
-		}
-		// Terminal responses repeat full tool calls, even when their deltas
-		// and output_item.done frames have already been inspected and emitted.
-		for _, item := range event.Response.Output {
-			if item.Type == "function_call" {
-				touched = true
-				call := g.tool(item.ID)
-				call.name, call.arguments, call.done = item.Name, item.Arguments, true
-			}
-		}
+		return g.collectResponses(data)
 	case wire.Gemini, wire.GeminiStream:
-		var event struct {
-			Candidates []struct {
-				Content struct {
-					Parts []struct {
-						Function *struct {
-							Name string
-							Args json.RawMessage
-						} `json:"functionCall"`
-					} `json:"parts"`
-				} `json:"content"`
-			} `json:"candidates"`
-		}
-		if json.Unmarshal(data, &event) != nil {
-			return false, guardrails.ErrSurface
-		}
-		for i, c := range event.Candidates {
-			for j, p := range c.Content.Parts {
-				if p.Function != nil {
-					touched = true
-					call := g.tool(strconv.Itoa(i) + "_" + strconv.Itoa(j))
-					call.name = p.Function.Name
-					call.arguments = string(p.Function.Args)
-					call.done = true
-				}
-			}
-		}
+		return g.collectGemini(data)
 	case wire.Bedrock:
-		var event struct {
-			Index int `json:"contentBlockIndex"`
-			Start struct {
-				Tool *struct{ Name string } `json:"toolUse"`
-			} `json:"start"`
-			Delta struct {
-				Tool *struct{ Input string } `json:"toolUse"`
-			} `json:"delta"`
-		}
-		if json.Unmarshal(data, &event) != nil {
-			return false, guardrails.ErrSurface
-		}
-		id := strconv.Itoa(event.Index)
-		if event.Start.Tool != nil {
-			touched = true
-			g.tool(id).name = event.Start.Tool.Name
-		}
-		if event.Delta.Tool != nil {
-			touched = true
-			g.tool(id).arguments += event.Delta.Tool.Input
-		}
-		if _, start := root["start"]; !start {
-			if _, delta := root["delta"]; !delta {
-				if call := g.calls[id]; call != nil {
-					call.done = true
-				}
-			}
-		}
+		return g.collectBedrock(data, root)
 	}
-	return touched, nil
+	return false, nil
 }
 
 func jsonObject(v any) map[string]any { m, _ := v.(map[string]any); return m }
@@ -266,128 +119,43 @@ func (g *Stream) rewriteTools() error {
 		return g.calls[id].arguments
 	}
 	for i, frame := range g.pending {
-		var data []byte
-		var message eventstream.Message
-		var lines [][]byte
-		lineIndex := -1
-		if g.config.Family == wire.Bedrock {
-			var err error
-			message, err = eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
-			if err != nil {
-				return guardrails.ErrSurface
-			}
-			data = message.Payload
-		} else {
-			lines = bytes.Split(frame, []byte("\n"))
-			for j, line := range lines {
-				if bytes.HasPrefix(line, []byte("data:")) {
-					lineIndex = j
-					data = bytes.TrimSpace(line[5:])
-					break
-				}
-			}
+		envelope, data, err := openFrame(g.config.Family, frame)
+		if err != nil {
+			return err
 		}
-		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+		if empty(data) {
 			continue
 		}
 		var root map[string]any
 		if decodeJSON(data, &root) != nil {
 			return guardrails.ErrSurface
 		}
-		switch g.config.Family {
-		case wire.Chat:
-			for _, value := range jsonArray(root["choices"]) {
-				choice := jsonObject(value)
-				delta := jsonObject(choice["delta"])
-				for _, value := range jsonArray(delta["tool_calls"]) {
-					tool := jsonObject(value)
-					fn := jsonObject(tool["function"])
-					id := jsonIndex(choice["index"]) + "_" + jsonIndex(tool["index"])
-					if fn != nil && g.calls[id] != nil {
-						fn["arguments"] = argument(id)
-					}
-				}
-				if fn := jsonObject(delta["function_call"]); fn != nil {
-					fn["arguments"] = argument(jsonIndex(choice["index"]) + "_legacy")
-				}
-			}
-		case wire.Anthropic:
-			id := jsonIndex(root["index"])
-			if call := g.calls[id]; call != nil {
-				if block := jsonObject(root["content_block"]); jsonText(block["type"]) == "tool_use" {
-					var input any
-					if call.chunks {
-						input = map[string]any{}
-					} else {
-						if decodeJSON([]byte(call.arguments), &input) != nil {
-							return guardrails.ErrSurface
-						}
-					}
-					block["input"] = input
-				}
-				if delta := jsonObject(root["delta"]); jsonText(delta["type"]) == "input_json_delta" {
-					delta["partial_json"] = argument(id)
-				}
-			}
-		case wire.Responses:
-			typ, id := jsonText(root["type"]), jsonText(root["item_id"])
-			if typ == "response.function_call_arguments.delta" && g.calls[id] != nil {
-				root["delta"] = argument(id)
-			}
-			if typ == "response.function_call_arguments.done" && g.calls[id] != nil {
-				root["arguments"] = g.calls[id].arguments
-			}
-			if item := jsonObject(root["item"]); item != nil && jsonText(item["type"]) == "function_call" {
-				id = jsonText(item["id"])
-				if call := g.calls[id]; call != nil {
-					if typ == "response.output_item.done" || !call.chunks {
-						item["arguments"] = call.arguments
-					} else {
-						item["arguments"] = ""
-					}
-				}
-			}
-			for _, value := range jsonArray(jsonObject(root["response"])["output"]) {
-				item := jsonObject(value)
-				if jsonText(item["type"]) == "function_call" {
-					if call := g.calls[jsonText(item["id"])]; call != nil {
-						item["arguments"] = call.arguments
-					}
-				}
-			}
-		case wire.Gemini, wire.GeminiStream:
-			for ci, value := range jsonArray(root["candidates"]) {
-				content := jsonObject(jsonObject(value)["content"])
-				for pi, value := range jsonArray(content["parts"]) {
-					if fn := jsonObject(jsonObject(value)["functionCall"]); fn != nil {
-						var args any
-						if decodeJSON([]byte(g.calls[strconv.Itoa(ci)+"_"+strconv.Itoa(pi)].arguments), &args) != nil {
-							return guardrails.ErrSurface
-						}
-						fn["args"] = args
-					}
-				}
-			}
-		case wire.Bedrock:
-			if tool := jsonObject(jsonObject(root["delta"])["toolUse"]); tool != nil {
-				tool["input"] = argument(jsonIndex(root["contentBlockIndex"]))
-			}
+		if err := g.rewriteCall(root, argument); err != nil {
+			return err
 		}
 		encoded, err := json.Marshal(root)
 		if err != nil {
 			return guardrails.ErrSurface
 		}
-		if g.config.Family == wire.Bedrock {
-			message.Payload = encoded
-			var out bytes.Buffer
-			if eventstream.NewEncoder().Encode(&out, message) != nil {
-				return guardrails.ErrSurface
-			}
-			g.pending[i] = out.Bytes()
-		} else {
-			lines[lineIndex] = append([]byte("data: "), encoded...)
-			g.pending[i] = bytes.Join(lines, []byte("\n"))
+		if g.pending[i], err = envelope.seal(encoded); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (g *Stream) rewriteCall(root map[string]any, argument func(string) string) error {
+	switch g.config.Family {
+	case wire.Chat:
+		g.rewriteChat(root, argument)
+	case wire.Anthropic:
+		return g.rewriteAnthropic(root, argument)
+	case wire.Responses:
+		g.rewriteResponses(root, argument)
+	case wire.Gemini, wire.GeminiStream:
+		return g.rewriteGemini(root)
+	case wire.Bedrock:
+		rewriteBedrock(root, argument)
 	}
 	return nil
 }

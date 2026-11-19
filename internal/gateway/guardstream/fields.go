@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
-	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -45,17 +43,7 @@ func frameDocument(frame []byte) (*oif.Document, [][]byte, []int, error) {
 
 func frameFields(family wire.Format, frame []byte) ([]field, error) {
 	if family == wire.Bedrock {
-		message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
-		if err != nil {
-			return nil, guardrails.ErrSurface
-		}
-		var payload struct {
-			Delta struct{ Text string } `json:"delta"`
-		}
-		if json.Unmarshal(message.Payload, &payload) != nil {
-			return nil, guardrails.ErrSurface
-		}
-		return []field{{id: "stream", text: payload.Delta.Text}}, nil
+		return bedrockFields(frame)
 	}
 	doc, _, _, err := frameDocument(frame)
 	if err != nil || doc == nil {
@@ -64,120 +52,36 @@ func frameFields(family wire.Format, frame []byte) ([]field, error) {
 	return documentFields(family, *doc)
 }
 
+func text(doc oif.Document, id, pointer string, snapshot bool) []field {
+	value, ok := doc.Lookup(pointer)
+	if !ok || value.Kind() != oif.String {
+		return nil
+	}
+	content, _ := value.Text()
+	return []field{{id: id, pointer: pointer, text: content, snapshot: snapshot}}
+}
+
+func index(value oif.Value, fallback int) string {
+	if v, ok := value.Lookup("index"); ok && v.Kind() == oif.Number {
+		return v.Raw()
+	}
+	return strconv.Itoa(fallback)
+}
+
 func documentFields(family wire.Format, doc oif.Document) ([]field, error) {
-	var fields []field
-	add := func(id, pointer string, snapshot bool) {
-		if value, ok := doc.Lookup(pointer); ok && value.Kind() == oif.String {
-			text, _ := value.Text()
-			fields = append(fields, field{id: id, pointer: pointer, text: text, snapshot: snapshot})
-		}
-	}
-	index := func(value oif.Value, fallback int) string {
-		if v, ok := value.Lookup("index"); ok && v.Kind() == oif.Number {
-			return v.Raw()
-		}
-		return strconv.Itoa(fallback)
-	}
 	switch family {
 	case wire.Completions:
-		choices, _ := doc.Root().Lookup("choices")
-		for i, choice := range choices.Elements() {
-			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
-				return nil, guardrails.ErrSurface
-			}
-			prefix := "completions_" + index(choice, i) + "_"
-			add(prefix+"text", "/choices/"+strconv.Itoa(i)+"/text", false)
-			if reason, ok := choice.Lookup("finish_reason"); ok && reason.Kind() == oif.String && reason.Raw() != `""` {
-				fields = append(fields, field{id: prefix, complete: true})
-			}
-		}
+		return completionsFields(doc)
 	case wire.Chat:
-		choices, _ := doc.Root().Lookup("choices")
-		for i, choice := range choices.Elements() {
-			// Refuse unsolicited logprobs too, before any of this frame escapes.
-			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
-				return nil, guardrails.ErrSurface
-			}
-			prefix := "chat_" + index(choice, i) + "_"
-			for _, key := range []string{"content", "refusal"} {
-				add(prefix+key, "/choices/"+strconv.Itoa(i)+"/delta/"+key, false)
-			}
-			if reason, ok := choice.Lookup("finish_reason"); ok && reason.Kind() == oif.String {
-				fields = append(fields, field{id: prefix, complete: true})
-			}
-		}
+		return chatFields(doc)
 	case wire.Gemini, wire.GeminiStream:
-		candidates, _ := doc.Root().Lookup("candidates")
-		for i, candidate := range candidates.Elements() {
-			prefix := "gemini_" + index(candidate, i) + "_"
-			content, _ := candidate.Lookup("content")
-			parts, _ := content.Lookup("parts")
-			for j := range parts.Elements() {
-				add(prefix+strconv.Itoa(j), "/candidates/"+strconv.Itoa(i)+"/content/parts/"+strconv.Itoa(j)+"/text", false)
-			}
-			if reason, ok := candidate.Lookup("finishReason"); ok && reason.Kind() == oif.String {
-				fields = append(fields, field{id: prefix, complete: true})
-			}
-		}
+		return geminiFields(doc)
 	case wire.Anthropic:
-		prefix := "anthropic_" + index(doc.Root(), 0) + "_"
-		add(prefix+"text", "/content_block/text", false)
-		add(prefix+"text", "/delta/text", false)
-		if typ, ok := doc.Root().Lookup("type"); ok {
-			if event, _ := typ.Text(); event == "content_block_stop" {
-				fields = append(fields, field{id: prefix, complete: true})
-			}
-		}
+		return anthropicFields(doc)
 	case wire.Responses:
-		typ, _ := doc.Root().Lookup("type")
-		event, _ := typ.Text()
-		outputIndex, contentIndex := "0", "0"
-		if v, ok := doc.Root().Lookup("output_index"); ok && v.Kind() == oif.Number {
-			outputIndex = v.Raw()
-		}
-		if v, ok := doc.Root().Lookup("content_index"); ok && v.Kind() == oif.Number {
-			contentIndex = v.Raw()
-		}
-		id := "responses_" + outputIndex + "_" + contentIndex
-		switch event {
-		case "response.output_text.delta":
-			add(id+"_text", "/delta", false)
-		case "response.refusal.delta":
-			add(id+"_refusal", "/delta", false)
-		case "response.output_text.done":
-			add(id+"_text", "/text", true)
-		case "response.refusal.done":
-			add(id+"_refusal", "/refusal", true)
-		}
-		for _, key := range []string{"text", "refusal"} {
-			add(id+"_"+key, "/part/"+key, true)
-		}
-		item, _ := doc.Root().Lookup("item")
-		content, _ := item.Lookup("content")
-		for j := range content.Elements() {
-			for _, key := range []string{"text", "refusal"} {
-				add("responses_"+outputIndex+"_"+strconv.Itoa(j)+"_"+key, "/item/content/"+strconv.Itoa(j)+"/"+key, true)
-			}
-		}
-		response, _ := doc.Root().Lookup("response")
-		output, _ := response.Lookup("output")
-		for i, item := range output.Elements() {
-			content, _ := item.Lookup("content")
-			for j := range content.Elements() {
-				for _, key := range []string{"text", "refusal"} {
-					add("responses_"+strconv.Itoa(i)+"_"+strconv.Itoa(j)+"_"+key, "/response/output/"+strconv.Itoa(i)+"/content/"+strconv.Itoa(j)+"/"+key, true)
-				}
-			}
-		}
-		if strings.HasSuffix(event, ".done") || event == "response.completed" || event == "response.incomplete" {
-			for i := range fields {
-				fields[i].complete = fields[i].snapshot
-			}
-		}
-	default:
-		return nil, guardrails.ErrSurface
+		return responsesFields(doc)
 	}
-	return fields, nil
+	return nil, guardrails.ErrSurface
 }
 
 func rewriteFrame(family wire.Format, frame []byte, texts map[string]string) ([]byte, error) {
