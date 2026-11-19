@@ -118,16 +118,15 @@ Before adding complexity for a speculative or vanishingly unlikely race or secur
 
 This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it
 
-
 ## Architecture rules
 
-Lint enforces the structure, so read the failure message and fix the code. `.golangci-legacy.json` and `console/eslint-legacy.json` list the code that broke a rule before it existed. Never add an entry to either list. They only shrink, which `scripts/check-exemptions.sh` checks against the default branch, and the Go lint gate also fails on a listed entry that no longer violates. When you fix listed code, remove its entry in the same change
+Lint enforces the structure, so read the failure message and fix the code. `.golangci-legacy.json` and `console/eslint-legacy.json` list the code that broke a rule before it existed. Never add an entry to either list. They only shrink, which `scripts/check-exemptions.sh` checks against the default branch, and the Go lint gate also fails on a listed entry that no longer violates. The one way a list is created is the change that introduces its rule, which lists the code that already broke it. When you fix listed code, remove its entry in the same change
 
 A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
 
 In Go, nothing under `internal/gateway` imports `internal/access` and nothing under `internal/access` imports the gateway, because only `cmd/olp` wires the serving and management planes together. `internal/access` is the management kit that authenticates callers, registers routes and runs write transactions, so a new resource gets its own package that imports the kit and never goes inside it. A function stays under 100 lines and a file under 500 lines of code, outside tests and generated files
 
-In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. `console/README.md` has the details
+In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. A component has no `try` block and runs each write through `useAction` or `useMutation`, copying `console/src/lib/features/sinks/SinkEditor.svelte`. `console/README.md` has the details
 
 ## Agent skills
 

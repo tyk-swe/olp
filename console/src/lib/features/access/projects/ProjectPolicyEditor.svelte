@@ -1,4 +1,5 @@
 <script lang="ts" generics="Doc extends { etag: string }, Form, Input">
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { untrack, type Component, type Snippet } from 'svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -46,8 +47,7 @@
   let form = $state(untrack(() => toForm()));
   let etag = $state('');
   let loaded = $state('');
-  let busy = $state(false);
-  let error = $state('');
+  const action = useAction();
 
   function load(value: Doc) {
     form = toForm(value);
@@ -67,27 +67,24 @@
     const result = await policy.refetch();
     if (result.data) {
       load(result.data);
-      error = '';
+      action.error = '';
     }
   }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !editable) return;
-    error = validate(form);
-    if (error) return;
-    busy = true;
-    try {
-      const saved = await save(etag, toInput(form));
-      client.setQueryData(queryKey, saved);
-      load(saved);
-      await client.invalidateQueries({ queryKey: projectKeys.root });
-      notify(savedMessage);
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    if (action.busy || !editable) return;
+    action.error = validate(form);
+    if (action.error) return;
+    await action.run(
+      () => save(etag, toInput(form)),
+      async (saved) => {
+        client.setQueryData(queryKey, saved);
+        load(saved);
+        await client.invalidateQueries({ queryKey: projectKeys.root });
+        notify(savedMessage);
+      }
+    );
   }
 </script>
 
@@ -102,20 +99,23 @@
   {:else if etag}
     <form onsubmit={submit}>
       <p class="muted">{help}</p>
-      <Fields bind:form {prefix} disabled={busy || !editable} />
+      <Fields bind:form {prefix} disabled={action.busy || !editable} />
       {#if policy.data && extra}{@render extra(policy.data)}{/if}
-      {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+      {#if action.error}<p class="inline-problem" role="alert">
+          {action.error}
+        </p>{/if}
 
       <div class="actions">
         {#if editable}<button
             class="button button-primary"
             type="submit"
-            disabled={busy}>{busy ? 'Saving…' : `Save ${name}`}</button
+            disabled={action.busy}
+            >{action.busy ? 'Saving…' : `Save ${name}`}</button
           >{/if}
         <button
           type="button"
           class="button button-secondary"
-          disabled={busy}
+          disabled={action.busy}
           onclick={reload}>Reload saved policy</button
         >
       </div>
