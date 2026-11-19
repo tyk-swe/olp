@@ -1,8 +1,11 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes, selectActiveRoutes } from '#lib/features/routes/api.js';
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import {
+    listRoutes,
+    selectActiveRoutes,
+    routeKeys
+  } from '#lib/features/routes/index.js';
   import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';

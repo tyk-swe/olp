@@ -1,4 +1,4 @@
-import { parseMFAChallenge } from '#lib/features/access/mfa/api.js';
+import { parseMFAChallenge } from '#lib/session/mfaChallenge.js';
 import type { components } from '#lib/management/schema.js';
 import { withAuthenticationDeadline } from './requestDeadline';
 import { apiClient } from '#lib/management/client.js';
@@ -8,10 +8,7 @@ import {
   unwrap,
   unwrapOutcome
 } from '#lib/management/http.js';
-import {
-  isFixedRole,
-  type FixedRole
-} from '#lib/features/access/session/authorization.js';
+import { isFixedRole, type FixedRole } from '#lib/session/authorization.js';
 
 type Schemas = components['schemas'];
 

@@ -1,6 +1,12 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 import { type CursorPage } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -46,7 +52,7 @@ export async function createApiKey(
   requestId: string
 ): Promise<ApiKeySecret> {
   const response = await apiClient.POST('/api/v1/api-keys', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -62,7 +68,7 @@ export async function rotateApiKey(
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': idempotencyKey }
+        header: mutationHeaders(key.etag, idempotencyKey)
       },
       body: { overlap_seconds: overlapSeconds }
     }
@@ -77,7 +83,7 @@ export async function updateApiKey(
   const response = await apiClient.PATCH('/api/v1/api-keys/{api_key_id}', {
     params: {
       path: { api_key_id: key.id },
-      header: { 'If-Match': key.etag }
+      header: ifMatch(key.etag)
     },
     body: input
   });
@@ -93,7 +99,7 @@ export async function revokeApiKey(
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': requestId }
+        header: mutationHeaders(key.etag, requestId)
       }
     }
   );

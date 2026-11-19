@@ -1,6 +1,13 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 import { type CursorPage } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -32,7 +39,7 @@ export async function createBudgetGroup(
   requestId: string
 ): Promise<{ id: string; etag: string }> {
   const response = await apiClient.POST('/api/v1/budget-groups', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -47,7 +54,7 @@ export async function updateBudgetGroup(
     {
       params: {
         path: { budget_group_id: group.id },
-        header: { 'If-Match': group.etag }
+        header: ifMatch(group.etag)
       },
       body: input
     }
@@ -63,7 +70,7 @@ export const retireBudgetGroup = async (
     await apiClient.DELETE('/api/v1/budget-groups/{budget_group_id}', {
       params: {
         path: { budget_group_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );

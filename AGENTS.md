@@ -123,6 +123,10 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. Never call `BeginMutation`, `Replay`, `CompleteReplay` or `tx.Commit` in a handler, and never add a file to the `hand_rolled` list in `scripts/check-lint.sh`. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
 
+Lint enforces the structure, so read the failure message and fix the code. Never add a file to a legacy exemption list such as `console/eslint-legacy.json`. Those lists record violations that existed before the rule and they only shrink, which `scripts/check-exemptions.sh` checks against the default branch. When you fix a listed file, remove it from the list in the same change
+
+In the console, shared layers under `console/src/lib` never import a feature, a feature imports another feature only through its `index.ts`, a `.svelte` file stays under 400 lines, and only `console/src/lib/management` names the `Idempotency-Key` and `If-Match` headers. `console/README.md` has the details
+
 ## Agent skills
 
 Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update lockfile skills with `npx skills@latest update`. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness

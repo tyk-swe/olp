@@ -1,5 +1,5 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, ifMatch } from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
 export type AggregateBudget = components['schemas']['AggregateBudget'];
 export type BudgetPolicy = components['schemas']['BudgetPolicy'];
@@ -30,7 +30,7 @@ export async function putBudget(
   policy: BudgetPolicy | null,
   organizationId?: string
 ): Promise<AggregateBudget> {
-  const headers = { 'If-Match': `"${etag}"` };
+  const headers = ifMatch(etag);
   if (organizationId)
     return unwrap(
       await apiClient.PUT('/api/v1/organizations/{organization_id}/budget', {

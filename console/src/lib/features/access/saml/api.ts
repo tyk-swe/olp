@@ -1,5 +1,5 @@
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap } from '#lib/management/http.js';
+import { ensureOk, unwrap, ifMatch } from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];
 export async function getSAML(signal?: AbortSignal) {
@@ -11,7 +11,7 @@ export async function saveSAML(body: SAMLWrite, etag?: string) {
   return unwrap(
     await apiClient.PUT('/api/v1/saml/configuration', {
       body,
-      params: { header: etag ? { 'If-Match': `"${etag}"` } : {} }
+      params: { header: etag ? ifMatch(etag) : {} }
     })
   );
 }

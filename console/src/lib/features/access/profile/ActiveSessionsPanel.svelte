@@ -4,13 +4,13 @@
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '#lib/features/access/session/api.js';
+  import { logout } from '#lib/session/api.js';
   import {
     listSessionPage,
     revokeSession
   } from '#lib/features/access/sessions/api.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory

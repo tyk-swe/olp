@@ -1,15 +1,14 @@
 import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
-import { routeKeys } from '#lib/features/routes/routeKeys.js';
 import {
+  routeKeys,
   listRoutes,
   selectActiveRoutes,
-  simulateRouting
-} from '#lib/features/routes/api.js';
-import { hasOutputRules } from '#lib/features/routes/routeEditor.js';
-import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
-import { listApiKeys } from '#lib/features/access/api-keys/api.js';
-import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  simulateRouting,
+  hasOutputRules,
+  inspectionDialects
+} from '#lib/features/routes/index.js';
+import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
 import {
   nativeObject,
   parseNativeJSON,

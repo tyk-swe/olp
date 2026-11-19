@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, ifMatch } from '#lib/management/http.js';
 
 export type Catalog = components['schemas']['ModelCatalogResponse'];
 export type Publication = components['schemas']['CatalogPublicationResponse'];
@@ -44,7 +44,7 @@ export async function putPublication(
 ): Promise<Publication> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/catalog', {
-      params: { path: { project_id: id }, header: { 'If-Match': value.etag } },
+      params: { path: { project_id: id }, header: ifMatch(value.etag) },
       body: { enabled: value.enabled, prices_public: value.prices_public }
     })
   );
@@ -68,7 +68,7 @@ export async function putExposure(
 ): Promise<Exposure> {
   return unwrap(
     await apiClient.PUT('/api/v1/routes/{route_id}/catalog', {
-      params: { path: { route_id: id }, header: { 'If-Match': value.etag } },
+      params: { path: { route_id: id }, header: ifMatch(value.etag) },
       body: { expose_upstream_models: value.expose_upstream_models }
     })
   );

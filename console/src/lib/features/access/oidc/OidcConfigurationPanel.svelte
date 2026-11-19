@@ -16,8 +16,8 @@
     listOidcIdentities
   } from '#lib/features/access/profile/api.js';
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
-  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';

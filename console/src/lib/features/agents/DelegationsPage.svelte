@@ -6,8 +6,10 @@
   import { writable } from 'svelte/store';
   import { page } from '$app/state';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import {
+    listProjectMemberships,
+    projectKeys
+  } from '#lib/features/access/index.js';
   import { listDelegations } from './api';
   import { agentKeys } from './agentKeys';
 

@@ -1,15 +1,17 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import { onDestroy } from 'svelte';
-  import { importSubscriptionCredentials } from '#lib/features/providers/grants.js';
+  import {
+    importSubscriptionCredentials,
+    getProvider,
+    listProviderKinds,
+    providerKeys,
+    requiresGrant,
+    GrantEnrollmentState,
+    GrantEnrollmentPanel
+  } from '#lib/features/providers/index.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { getProvider } from '#lib/features/providers/providers.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import { requiresGrant } from '#lib/features/providers/providerEditor.js';
-  import { GrantEnrollmentState } from '#lib/features/providers/grantEnrollment.svelte.js';
-  import GrantEnrollmentPanel from '#lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   let {
     providerId,

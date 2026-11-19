@@ -1,9 +1,11 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
-  import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
-  import { decisionRows } from '#lib/features/routes/routingExplanation.js';
+  import {
+    RoutingPreferencesForm,
+    RoutingDecisions,
+    decisionRows
+  } from '#lib/features/routes/index.js';
   import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { formatInteger } from '#lib/format.js';

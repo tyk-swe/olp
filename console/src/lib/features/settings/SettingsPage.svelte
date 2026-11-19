@@ -5,9 +5,9 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { sessionKeys } from '#lib/session/sessionKeys.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listSettings,
     updateSetting,

@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
   import { createOwner } from '#lib/features/access/setup/api.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     PASSWORD_MAX_LENGTH,

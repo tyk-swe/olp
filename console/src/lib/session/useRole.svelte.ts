@@ -4,9 +4,9 @@ import {
   can,
   type Capability,
   type FixedRole
-} from '#lib/features/access/session/authorization.js';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-import type { AuthenticatedUser } from '#lib/features/access/session/state.js';
+} from '#lib/session/authorization.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
+import type { AuthenticatedUser } from '#lib/session/state.js';
 
 export type RoleAccess = {
   readonly user: AuthenticatedUser | null;

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import type { SessionUser } from '#lib/features/access/session/api.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import InstallationSwitcher from '#lib/features/fleet/InstallationSwitcher.svelte';
+  import type { SessionUser } from '#lib/session/api.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import InstallationSwitcher from '#lib/shell/installations/InstallationSwitcher.svelte';
   import Menu from '#lib/components/Menu.svelte';
   import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
   import { productName, useBranding } from '#lib/shell/branding/branding.js';

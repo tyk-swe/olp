@@ -4,7 +4,10 @@ import {
   type CursorPage,
   ensureOk,
   unwrap,
-  unwrapPage
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
 } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -47,7 +50,7 @@ export async function createNotificationDestination(
   requestId: string
 ): Promise<NotificationDestination> {
   const response = await apiClient.POST('/api/v1/notifications/destinations', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -62,7 +65,7 @@ export async function updateNotificationDestination(
     {
       params: {
         path: { notification_destination_id: destination.id },
-        header: { 'If-Match': destination.etag }
+        header: ifMatch(destination.etag)
       },
       body: input
     }
@@ -94,7 +97,7 @@ export async function createNotificationRule(
   requestId: string
 ): Promise<NotificationRule> {
   const response = await apiClient.POST('/api/v1/notifications/rules', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -109,7 +112,7 @@ export async function updateNotificationRule(
     {
       params: {
         path: { notification_rule_id: rule.id },
-        header: { 'If-Match': rule.etag }
+        header: ifMatch(rule.etag)
       },
       body: input
     }
@@ -140,10 +143,7 @@ export const deleteNotificationDestination = async (
       {
         params: {
           path: { notification_destination_id: value.id },
-          header: {
-            'If-Match': `"${value.etag}"`,
-            'Idempotency-Key': requestId
-          }
+          header: mutationHeaders(value.etag, requestId)
         }
       }
     )
@@ -159,10 +159,7 @@ export const deleteNotificationRule = async (
       {
         params: {
           path: { notification_rule_id: value.id },
-          header: {
-            'If-Match': `"${value.etag}"`,
-            'Idempotency-Key': requestId
-          }
+          header: mutationHeaders(value.etag, requestId)
         }
       }
     )

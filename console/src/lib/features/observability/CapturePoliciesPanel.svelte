@@ -7,7 +7,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,

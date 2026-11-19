@@ -1,5 +1,5 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, ifMatch } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Group = components['schemas']['SCIMManagedGroup'];
@@ -19,7 +19,7 @@ export async function saveMapping(group: Group, mapping: Mapping) {
     await apiClient.PUT('/api/v1/scim/groups/{scim_id}/mapping', {
       params: {
         path: { scim_id: group.id },
-        header: { 'If-Match': `"${group.etag}"` }
+        header: ifMatch(group.etag)
       },
       body: { mapping }
     })

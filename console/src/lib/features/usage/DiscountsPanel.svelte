@@ -3,6 +3,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -12,12 +13,14 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import {
+    listProviderKinds,
+    listProviderVendors,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     createDiscount,
     listDiscounts,
@@ -154,7 +157,7 @@
       <div class="form-field">
         <label for="discount-provider">Provider</label><EntityPicker
           id="discount-provider"
-          kind="provider"
+          source={providerOptions}
           bind:value={providerId}
           emptyLabel="Every provider of this kind"
           disabled={!canEdit}

@@ -9,8 +9,8 @@
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import {
     retireBudgetGroup,

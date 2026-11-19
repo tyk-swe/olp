@@ -1,5 +1,6 @@
 import { getProviderResourceContracts } from './api';
 import { gatewayFetch } from '#lib/management/gateway.js';
+import { createHeaders } from '#lib/management/http.js';
 import {
   nativeObject,
   parseNativeJSON,
@@ -330,7 +331,7 @@ export async function runNativeResourceRequest(
   if (request.endpoint.method !== 'GET') {
     if (!request.submissionKey)
       throw new Error('A mutation identity is required.');
-    headers['Idempotency-Key'] = request.submissionKey;
+    Object.assign(headers, createHeaders(request.submissionKey));
   }
   if (typeof body === 'string') headers['Content-Type'] = 'application/json';
   const response = await gatewayFetch(path, {

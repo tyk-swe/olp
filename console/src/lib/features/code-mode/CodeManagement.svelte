@@ -35,8 +35,10 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { listCredentialSlots } from '#lib/features/providers/credentials.js';
+  import {
+    listProviders,
+    listCredentialSlots
+  } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';

@@ -5,7 +5,8 @@ import {
   ensureOk,
   errorMessage,
   fieldIssues,
-  unwrap
+  unwrap,
+  ifMatch
 } from '#lib/management/http.js';
 
 export type Plugin = components['schemas']['Plugin'];
@@ -53,7 +54,7 @@ export async function approvePlugin(plugin: Plugin): Promise<Plugin> {
     {
       params: {
         path: { plugin_digest: plugin.digest },
-        header: { 'If-Match': plugin.etag }
+        header: ifMatch(plugin.etag)
       },
       body: { origins: plugin.manifest.origins }
     }
@@ -67,7 +68,7 @@ export async function uninstallPlugin(plugin: Plugin): Promise<void> {
     {
       params: {
         path: { plugin_digest: plugin.digest },
-        header: { 'If-Match': plugin.etag }
+        header: ifMatch(plugin.etag)
       }
     }
   );

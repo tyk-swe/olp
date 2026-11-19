@@ -1,6 +1,12 @@
 import { apiClient } from '#lib/management/client.js';
 import type { components } from '#lib/management/schema.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  mutationHeaders
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
 export type RetrievalBinding =
@@ -41,14 +47,14 @@ export async function saveRetrievalBinding(
         await apiClient.PUT('/api/v1/retrieval-bindings/{binding_id}', {
           params: {
             path: { binding_id: current.id },
-            header: { 'If-Match': current.etag, 'Idempotency-Key': requestId }
+            header: mutationHeaders(current.etag, requestId)
           },
           body: input
         })
       )
     : unwrap(
         await apiClient.POST('/api/v1/retrieval-bindings', {
-          params: { header: { 'Idempotency-Key': requestId } },
+          params: { header: createHeaders(requestId) },
           body: input
         })
       );
@@ -61,7 +67,7 @@ export async function retireRetrievalBinding(
     await apiClient.DELETE('/api/v1/retrieval-bindings/{binding_id}', {
       params: {
         path: { binding_id: current.id },
-        header: { 'If-Match': current.etag, 'Idempotency-Key': requestId }
+        header: mutationHeaders(current.etag, requestId)
       }
     })
   );

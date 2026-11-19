@@ -4,7 +4,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { listProjects } from '#lib/features/access/projects/api.js';
   import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { listGroups, saveMapping, type Group, type Mapping } from './api';

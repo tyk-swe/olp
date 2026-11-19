@@ -15,11 +15,11 @@
     usageSeries,
     usageSummary
   } from '#lib/features/usage/usage.js';
-  import { getApiKey } from '#lib/features/access/api-keys/api.js';
   import {
+    getApiKey,
     budgetStateNote,
     budgetWindowState
-  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  } from '#lib/features/access/index.js';
   import UsageChart from '#lib/features/usage/UsageChart.svelte';
   import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
   import {

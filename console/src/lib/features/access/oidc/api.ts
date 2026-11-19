@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { ifMatch, unwrap } from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 
@@ -22,7 +22,7 @@ export async function putOidcConfiguration(
   etag?: string
 ): Promise<OidcConfiguration> {
   const response = await apiClient.PUT('/api/v1/oidc/configuration', {
-    params: { header: { 'If-Match': etag ?? null } },
+    params: { header: etag === undefined ? {} : ifMatch(etag) },
     body: input
   });
   return unwrap(response);

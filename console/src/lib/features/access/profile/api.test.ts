@@ -1,14 +1,14 @@
 import { reauthenticateWithPassword } from './reauthentication';
 import { afterEach, expect, it, vi } from 'vitest';
-import { confirmMFA } from '#lib/features/access/mfa/prompt.svelte.js';
+import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
 import { beginIdentityReauthentication } from './api';
 
-vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
+vi.mock('#lib/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })
 }));
-vi.mock('#lib/features/access/mfa/prompt.svelte.js', () => ({
+vi.mock('#lib/session/mfaPrompt.svelte.js', () => ({
   confirmMFA: vi.fn()
 }));
 afterEach(() => {

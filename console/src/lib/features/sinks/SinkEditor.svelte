@@ -5,7 +5,7 @@
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { saveSink, type Sink, type SinkInput } from './api';
   import { sinkKeys } from './sinkKeys';

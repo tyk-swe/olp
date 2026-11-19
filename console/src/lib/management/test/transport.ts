@@ -1,6 +1,6 @@
 import { expect, vi } from 'vitest';
 import type { ManagementOperation } from '#lib/management/requirements.js';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 
 export function serve(
   handler: (request: Request) => Response | Promise<Response>,
