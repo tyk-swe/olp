@@ -314,6 +314,7 @@ func (r *listedRuntime) NetworkSecret(_ context.Context, _ *release.Release, _, 
 type storedPlan struct {
 	slug, model string
 	kind        string
+	surface     string
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
@@ -346,7 +347,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	providerConfig := encoded(t, map[string]string{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model})
 	certified := make([]routing.RevisionCapability, len(plan.operations))
 	for i, operation := range plan.operations {
-		certified[i] = routing.RevisionCapability{Operation: operation, Surface: "openai", Mode: "unary", Source: "certified"}
+		certified[i] = routing.RevisionCapability{Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary", Source: "certified"}
 	}
 	models := encoded(t, []routing.RevisionModel{{ID: g.modelID, UpstreamModel: plan.model, DisplayName: plan.model, Capabilities: certified}})
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.provider_credentials (id,provider_id,version) VALUES ($1,$2,1)`, g.credentialID, fixture.providerID); err != nil {
@@ -362,7 +363,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 
 	capabilities := make([]routing.Capability, len(plan.operations))
 	for i, operation := range plan.operations {
-		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: "openai", Mode: "unary"}
+		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary"}
 	}
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
@@ -766,25 +767,37 @@ type upstreamCall struct {
 }
 
 type retainedUpstream struct {
-	mu        sync.Mutex
-	calls     []upstreamCall
-	responses int
+	mu      sync.Mutex
+	calls   []upstreamCall
+	replies func(request string, nth int) map[string]string
 }
 
 const providerOwned = "provider-owned"
 
-var deploymentPrefix = regexp.MustCompile(`^/v1/openai(/deployments/[^/]+)?`)
+var providerPrefix = regexp.MustCompile(`^/v1(/openai(/deployments/[^/]+)?)?`)
 
 func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	request := r.Method + " " + deploymentPrefix.ReplaceAllString(r.URL.Path, "")
+	request := r.Method + " " + providerPrefix.ReplaceAllString(r.URL.Path, "")
 	u.mu.Lock()
-	u.calls = append(u.calls, upstreamCall{request, r.Header.Get("api-key"), r.Header.Get("Authorization"), string(body)})
-	if request == "POST /responses" {
-		u.responses++
+	u.calls = append(u.calls, upstreamCall{request, cmp.Or(r.Header.Get("api-key"), r.Header.Get("x-api-key")), r.Header.Get("Authorization"), string(body)})
+	nth := 0
+	for _, call := range u.calls {
+		if call.request == request {
+			nth++
+		}
 	}
-	created := u.responses
 	u.mu.Unlock()
+	reply, known := u.replies(request, nth)[request]
+	if !known {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, reply)
+}
+
+func openAIReplies(_ string, nth int) map[string]string {
 	const file = `{"id":"file-provider-owned","object":"file","bytes":7,"created_at":1700000000,"filename":"batch.jsonl","purpose":"batch"}`
 	batch := func(status string) string {
 		return `{"id":"batch_provider-owned","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"file-provider-owned","completion_window":"24h","status":"` + status + `","created_at":1700000000}`
@@ -800,18 +813,29 @@ func (u *retainedUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"POST /batches":                                    batch("validating"),
 		"GET /batches/batch_provider-owned":                batch("in_progress"),
 		"POST /batches/batch_provider-owned/cancel":        batch("cancelling"),
-		"POST /responses":                                  response(fmt.Sprintf("resp_provider-owned-%d", created)),
+		"POST /responses":                                  response(fmt.Sprintf("resp_provider-owned-%d", nth)),
 		"GET /responses/resp_provider-owned-1":             response("resp_provider-owned-1"),
 		"GET /responses/resp_provider-owned-1/input_items": `{"object":"list","data":[{"id":"msg_1","type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"first_id":"msg_1","last_id":"msg_1","has_more":false}`,
 		"DELETE /responses/resp_provider-owned-1":          `{"id":"resp_provider-owned-1","object":"response.deleted","deleted":true}`,
 	}
-	reply, known := replies[request]
-	if !known {
-		http.NotFound(w, r)
-		return
+	return replies
+}
+
+func anthropicReplies(string, int) map[string]string {
+	const file = `{"id":"file_provider-owned","type":"file","filename":"a.txt","mime_type":"text/plain","size_bytes":5,"created_at":"2026-01-01T00:00:00Z","downloadable":true}`
+	batch := func(status string) string {
+		return `{"id":"msgbatch_provider-owned","type":"message_batch","processing_status":"` + status + `","request_counts":{"processing":1,"succeeded":0,"errored":0,"canceled":0,"expired":0},"created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z","results_url":null}`
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = io.WriteString(w, reply)
+	return map[string]string{
+		"POST /files":                                           file,
+		"GET /files/file_provider-owned":                        file,
+		"GET /files/file_provider-owned/content":                "CONTENT",
+		"DELETE /files/file_provider-owned":                     `{"id":"file_provider-owned","type":"file_deleted"}`,
+		"POST /messages/batches":                                batch("in_progress"),
+		"GET /messages/batches/msgbatch_provider-owned":         batch("in_progress"),
+		"POST /messages/batches/msgbatch_provider-owned/cancel": batch("canceling"),
+		"GET /messages/batches/msgbatch_provider-owned/results": `{"custom_id":"one","result":{"type":"succeeded","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-model","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}}}` + "\n",
+	}
 }
 
 func (u *retainedUpstream) sent(request string) []upstreamCall {
@@ -821,10 +845,11 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 }
 
 type retainedObject struct {
-	ID, Status  string
-	InputFileID string `json:"input_file_id"`
-	Deleted     bool
-	Data        []struct{ ID string }
+	ID, Status       string
+	InputFileID      string `json:"input_file_id"`
+	ProcessingStatus string `json:"processing_status"`
+	Deleted          bool
+	Data             []struct{ ID string }
 }
 
 func (o retainedObject) identifiers() []string {
@@ -867,7 +892,7 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	const slug, model = "stored-batch", "batch-model"
-	upstream := &retainedUpstream{}
+	upstream := &retainedUpstream{replies: openAIReplies}
 	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
 		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
 	})
@@ -941,7 +966,7 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	const slug, model = "stored-responses", "responses-model"
-	upstream := &retainedUpstream{}
+	upstream := &retainedUpstream{replies: openAIReplies}
 	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
 		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation"}, upstream: upstream,
 	})
@@ -988,4 +1013,87 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
 	}
 	g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 404)
+}
+
+func TestAnthropicFilesAndBatchesHideProviderIdentifiersIsolateKeysAndKeepUnsettledBatches(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "claude-route", "claude-model"
+	upstream := &retainedUpstream{replies: anthropicReplies}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "anthropic", surface: "anthropic", operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	const files, batches = "/anthropic/v1/files", "/anthropic/v1/messages/batches"
+
+	upload := "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	file := g.call(t, "owner", "POST", files, "multipart/form-data; boundary=b", upload, 200)
+	if file.ID == "" {
+		t.Fatal("upload returned no file identifier")
+	}
+	uploaded := upstream.sent("POST /files")
+	if len(uploaded) != 1 || uploaded[0].key != "listed-secret" || uploaded[0].authorization != "" || !strings.Contains(uploaded[0].body, "hello") {
+		t.Fatalf("upload reached the provider as %+v, want the file under the provider credential only", uploaded)
+	}
+	if got := g.call(t, "owner", "GET", files+"/"+file.ID, "", "", 200); got.ID != file.ID {
+		t.Fatalf("file read returned %q, want %q", got.ID, file.ID)
+	}
+	if got := g.call(t, "owner", "GET", files, "", "", 200).identifiers(); !slices.Equal(got, []string{file.ID}) {
+		t.Fatalf("owner lists files %v, want %v", got, []string{file.ID})
+	}
+	g.call(t, "owner", "GET", files+"/"+file.ID+"/content", "", "", 200)
+
+	submission := `{"requests":[{"custom_id":"one","params":{"model":"` + slug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}}]}`
+	batch := g.call(t, "owner", "POST", batches, "application/json", submission, 200)
+	if batch.ID == "" {
+		t.Fatal("batch creation returned no identifier")
+	}
+	submitted := upstream.sent("POST /messages/batches")
+	if len(submitted) != 1 || !strings.Contains(submitted[0].body, `"model":"`+model+`"`) || strings.Contains(submitted[0].body, slug) {
+		t.Fatalf("batch reached the provider as %+v, want the provider model in place of the route", submitted)
+	}
+	if got := g.call(t, "owner", "GET", batches+"/"+batch.ID, "", "", 200); got.ID != batch.ID {
+		t.Fatalf("batch read returned %q, want %q", got.ID, batch.ID)
+	}
+	if got := g.call(t, "owner", "GET", batches, "", "", 200).identifiers(); !slices.Equal(got, []string{batch.ID}) {
+		t.Fatalf("owner lists batches %v, want %v", got, []string{batch.ID})
+	}
+
+	if got := g.call(t, "stranger", "GET", files, "", "", 200).identifiers(); len(got) != 0 {
+		t.Fatalf("another key lists files %v", got)
+	}
+	if got := g.call(t, "stranger", "GET", batches, "", "", 200).identifiers(); len(got) != 0 {
+		t.Fatalf("another key lists batches %v", got)
+	}
+	g.call(t, "stranger", "GET", files+"/"+file.ID, "", "", 404)
+	g.call(t, "stranger", "GET", files+"/"+file.ID+"/content", "", "", 404)
+	g.call(t, "stranger", "DELETE", files+"/"+file.ID, "", "", 404)
+	g.call(t, "stranger", "GET", batches+"/"+batch.ID, "", "", 404)
+	g.call(t, "stranger", "GET", batches+"/"+batch.ID+"/results", "", "", 404)
+	g.call(t, "stranger", "POST", batches+"/"+batch.ID+"/cancel", "", "", 404)
+	g.call(t, "stranger", "DELETE", batches+"/"+batch.ID, "", "", 404)
+
+	if got := g.call(t, "owner", "POST", batches+"/"+batch.ID+"/cancel", "", "", 200); got.ID != batch.ID || got.ProcessingStatus != "canceling" {
+		t.Fatalf("batch cancel = %+v", got)
+	}
+	g.call(t, "owner", "GET", batches+"/"+batch.ID+"/results", "", "", 200)
+	g.call(t, "owner", "DELETE", batches+"/"+batch.ID, "", "", 409)
+	if got := g.call(t, "owner", "GET", batches+"/"+batch.ID, "", "", 200); got.ID != batch.ID {
+		t.Fatalf("an unsettled batch disappeared after a refused delete: %+v", got)
+	}
+	if got := g.call(t, "owner", "DELETE", files+"/"+file.ID, "", "", 200); got.ID != file.ID {
+		t.Fatalf("file delete = %+v", got)
+	}
+	g.call(t, "owner", "GET", files+"/"+file.ID, "", "", 404)
+	for request, want := range map[string]int{
+		"POST /messages/batches/msgbatch_provider-owned/cancel": 1,
+		"GET /messages/batches/msgbatch_provider-owned/results": 1,
+		"DELETE /messages/batches/msgbatch_provider-owned":      0,
+		"DELETE /files/file_provider-owned":                     1,
+	} {
+		if sent := upstream.sent(request); len(sent) != want {
+			t.Fatalf("the provider saw %d of %q, want %d", len(sent), request, want)
+		}
+	}
 }
