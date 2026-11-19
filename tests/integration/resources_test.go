@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -331,6 +332,7 @@ type storedPlan struct {
 	secure      bool
 	streams     bool
 	probe       *routing.HealthProbe
+	limits      *routing.Limits
 	sink        events.Sink
 	operations  []string
 	prices      []rates.RoutingPrice
@@ -412,7 +414,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Providers: map[string]routing.Provider{fixture.providerID: {
 			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
-			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe,
+			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe, Limits: plan.limits,
 		}},
 		Routes: map[string]routing.Route{plan.slug: {
 			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
@@ -2114,5 +2116,42 @@ func TestHealthProbesAskEachOptedInProviderOncePerIntervalAndOpenItsCircuitOnlyW
 				t.Fatalf("probe usage record = %+v", record)
 			}
 		})
+	}
+}
+
+func TestAProviderOverItsOwnLimitIsRefusedByTheGatewayWithARetryHintAndIsNotCalled(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "limited", "limited-model"
+	var calls atomic.Int64
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	})
+	sink := &terminals{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "openai_compatible", operations: []string{"generation"},
+		upstream: upstream, limits: &routing.Limits{RequestsPerMinute: new(int64(1))}, sink: sink,
+	})
+	g.key(t, "owner")
+	headers := map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}
+	const body = `{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}`
+
+	g.send(t, "POST", "/v1/chat/completions", headers, body, 200)
+	refused, raw := g.send(t, "POST", "/v1/chat/completions", headers, body, 429)
+
+	wait, err := strconv.Atoi(refused.Get("Retry-After"))
+	if err != nil || wait < 1 || wait > 60 || !strings.Contains(string(raw), `"code":"rate_limit_exceeded"`) {
+		t.Fatalf("the refusal carried Retry-After %q and %s, want a wait inside the minute and rate_limit_exceeded", refused.Get("Retry-After"), raw)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("the provider was called %d times with one request per minute allowed", calls.Load())
+	}
+	seen := sink.all()
+	last := seen[len(seen)-1]
+	if len(seen) != 2 || len(last.Attempts) != 1 || last.Attempts[0].Class != "rate_limit" || last.Attempts[0].Status != 0 {
+		t.Fatalf("recorded %d requests, the refused one with attempts %+v; want one rate limited attempt that got no provider status", len(seen), last.Attempts)
 	}
 }
