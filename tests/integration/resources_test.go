@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
@@ -46,6 +47,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/tests/harness"
+	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
 func (f usageFixture) resource(kind, keyID, upstream string) *resources.Resource {
@@ -319,6 +321,8 @@ type storedPlan struct {
 	surface     string
 	profile     string
 	version     string
+	toolsets    []string
+	tools       gateway.WorkflowToolRunner
 	secure      bool
 	operations  []string
 	prices      []rates.RoutingPrice
@@ -353,8 +357,8 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := keyRing(t, "01")
-	if err := access.PrepareInstallation(ctx, pool, installation, secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), installation), keys); err != nil {
+	keys, auth := keyRing(t, "01"), secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
 		t.Fatal(err)
 	}
 	g := &storedGateway{
@@ -387,7 +391,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 
 	capabilities := make([]routing.Capability, len(plan.operations))
 	for i, operation := range plan.operations {
-		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary"}
+		capabilities[i] = routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: "unary", ToolCalls: plan.tools != nil}
 	}
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
@@ -402,6 +406,11 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
 			Targets:  []routing.Target{{ID: g.targetID, ProviderID: fixture.providerID, ProviderModel: plan.model, Weight: 1, Timeout: 2000, RoutingID: g.modelID}},
 		}},
+	}
+	if plan.tools != nil {
+		route := snapshot.Routes[plan.slug]
+		route.ToolExecution, route.Toolsets = "gateway", plan.toolsets
+		snapshot.Routes[plan.slug] = route
 	}
 	published, err := release.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{g.credentialID: []byte("listed-secret")})
 	if err != nil {
@@ -418,8 +427,15 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	}
 	t.Cleanup(func() { _ = spool.Close() })
 	runner := newRunner(t)
-	limiter := admission.NewDurable(runner, debits.NewSyncer(debits.NewStore(pool), runner))
+	debitStore := debits.NewStore(pool)
+	syncer := debits.NewSyncer(debitStore, runner)
+	limiter := admission.NewDurable(runner, syncer)
+	workflow := gateway.Dependencies{}
+	if plan.tools != nil {
+		workflow = gateway.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: gateway.DurableSessionDebits(pool, debitStore, syncer)}
+	}
 	server := gateway.New(gateway.Dependencies{
+		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
 		Admission: quota.NewAdmission(limiter, fleet.New(runner), nil, nil),
 		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
@@ -474,7 +490,7 @@ func (g *storedGateway) key(t *testing.T, secret string) string {
 	g.fixture.addKey(t, keyID)
 	g.runtime.keys[secret] = keyauthority.Authority{
 		ID: keyID, LookupID: "listed" + secret, ProjectID: &g.fixture.projectID,
-		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{g.plan.slug}, AllowProviderState: true},
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference", "tools"}, AllowedRoutes: []string{g.plan.slug}, AllowProviderState: true, AllowedToolsets: g.plan.toolsets},
 	}
 	return keyID
 }
@@ -1408,5 +1424,142 @@ func TestVectorStoresHideProviderIdentifiersBindFilesReplayCreationAndIsolateKey
 	g.call(t, "owner", "GET", own, "", "", 404)
 	if sent := upstream.sent("DELETE /vector_stores/vs_" + providerOwned); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
+	}
+}
+
+type routeTools struct {
+	mu    sync.Mutex
+	calls []toolCall
+}
+
+type toolCall struct {
+	run       string
+	arguments string
+}
+
+func (*routeTools) Resolve(_ context.Context, _ keyauthority.Authority, _ *release.Release, toolsets []string) ([]gateway.WorkflowTool, error) {
+	price := "0.01"
+	return []gateway.WorkflowTool{{ToolsetID: toolsets[0], RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+		Classification: "read_only", Alias: "lookup", Name: "lookup", Description: "Look up a fact.", UnitPrice: &price,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q"],"additionalProperties":false}`),
+	}}}, nil
+}
+
+func (*routeTools) AuthorizeWorkflowTool(keyauthority.Authority, gateway.WorkflowTool) error {
+	return nil
+}
+
+func (r *routeTools) Call(_ context.Context, _ keyauthority.Authority, _ *release.Release, _ gateway.WorkflowTool, run string, _ int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, toolCall{run: run, arguments: string(arguments)})
+	return json.RawMessage(`{"content":[{"type":"text","text":"forty-two"}]}`), nil
+}
+
+func (*routeTools) CallApproved(context.Context, keyauthority.Authority, *release.Release, gateway.WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error) {
+	return nil, errors.New("the route tool needs no approval")
+}
+
+func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTurn(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	const slug, model = "tools", vendor.Model
+	var pricingID string
+	if err := pool.QueryRow(t.Context(), `SELECT pricing_revision_id::text FROM olp.prices WHERE provider_id=$1`,
+		fixture.providerID).Scan(&pricingID); err != nil {
+		t.Fatal(err)
+	}
+	type turn struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		Messages []struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"tool_call_id"`
+			Content    any    `json:"content"`
+		} `json:"messages"`
+	}
+	var mu sync.Mutex
+	var turns []turn
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sent turn
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		turns = append(turns, sent)
+		first := len(turns) == 1
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if first {
+			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"answer\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"It is forty-two."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`)
+	})
+	price := rates.NewRoutingPrice(rates.RoutingPrice{
+		Price: rates.Price{ProviderKind: "openai_compatible", Model: model, Operation: "generation",
+			InputPerMillion: new("1"), OutputPerMillion: new("2"), Currency: "USD"},
+		RevisionID: pricingID, Revision: 1, EffectiveAt: fixture.observedAt.Add(-time.Hour),
+	})
+	tools := &routeTools{}
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "openai_compatible", operations: []string{"generation"},
+		prices: []rates.RoutingPrice{*price}, upstream: upstream, toolsets: []string{uuid.NewString()}, tools: tools,
+	})
+	g.key(t, "owner")
+	headers := map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}
+
+	_, refused := g.send(t, "POST", "/v1/chat/completions", headers,
+		`{"model":"tools","olp_toolsets":["`+uuid.NewString()+`"],"messages":[{"role":"user","content":"what is the answer?"}]}`, 400)
+	if !strings.Contains(string(refused), "toolset_not_permitted") || len(turns) != 0 {
+		t.Fatalf("a toolset outside the route reached the model %d times: %s", len(turns), refused)
+	}
+
+	_, raw := g.send(t, "POST", "/v1/chat/completions", headers,
+		`{"model":"tools","messages":[{"role":"user","content":"what is the answer?"}]}`, 200)
+	var reply struct {
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Content   string            `json:"content"`
+				ToolCalls []json.RawMessage `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Model != slug || len(reply.Choices) != 1 || reply.Choices[0].Message.Content != "It is forty-two." ||
+		len(reply.Choices[0].Message.ToolCalls) != 0 {
+		t.Fatalf("the caller did not get only the final answer: %s", raw)
+	}
+	if len(tools.calls) != 1 || tools.calls[0].arguments != `{"q":"answer"}` {
+		t.Fatalf("tool calls = %+v, want the one call the model asked for", tools.calls)
+	}
+	if len(turns) != 2 || len(turns[0].Tools) != 1 || turns[0].Tools[0].Function.Name != "lookup" {
+		t.Fatalf("model turns = %+v, want the route tool offered and one continuation", turns)
+	}
+	result := turns[1].Messages[len(turns[1].Messages)-1]
+	if text, _ := result.Content.(string); result.Role != "tool" || result.ToolCallID != "call_1" || !strings.Contains(text, "forty-two") {
+		t.Fatalf("the continuation ended with %+v, want the tool result for call_1", result)
+	}
+
+	const inputTokens, outputTokens = 5 + 9, 3 + 4
+	var settled, runCount int
+	var run string
+	var priced bool
+	if err := pool.QueryRow(t.Context(), `SELECT count(*), count(DISTINCT run_id), coalesce(min(run_id::text),''),
+		coalesce(sum(observed_cost),0) = ($2::numeric * 1 + $3::numeric * 2) / 1000000 FROM olp.execution_debits
+		WHERE api_key_id=$1 AND kind='model' AND state='settled'`, g.runtime.keys["owner"].ID, inputTokens, outputTokens).
+		Scan(&settled, &runCount, &run, &priced); err != nil {
+		t.Fatal(err)
+	}
+	if settled != 2 || runCount != 1 || run != tools.calls[0].run || !priced {
+		t.Fatalf("settled model debits=%d runs=%d run=%s priced for both turns=%t, want 2 debits on run %s",
+			settled, runCount, run, priced, tools.calls[0].run)
 	}
 }
