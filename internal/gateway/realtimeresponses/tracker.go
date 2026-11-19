@@ -84,6 +84,15 @@ func (s *Tracker) ClientFrame(typ websocket.MessageType, data []byte) {
 	}
 }
 
+func decodeFrame(data []byte, strict bool) (frame, bool) {
+	if strict {
+		return decodeStrict(data)
+	}
+	var event frame
+	err := json.Unmarshal(data, &event)
+	return event, err == nil
+}
+
 func (s *Tracker) ProviderFrame(typ websocket.MessageType, data []byte, strict bool) *wire.Usage {
 	if typ != websocket.MessageText || len(data) > maxFrameBytes {
 		s.unknown = true
@@ -96,13 +105,7 @@ func (s *Tracker) ProviderFrame(typ websocket.MessageType, data []byte, strict b
 		// through byte-for-byte without decoding or changed failure behavior.
 		return nil
 	}
-	var event frame
-	valid := false
-	if strict {
-		valid = decodeStrict(data, &event)
-	} else {
-		valid = json.Unmarshal(data, &event) == nil
-	}
+	event, valid := decodeFrame(data, strict)
 	if !valid {
 		s.unknown = true
 		return nil

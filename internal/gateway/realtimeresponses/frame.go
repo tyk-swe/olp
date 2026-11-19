@@ -29,122 +29,138 @@ func parseObject(data []byte) (oif.Value, bool) {
 // json.Valid and UTF-8 validation cover the complete flat document. Escapes
 // fall through so OIF still enforces surrogate-pair and decoded-key rules.
 func flatFrame(data []byte) (frame, bool) {
-	var event frame
 	if len(data) > maxFrameBytes || !utf8.Valid(data) {
-		return event, false
+		return frame{}, false
 	}
-	data = bytes.TrimSpace(data)
-	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
-		return event, false
+	scan := flatScanner{data: bytes.TrimSpace(data), at: 1}
+	if len(scan.data) < 2 || scan.data[0] != '{' || scan.data[len(scan.data)-1] != '}' {
+		return frame{}, false
 	}
+	var event frame
 	var keys [16][]byte
-	count, at := 0, 1
-	space := func() {
-		for at < len(data) && (data[at] == ' ' || data[at] == '\t' || data[at] == '\r' || data[at] == '\n') {
-			at++
-		}
-	}
+	count := 0
 	for {
-		space()
-		if at >= len(data) {
+		next, more := scan.peek()
+		if !more {
 			return frame{}, false
 		}
-		if data[at] == '}' {
-			at++
+		if next == '}' {
+			scan.at++
 			break
 		}
-		if data[at] != '"' || count == len(keys) {
+		if next != '"' || count == len(keys) {
 			return frame{}, false
 		}
-		at++
-		start := at
-		for at < len(data) && data[at] != '"' {
-			if data[at] == '\\' {
-				return frame{}, false
-			}
-			at++
-		}
-		if at >= len(data) {
+		key, value, quoted, ok := scan.member()
+		if !ok || needsFullDecoder(key) || contains(keys[:count], key) {
 			return frame{}, false
-		}
-		key := data[start:at]
-		// Case-insensitive observed fields need the full decoder, including
-		// its strict ambiguity checks. Response is structured even if a caller
-		// sends a scalar value.
-		if bytes.EqualFold(key, []byte("response")) ||
-			bytes.EqualFold(key, []byte("type")) && !bytes.Equal(key, []byte("type")) ||
-			bytes.EqualFold(key, []byte("response_id")) && !bytes.Equal(key, []byte("response_id")) {
-			return frame{}, false
-		}
-		for _, prior := range keys[:count] {
-			if bytes.Equal(prior, key) {
-				return frame{}, false
-			}
 		}
 		keys[count], count = key, count+1
-		at++
-		space()
-		if at >= len(data) || data[at] != ':' {
+		observed := bytes.Equal(key, []byte("type")) || bytes.Equal(key, []byte("response_id"))
+		if observed && !quoted {
 			return frame{}, false
-		}
-		at++
-		space()
-		if at >= len(data) || data[at] == '{' || data[at] == '[' {
-			return frame{}, false
-		}
-		quoted := data[at] == '"'
-		if quoted {
-			at++
-		}
-		start = at
-		if quoted {
-			for at < len(data) && data[at] != '"' {
-				if data[at] == '\\' {
-					return frame{}, false
-				}
-				at++
-			}
-		} else {
-			for at < len(data) && data[at] != ',' && data[at] != '}' {
-				at++
-			}
-		}
-		if at >= len(data) {
-			return frame{}, false
-		}
-		value := data[start:at]
-		if quoted {
-			at++
 		}
 		switch {
 		case bytes.Equal(key, []byte("type")):
-			if !quoted {
-				return frame{}, false
-			}
 			event.Type = string(value)
 		case bytes.Equal(key, []byte("response_id")):
-			if !quoted {
-				return frame{}, false
-			}
 			event.ResponseID = string(value)
 		}
-		space()
-		if at >= len(data) {
+		next, more = scan.peek()
+		if !more {
 			return frame{}, false
 		}
-		if data[at] == '}' {
-			at++
+		if next == '}' {
+			scan.at++
 			break
 		}
-		if data[at] != ',' {
+		if next != ',' {
 			return frame{}, false
 		}
-		at++
+		scan.at++
 	}
-	if at != len(data) || !json.Valid(data) {
+	if scan.at != len(scan.data) || !json.Valid(scan.data) {
 		return frame{}, false
 	}
 	return event, true
+}
+
+// Case-insensitive observed fields need the full decoder, including its
+// strict ambiguity checks. Response is structured even if a caller sends a
+// scalar value.
+func needsFullDecoder(key []byte) bool {
+	return bytes.EqualFold(key, []byte("response")) ||
+		bytes.EqualFold(key, []byte("type")) && !bytes.Equal(key, []byte("type")) ||
+		bytes.EqualFold(key, []byte("response_id")) && !bytes.Equal(key, []byte("response_id"))
+}
+
+func contains(keys [][]byte, key []byte) bool {
+	for _, prior := range keys {
+		if bytes.Equal(prior, key) {
+			return true
+		}
+	}
+	return false
+}
+
+type flatScanner struct {
+	data []byte
+	at   int
+}
+
+func (s *flatScanner) peek() (byte, bool) {
+	for s.at < len(s.data) && (s.data[s.at] == ' ' || s.data[s.at] == '\t' || s.data[s.at] == '\r' || s.data[s.at] == '\n') {
+		s.at++
+	}
+	if s.at >= len(s.data) {
+		return 0, false
+	}
+	return s.data[s.at], true
+}
+
+func (s *flatScanner) member() (key, value []byte, quoted, ok bool) {
+	key, ok = s.text()
+	if !ok {
+		return nil, nil, false, false
+	}
+	if next, more := s.peek(); !more || next != ':' {
+		return nil, nil, false, false
+	}
+	s.at++
+	next, more := s.peek()
+	if !more || next == '{' || next == '[' {
+		return nil, nil, false, false
+	}
+	if next == '"' {
+		value, ok = s.text()
+		return key, value, true, ok
+	}
+	value, ok = s.bare()
+	return key, value, false, ok
+}
+
+func (s *flatScanner) text() ([]byte, bool) {
+	s.at++
+	start := s.at
+	for s.at < len(s.data) && s.data[s.at] != '"' {
+		if s.data[s.at] == '\\' {
+			return nil, false
+		}
+		s.at++
+	}
+	if s.at >= len(s.data) {
+		return nil, false
+	}
+	s.at++
+	return s.data[start : s.at-1], true
+}
+
+func (s *flatScanner) bare() ([]byte, bool) {
+	start := s.at
+	for s.at < len(s.data) && s.data[s.at] != ',' && s.data[s.at] != '}' {
+		s.at++
+	}
+	return s.data[start:s.at], s.at < len(s.data)
 }
 
 func member(object oif.Value, name string) (oif.Value, bool) {
@@ -198,150 +214,127 @@ func intField(object oif.Value, name string) (int64, bool) {
 // responseUsage is the usage object of a terminal realtime response,
 // including the modality shares a multimodal session reports.
 type responseUsage struct {
-	InputTokens  *int64 `json:"input_tokens"`
-	OutputTokens *int64 `json:"output_tokens"`
-	InputDetails *struct {
-		CachedTokens  *int64 `json:"cached_tokens"`
-		AudioTokens   *int64 `json:"audio_tokens"`
-		ImageTokens   *int64 `json:"image_tokens"`
-		CachedDetails *struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		} `json:"cached_tokens_details"`
-	} `json:"input_token_details"`
-	OutputDetails *struct {
-		AudioTokens *int64 `json:"audio_tokens"`
-	} `json:"output_token_details"`
+	InputTokens   *int64         `json:"input_tokens"`
+	OutputTokens  *int64         `json:"output_tokens"`
+	InputDetails  *inputDetails  `json:"input_token_details"`
+	OutputDetails *outputDetails `json:"output_token_details"`
+}
+
+type inputDetails struct {
+	CachedTokens  *int64         `json:"cached_tokens"`
+	AudioTokens   *int64         `json:"audio_tokens"`
+	ImageTokens   *int64         `json:"image_tokens"`
+	CachedDetails *cachedDetails `json:"cached_tokens_details"`
+}
+
+type cachedDetails struct {
+	AudioTokens *int64 `json:"audio_tokens"`
+	ImageTokens *int64 `json:"image_tokens"`
+}
+
+type outputDetails struct {
+	AudioTokens *int64 `json:"audio_tokens"`
+}
+
+type responseBody struct {
+	ID    string         `json:"id"`
+	Usage *responseUsage `json:"usage"`
 }
 
 type frame struct {
-	Type       string `json:"type"`
-	ResponseID string `json:"response_id"`
-	Response   *struct {
-		ID    string         `json:"id"`
-		Usage *responseUsage `json:"usage"`
-	} `json:"response"`
+	Type       string        `json:"type"`
+	ResponseID string        `json:"response_id"`
+	Response   *responseBody `json:"response"`
 }
 
 // decodeStrict extracts only the fields used by terminal and
 // usage accounting from one duplicate-safe OIF parse. Unknown members remain
 // byte-identical in the forwarded frame and are still fully syntax checked.
-func decodeStrict(data []byte, event *frame) bool {
+func decodeStrict(data []byte) (frame, bool) {
 	if flat, ok := flatFrame(data); ok {
-		*event = flat
-		return true
+		return flat, true
 	}
 	root, valid := parseObject(data)
 	if !valid {
-		return false
+		return frame{}, false
 	}
-	if event.Type, valid = stringField(root, "type"); !valid {
-		return false
+	eventType, validType := stringField(root, "type")
+	responseID, validID := stringField(root, "response_id")
+	response, validResponse := decodeResponse(root)
+	return frame{Type: eventType, ResponseID: responseID, Response: response}, validType && validID && validResponse
+}
+
+func decodeResponse(root oif.Value) (*responseBody, bool) {
+	response, present, valid := optionalObject(root, "response")
+	if !present || !valid {
+		return nil, valid
 	}
-	if event.ResponseID, valid = stringField(root, "response_id"); !valid {
-		return false
+	id, validID := stringField(response, "id")
+	usage, validUsage := decodeUsage(response)
+	return &responseBody{ID: id, Usage: usage}, validID && validUsage
+}
+
+func decodeUsage(response oif.Value) (*responseUsage, bool) {
+	usage, present, valid := optionalObject(response, "usage")
+	if !present || !valid {
+		return nil, valid
 	}
-	response, present := member(root, "response")
-	if !present || response.Kind() == oif.Null {
-		return true
+	input, validInput := optionalCount(usage, "input_tokens")
+	output, validOutput := optionalCount(usage, "output_tokens")
+	inputShares, validInputShares := decodeInputDetails(usage)
+	outputShares, validOutputShares := decodeOutputDetails(usage)
+	return &responseUsage{InputTokens: input, OutputTokens: output, InputDetails: inputShares, OutputDetails: outputShares},
+		validInput && validOutput && validInputShares && validOutputShares
+}
+
+func decodeInputDetails(usage oif.Value) (*inputDetails, bool) {
+	details, present, valid := optionalObject(usage, "input_token_details")
+	if !present || !valid {
+		return nil, valid
 	}
-	if response.Kind() != oif.Object {
-		return false
+	cachedTokens, validCached := optionalCount(details, "cached_tokens")
+	audio, validAudio := optionalCount(details, "audio_tokens")
+	image, validImage := optionalCount(details, "image_tokens")
+	cached, validShares := decodeCachedDetails(details)
+	return &inputDetails{CachedTokens: cachedTokens, AudioTokens: audio, ImageTokens: image, CachedDetails: cached},
+		validCached && validAudio && validImage && validShares
+}
+
+func decodeCachedDetails(details oif.Value) (*cachedDetails, bool) {
+	cached, present, valid := optionalObject(details, "cached_tokens_details")
+	if !present || !valid {
+		return nil, valid
 	}
-	event.Response = new(struct {
-		ID    string         `json:"id"`
-		Usage *responseUsage `json:"usage"`
-	})
-	if event.Response.ID, valid = stringField(response, "id"); !valid {
-		return false
+	audio, validAudio := optionalCount(cached, "audio_tokens")
+	image, validImage := optionalCount(cached, "image_tokens")
+	return &cachedDetails{AudioTokens: audio, ImageTokens: image}, validAudio && validImage
+}
+
+func decodeOutputDetails(usage oif.Value) (*outputDetails, bool) {
+	details, present, valid := optionalObject(usage, "output_token_details")
+	if !present || !valid {
+		return nil, valid
 	}
-	usageValue, present := member(response, "usage")
-	if !present || usageValue.Kind() == oif.Null {
-		return true
+	audio, validAudio := optionalCount(details, "audio_tokens")
+	return &outputDetails{AudioTokens: audio}, validAudio
+}
+
+func optionalObject(parent oif.Value, name string) (value oif.Value, present, valid bool) {
+	value, present = member(parent, name)
+	if !present || value.Kind() == oif.Null {
+		return oif.Value{}, false, true
 	}
-	if usageValue.Kind() != oif.Object {
-		return false
+	return value, true, value.Kind() == oif.Object
+}
+
+func optionalCount(parent oif.Value, name string) (*int64, bool) {
+	value, present := member(parent, name)
+	if !present || value.Kind() == oif.Null {
+		return nil, true
 	}
-	event.Response.Usage = new(responseUsage)
-	counter := func(name string) (*int64, bool) {
-		value, present := member(usageValue, name)
-		if !present || value.Kind() == oif.Null {
-			return nil, true
-		}
-		count, valid := intField(usageValue, name)
-		if !valid {
-			return nil, false
-		}
-		return &count, true
+	count, valid := intField(parent, name)
+	if !valid {
+		return nil, false
 	}
-	if event.Response.Usage.InputTokens, valid = counter("input_tokens"); !valid {
-		return false
-	}
-	if event.Response.Usage.OutputTokens, valid = counter("output_tokens"); !valid {
-		return false
-	}
-	readDetail := func(parent oif.Value, name string) (*int64, bool) {
-		value, present := member(parent, name)
-		if !present || value.Kind() == oif.Null {
-			return nil, true
-		}
-		count, valid := intField(parent, name)
-		if !valid {
-			return nil, false
-		}
-		return &count, true
-	}
-	var ok bool
-	if outputDetails, present := member(usageValue, "output_token_details"); present && outputDetails.Kind() != oif.Null {
-		if outputDetails.Kind() != oif.Object {
-			return false
-		}
-		event.Response.Usage.OutputDetails = new(struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-		})
-		if event.Response.Usage.OutputDetails.AudioTokens, ok = readDetail(outputDetails, "audio_tokens"); !ok {
-			return false
-		}
-	}
-	details, present := member(usageValue, "input_token_details")
-	if !present || details.Kind() == oif.Null {
-		return true
-	}
-	if details.Kind() != oif.Object {
-		return false
-	}
-	event.Response.Usage.InputDetails = new(struct {
-		CachedTokens  *int64 `json:"cached_tokens"`
-		AudioTokens   *int64 `json:"audio_tokens"`
-		ImageTokens   *int64 `json:"image_tokens"`
-		CachedDetails *struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		} `json:"cached_tokens_details"`
-	})
-	if event.Response.Usage.InputDetails.CachedTokens, ok = readDetail(details, "cached_tokens"); !ok {
-		return false
-	}
-	if event.Response.Usage.InputDetails.AudioTokens, ok = readDetail(details, "audio_tokens"); !ok {
-		return false
-	}
-	if event.Response.Usage.InputDetails.ImageTokens, ok = readDetail(details, "image_tokens"); !ok {
-		return false
-	}
-	if cachedDetails, present := member(details, "cached_tokens_details"); present && cachedDetails.Kind() != oif.Null {
-		if cachedDetails.Kind() != oif.Object {
-			return false
-		}
-		event.Response.Usage.InputDetails.CachedDetails = new(struct {
-			AudioTokens *int64 `json:"audio_tokens"`
-			ImageTokens *int64 `json:"image_tokens"`
-		})
-		if event.Response.Usage.InputDetails.CachedDetails.AudioTokens, ok = readDetail(cachedDetails, "audio_tokens"); !ok {
-			return false
-		}
-		if event.Response.Usage.InputDetails.CachedDetails.ImageTokens, ok = readDetail(cachedDetails, "image_tokens"); !ok {
-			return false
-		}
-	}
-	return true
+	return &count, true
 }
