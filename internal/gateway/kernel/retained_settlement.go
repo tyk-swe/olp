@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -16,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *Server) prepareRetainedAccounting(x *Call, p *Pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *fault.Error {
+func (s *Server) prepareRetainedAccounting(x *Call, p *Pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint) *fault.Error {
 	if !e.Metered {
 		return nil
 	}
@@ -65,7 +64,7 @@ func retainedEvalPricingSupported(price *rates.RoutingPrice, card *rates.Routing
 	return explicit == nil || len(explicit.Tiers) == 0
 }
 
-func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *Call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
+func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
 		return nil, nil
 	}

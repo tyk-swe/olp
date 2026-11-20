@@ -200,7 +200,7 @@ func (q retainedRequest) beginCreation(ctx context.Context, p *Pin, route *routi
 		candidate.ParentID = &q.parent.UUID
 		candidate.RouteRevisionID = q.parent.RouteRevisionID
 	}
-	if err := s.prepareRetainedAccounting(q.x, p, route, candidate, e, q.input.source); err != nil {
+	if err := s.prepareRetainedAccounting(q.x, p, route, candidate, e); err != nil {
 		return nil, nil, err
 	}
 	lifecycle, err := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})

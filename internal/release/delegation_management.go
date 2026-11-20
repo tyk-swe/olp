@@ -3,6 +3,7 @@ package release
 import (
 	"cmp"
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
@@ -55,7 +56,7 @@ func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (http
 	defer tx.Rollback(r.Context())
 	var projectID *string
 	if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 		}
 		return httpkit.Reply{}, err

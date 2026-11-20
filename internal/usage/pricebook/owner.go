@@ -59,7 +59,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 }
 
 func ownerExists(ctx context.Context, q database.Queryer, owner Owner) error {
-	query := ""
+	var query string
 	switch owner.kind {
 	case ownerOrganization:
 		query = "SELECT EXISTS(SELECT 1 FROM olp.organizations WHERE id=$1::uuid)"

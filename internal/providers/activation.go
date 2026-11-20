@@ -121,7 +121,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 	if err := validateNetworkReference(ctx, tx, current.ID, configuration.Options.Network); err != nil {
 		return activatedProvider{}, err
 	}
-	if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
+	if _, err := s.credentialFor(ctx, tx, current); err != nil {
 		return activatedProvider{}, err
 	}
 	models, err := enabledModels(ctx, tx, current.ID)

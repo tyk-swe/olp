@@ -30,7 +30,7 @@ const (
 
 func TestVendorBatchFixturesDecode(t *testing.T) {
 	gemini := func(body []byte) (Snapshot, error) {
-		_, snapshot, err := decodeGeminiSnapshot(body)
+		snapshot, err := decodeGeminiSnapshot(body)
 		return snapshot, err
 	}
 	cloud := func(adapter connectors.BatchAdapter) func([]byte) (Snapshot, error) {

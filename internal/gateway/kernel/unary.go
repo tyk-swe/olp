@@ -250,7 +250,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 	_, _, failure := session.selectPlan(ctx, options)
 	return failure
 }
-func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call, body []byte) (*Outcome, int) {
+func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call) (*Outcome, int) {
 	fail := func(e *fault.Error) (*Outcome, int) {
 		if x.dispatched && e.Status >= 500 {
 			copy := *e

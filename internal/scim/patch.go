@@ -2,6 +2,7 @@ package scim
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -207,7 +208,7 @@ func change(d map[string]any, parts []string, kind string, value any, group bool
 					return Fail(400, "invalidPath", "A subattribute requires a complex value.")
 				}
 				err := change(object, parts[1:], kind, value, true)
-				if problem, ok := err.(*Error); ok && problem.Type == "noTarget" {
+				if problem, ok := errors.AsType[*Error](err); ok && problem.Type == "noTarget" {
 					continue
 				}
 				if err != nil {

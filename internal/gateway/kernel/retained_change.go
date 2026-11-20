@@ -39,7 +39,7 @@ func (q retainedRequest) change() {
 		q.reply.fail(err)
 		return
 	}
-	mutation, err := s.fenceRetainedMutation(ctx, q.r, q.x, q.endpoint, resource, body)
+	mutation, err := s.fenceRetainedMutation(ctx, q.r, q.endpoint, resource, body)
 	if err != nil {
 		q.reply.fail(err)
 		return

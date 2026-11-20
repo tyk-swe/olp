@@ -60,7 +60,7 @@ func (c *Cache) Keys(ctx context.Context, id, url, kid string, now time.Time) (m
 		if !candidate.mu.TryLock() {
 			continue
 		}
-		stale := false
+		var stale bool
 		if candidate.keys != nil {
 			stale = !candidate.fetched.IsZero() && now.Sub(candidate.fetched) >= 5*time.Minute
 		} else {

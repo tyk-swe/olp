@@ -158,7 +158,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	defer resp.Body.Close()
 
 	if mode == "streaming" {
-		s.relayBedrockStream(ctx, w, x, p, resp)
+		s.relayBedrockStream(ctx, w, x, resp)
 		return
 	}
 	result, err := resp.ReadBody(s.Config.MaxResponseBytes)
@@ -305,7 +305,7 @@ func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
 	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), ClassProtocol
 }
 
-func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *Call, p *Pin, resp *PinnedResponse) {
+func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *Call, resp *PinnedResponse) {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/vnd.amazon.eventstream"

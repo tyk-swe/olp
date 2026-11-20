@@ -17,8 +17,6 @@ import (
 
 var identity = oif.Identity{ID: "embeddings", Revision: operations.Revision}
 
-func Identity() oif.Identity { return identity }
-
 type Format struct {
 	Layout, DType, Encoding string
 	LogicalDimensions       int64

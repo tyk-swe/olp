@@ -103,17 +103,17 @@ func (s *Server) updateProvider(r *http.Request, _ authz.Principal) (httpkit.Rep
 }
 
 // Credentials are never restored, so the draft keeps its current slots.
-func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
+func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) error {
 	if err := preserveCredentialBoundary(ctx, tx, current.ID, current.Connection.Document(), v.Configuration); err != nil {
-		return "", err
+		return err
 	}
 	change, err := connection.Diff(current.Connection.Document(), v.Configuration)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if change.Enrollment {
 		if err := grants.CancelProviderPending(ctx, tx, current.ID); err != nil {
-			return "", err
+			return err
 		}
 	}
 	// A revision only ever records evidence gathered against its own
@@ -121,7 +121,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	// validation is keyed by fingerprint and re-evaluates itself on read.
 	configuration, err := json.Marshal(v.Configuration)
 	if err != nil {
-		return "", err
+		return err
 	}
 	// Published model identities also anchor route targets. Remove only models
 	// that have never been published, and disable the retained rows until the
@@ -130,12 +130,12 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_models WHERE provider_id=$1 AND id NOT IN (
 		SELECT (m->>'id')::uuid FROM olp.provider_revisions r,jsonb_array_elements(r.models) m WHERE r.provider_id=$1
 	)`, current.ID); err != nil {
-		return "", err
+		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE olp.provider_models SET enabled=false,
 		capabilities=(SELECT coalesce(jsonb_agg(c||'{"source":"declared","certified_at":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c)
 		WHERE provider_id=$1`, current.ID); err != nil {
-		return "", err
+		return err
 	}
 	for _, m := range v.Models {
 		capabilities := make([]storedCapability, 0, len(m.Capabilities))
@@ -145,7 +145,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 		encoded, _ := json.Marshal(capabilities)
 		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)
 			ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,enabled=true,capabilities=excluded.capabilities`, m.ID, current.ID, m.UpstreamModel, m.DisplayName, encoded); err != nil {
-			return "", err
+			return err
 		}
 	}
 	etag := httpkit.NewID()
@@ -155,7 +155,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 		// and restrictions. Only an exact match to the active slots is clean.
 		slots, err := loadSlots(ctx, tx, current.ID)
 		if err != nil {
-			return "", err
+			return err
 		}
 		published := make([]routing.RevisionSlot, 0, len(slots))
 		for i := range slots {
@@ -166,7 +166,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 		dirty = string(draftSlots) != string(activeSlots)
 	}
 	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=$6,updated_at=now() WHERE id=$1", current.ID, v.Name, v.Configuration.Kind, configuration, etag, dirty)
-	return etag, err
+	return err
 }
 
 func (s *Server) restoreActiveAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -178,7 +178,7 @@ func (s *Server) restoreActiveAsDraft(r *http.Request, _ authz.Principal) (httpk
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if _, err = s.restoreDraft(ctx, tx, current, v); err != nil {
+		if err = s.restoreDraft(ctx, tx, current, v); err != nil {
 			return httpkit.Reply{}, err
 		}
 		return s.detailReply(ctx, tx, current.ID)
@@ -195,7 +195,7 @@ func (s *Server) restoreRevisionAsDraft(r *http.Request, _ authz.Principal) (htt
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		if _, err = s.restoreDraft(ctx, tx, current, v); err != nil {
+		if err = s.restoreDraft(ctx, tx, current, v); err != nil {
 			return httpkit.Reply{}, err
 		}
 		d, err := s.detail(ctx, tx, current.ID)

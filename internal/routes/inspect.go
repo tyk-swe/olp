@@ -336,7 +336,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 		slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
 		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
 			safe := safeInspectionError(err)
-			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
+			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
 			return nil, safe

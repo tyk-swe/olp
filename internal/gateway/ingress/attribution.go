@@ -3,6 +3,7 @@ package ingress
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -23,12 +24,12 @@ func ParseAttributionValues(values []string, authority keyauthority.Authority) (
 	}
 	resolved, problem := authority.ResolveAttribution(labels)
 	if problem != nil {
-		reason := problem.(*attribution.Error).Reason
-		if reason == "missing_attribution" {
-			return nil, fault.InvalidRequest(reason, "Required attribution labels are missing.", nil)
+		failure, known := errors.AsType[*attribution.Error](problem)
+		if known && failure.Reason == "missing_attribution" {
+			return nil, fault.InvalidRequest(failure.Reason, "Required attribution labels are missing.", nil)
 		}
-		if reason == "pinned_attribution_override" {
-			return nil, fault.InvalidRequest(reason, "Operator-pinned attribution labels cannot be overridden.", nil)
+		if known && failure.Reason == "pinned_attribution_override" {
+			return nil, fault.InvalidRequest(failure.Reason, "Operator-pinned attribution labels cannot be overridden.", nil)
 		}
 		return nil, fault.InvalidRequest("invalid_attribution", "Attribution does not satisfy the key and project policies.", nil)
 	}

@@ -41,7 +41,7 @@ type exchange struct {
 	copies int
 }
 
-func textExchanges(t *testing.T) []exchange {
+func textExchanges() []exchange {
 	return []exchange{
 		{family: wire.Chat, held: 2, copies: 1, frames: [][]byte{
 			sse(`{"choices":[{"index":0,"delta":{"content":"it is for"}}]}`),
@@ -162,7 +162,7 @@ func checkRedacted(t *testing.T, e exchange, redacted string) {
 }
 
 func TestTextSplitAcrossFramesIsRedactedOnceInEveryFamily(t *testing.T) {
-	for _, e := range textExchanges(t) {
+	for _, e := range textExchanges() {
 		t.Run(string(e.family), func(t *testing.T) { checkRedacted(t, e, "it is [REDACTED] here") })
 	}
 }
@@ -192,7 +192,7 @@ func checkBlocked(t *testing.T, e exchange) run {
 }
 
 func TestBlockedTextNeverReachesTheClient(t *testing.T) {
-	for _, e := range textExchanges(t) {
+	for _, e := range textExchanges() {
 		t.Run(string(e.family), func(t *testing.T) { checkBlocked(t, e) })
 	}
 }
@@ -208,7 +208,7 @@ func TestBlockedToolCallNeverReachesTheClientAndIsRecorded(t *testing.T) {
 }
 
 func TestStrictRoutesRefuseARewriteInsteadOfChangingOrLeakingFrames(t *testing.T) {
-	for _, e := range slices.Concat(textExchanges(t), toolExchanges(t)) {
+	for _, e := range slices.Concat(textExchanges(), toolExchanges(t)) {
 		t.Run(string(e.family), func(t *testing.T) {
 			got := play(t, guardrails.Redact, true, e)
 			if !errors.Is(got.err, guardrails.ErrSurface) {

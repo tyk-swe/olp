@@ -920,7 +920,7 @@ func validateEmbeddingCount(request *wire.Request, actual int) error {
 	if request == nil {
 		return nil
 	}
-	expected := 0
+	var expected int
 	switch request.Family {
 	case wire.Embeddings:
 		count, ok := embeddingInputCount(request.Field("input"))

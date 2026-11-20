@@ -121,7 +121,7 @@ func (q inferenceRequest) serve() {
 		return
 	}
 	if unary {
-		q.end.out, q.end.status = s.serveUnary(q.w, q.r, q.x, caller.body)
+		q.end.out, q.end.status = s.serveUnary(q.w, q.r, q.x)
 		return
 	}
 	parsed, e := q.parse(caller.body)
@@ -222,8 +222,7 @@ func (q inferenceRequest) decode(body []byte) (*wire.Request, *fault.Error) {
 }
 
 func (q inferenceRequest) replay() {
-	status, err := q.server.replayContinuation(q.w, q.x)
-	q.end.status, q.end.out = status, continuationDeliveryOutcome(err)
+	q.end.status, q.end.out = http.StatusOK, continuationDeliveryOutcome(q.server.replayContinuation(q.w, q.x))
 	// Replaying a committed response never starts shadow inference.
 	q.x.mirrors = false
 }

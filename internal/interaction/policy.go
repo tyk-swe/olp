@@ -59,7 +59,7 @@ func checkInputCoverage(encodedWire wire.Format, document oif.Document) error {
 	// state. Outside those positions, unknown message/part members fail closed.
 	for _, name := range []string{"messages", "contents", "input", "prompt", "system", "systemInstruction"} {
 		if value, present := document.Root().Lookup(name); present {
-			if err := inspectableContent(value, name == "input" && encodedWire == wire.Responses); err != nil {
+			if err := inspectableContent(value); err != nil {
 				return err
 			}
 		}
@@ -71,13 +71,13 @@ func checkInputCoverage(encodedWire wire.Format, document oif.Document) error {
 	}
 	return nil
 }
-func inspectableContent(value oif.Value, responseInput bool) error {
+func inspectableContent(value oif.Value) error {
 	switch value.Kind() {
 	case oif.Absent, oif.Null, oif.String:
 		return nil
 	case oif.Array:
 		for _, element := range value.Elements() {
-			if err := inspectableContent(element, responseInput); err != nil {
+			if err := inspectableContent(element); err != nil {
 				return err
 			}
 		}
@@ -86,7 +86,7 @@ func inspectableContent(value oif.Value, responseInput bool) error {
 			switch field.Name {
 			case "role", "type", "name", "id", "call_id", "status", "tool_call_id", "tool_use_id", "is_error":
 			case "text", "refusal", "content", "parts", "arguments":
-				if err := inspectableContent(field.Value, responseInput); err != nil {
+				if err := inspectableContent(field.Value); err != nil {
 					return err
 				}
 			case "tool_calls", "function_call", "functionCall", "functionResponse", "toolUse", "toolResult", "input", "output":

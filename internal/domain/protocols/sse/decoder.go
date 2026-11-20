@@ -42,7 +42,7 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 		if err != nil {
 			return err
 		}
-		if err = emit(frame); err != nil {
+		if err := emit(frame); err != nil {
 			return err
 		}
 	}

@@ -395,14 +395,13 @@ func encodeTransformed(r *wire.Request, encodedWire wire.Format, kind, vendor, m
 	encoded, err := json.Marshal(out)
 	return encoded, encodedWire, err
 }
-func textInput(v json.RawMessage) ([]string, bool) {
+func textInput(v json.RawMessage) bool {
 	var s string
 	if json.Unmarshal(v, &s) == nil {
-		return []string{s}, true
+		return true
 	}
 	var a []string
-	err := json.Unmarshal(v, &a)
-	return a, err == nil && len(a) > 0
+	return json.Unmarshal(v, &a) == nil && len(a) > 0
 }
 
 // ParameterNames is used by strict routing policies. Delivery fields never

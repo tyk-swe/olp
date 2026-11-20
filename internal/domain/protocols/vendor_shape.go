@@ -23,7 +23,7 @@ func validateProfile(vendor string, family wire.Format, f Object) error {
 		}
 	}
 	if shape.TextInput {
-		if _, ok := textInput(f["input"]); !ok {
+		if !textInput(f["input"]) {
 			return requestError("input", name+" requires text input")
 		}
 	}

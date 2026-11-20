@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -956,7 +957,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		writer := &bedrockFrameWriter{ResponseRecorder: httptest.NewRecorder()}
-		h.gateway.relayBedrockStream(t.Context(), writer, x, p, resp)
+		h.gateway.relayBedrockStream(t.Context(), writer, x, resp)
 		h.sink.mu.Lock()
 		defer h.sink.mu.Unlock()
 		if len(h.sink.envs) != 1 {
@@ -2738,5 +2739,67 @@ func TestARetainedRequestKeepsOnlyModelAndBillingFactsAndRefusesControlsThatSpen
 				t.Fatalf("kept %s beyond the provider model, want %s", got, tc.kept)
 			}
 		})
+	}
+}
+
+func TestStagedBodyFailureBlamesTheProviderOnlyWhenItsBodyBreaks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		body   io.Reader
+		closed bool
+		local  bool
+	}{
+		{"provider body breaks", iotest.ErrReader(errors.New("connection reset")), false, false},
+		{"spool is unavailable", strings.NewReader("content"), true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = spool.Close() })
+			if tc.closed {
+				if err := spool.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			response := &PinnedResponse{
+				Response: &http.Response{Body: io.NopCloser(tc.body)},
+				Exchange: h.gateway.beginPinned(t.Context(), x, testPinnedTarget(h, 0), http.MethodGet),
+			}
+			if _, err := response.StageBody(t.Context(), spool, "file-content", "application/octet-stream", 64); err == nil {
+				t.Fatal("staging succeeded")
+			}
+			if fact := x.facts[0]; fact.Class != ClassProtocol || fact.LocalRefusal != tc.local {
+				t.Fatalf("got class %q local %v, want local %v", fact.Class, fact.LocalRefusal, tc.local)
+			}
+		})
+	}
+}
+
+func TestRetainedUploadRefusesAMultipartBodyCutBeforeItsFinalBoundary(t *testing.T) {
+	t.Parallel()
+	skill := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "skill"}, Action: "create", Method: http.MethodPost}
+	complete := "--frame\r\nContent-Disposition: form-data; name=\"file\"; filename=\"skill.zip\"\r\n\r\ncontent\r\n--frame--\r\n"
+	server := &Server{Config: Config{MaxBodyBytes: 1 << 20}}
+	for name, body := range map[string]string{
+		"empty":         "",
+		"cut in a part": strings.TrimSuffix(complete, "--frame--\r\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/skills", strings.NewReader(body))
+			request.Header.Set("Content-Type", "multipart/form-data; boundary=frame")
+			if _, _, _, failure := server.readRetainedBody(request, skill); failure == nil || failure.Status != http.StatusBadRequest || failure.Code != "invalid_request" {
+				t.Fatalf("truncated upload = %+v, want 400 invalid_request", failure)
+			}
+		})
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/skills", strings.NewReader(complete))
+	request.Header.Set("Content-Type", "multipart/form-data; boundary=frame")
+	if read, _, _, failure := server.readRetainedBody(request, skill); failure != nil || string(read) != complete {
+		t.Fatalf("complete upload = %q %+v, want the body back", read, failure)
 	}
 }
