@@ -310,10 +310,6 @@ func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, a
 	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
 }
 
-func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
-	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, projectID)
-}
-
 func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
 	source := auditSource(r)
 	family := "other"
