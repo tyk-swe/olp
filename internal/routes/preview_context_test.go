@@ -77,9 +77,27 @@ func TestPreviewDoesNotClaimUnmeasuredContext(t *testing.T) {
 	}
 }
 
+func TestPreviewLeavesHeadroomUnknownForRedactedThinking(t *testing.T) {
+	snapshot, route := contextPreviewFixture()
+	inline := `{"model":"review","max_tokens":128,"messages":[
+		{"role":"user","content":"Continue the analysis."},
+		{"role":"assistant","content":[%s{"type":"text","text":"Checking."}]}]}`
+	clear := decisionWithContextLimit(t, explainContextFixture(t, snapshot, route, wire.Anthropic, json.RawMessage(fmt.Sprintf(inline, "")), nil))
+	redacted := decisionWithContextLimit(t, explainContextFixture(t, snapshot, route, wire.Anthropic, json.RawMessage(fmt.Sprintf(inline, `{"type":"redacted_thinking","data":"opaque"},`)), nil))
+	if window := clear.ContextWindow; window == nil || window.RetainedContextUnknown || window.RemainingTokens == nil {
+		t.Fatalf("inline context should have measurable headroom: %+v", window)
+	}
+	if window := redacted.ContextWindow; window == nil || !window.RetainedContextUnknown || window.InputBreakdown == nil || window.RemainingTokens != nil {
+		t.Fatalf("redacted thinking should leave headroom unknown: %+v", window)
+	}
+}
+
 func contextPreviewFixture() (*routing.Snapshot, routing.Route) {
 	id, known, unknown := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	capabilities := []routing.Capability{{Model: "fixture-model", Operation: "generation", Surface: "openai", Mode: "unary"}}
+	capabilities := []routing.Capability{
+		{Model: "fixture-model", Operation: "generation", Surface: "openai", Mode: "unary"},
+		{Model: "fixture-model", Operation: "generation", Surface: "anthropic", Mode: "unary"},
+	}
 	target := func(provider string) routing.Target {
 		targetID := uuid.NewString()
 		return routing.Target{ID: targetID, RoutingID: targetID, ProviderID: provider, ProviderModel: "fixture-model", Weight: 1, Timeout: 1000}
@@ -103,7 +121,7 @@ func explainContextFixture(t *testing.T, snapshot *routing.Snapshot, route routi
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := simulationInput{Operation: "generation", Surface: "openai", Mode: "unary", Dialect: wire.Descriptor(family, false).Dialect.ID, Request: request, EstimatedInputTokens: fixed}
+	input := simulationInput{Operation: "generation", Surface: family.Surface(), Mode: "unary", Dialect: wire.Descriptor(family, false).Dialect.ID, Request: request, EstimatedInputTokens: fixed}
 	m := s.newSimulation(t.Context(), snapshot, input, nil, demand)
 	m.key = func(routing.Route) (inspectionKeyContext, error) { return inspectionKeyContext{}, nil }
 	m.eligibility = func(routing.Route) (func(string) routing.Eligibility, error) { return nil, nil }

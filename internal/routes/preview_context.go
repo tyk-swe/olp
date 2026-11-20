@@ -51,9 +51,21 @@ func hasUnmeasuredContext(request *wire.Request) bool {
 		input, _ := document.Lookup("/input")
 		return slices.ContainsFunc(input.Elements(), func(item oif.Value) bool {
 			kind, _ := item.Lookup("type")
+			name, _ := kind.Chars()
+			_, hasID := item.Lookup("id")
 			encrypted, hasEncrypted := item.Lookup("encrypted_content")
-			return kind.Raw() == `"item_reference"` ||
-				(kind.Raw() == `"reasoning"` && hasEncrypted && encrypted.Kind() != oif.Null)
+			return wire.IsResponsesItemReference(name, hasID) ||
+				(name == "reasoning" && hasEncrypted && encrypted.Kind() != oif.Null)
+		})
+	case wire.Anthropic:
+		messages, _ := document.Lookup("/messages")
+		return slices.ContainsFunc(messages.Elements(), func(message oif.Value) bool {
+			content, _ := message.Lookup("content")
+			return slices.ContainsFunc(content.Elements(), func(block oif.Value) bool {
+				kind, _ := block.Lookup("type")
+				name, _ := kind.Chars()
+				return name == "redacted_thinking"
+			})
 		})
 	case wire.Gemini, wire.GeminiStream:
 		return presentValue(document, "/cachedContent")
