@@ -384,6 +384,7 @@
     "PUT /api/v1/branding": "Y-Y-----Y-Y-",
     "PUT /api/v1/budgets/installation": "Y-Y-----Y-Y-",
     "PUT /api/v1/code/accounts/{id}": "YYYY----YYYY",
+    "PUT /api/v1/code/accounts/{id}/drain": "YYYY----YYYY",
     "PUT /api/v1/code/budgets/{id}": "YYYY----YYYY",
     "PUT /api/v1/code/pools/{id}": "YYYY----YYYY",
     "PUT /api/v1/code/routes/{id}": "YYYY----YYYY",

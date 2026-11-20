@@ -15628,7 +15628,10 @@
             "description": "Nonretired model pins that still have account, grant, route, pool, and key enrollment. Transient capacity and health are not counted against this total."
           },
           "last_activity_at": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time",
             "description": "Latest recorded Code Mode routing decision for this account, or null if none."
           },
@@ -15875,7 +15878,9 @@
       "CodeAccountDrainWrite": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["draining"],
+        "required": [
+          "draining"
+        ],
         "properties": {
           "draining": {
             "type": "boolean"
@@ -48001,20 +48006,27 @@
             "in": "path",
             "name": "id",
             "required": true,
-            "schema": { "type": "string", "format": "uuid" }
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           {
             "in": "header",
             "name": "If-Match",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CodeAccountDrainWrite" }
+              "schema": {
+                "$ref": "#/components/schemas/CodeAccountDrainWrite"
+              }
             }
           }
         },
@@ -48023,7 +48035,9 @@
             "description": "Account with its drain state and current pin count",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CodeAccount" }
+                "schema": {
+                  "$ref": "#/components/schemas/CodeAccount"
+                }
               }
             }
           },
@@ -48031,16 +48045,29 @@
             "description": "Drain update refused",
             "content": {
               "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/Problem" }
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
               }
             }
           }
         },
         "security": [
-          { "csrfToken": [], "sessionCookie": ["configure"] },
-          { "managementToken": ["configure"] }
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
         ],
-        "tags": ["code-mode"]
+        "tags": [
+          "code-mode"
+        ]
       }
     },
     "/api/v1/code/accounts/{id}/allowance-reads": {
