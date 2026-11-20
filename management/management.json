@@ -15471,6 +15471,9 @@
       "CodeAccount": {
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "credential_id": {
             "format": "uuid",
             "type": "string"
@@ -15660,6 +15663,7 @@
           "enabled",
           "models",
           "extra_usage_enabled",
+          "max_concurrency",
           "principal",
           "etag",
           "health",
@@ -15726,9 +15730,22 @@
         ],
         "type": "object"
       },
+      "CodeAccountMaxConcurrency": {
+        "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+        "type": [
+          "integer",
+          "null"
+        ],
+        "format": "int32",
+        "minimum": 1,
+        "maximum": 2147483647
+      },
       "CodeAccountWrite": {
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "credential_id": {
             "format": "uuid",
             "type": "string"
@@ -16217,13 +16234,14 @@
                 "class": {
                   "enum": [
                     "cooldown",
+                    "busy",
                     "band",
                     "weight",
                     "tree",
                     "unavailable"
                   ],
                   "type": "string",
-                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
+                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
                 }
               },
               "required": [
@@ -31705,6 +31723,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "id": {
             "type": "string",
             "format": "uuid"

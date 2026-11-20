@@ -59,6 +59,8 @@ type Authorization struct {
 	ProjectID       string
 }
 
+const GenerationTimeout = 10 * time.Minute
+
 type Refusal struct {
 	Status  int
 	Code    string

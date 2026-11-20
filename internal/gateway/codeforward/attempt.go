@@ -25,7 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-const codeGenerationTimeout = 10 * time.Minute
+const codeGenerationTimeout = codemode.GenerationTimeout
 
 type codeAttempt struct {
 	identityOriginator string

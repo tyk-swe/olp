@@ -61,6 +61,54 @@ func TestCodeModelHintRefusalExplainsRetry(t *testing.T) {
 	}
 }
 
+type busyCodeLedger struct{ fakeCodeLedger }
+
+func (*busyCodeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
+	return codesessions.Permit{}, &codemode.Refusal{Status: http.StatusTooManyRequests, Code: "code_account_busy", RetryAt: new(time.Now().Add(time.Second))}
+}
+
+func (*busyCodeLedger) ResolvePaidFallback(_ context.Context, request codesessions.Admission, _ keyauthority.Authority) (*codemode.Operation, error) {
+	if request.InitialRecovery {
+		return nil, errors.New("local saturation must not consider paid fallback")
+	}
+	return nil, nil
+}
+
+type codeKeyFixture struct{ authority keyauthority.Authority }
+
+func (k codeKeyFixture) Authenticate(string) (*keyauthority.Authority, error) {
+	return &k.authority, nil
+}
+
+func TestCodeAccountBusyReturnsRetryWithoutPaidFallback(t *testing.T) {
+	route := codemode.Route{
+		ProjectID: "project", Slug: "code", Models: []string{"gpt-model"}, InitialRecoveryAttempts: 1,
+		PaidParticipation: true, PaidFallbackTargets: map[string]codemode.PaidTarget{"gpt-model": {ProviderID: "paid", SlotID: "slot"}},
+	}
+	key := codeKeyFixture{authority: keyauthority.Authority{ID: "key", ProjectID: &route.ProjectID, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}}
+	ledger := &busyCodeLedger{}
+	f := &Forwarder{gate: ingress.NewGate(key, nil, nil, 0, time.Now), ledger: ledger, now: time.Now}
+	snapshot, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/code/code/responses", nil)
+	r.Header.Set("Authorization", "Bearer fixture")
+	w := httptest.NewRecorder()
+	inbound, _ := codeIngressFor("responses")
+	observation := codemode.Request{Operation: codemode.Operation{Name: "responses", Model: "gpt-model"}, Recoverable: true}
+	f.forwardCode(w, r, snapshot, route, observation, inbound, nil, nil, nil, func(err error) {
+		f.codeRefuse(w, r, route, key.authority.ID, "", err)
+	})
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "1" ||
+		!strings.Contains(w.Body.String(), `"code":"code_account_busy"`) || !strings.Contains(w.Body.String(), "Retry the same conversation") {
+		t.Fatalf("busy response = %d, %v, %s", w.Code, w.Header(), w.Body)
+	}
+	if len(ledger.health) != 0 || len(ledger.cooldowns) != 0 || ledger.confirmations != 0 {
+		t.Fatal("local saturation recorded an upstream failure")
+	}
+}
+
 type notifyingResponseWriter struct {
 	*httptest.ResponseRecorder
 	written chan struct{}
