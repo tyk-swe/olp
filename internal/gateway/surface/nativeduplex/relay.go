@@ -171,14 +171,12 @@ func (st *duplexRelay) watch(done chan relayEnd) (relayEnd, int) {
 		case <-heartbeat.C:
 			pingCtx, pingCancel := context.WithTimeout(st.ctx, ingress.ReauthInterval)
 			err := st.upstream.Ping(pingCtx)
-			clientFailed := false
 			if err == nil {
 				err = st.client.Ping(pingCtx)
-				clientFailed = err != nil
 			}
 			pingCancel()
 			if err != nil {
-				return relayEnd{err: err, client: clientFailed}, remaining
+				return relayEnd{err: err}, remaining
 			}
 		case <-st.ctx.Done():
 			return relayEnd{err: st.ctx.Err()}, remaining
@@ -197,7 +195,6 @@ func (st *duplexRelay) reauthorize() (relayEnd, bool) {
 	current := *authority
 	current.EndUserDigest = x.EndUserDigest()
 	if e := st.kernel.UnboundedPinLimits(x.AdmissionAuthority(current), st.p, x.Route); e != nil {
-		st.upstream.CloseNow()
 		st.client.Close(websocket.StatusPolicyViolation, "consumption budget changed")
 		return relayEnd{err: errDuplexAuthority}, false
 	}
