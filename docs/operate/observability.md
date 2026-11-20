@@ -318,7 +318,19 @@ reconstruct rule changes made before the upgrade. Older producers that omit
 the snapshot receive the current rule identity at insertion, so their earlier
 sampling races are not covered. New producers capture identity and amounts in
 one evaluation snapshot. Key reminders deduplicate reason/date and cancel
-superseded pending sends. Retired unused grants do not emit lapse.
+superseded pending sends. Retired unused grants do not emit lapse. A
+`spend.spike` rule requires a project and compares the last complete UTC day
+of priced spend with the mean of the complete priced days in its trailing
+`baseline_days` window (default 14). It fires once per rule and day only when
+at least `minimum_history_days` days qualify (default 7) and the day clears
+both `increase_percent` (default 50) and `minimum_increase` in the pricing
+currency (default 10). Days with unpriced or incomplete usage never count as
+zero, and an incompletely priced day is rechecked on later worker passes
+instead of firing. A baseline day that overlaps a request metadata ingestion
+gap is left out of the mean, and the rule does not fire for a day that overlaps
+one. The payload freezes the actual spend, the baseline, the
+increase and a relative `usage_path` for that project and day. The rule only
+notifies and never changes a budget or blocks traffic.
 
 HMAC-SHA256 webhook signatures cover exact bodies in
 `X-OLP-Signature: sha256=<hex>`. Payloads are metadata-only; failures retain safe
@@ -342,3 +354,4 @@ checkpoints and delivery status counters.
 | `runtime.install_failed` | A gateway cannot install the newest runtime generation |
 | `worker.stale` | A worker task misses its checkpoint bound |
 | `report.spend` | A scheduled daily, weekly or monthly spend digest is due |
+| `spend.spike` | A project's last complete UTC day of priced spend jumped above its trailing baseline by both configured thresholds |

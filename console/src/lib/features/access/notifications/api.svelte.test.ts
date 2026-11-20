@@ -548,6 +548,42 @@ it('writes only the subject and scope supported by the selected rule event', asy
   ]);
 });
 
+it('requires a project and preserves spike thresholds', () => {
+  const draft = newRuleDraft('spend.spike', {
+    name: 'Spend spike',
+    destinationId: destination.id,
+    projectId: ''
+  });
+  expect(createRuleInput(draft)).toEqual({
+    kind: 'invalid',
+    message: 'Choose a project.'
+  });
+  const scoped = createRuleInput({
+    ...draft,
+    projectId: 'project-id',
+    values: {
+      baseline_days: '21',
+      minimum_history_days: '10',
+      increase_percent: '75.50',
+      minimum_increase: '25.00'
+    }
+  });
+  expect(scoped.kind).toBe('valid');
+  if (scoped.kind !== 'valid') return;
+  expect(scoped.input).toEqual({
+    name: 'Spend spike',
+    event: 'spend.spike',
+    destination_id: destination.id,
+    project_id: 'project-id',
+    configuration: {
+      baseline_days: 21,
+      minimum_history_days: 10,
+      increase_percent: '75.50',
+      minimum_increase: '25.00'
+    }
+  });
+});
+
 it('clears channel credentials when the destination type changes', () => {
   const email = {
     type: 'email' as const,
