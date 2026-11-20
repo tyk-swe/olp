@@ -192,25 +192,29 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 	upstream.SetReadLimit(codewire.MaxBody)
 	upstreamMessages := codeRead(ctx, upstream)
 	var active *codeAttempt
+	generation := ctx
+	var stopGeneration context.CancelFunc
+	var generationDone <-chan struct{}
 	defer func() {
+		if stopGeneration != nil {
+			stopGeneration()
+		}
 		if active != nil {
+			_ = upstream.CloseNow()
 			active.finish(ctx)
 		}
 	}()
 	account := connection.permit.Account.ID
-	var generationDone <-chan time.Time
-	var generationTimer *time.Timer
-	defer func() {
-		if generationTimer != nil {
-			generationTimer.Stop()
-		}
-	}()
 	refuse := func(err error) {
 		if active != nil {
 			active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 		}
 		refusal := codeRefusal(err)
 		f.recordCodeRefusal(ctx, route, keyID, digest, refusal.Code)
+		if refusal.Code == "code_account_busy" {
+			_ = client.Close(websocket.StatusTryAgainLater, refusal.Code)
+			return
+		}
 		_ = client.Close(websocket.StatusPolicyViolation, refusal.Code)
 	}
 	var authorityTick <-chan time.Time
@@ -256,7 +260,10 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = f.prepareCode(r.WithContext(ctx), release, route, observation, inbound, codeadapter.WebSocket, nil, message.body)
+			requestContext, stop := context.WithTimeout(ctx, codeGenerationTimeout)
+			generation, stopGeneration = requestContext, stop
+			generationDone = generation.Done()
+			active, err = f.prepareCode(r.WithContext(generation), release, route, observation, inbound, codeadapter.WebSocket, nil, message.body)
 			if err != nil {
 				refuse(err)
 				return
@@ -288,16 +295,14 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 				refuse(err)
 				return
 			}
-			if err := active.dispatch(ctx); err != nil {
+			if err := active.dispatch(generation); err != nil {
 				refuse(err)
 				return
 			}
-			if err := codeWrite(ctx, upstream, message.kind, body); err != nil {
+			if err := codeWrite(generation, upstream, message.kind, body); err != nil {
 				active.transportFailed(ctx, err)
 				return
 			}
-			generationTimer = time.NewTimer(codeGenerationTimeout)
-			generationDone = generationTimer.C
 		case message, open := <-upstreamMessages:
 			if !open {
 				return
@@ -325,7 +330,7 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 				}
 				return message.body
 			}()
-			if err := codeWrite(ctx, client, message.kind, body); err != nil {
+			if err := codeWrite(generation, client, message.kind, body); err != nil {
 				if active != nil {
 					active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				}
@@ -334,7 +339,8 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 			if observation.Terminal && active != nil {
 				active.finish(ctx)
 				active = nil
-				generationTimer.Stop()
+				stopGeneration()
+				generation = ctx
 				generationDone = nil
 			}
 		}

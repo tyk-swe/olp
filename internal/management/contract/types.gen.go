@@ -1456,6 +1456,7 @@ func (e CodeDecisionReason) Valid() bool {
 // Defines values for CodeDecisionSkippedClass.
 const (
 	CodeDecisionSkippedClassBand        CodeDecisionSkippedClass = "band"
+	CodeDecisionSkippedClassBusy        CodeDecisionSkippedClass = "busy"
 	CodeDecisionSkippedClassCooldown    CodeDecisionSkippedClass = "cooldown"
 	CodeDecisionSkippedClassTree        CodeDecisionSkippedClass = "tree"
 	CodeDecisionSkippedClassUnavailable CodeDecisionSkippedClass = "unavailable"
@@ -1466,6 +1467,8 @@ const (
 func (e CodeDecisionSkippedClass) Valid() bool {
 	switch e {
 	case CodeDecisionSkippedClassBand:
+		return true
+	case CodeDecisionSkippedClassBusy:
 		return true
 	case CodeDecisionSkippedClassCooldown:
 		return true
@@ -8912,11 +8915,14 @@ type CodeAccount struct {
 	// HealthObservedAt Time of the latest serving health observation. Enrollment and refresh do not qualify serving health.
 	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
 	Id               openapi_types.UUID           `json:"id"`
-	Models           []string                     `json:"models"`
-	Name             string                       `json:"name"`
-	Principal        string                       `json:"principal"`
-	ProjectId        openapi_types.UUID           `json:"project_id"`
-	ProviderId       openapi_types.UUID           `json:"provider_id"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	Principal      string                                       `json:"principal"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	ProviderId     openapi_types.UUID                           `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
@@ -8961,6 +8967,9 @@ type CodeAccountList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// CodeAccountMaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+type CodeAccountMaxConcurrency = int32
+
 // CodeAccountWrite defines model for CodeAccountWrite.
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
@@ -8971,10 +8980,13 @@ type CodeAccountWrite struct {
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
-	Models            []string                `json:"models"`
-	Name              string                  `json:"name"`
-	ProjectId         openapi_types.UUID      `json:"project_id"`
-	ProviderId        openapi_types.UUID      `json:"provider_id"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency,omitempty"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	ProviderId     openapi_types.UUID                           `json:"provider_id"`
 }
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
@@ -9292,7 +9304,7 @@ type CodeDecision struct {
 	Skipped []struct {
 		AccountId openapi_types.UUID `json:"account_id"`
 
-		// Class Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+		// Class Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
 		Class CodeDecisionSkippedClass `json:"class"`
 	} `json:"skipped"`
 }
@@ -9306,7 +9318,7 @@ type CodeDecisionEvidence string
 // CodeDecisionReason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
 type CodeDecisionReason string
 
-// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
 type CodeDecisionSkippedClass string
 
 // CodeDecisionList defines model for CodeDecisionList.
@@ -9686,10 +9698,13 @@ type ConfigurationCodeAccount struct {
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
 	Id                openapi_types.UUID      `json:"id"`
-	Models            []string                `json:"models"`
-	Name              string                  `json:"name"`
-	Project           string                  `json:"project"`
-	Provider          string                  `json:"provider"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency,omitempty"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	Project        string                                       `json:"project"`
+	Provider       string                                       `json:"provider"`
 }
 
 // ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
