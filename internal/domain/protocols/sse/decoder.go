@@ -36,13 +36,13 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 	events := NewDecoder(r, maxEventBytes)
 	for {
 		frame, err := events.Next()
-		if errors.Is(err, io.EOF) {
+		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if err = emit(frame); err != nil {
+		if err := emit(frame); err != nil {
 			return err
 		}
 	}

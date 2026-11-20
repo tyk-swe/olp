@@ -125,12 +125,12 @@ func readLine(reader *bufio.Reader) ([]byte, bool, error) {
 			return nil, false, batches.ErrLineTooLarge
 		}
 		line = append(line, part...)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			return line, true, nil
-		case errors.Is(err, bufio.ErrBufferFull):
+		case bufio.ErrBufferFull:
 			continue
-		case errors.Is(err, io.EOF):
+		case io.EOF:
 			if len(line) == 0 {
 				return nil, false, nil
 			}

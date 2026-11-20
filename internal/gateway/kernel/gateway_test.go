@@ -2779,3 +2779,27 @@ func TestStagedBodyFailureBlamesTheProviderOnlyWhenItsBodyBreaks(t *testing.T) {
 		})
 	}
 }
+
+func TestRetainedUploadRefusesAMultipartBodyCutBeforeItsFinalBoundary(t *testing.T) {
+	t.Parallel()
+	skill := retainedapi.Endpoint{Family: retainedapi.Family{Operation: "skill"}, Action: "create", Method: http.MethodPost}
+	complete := "--frame\r\nContent-Disposition: form-data; name=\"file\"; filename=\"skill.zip\"\r\n\r\ncontent\r\n--frame--\r\n"
+	server := &Server{Config: Config{MaxBodyBytes: 1 << 20}}
+	for name, body := range map[string]string{
+		"empty":         "",
+		"cut in a part": strings.TrimSuffix(complete, "--frame--\r\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/skills", strings.NewReader(body))
+			request.Header.Set("Content-Type", "multipart/form-data; boundary=frame")
+			if _, _, _, failure := server.readRetainedBody(request, skill); failure == nil || failure.Status != http.StatusBadRequest || failure.Code != "invalid_request" {
+				t.Fatalf("truncated upload = %+v, want 400 invalid_request", failure)
+			}
+		})
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/skills", strings.NewReader(complete))
+	request.Header.Set("Content-Type", "multipart/form-data; boundary=frame")
+	if read, _, _, failure := server.readRetainedBody(request, skill); failure != nil || string(read) != complete {
+		t.Fatalf("complete upload = %q %+v, want the body back", read, failure)
+	}
+}

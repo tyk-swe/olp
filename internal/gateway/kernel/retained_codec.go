@@ -77,7 +77,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		var fileID string
 		for {
 			part, err := reader.NextPart()
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF {
 				break
 			}
 			if err != nil {
@@ -96,7 +96,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 			if strings.HasSuffix(name, "_id") || strings.HasSuffix(name, "_ids") || e.Kind == "container_file" && name != "file" {
 				return nil, source, "", fault.InvalidRequest("invalid_resource_reference", "Multipart resource references are not supported.", nil)
 			}
-			if _, err = io.Copy(io.Discard, part); err != nil {
+			if _, err := io.Copy(io.Discard, part); err != nil {
 				return nil, source, "", fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 			}
 		}
@@ -161,11 +161,11 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	}
 	var parts []partContent
 	for {
-		part, err := reader.NextRawPart()
-		if errors.Is(err, io.EOF) {
+		part, readErr := reader.NextRawPart()
+		if readErr == io.EOF {
 			break
 		}
-		if err != nil {
+		if readErr != nil {
 			return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 		}
 		data, err := io.ReadAll(part)

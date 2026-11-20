@@ -9,6 +9,19 @@ linters:
       checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1019, ST1023]
     errorlint:
       errorf: false
+      allowed-errors:
+        - err: io.EOF
+          fun: (*mime/multipart.Reader).NextPart
+        - err: io.EOF
+          fun: (*mime/multipart.Reader).NextRawPart
+        - err: io.EOF
+          fun: (*encoding/xml.Decoder).Token
+        - err: io.EOF
+          fun: (*github.com/tyk-swe/olp/internal/domain/protocols/sse.Decoder).Next
+        - err: io.EOF
+          fun: (*github.com/tyk-swe/olp/internal/domain/protocols/sse.RawDecoder).Next
+        - err: bufio.ErrBufferFull
+          fun: (*bufio.Reader).ReadSlice
     forbidigo:
       analyze-types: true
       forbid:

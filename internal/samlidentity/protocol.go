@@ -40,7 +40,7 @@ func BoundedXML(raw []byte) error {
 	ids := map[string]bool{}
 	for {
 		token, err := d.Token()
-		if errors.Is(err, io.EOF) {
+		if err == io.EOF {
 			break
 		}
 		if err != nil {

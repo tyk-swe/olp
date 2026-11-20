@@ -2,7 +2,6 @@ package codeforward
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -149,12 +148,12 @@ func (a *codeAttempt) scrubPaidStream(reader io.Reader, writer io.Writer) error 
 	var pending bytes.Buffer
 	decoder := sse.NewRawDecoder(io.TeeReader(reader, &pending), codewire.MaxBody)
 	for {
-		frame, err := decoder.Next()
-		if err != nil {
+		frame, readErr := decoder.Next()
+		if readErr != nil {
 			if _, writeErr := writer.Write(pending.Bytes()); writeErr != nil {
 				return writeErr
 			}
-			if errors.Is(err, io.EOF) {
+			if readErr == io.EOF {
 				return nil
 			}
 			_, copyErr := io.Copy(writer, reader)
