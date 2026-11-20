@@ -17,24 +17,46 @@ func codeGeneration(operation string) bool {
 }
 
 func chooseCodeAccount(ctx context.Context, tx pgx.Tx, checkCapacity bool, candidates []codeCandidate) (codemode.Candidate, []codemode.Candidate, error) {
-	outcomes := make([]codemode.Candidate, len(candidates))
-	for index, candidate := range candidates {
-		outcomes[index] = candidate.outcome
+	outcomes := slices.Collect(func(yield func(codemode.Candidate) bool) {
+		for _, candidate := range candidates {
+			if !yield(candidate.outcome) {
+				return
+			}
+		}
+	})
+	if !checkCapacity {
+		chosen, _ := codemode.ChooseCandidate(outcomes)
+		return chosen, outcomes, nil
 	}
-	for {
-		chosen, ok := codemode.ChooseCandidate(outcomes)
-		if !ok || !chosen.Eligible() || !checkCapacity {
-			return chosen, outcomes, nil
+	return chooseAvailableCodeAccount(ctx, tx, outcomes)
+}
+
+func chooseAvailableCodeAccount(ctx context.Context, tx pgx.Tx, outcomes []codemode.Candidate) (codemode.Candidate, []codemode.Candidate, error) {
+	chosen, ok := codemode.ChooseCandidate(outcomes)
+	if !ok || !chosen.Eligible() {
+		return chosen, outcomes, nil
+	}
+	available, err := lockCodeCapacity(ctx, tx, chosen.AccountID)
+	if err != nil || available {
+		return chosen, outcomes, err
+	}
+	remaining := slices.Collect(func(yield func(codemode.Candidate) bool) {
+		for _, candidate := range outcomes {
+			if !yield(codeCapacityOutcome(candidate, chosen.AccountID)) {
+				return
+			}
 		}
-		available, err := lockCodeCapacity(ctx, tx, chosen.AccountID)
-		if err != nil {
-			return chosen, outcomes, err
-		}
-		if available {
-			return chosen, outcomes, nil
-		}
-		index := slices.Index(outcomes, chosen)
-		outcomes[index].Busy = true
+	})
+	return chooseAvailableCodeAccount(ctx, tx, remaining)
+}
+
+func codeCapacityOutcome(candidate codemode.Candidate, fullAccount string) codemode.Candidate {
+	if candidate.AccountID != fullAccount {
+		return candidate
+	}
+	return codemode.Candidate{
+		AccountID: candidate.AccountID, Available: candidate.Available, Cooldown: candidate.Cooldown,
+		Busy: true, Position: candidate.Position, Score: candidate.Score, Band: candidate.Band, ResetAt: candidate.ResetAt,
 	}
 }
 
