@@ -307,9 +307,11 @@ func TestReserveRejectsBypassableLimits(t *testing.T) {
 		return err
 	}
 	accepted := append([]Request{base()}, func() []Request {
-		connection, slot := base(), base()
+		connection, slot, split := base(), base(), base()
 		connection.Lookup, slot.Lookup = limits.ConnectionLookup(owner), limits.SlotLookup(owner)
-		return []Request{connection, slot}
+		split.Rate.InputTokensPerMinute, split.Rate.OutputTokensPerMinute = pointer(int64(600)), pointer(int64(400))
+		split.Rate.InputTokens, split.Rate.OutputTokens = 3, 2
+		return []Request{connection, slot, split}
 	}()...)
 	for _, request := range accepted {
 		if err := reserve(request); err != nil {
@@ -322,6 +324,19 @@ func TestReserveRejectsBypassableLimits(t *testing.T) {
 	}{
 		{"zero requests per minute", func(r *Request) { r.Rate.RequestsPerMinute = pointer(int64(0)) }},
 		{"negative tokens per minute", func(r *Request) { r.Rate.TokensPerMinute = pointer(int64(-1)) }},
+		{"negative input tokens per minute", func(r *Request) {
+			r.Rate.InputTokensPerMinute, r.Rate.InputTokens = pointer(int64(-1)), 5
+		}},
+		{"negative output tokens per minute", func(r *Request) {
+			r.Rate.OutputTokensPerMinute, r.Rate.InputTokens, r.Rate.OutputTokens = pointer(int64(-1)), 0, 5
+		}},
+		{"split input above the request", func(r *Request) {
+			r.Rate.InputTokensPerMinute, r.Rate.InputTokens = pointer(int64(100)), 6
+		}},
+		{"split output above the request", func(r *Request) {
+			r.Rate.OutputTokensPerMinute, r.Rate.OutputTokens = pointer(int64(100)), 6
+		}},
+		{"negative requested input tokens", func(r *Request) { r.Rate.InputTokens = -1 }},
 		{"negative requested tokens", func(r *Request) { r.Rate.Tokens = -1 }},
 		{"no tokens requested under a token limit", func(r *Request) { r.Rate.Tokens = 0 }},
 		{"concurrency beyond the Lua range", func(r *Request) { r.Rate.MaxConcurrency = pointer(limits.MaxCounter + 1) }},

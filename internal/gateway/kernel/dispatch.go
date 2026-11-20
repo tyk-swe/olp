@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 // gateVerdict is the shared pre-dispatch decision for one candidate slot.
@@ -60,15 +61,15 @@ type dispatchHold struct {
 	probed      bool
 	settled     bool
 	budgets     []string
-	estimate    int64
+	demand      quota.TokenDemand
 	pinned      []*PinnedExchange
 }
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
-func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
+func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time) gateResult {
 	if x.workflow != nil {
-		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+		gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority)
 		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
 			for _, owner := range quota.AttemptCaps(x.Route, provider, slot) {
 				if owner.Limits != nil {
@@ -85,7 +86,7 @@ func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attem
 		}
 		return gateResult{verdict: gateUnmeterable, quota: caps.quota}
 	}
-	gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+	gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority)
 	if gate.hold != nil {
 		gate.hold.budgets = caps.owners
 	}
@@ -94,12 +95,19 @@ func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attem
 
 // settle reconciles and releases the quota reservation once the attempt has
 // ended. It runs at most once so a pre-dispatch release cannot double-refund.
-func (h *dispatchHold) settle(ctx context.Context, dispatched bool, actual *int64) {
+func (h *dispatchHold) settle(ctx context.Context, dispatched bool, usage *admission.TokenUsage) {
 	if h == nil || h.settled {
 		return
 	}
 	h.settled = true
-	h.reservation.Settle(ctx, dispatched, actual)
+	h.reservation.Settle(ctx, dispatched, usage)
+}
+
+func totalUsage(actual *int64) *admission.TokenUsage {
+	if actual == nil {
+		return nil
+	}
+	return &admission.TokenUsage{Total: *actual}
 }
 
 // releaseHold abandons an admitted slot before its dispatch: the quota
@@ -202,7 +210,7 @@ func (s *Server) SettleSessionHold(ctx context.Context, x *Call, hold *dispatchH
 	if hold == nil {
 		return
 	}
-	hold.settle(ctx, x.dispatched, actual)
+	hold.settle(ctx, x.dispatched, totalUsage(actual))
 	if !hold.probed {
 		return
 	}
@@ -219,7 +227,6 @@ type attemptCompletion struct {
 	failure     *AttemptFailure
 	authority   *fault.Error
 	attempt     routing.Attempt
-	estimate    int64
 	finishLease func() *fault.Error
 }
 
@@ -281,7 +288,7 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *Call, complet
 	dispatched := completion.failure == nil || completion.failure.dispatched
 	x.dispatched = x.dispatched || dispatched
 	x.stepDispatched = x.stepDispatched || dispatched
-	h.settle(ctx, dispatched, quota.SettledAttemptTokens(&completion.fact, completion.estimate))
+	h.settle(ctx, dispatched, quota.SettledAttemptUsage(&completion.fact, h.demand))
 	if dispatched {
 		x.spendCaps(h.budgets, completion.attempt)
 	}
@@ -351,7 +358,7 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
-func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time, priority string) gateResult {
+func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
 	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
@@ -373,11 +380,11 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
-	return acquireDispatchHold(ctx, s, provider, slot, estimate, ttl, priority)
+	return acquireDispatchHold(ctx, s, provider, slot, demand, ttl, priority)
 }
 
-func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) gateResult {
-	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, estimate, ttl, priority)
+func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, ttl time.Duration, priority string) gateResult {
+	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, demand, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}
@@ -389,7 +396,7 @@ func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provi
 		reservation.Settle(ctx, false, nil)
 		return gateResult{verdict: gateDenied}
 	}
-	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed, estimate: estimate}}
+	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed, demand: demand}}
 }
 
 // cooldownFailure parks the credential or slot that produced a retryable
@@ -439,5 +446,5 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 }
 
 func rateLimitedTarget(refusal *quota.TargetRefusal) *AttemptFailure {
-	return &AttemptFailure{class: classRateLimit, quota: refusal.Quota, retryAfter: refusal.RetryAfter}
+	return &AttemptFailure{class: classRateLimit, quota: refusal.Quota, dimension: refusal.Dimension, retryAfter: refusal.RetryAfter}
 }

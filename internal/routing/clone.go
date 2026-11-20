@@ -131,6 +131,8 @@ func cloneLimits(l *Limits) *Limits {
 	out := *l
 	out.RequestsPerMinute = copyPointer(l.RequestsPerMinute)
 	out.TokensPerMinute = copyPointer(l.TokensPerMinute)
+	out.InputTokensPerMinute = copyPointer(l.InputTokensPerMinute)
+	out.OutputTokensPerMinute = copyPointer(l.OutputTokensPerMinute)
 	out.MaxConcurrency = copyPointer(l.MaxConcurrency)
 	out.Supply = cloneSupply(l.Supply)
 	return &out
@@ -143,6 +145,8 @@ func cloneSlot(s Slot) Slot {
 	s.AllowedAPIKeys = slices.Clone(s.AllowedAPIKeys)
 	s.RequestsPerMinute = copyPointer(s.RequestsPerMinute)
 	s.TokensPerMinute = copyPointer(s.TokensPerMinute)
+	s.InputTokensPerMinute = copyPointer(s.InputTokensPerMinute)
+	s.OutputTokensPerMinute = copyPointer(s.OutputTokensPerMinute)
 	s.MaxConcurrency = copyPointer(s.MaxConcurrency)
 	s.Supply = cloneSupply(s.Supply)
 	return s

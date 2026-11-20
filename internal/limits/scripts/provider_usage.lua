@@ -15,14 +15,16 @@ end
 local t = redis.call("TIME")
 local w = math.floor(tonumber(t[1]) / 60)
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-local r = redis.call("HMGET", KEYS[1], "window", "rpm", "tpm")
-local rpm, tpm = 0, 0
+local r = redis.call("HMGET", KEYS[1], "window", "rpm", "tpm", "itpm", "otpm")
+local rpm, tpm, itpm, otpm = 0, 0, 0, 0
 if r[1] ~= false or r[2] ~= false or r[3] ~= false then
   local window = unsigned(r[1])
   local requests, tokens = unsigned(r[2]), unsigned(r[3])
-  if window == nil or requests == nil or tokens == nil or window > w then
+  local input = r[4] == false and 0 or unsigned(r[4])
+  local output = r[5] == false and 0 or unsigned(r[5])
+  if window == nil or requests == nil or tokens == nil or input == nil or output == nil or window > w then
     return redis.error_reply("invalid rate state")
   end
-  if window == w then rpm, tpm = requests, tokens end
+  if window == w then rpm, tpm, itpm, otpm = requests, tokens, input, output end
 end
-return {rpm, tpm, redis.call("ZCOUNT", KEYS[2], "(" .. now, "+inf")}
+return {rpm, tpm, redis.call("ZCOUNT", KEYS[2], "(" .. now, "+inf"), itpm, otpm}

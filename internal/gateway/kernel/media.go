@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
@@ -309,7 +310,7 @@ type MediaOutcome struct {
 
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Call) *MediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*transport.Result]{
-		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
+		demand: func(routing.Attempt, *routing.Provider) quota.TokenDemand { return quota.CombinedDemand(x.estimate) },
 		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},

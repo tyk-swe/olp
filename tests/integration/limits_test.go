@@ -148,6 +148,138 @@ func TestRequestWindowRefusesTheOverflowAndGivesBackRefunds(t *testing.T) {
 	}
 }
 
+func splitRated(inputLimit, outputLimit, input, output int64) admission.RateLimits {
+	return admission.RateLimits{
+		InputTokensPerMinute: new(inputLimit), OutputTokensPerMinute: new(outputLimit),
+		Tokens: input + output, InputTokens: input, OutputTokens: output,
+	}
+}
+
+func TestSplitTokenLimitsRefuseEachDimensionWithoutPartialReservation(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	runner := newRunner(t)
+	limiter := admission.NewDurable(runner, nil)
+	request := rated(splitRated(100, 50, 60, 40))
+	asking := func(input, output int64) admission.Request {
+		sized := request
+		sized.Rate = splitRated(100, 50, input, output)
+		return sized
+	}
+	if _, err := limiter.Reserve(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := limiter.Reserve(t.Context(), asking(30, 20)); refusal(err).Dimension != limits.DimensionOutputTokens {
+		t.Fatalf("got %v for output past its limit, want an output token refusal", err)
+	}
+	if _, err := limiter.Reserve(t.Context(), asking(40, 10)); err != nil {
+		t.Fatalf("the refused reservation left input behind: %v", err)
+	}
+	if _, err := limiter.Reserve(t.Context(), asking(1, 0)); refusal(err).Dimension != limits.DimensionInputTokens {
+		t.Fatalf("got %v for input past its limit, want an input token refusal", err)
+	}
+	usage, err := runner.Usage(t.Context(), request.Lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokensThisMinute != 100 || usage.OutputTokensThisMinute != 50 || usage.TokensThisMinute != 0 {
+		t.Fatalf("usage = %+v, want 100 input and 50 output counted apart", usage)
+	}
+}
+
+func TestSplitTokenRefundReturnsBothDimensions(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	limiter := admission.NewDurable(newRunner(t), nil)
+	request := rated(splitRated(100, 50, 60, 40))
+	lease, err := limiter.Reserve(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Refund(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	full := request
+	full.Rate = splitRated(100, 50, 100, 50)
+	if _, err := limiter.Reserve(t.Context(), full); err != nil {
+		t.Fatalf("the refund kept part of a dimension: %v", err)
+	}
+}
+
+func TestSplitTokenSettlementCreditsUnusedOutputOnce(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	limiter := admission.NewDurable(newRunner(t), nil)
+	request := rated(splitRated(1000, 100, 10, 80))
+	asking := func(input, output int64) admission.Request {
+		sized := request
+		sized.Rate = splitRated(1000, 100, input, output)
+		return sized
+	}
+	lease, err := limiter.Reserve(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled := &admission.TokenUsage{Input: 10, Output: 5, Total: 15, Credit: true}
+	if err := lease.SettleUsage(t.Context(), settled); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.SettleUsage(t.Context(), settled); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := limiter.Reserve(t.Context(), asking(0, 96)); refusal(err).Dimension != limits.DimensionOutputTokens {
+		t.Fatalf("got %v for output settled twice over, want an output token refusal", err)
+	}
+	if _, err := limiter.Reserve(t.Context(), asking(0, 95)); err != nil {
+		t.Fatalf("the credited output did not come back: %v", err)
+	}
+	if err := lease.Refund(t.Context()); err == nil {
+		t.Fatal("a reconciled lease refunded without error")
+	}
+}
+
+func TestSplitTokenLimitsCannotBeOverbookedAcrossReplicas(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	prefix := "olp:" + uuid.NewString() + ":"
+	limiters := make([]*admission.Limiter, 2)
+	for i := range limiters {
+		runner, err := scripts.NewRunner(harness.Valkey(t), prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		limiters[i] = admission.NewDurable(runner, nil)
+	}
+	request := rated(splitRated(100, 100, 30, 30))
+	type outcome struct {
+		lease *admission.Lease
+		err   error
+	}
+	outcomes := make(chan outcome, 12)
+	var group sync.WaitGroup
+	for i := range 12 {
+		group.Go(func() {
+			lease, err := limiters[i%len(limiters)].Reserve(t.Context(), request)
+			outcomes <- outcome{lease, err}
+		})
+	}
+	group.Wait()
+	close(outcomes)
+	admitted := 0
+	for o := range outcomes {
+		switch {
+		case o.err == nil:
+			admitted++
+		case refusal(o.err).Dimension == limits.DimensionInputTokens || refusal(o.err).Dimension == limits.DimensionOutputTokens:
+		default:
+			t.Errorf("got %v, want a split token refusal", o.err)
+		}
+	}
+	if admitted != 3 {
+		t.Fatalf("admitted %d concurrent reservations, want exactly 3 of 30 tokens in a 100-token window", admitted)
+	}
+}
+
 func TestTokenWindowChargesWhatARequestActuallyUsed(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()

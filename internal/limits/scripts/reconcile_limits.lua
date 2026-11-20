@@ -2,8 +2,8 @@
 -- active fixed UTC-minute window. Reconciliation is idempotent per lease so
 -- callers may safely retry an ambiguous transport failure.
 -- KEYS: stable rate hash
--- ARGV: reservation window_id, token_adjustment, lease_id, and the share class
---       the lease was counted in, if any.
+-- ARGV: reservation window_id, combined, input and output token adjustments,
+--       lease_id, and the share class the lease was counted in, if any.
 
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
 local MAX_SAFE_INTEGER = tonumber(MAX_SAFE_INTEGER_TEXT)
@@ -50,12 +50,17 @@ if stored_window == false or stored_window ~= ARGV[1] then
   return 0
 end
 
-local adjustment = parse_safe_signed_integer(ARGV[2])
-if adjustment == nil or adjustment == 0 then
+local fields = {"tpm", "itpm", "otpm"}
+local adjustments = {}
+for index = 1, 3 do
+  adjustments[index] = parse_safe_signed_integer(ARGV[index + 1])
+end
+if adjustments[1] == nil or adjustments[2] == nil or adjustments[3] == nil
+    or (adjustments[1] == 0 and adjustments[2] == 0 and adjustments[3] == 0) then
   return 0
 end
 
-local lease_id = ARGV[3]
+local lease_id = ARGV[5]
 if type(lease_id) ~= "string" or #lease_id < 1 or #lease_id > 128 then
   return redis.error_reply("invalid lease ID")
 end
@@ -64,17 +69,23 @@ if redis.call("HEXISTS", KEYS[1], reconciliation_field) == 1 then
   return 0
 end
 
-local class = ARGV[4]
+local class = ARGV[6]
 if class ~= nil and string.match(class, "^[a-z]+$") == nil then
   return redis.error_reply("invalid share class")
 end
 
-local current_tpm = parse_safe_unsigned_integer(redis.call("HGET", KEYS[1], "tpm"))
-if current_tpm == nil then
-  return redis.error_reply("invalid token state")
+local function current_of(field, required)
+  local raw = redis.call("HGET", KEYS[1], field)
+  if raw == false then
+    if required then
+      return nil
+    end
+    return 0
+  end
+  return parse_safe_unsigned_integer(raw)
 end
 
-local function adjusted(current)
+local function adjusted(current, adjustment)
   if adjustment > 0 and current > MAX_SAFE_INTEGER - adjustment then
     -- The configured limit cannot exceed this ceiling, so saturation preserves
     -- fail-closed enforcement without storing an inexact Lua number.
@@ -83,18 +94,36 @@ local function adjusted(current)
   return math.max(0, current + adjustment)
 end
 
+local currents = {}
+for index, field in ipairs(fields) do
+  currents[index] = current_of(field, field == "tpm")
+  if currents[index] == nil then
+    return redis.error_reply("invalid token state")
+  end
+end
+
 -- Update the token counts and idempotence marker in one command. A script
 -- runtime error cannot leave a successful adjustment without its marker.
 if class ~= nil then
-  local class_field = "tpm:" .. class
-  local class_tpm = redis.call("HGET", KEYS[1], class_field)
-  class_tpm = class_tpm == false and 0 or parse_safe_unsigned_integer(class_tpm)
-  if class_tpm == nil then
-    return redis.error_reply("invalid token state")
+  local writes = {KEYS[1]}
+  for index, field in ipairs(fields) do
+    local class_current = current_of(field .. ":" .. class, false)
+    if class_current == nil then
+      return redis.error_reply("invalid token state")
+    end
+    writes[#writes + 1] = field
+    writes[#writes + 1] = adjusted(currents[index], adjustments[index])
+    writes[#writes + 1] = field .. ":" .. class
+    writes[#writes + 1] = adjusted(class_current, adjustments[index])
   end
-  redis.call("HSET", KEYS[1], "tpm", adjusted(current_tpm), class_field, adjusted(class_tpm),
-             reconciliation_field, 1)
+  writes[#writes + 1] = reconciliation_field
+  writes[#writes + 1] = 1
+  redis.call("HSET", unpack(writes))
 else
-  redis.call("HSET", KEYS[1], "tpm", adjusted(current_tpm), reconciliation_field, 1)
+  redis.call("HSET", KEYS[1],
+             "tpm", adjusted(currents[1], adjustments[1]),
+             "itpm", adjusted(currents[2], adjustments[2]),
+             "otpm", adjusted(currents[3], adjustments[3]),
+             reconciliation_field, 1)
 end
 return 1

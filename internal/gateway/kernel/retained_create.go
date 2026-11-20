@@ -42,7 +42,7 @@ func (q retainedRequest) create() {
 		q.reply.fail(err)
 		return
 	}
-	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", bound, func(provider *routing.Provider, model string) bool {
+	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", resourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 	}, qualifiers...)
 	end.pin = pin

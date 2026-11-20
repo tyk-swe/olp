@@ -10315,13 +10315,15 @@ type ConfigurationSlotEntry struct {
 // ConfigurationSlotLimits defines model for ConfigurationSlotLimits.
 type ConfigurationSlotLimits struct {
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MaxConcurrency nullable.Nullable[int64]  `json:"max_concurrency"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int64]  `json:"max_concurrency"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int64]          `json:"requests_per_minute"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int64]          `json:"requests_per_minute"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -10393,13 +10395,15 @@ type ConfigurationWorkloadMappingScopes string
 // ConnectionLimits defines model for ConnectionLimits.
 type ConnectionLimits struct {
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -11004,17 +11008,19 @@ type CredentialSlot struct {
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	Enabled        *bool                     `json:"enabled,omitempty"`
-	Id             *openapi_types.UUID       `json:"id,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled              *bool                     `json:"enabled,omitempty"`
+	Id                   *openapi_types.UUID       `json:"id,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	Name              *string                           `json:"name,omitempty"`
-	Priority          *int32                            `json:"priority,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name                  *string                           `json:"name,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	Priority              *int32                            `json:"priority,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -11032,20 +11038,22 @@ type CredentialSlotDetail struct {
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	Enabled        *bool                     `json:"enabled,omitempty"`
-	Etag           openapi_types.UUID        `json:"etag"`
-	Id             *openapi_types.UUID       `json:"id,omitempty"`
-	IsDefault      bool                      `json:"is_default"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled              *bool                     `json:"enabled,omitempty"`
+	Etag                 openapi_types.UUID        `json:"etag"`
+	Id                   *openapi_types.UUID       `json:"id,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	IsDefault            bool                      `json:"is_default"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	Name              *string                           `json:"name,omitempty"`
-	Priority          *int32                            `json:"priority,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	ProviderId        openapi_types.UUID                `json:"provider_id"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name                  *string                           `json:"name,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	Priority              *int32                            `json:"priority,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	ProviderId            openapi_types.UUID                `json:"provider_id"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -14425,9 +14433,11 @@ type ProviderProfilePlugin struct {
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
 type ProviderQuotaUsage struct {
-	ConcurrentRequests int64 `json:"concurrent_requests"`
-	RequestsThisMinute int64 `json:"requests_this_minute"`
-	TokensThisMinute   int64 `json:"tokens_this_minute"`
+	ConcurrentRequests     int64 `json:"concurrent_requests"`
+	InputTokensThisMinute  int64 `json:"input_tokens_this_minute"`
+	OutputTokensThisMinute int64 `json:"output_tokens_this_minute"`
+	RequestsThisMinute     int64 `json:"requests_this_minute"`
+	TokensThisMinute       int64 `json:"tokens_this_minute"`
 }
 
 // ProviderResourceContract defines model for ProviderResourceContract.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -155,14 +156,18 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *Call, p *Pin, route *r
 		copyProvider := p.Provider
 		copySlot := p.Slot
 		copySlot.TokensPerMinute = nil
+		copySlot.InputTokensPerMinute = nil
+		copySlot.OutputTokensPerMinute = nil
 		if p.Provider.Limits != nil {
 			copyLimits := *p.Provider.Limits
 			copyLimits.TokensPerMinute = nil
+			copyLimits.InputTokensPerMinute = nil
+			copyLimits.OutputTokensPerMinute = nil
 			copyProvider.Limits = &copyLimits
 		}
 		provider, slot = &copyProvider, &copySlot
 	}
-	gate := s.gateAttempt(ctx, x, p.attempt, provider, slot, max(ResourceEstimate, x.estimate), s.Now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateAttempt(ctx, x, p.attempt, provider, slot, quota.CombinedDemand(max(ResourceEstimate, x.estimate)), s.Now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

@@ -2767,6 +2767,20 @@
               "null"
             ]
           },
+          "input_tokens_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "daily_cost_limit": {
             "description": "Exact decimal amount in the installation currency.",
             "type": [
@@ -2859,6 +2873,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,
@@ -4283,6 +4315,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,
@@ -9339,11 +9389,23 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "input_tokens_this_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens_this_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
           "requests_this_minute",
           "tokens_this_minute",
+          "input_tokens_this_minute",
+          "output_tokens_this_minute",
           "concurrent_requests"
         ],
         "type": "object"
@@ -22710,6 +22772,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,

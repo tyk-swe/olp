@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
@@ -32,7 +33,7 @@ func (s *Server) VideoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 	if refusal != nil {
 		return s.jobRefused(fact, refusal)
 	}
-	reservation, limited, skip := s.Deps.Admission.ReserveTarget(ctx, &plan.provider, &plan.slot, 0, plan.target.Timeout+jobs.LeaseSlack, "")
+	reservation, limited, skip := s.Deps.Admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "")
 	if skip {
 		return s.jobRefused(fact, &AttemptFailure{class: classLimitsUnavailable})
 	}
@@ -158,6 +159,8 @@ func currentVideoLimits(x *Call, stored routing.Provider, storedSlot routing.Slo
 			slot := storedSlot
 			slot.RequestsPerMinute = currentSlot.RequestsPerMinute
 			slot.TokensPerMinute = currentSlot.TokensPerMinute
+			slot.InputTokensPerMinute = currentSlot.InputTokensPerMinute
+			slot.OutputTokensPerMinute = currentSlot.OutputTokensPerMinute
 			slot.MaxConcurrency = currentSlot.MaxConcurrency
 			return provider, slot
 		}

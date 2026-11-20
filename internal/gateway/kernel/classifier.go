@@ -192,7 +192,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	if e := s.admitClassifier(ctx, x); e != nil {
 		return failed, &Outcome{Err: e}
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {

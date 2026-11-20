@@ -65,7 +65,7 @@ func (s *Server) CreateVideoJob(w http.ResponseWriter, r *http.Request, x *Call,
 		s.Refuse(x, w, e)
 		return
 	}
-	defer func() { hold.settle(ctx, x.dispatched, x.settledTokens()) }()
+	defer func() { hold.settle(ctx, x.dispatched, totalUsage(x.settledTokens())) }()
 
 	reserved, jobErr := s.Deps.Media.Store.Reserve(ctx, videoReservation(x, authority, target.attempt, slot, jobID.String(), deadline))
 	if jobErr != nil {
@@ -161,7 +161,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *Call, attempt routing.At
 		if used >= x.budget || ctx.Err() != nil {
 			break
 		}
-		gate := s.gateAttempt(ctx, x, attempt, provider, &slot, x.estimate, deadline)
+		gate := s.gateAttempt(ctx, x, attempt, provider, &slot, quota.CombinedDemand(x.estimate), deadline)
 		switch gate.verdict {
 		case gateExpired:
 			return nil, routing.Slot{}, (&AttemptFailure{class: ClassTimeout}).Fault()

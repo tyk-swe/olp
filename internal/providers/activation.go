@@ -74,7 +74,7 @@ func onePrincipal(slots []slotRow, cfg connection.Configuration) error {
 }
 
 func (row slotRow) published(authMode connectors.AuthMode) routing.RevisionSlot {
-	slot := routing.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
+	slot := routing.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, InputTokensPerMinute: row.Limits.InputTokensPerMinute, OutputTokensPerMinute: row.Limits.OutputTokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
 	var principal string
 	if connectors.SecretRequired(authMode) {
 		slot.Enabled = slot.Enabled && !row.CredentialRevoked

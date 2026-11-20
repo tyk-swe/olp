@@ -27,7 +27,10 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/release"
@@ -1168,5 +1171,68 @@ func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
 	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
 	if string(ledger.charge) != string(terminal) {
 		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
+	}
+}
+
+func TestCodeProviderDemandHoldsTheReplyBoundAsOutput(t *testing.T) {
+	t.Parallel()
+	const prompt = `"messages":[{"role":"user","content":"fixture"}]`
+	for name, tc := range map[string]struct {
+		classify func([]byte, http.Header) (codemode.Request, error)
+		body     string
+		want     int64
+	}{
+		"messages cap":     {classify: codewire.ClassifyMessages, body: `{"model":"m","max_tokens":300,` + prompt + `}`, want: 300},
+		"chat cap":         {classify: codewire.ClassifyChat, body: `{"model":"m","max_completion_tokens":200,` + prompt + `}`, want: 200},
+		"chat without cap": {classify: codewire.ClassifyChat, body: `{"model":"m",` + prompt + `}`, want: estimate.DefaultOutputTokens},
+		"chat choices":     {classify: codewire.ClassifyChat, body: `{"model":"m","n":3,"max_completion_tokens":200,` + prompt + `}`, want: 600},
+		"chat choices without cap": {
+			classify: codewire.ClassifyChat, body: `{"model":"m","n":2,` + prompt + `}`, want: 2 * estimate.DefaultOutputTokens,
+		},
+		"responses cap": {
+			classify: func(body []byte, headers http.Header) (codemode.Request, error) {
+				return codexwire.Classify(body, headers, "responses", false)
+			},
+			body: `{"model":"m","max_output_tokens":150,"input":"fixture"}`, want: 150,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			request, err := tc.classify([]byte(tc.body), http.Header{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			demand := codeProviderDemand(request)
+			if demand.Output != tc.want || demand.Input < 1 || demand.Total != demand.Input+demand.Output {
+				t.Fatalf("demand = %+v, want %d output tokens beside the sized input", demand, tc.want)
+			}
+		})
+	}
+}
+
+func TestSettledCodeUsageChargesEachTokenDimension(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		usage codemode.Usage
+		want  *admission.TokenUsage
+	}{
+		"nothing reported": {},
+		"total only":       {usage: codemode.Usage{Total: new(int64(15))}, want: &admission.TokenUsage{Total: 15}},
+		"input and output": {
+			usage: codemode.Usage{Total: new(int64(15)), Input: new(int64(10)), Output: new(int64(5))},
+			want:  &admission.TokenUsage{Input: 10, Output: 5, Total: 15, Credit: true},
+		},
+		"cached input": {
+			usage: codemode.Usage{Total: new(int64(1025)), Input: new(int64(1000)), Output: new(int64(25)), Cached: new(int64(800))},
+			want:  &admission.TokenUsage{Input: 200, Output: 25, Total: 1025, Credit: true},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := settledCodeUsage(tc.usage)
+			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
+				t.Fatalf("settledCodeUsage = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
