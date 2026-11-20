@@ -30,13 +30,19 @@ func TestGeminiDecisionRoute(t *testing.T) {
 		name, body, result string
 		reason             string
 		want, calls        int
+		withoutUsage       bool
 		allowFetch         bool
 		policy             *contentpolicy.Policy
 	}{
 		{name: "native answers and usage", body: request, result: answer, want: http.StatusOK, calls: 1},
 		{name: "different answer key", body: request, result: strings.Replace(answer, `"access":`, `"other":`, 1), want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
 		{name: "invalid choice distribution", body: request, result: strings.Replace(answer, `"orders":0.2`, `"other":0.2`, 1), want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
+		{name: "missing usage", body: request, result: strings.SplitN(answer, `,"usage":`, 2)[0] + "}", want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
+		{name: "null usage", body: request, result: strings.SplitN(answer, `,"usage":`, 2)[0] + `,"usage":null}`, want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
+		{name: "inconsistent usage total", body: request, result: strings.Replace(answer, `"total_tokens":19`, `"total_tokens":20`, 1), want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
 		{name: "native safety feedback", body: request, result: `{"answers":{},"prompt_feedback":{"block_reason":"safety"},"usage":{"total_input_tokens":19,"total_output_tokens":0,"total_tokens":19}}`, want: http.StatusOK, calls: 1},
+		{name: "native safety feedback without usage", body: request, result: `{"answers":{},"prompt_feedback":{"block_reason":"safety"}}`, want: http.StatusOK, calls: 1, withoutUsage: true},
+		{name: "native safety feedback with inconsistent usage", body: request, result: `{"answers":{},"prompt_feedback":{"block_reason":"safety"},"usage":{"total_input_tokens":19,"total_output_tokens":0,"total_tokens":20}}`, want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
 		{name: "invalid question key", body: strings.Replace(request, `"access":`, `"bad key":`, 1), want: http.StatusBadRequest},
 		{name: "inline input", body: inline, result: answer, want: http.StatusOK, calls: 1},
 		{name: "inline input over byte limit", body: strings.Replace(inline, "AA==", "AAA=", 1), want: http.StatusBadRequest},
@@ -90,14 +96,30 @@ func TestGeminiDecisionRoute(t *testing.T) {
 			if tc.reason != "" && !strings.Contains(string(got), `"reason":"`+tc.reason+`"`) {
 				t.Fatalf("expected error reason %s, body %s", tc.reason, got)
 			}
-			if tc.want == http.StatusOK {
-				if string(got) != tc.result {
-					t.Fatalf("native response changed: %s", got)
-				}
+			if tc.want == http.StatusBadGateway {
 				env := h.sink.await(t, 1)[0]
-				if env.Operation != "decision" || env.Surface != "gemini" || env.Usage == nil || env.Usage.InputTokens != 19 || env.Usage.OutputTokens != 0 || env.Usage.TotalTokens != env.Usage.InputTokens {
-					t.Fatalf("incorrect accounting envelope: %+v", env)
+				if env.Usage != nil || len(env.Attempts) != 1 || env.Attempts[0].UsageObserved || !env.Attempts[0].BillingUncertain {
+					t.Fatalf("invalid response was accounted as measured usage: %+v", env)
 				}
+			}
+			if tc.want != http.StatusOK {
+				return
+			}
+			if string(got) != tc.result {
+				t.Fatalf("native response changed: %s", got)
+			}
+			env := h.sink.await(t, 1)[0]
+			if env.Operation != "decision" || env.Surface != "gemini" {
+				t.Fatalf("incorrect accounting envelope: %+v", env)
+			}
+			if tc.withoutUsage {
+				if env.Usage != nil {
+					t.Fatalf("safety response without usage recorded counters: %+v", env.Usage)
+				}
+				return
+			}
+			if env.Usage == nil || env.Usage.InputTokens != 19 || env.Usage.OutputTokens != 0 || env.Usage.TotalTokens != env.Usage.InputTokens {
+				t.Fatalf("incorrect usage: %+v", env.Usage)
 			}
 		})
 	}
@@ -106,7 +128,7 @@ func TestGeminiDecisionRoute(t *testing.T) {
 func TestGeminiDecisionSafetyFallback(t *testing.T) {
 	t.Parallel()
 	const input = `{"model":"team-chat","input":"Example","questions":{"check":{"type":"noul","instructions":"Does the input contain a word?"}}}`
-	const answer = `{"answers":{"check":{"type":"noul","noul":0.9,"confidence":0.9}}}`
+	const answer = `{"answers":{"check":{"type":"noul","noul":0.9,"confidence":0.9}},"usage":{"total_input_tokens":19,"total_output_tokens":0,"total_tokens":19}}`
 	// The safety code and status follow https://aistudio.google.com/docs/decisions-api#request (2026-11-18).
 	for _, tc := range []struct {
 		code, reason string
