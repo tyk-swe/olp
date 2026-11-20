@@ -167,7 +167,7 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, observation.ChatChoices)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, quota.CombinedDemand(observation.Estimate), codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, codeProviderDemand(observation), codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
@@ -286,7 +286,25 @@ func (a *codeAttempt) finish(ctx context.Context) {
 		a.finishPaid(ctx)
 	}
 	quota.SettleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.forwarder.log)
-	quota.SettleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.forwarder.log)
+	quota.SettleLease(ctx, a.providerLease, a.dispatched, settledCodeUsage(a.usage), a.forwarder.log)
+}
+
+func codeProviderDemand(request codemode.Request) quota.TokenDemand {
+	return quota.GenerationDemand(request.Estimate-request.OutputCap, request.OutputCap)
+}
+
+func settledCodeUsage(usage codemode.Usage) *admission.TokenUsage {
+	if usage.Total == nil {
+		return nil
+	}
+	if usage.Input == nil || usage.Output == nil {
+		return &admission.TokenUsage{Total: *usage.Total}
+	}
+	cached := int64(0)
+	if usage.Cached != nil && *usage.Cached <= *usage.Input {
+		cached = *usage.Cached
+	}
+	return &admission.TokenUsage{Input: *usage.Input - cached, Output: *usage.Output, Total: *usage.Total, Credit: true}
 }
 
 func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {

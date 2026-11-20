@@ -213,7 +213,8 @@ unbounded, and a combined-only configuration behaves as before. Before dispatch,
 atomic reservation holds the estimated input and a bounded output allowance against the
 connection and slot counters shared by every replica, without changing the request. The
 output allowance is the reply bound the request or provider defaults name, or 4096 tokens
-when neither does, per requested candidate. A request exceeding either dimension is
+when neither does, per requested candidate. Subscription code requests and Gemini
+interaction continuations hold the same allowance. A request exceeding either dimension is
 refused on that target before dispatch and routing tries the next candidate; the refusal
 names the exhausted dimension. When usage is reported, the input and output counters
 settle to it, with input excluding tokens read from the provider prompt cache, so unused

@@ -1,6 +1,8 @@
 package quota
 
 import (
+	"cmp"
+
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -18,6 +20,11 @@ func DemandOf(e estimate.Estimate) TokenDemand {
 
 func CombinedDemand(tokens int64) TokenDemand {
 	return TokenDemand{Input: tokens, Total: tokens}
+}
+
+func GenerationDemand(input, replyBound int64) TokenDemand {
+	output := cmp.Or(replyBound, estimate.DefaultOutputTokens)
+	return TokenDemand{Input: input, Output: output, Total: AddBounded(input, output)}
 }
 
 func SettledAttemptUsage(fact *events.AttemptFact, demand TokenDemand) *admission.TokenUsage {

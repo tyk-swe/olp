@@ -88,6 +88,7 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 	// This is a rate estimate only; opaque and server-side context has no proven bound.
 	request.Estimate = max(1, int64(len(body))/4)
 	if cap, err := strconv.ParseInt(field(root, "max_output_tokens").Raw(), 10, 64); err == nil && cap > 0 && cap <= 1<<32 {
+		request.OutputCap = cap
 		request.Estimate += cap
 	}
 	return request, nil

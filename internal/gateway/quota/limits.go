@@ -549,27 +549,18 @@ func slotRequest(slot *routing.Slot, demand TokenDemand, ttl time.Duration, prio
 	}, ttl)
 }
 
-func connectionTokenLimited(provider *routing.Provider) bool {
-	return provider.Limits != nil && (provider.Limits.TokensPerMinute != nil ||
-		provider.Limits.InputTokensPerMinute != nil || provider.Limits.OutputTokensPerMinute != nil)
-}
-
-func slotTokenLimited(slot *routing.Slot) bool {
-	return slot.TokensPerMinute != nil || slot.InputTokensPerMinute != nil || slot.OutputTokensPerMinute != nil
-}
-
 // ReserveTarget admits one attempt against the provider connection quota and
 // then the credential slot quota. It returns the reservation the attempt must
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
 func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand TokenDemand, ttl time.Duration, priority string) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
-	if connectionTokenLimited(provider) {
+	if provider.Limits.TokenLimited() {
 		if a.checkPendingTokenAccounting(ctx, provider.ID) != nil {
 			return nil, nil, true
 		}
 	}
-	if slotTokenLimited(slot) {
+	if slot.TokenLimited() {
 		if a.checkPendingTokenAccounting(ctx, slot.ID) != nil {
 			return nil, nil, true
 		}

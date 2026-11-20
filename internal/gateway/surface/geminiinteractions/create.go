@@ -147,7 +147,7 @@ func (t turn) pinGeneration(ctx context.Context, input geminilifecycle.Interacti
 	if e != nil || retained == nil || retained.Slug != route.Slug || !t.supports(&pin.Provider, pin.Model) {
 		return pin, previous{}, kernel.PinUnavailable()
 	}
-	if e := t.kernel.GatePinnedGeneration(ctx, t.x, pin, "generation"); e != nil {
+	if e := t.kernel.GatePinnedGeneration(ctx, t.x, pin, "generation", input.MaxOutputTokens); e != nil {
 		return pin, previous{}, e
 	}
 	return pin, previous{resource: parent, upstream: upstream}, nil
