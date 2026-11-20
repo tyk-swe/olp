@@ -28,6 +28,9 @@ export type ExplanationRow = {
   /** The input tokens the request was estimated at for this target, and how
    * they were counted, as one line; null when nothing was estimated. */
   estimate: string | null;
+  contextWindow: RoutingDecision['context_window'];
+  contextLimit: number | null;
+  contextOutput: number | null;
   estimatedCost: RoutingDecision['estimated_cost'];
   interaction: RoutingDecision['interaction'];
   incompatibility: RoutingDecision['incompatibility'];
@@ -71,6 +74,17 @@ export function describeEstimate(decision: RoutingDecision): string | null {
     .join(' · ');
 }
 
+export function inputBreakdownRows(input: Schemas['RouteInputTokenBreakdown']) {
+  return [
+    { label: 'Instructions', tokens: input.instructions },
+    { label: 'Conversation', tokens: input.conversation },
+    { label: 'Tool schemas', tokens: input.tool_schemas },
+    { label: 'Tool calls and results', tokens: input.tool_calls_results },
+    { label: 'Media', tokens: input.media },
+    { label: 'Unclassified', tokens: input.unclassified }
+  ].toSorted((a, b) => b.tokens - a.tokens);
+}
+
 function decisionRow(
   decision: RoutingDecision,
   title: string,
@@ -91,6 +105,9 @@ function decisionRow(
     performance: decision.performance,
     metadataObservedAt: decision.metadata_observed_at ?? null,
     estimate: describeEstimate(decision),
+    contextWindow: decision.context_window,
+    contextLimit: decision.context_length ?? null,
+    contextOutput: decision.requested_output_tokens ?? null,
     estimatedCost: decision.estimated_cost,
     interaction: decision.interaction,
     incompatibility: decision.incompatibility,
@@ -149,6 +166,9 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       performance: null,
       metadataObservedAt: null,
       estimate: null,
+      contextWindow: undefined,
+      contextLimit: null,
+      contextOutput: null,
       estimatedCost:
         'estimated_cost' in target &&
         target.estimated_cost != null &&

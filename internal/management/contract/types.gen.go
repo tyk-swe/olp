@@ -15551,6 +15551,18 @@ type RouteCatalogExposureResponse struct {
 	ExposeUpstreamModels bool   `json:"expose_upstream_models"`
 }
 
+// RouteContextWindowPreview Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
+type RouteContextWindowPreview struct {
+	// InputBreakdown Input tokens by category, summing to estimated_input_tokens. Null for a caller-supplied estimate.
+	InputBreakdown nullable.Nullable[RouteInputTokenBreakdown] `json:"input_breakdown"`
+
+	// RemainingTokens Model context length less estimated input and any output bound used by the preview, per completion. Negative means over the window. Null if the limit, input or retained context is unknown.
+	RemainingTokens nullable.Nullable[int64] `json:"remaining_tokens"`
+
+	// RetainedContextUnknown The request references provider-held or opaque context not included in the inline estimate.
+	RetainedContextUnknown bool `json:"retained_context_unknown"`
+}
+
 // RouteDetailResponse defines model for RouteDetailResponse.
 type RouteDetailResponse struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -15690,6 +15702,16 @@ type RouteFidelityMode string
 
 // RouteGroups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
 type RouteGroups map[string][]string
+
+// RouteInputTokenBreakdown Counts for the prompt checked against the window. For batched completions, this is the largest prompt. Unclassified includes framing and counted material outside the named categories.
+type RouteInputTokenBreakdown struct {
+	Conversation     int64 `json:"conversation"`
+	Instructions     int64 `json:"instructions"`
+	Media            int64 `json:"media"`
+	ToolCallsResults int64 `json:"tool_calls_results"`
+	ToolSchemas      int64 `json:"tool_schemas"`
+	Unclassified     int64 `json:"unclassified"`
+}
 
 // RouteLeg The route that served an attempt when it is not the route the caller named.
 type RouteLeg struct {
@@ -16037,8 +16059,11 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt          nullable.Nullable[int]                `json:"attempt,omitempty"`
-	ContextLength    nullable.Nullable[int64]              `json:"context_length,omitempty"`
+	Attempt       nullable.Nullable[int]   `json:"attempt,omitempty"`
+	ContextLength nullable.Nullable[int64] `json:"context_length,omitempty"`
+
+	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
+	ContextWindow    *RouteContextWindowPreview            `json:"context_window,omitempty"`
 	CredentialSlotId nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
 	Eligible         bool                                  `json:"eligible"`
 

@@ -91,7 +91,7 @@ func (w refWalker) generationConfig(raw json.RawMessage) {
 func (w refWalker) text(raw json.RawMessage) bool {
 	text, ok := textOf(raw)
 	if ok {
-		w.in.addText(text, false)
+		w.in.addText(text, false, unclassified)
 	}
 	return ok
 }
@@ -194,7 +194,7 @@ func refRoleOf(raw json.RawMessage) (string, bool) {
 // reads as a message of their own.
 func (w refWalker) instructions(raw json.RawMessage) {
 	if text, ok := textOf(raw); ok && text != "" {
-		w.in.addText(text, false)
+		w.in.addText(text, false, unclassified)
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "system")
 	}
@@ -245,7 +245,7 @@ func (w refWalker) tools(raw json.RawMessage) {
 // caller happened to send removed.
 func (w refWalker) schema(raw json.RawMessage) {
 	if text := SchemaText(raw); text != "" {
-		w.in.addText(text, false)
+		w.in.addText(text, false, unclassified)
 		w.in.approx = true
 	}
 }
@@ -259,7 +259,7 @@ func (w refWalker) embedding(raw json.RawMessage) {
 	for _, item := range jsonArray(raw) {
 		var token uint32
 		if json.Unmarshal(item, &token) == nil {
-			w.in.addFlat(1)
+			w.in.addFlat(1, unclassified)
 		} else {
 			w.embedding(item)
 		}
