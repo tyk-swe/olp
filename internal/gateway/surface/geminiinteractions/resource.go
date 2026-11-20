@@ -40,8 +40,8 @@ func (s surface) resource(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.kernel.Gate.Release(r.Context())
 	defer func() {
-		s.kernel.Finish(t.x, t.out, t.status)
-		s.kernel.SettleRetrieval(r.Context(), t.x, t.pin)
+		s.kernel.Finish(t.x, t.end.out, t.end.status)
+		s.kernel.SettleRetrieval(r.Context(), t.x, t.end.pin)
 	}()
 	asked, e := t.retrievalControls()
 	if e != nil {
@@ -59,16 +59,18 @@ func (s surface) resource(w http.ResponseWriter, r *http.Request) {
 		t.refuse(e)
 		return
 	}
-	if e := t.pinStored(ctx, interaction); e != nil {
-		t.refuse(e)
-		return
-	}
-	endpoint, e := t.storedURL(interaction, asked)
+	pin, e := t.pinStored(ctx, interaction)
+	t.end.pin = pin
 	if e != nil {
 		t.refuse(e)
 		return
 	}
-	response, failure := s.kernel.PinnedDo(ctx, t.x, t.pin, r.Method, endpoint, nil, "")
+	endpoint, e := t.storedURL(pin, interaction, asked)
+	if e != nil {
+		t.refuse(e)
+		return
+	}
+	response, failure := s.kernel.PinnedDo(ctx, t.x, pin, r.Method, endpoint, nil, "")
 	if r.Method == http.MethodDelete && (failure == nil || failure.Status == http.StatusNotFound) {
 		e := t.forget(ctx, response, interaction)
 		if e == nil {
@@ -89,14 +91,14 @@ func (s surface) resource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if asked.stream {
-		committed, err := t.relay(ctx, response, binding{store: true, existing: interaction.resource, upstream: interaction.upstream, resumed: asked.resumed})
+		committed, err := t.relay(ctx, pin, response, binding{store: true, existing: interaction.resource, upstream: interaction.upstream, resumed: asked.resumed})
 		t.streamed(committed, err, "The Interaction retrieval stream ended before its terminal contract.")
 		return
 	}
 	t.answerStored(ctx, response, interaction)
 }
 
-func (t *turn) retrievalControls() (controls, *fault.Error) {
+func (t turn) retrievalControls() (controls, *fault.Error) {
 	if !t.stateConfigured() || !t.authority.Policy.AllowProviderState {
 		return controls{}, fault.PermissionError("provider_state_unavailable", "Interaction state is unavailable to this key.")
 	}
@@ -130,7 +132,7 @@ func (t *turn) retrievalControls() (controls, *fault.Error) {
 	return controls{stream: stream, resumed: resumed, forward: forward}, nil
 }
 
-func (t *turn) storedInteraction() (stored, *fault.Error) {
+func (t turn) storedInteraction() (stored, *fault.Error) {
 	id := t.r.PathValue("id")
 	resource, upstream, err := t.kernel.Deps.Resources.ReadInteractionContract(t.r.Context(), t.authority.ID, id)
 	if errors.Is(err, resources.ErrNotFound) {
@@ -151,25 +153,24 @@ func (t *turn) storedInteraction() (stored, *fault.Error) {
 	return stored{id: id, resource: resource, upstream: upstream, route: route}, nil
 }
 
-func (t *turn) pinStored(ctx context.Context, interaction stored) *fault.Error {
+func (t turn) pinStored(ctx context.Context, interaction stored) (*kernel.Pin, *fault.Error) {
 	use := kernel.RetainedHousekeeping
 	if t.r.Method == http.MethodGet {
 		use = kernel.RetainedRetrieval
 	}
 	pin, retained, e := t.kernel.ResolveResource(ctx, t.x, t.authority, interaction.resource, "generation", use)
-	t.pin = pin
 	if e != nil || retained == nil || retained.Slug != interaction.route.Slug || !t.supports(&pin.Provider, pin.Model) {
-		return kernel.PinUnavailable()
+		return pin, kernel.PinUnavailable()
 	}
-	return t.kernel.GatePinnedRetrieval(ctx, t.x, pin)
+	return pin, t.kernel.GatePinnedRetrieval(ctx, t.x, pin)
 }
 
-func (t *turn) storedURL(interaction stored, asked controls) (string, *fault.Error) {
+func (t turn) storedURL(pin *kernel.Pin, interaction stored, asked controls) (string, *fault.Error) {
 	action := ""
 	if t.r.Method == http.MethodPost {
 		action = "cancel"
 	}
-	endpoint, err := t.pin.Provider.Connector().InteractionsURL(interaction.upstream, action)
+	endpoint, err := pin.Provider.Connector().InteractionsURL(interaction.upstream, action)
 	if err != nil {
 		return "", kernel.PinUnavailable()
 	}
@@ -179,7 +180,7 @@ func (t *turn) storedURL(interaction stored, asked controls) (string, *fault.Err
 	return endpoint + "?" + asked.forward.Encode(), nil
 }
 
-func (t *turn) forget(ctx context.Context, response *kernel.PinnedResponse, interaction stored) *fault.Error {
+func (t turn) forget(ctx context.Context, response *kernel.PinnedResponse, interaction stored) *fault.Error {
 	if response != nil {
 		defer response.Body.Close()
 		response.Exchange.Complete(kernel.ClassSuccess)
@@ -198,7 +199,7 @@ func (t *turn) forget(ctx context.Context, response *kernel.PinnedResponse, inte
 	return nil
 }
 
-func (t *turn) answerStored(ctx context.Context, response *kernel.PinnedResponse, interaction stored) {
+func (t turn) answerStored(ctx context.Context, response *kernel.PinnedResponse, interaction stored) {
 	const invalid = "The provider returned an invalid or different Interaction."
 	result, e := t.readResult(response, invalid)
 	if e != nil {
@@ -227,7 +228,7 @@ func (t *turn) answerStored(ctx context.Context, response *kernel.PinnedResponse
 	t.deliver(response, projection, "The Interaction resource could not be delivered.")
 }
 
-func (t *turn) projectStored(interaction stored, result geminilifecycle.InteractionResponse) ([]byte, *fault.Error) {
+func (t turn) projectStored(interaction stored, result geminilifecycle.InteractionResponse) ([]byte, *fault.Error) {
 	safe, e := t.withoutCredentials(result)
 	if e != nil {
 		return nil, e

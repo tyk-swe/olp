@@ -21,85 +21,85 @@ type mediaRun struct {
 	target   routing.Attempt
 	provider *routing.Provider
 	slot     routing.Slot
-	fact     events.AttemptFact
 	traced   context.Context
 	trace    *telemetry.AttemptTrace
-	encoded  encodedMedia
+}
 
+type mediaSent struct {
+	fact    events.AttemptFact
+	encoded encodedMedia
+	result  *transport.Result
 	sending context.Context
 	cancel  context.CancelFunc
 }
 
+func (sent mediaSent) release() {
+	if sent.cancel != nil {
+		sent.cancel()
+	}
+}
+
 func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
-	run := &mediaRun{server: s, ctx: ctx, w: w, x: x, target: a, provider: provider, slot: slot, fact: fact}
-	run.traced, run.trace = x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
-	defer run.close()
-	result, end := run.exchange()
+	traced, trace := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
+	run := mediaRun{server: s, ctx: ctx, w: w, x: x, target: a, provider: provider, slot: slot, traced: traced, trace: trace}
+	sent, end := run.send(fact)
+	defer sent.release()
 	if end != nil {
-		return run.fail(end.class, end.failure)
+		return run.fail(sent.fact, end)
 	}
-	return run.succeed(result)
-}
-
-func (run *mediaRun) exchange() (*transport.Result, *attemptEnd) {
-	result, end := run.send()
+	if end := run.verify(sent); end != nil {
+		return run.fail(sent.fact, end)
+	}
+	relayed, end := run.relay(sent)
 	if end != nil {
-		return nil, end
+		return run.fail(relayed, end)
 	}
-	if end := run.verify(result); end != nil {
-		return nil, end
-	}
-	return result, run.relay(result)
+	return run.succeed(relayed, sent.result)
 }
 
-func (run *mediaRun) close() {
-	if run.cancel != nil {
-		run.cancel()
-	}
-}
-
-func (run *mediaRun) send() (*transport.Result, *attemptEnd) {
+func (run mediaRun) send(fact events.AttemptFact) (mediaSent, *attemptEnd) {
 	s, x := run.server, run.x
 	encoded, err := x.encodeMedia(x.request.release.Snapshot(), *run.provider, run.target.TargetID, run.target.UpstreamModel)
 	if err != nil {
-		return nil, ended(ClassProtocol, nil)
+		return mediaSent{fact: fact}, ended(ClassProtocol, nil)
 	}
-	run.encoded = encoded
 	cfg := run.provider.Connector()
 	deadline, _ := run.ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return nil, ended(ClassTimeout, &AttemptFailure{overall: true})
+		return mediaSent{fact: fact, encoded: encoded}, ended(ClassTimeout, &AttemptFailure{overall: true})
 	}
-	run.sending, run.cancel = context.WithTimeout(run.traced, min(run.target.Timeout, remaining))
+	sending, cancel := context.WithTimeout(run.traced, min(run.target.Timeout, remaining))
+	unsent := mediaSent{fact: fact, encoded: encoded, sending: sending, cancel: cancel}
 
-	secret, err := s.slotSecret(run.sending, x, run.slot, run.provider, run.target.UpstreamModel)
+	secret, err := s.slotSecret(sending, x, run.slot, run.provider, run.target.UpstreamModel)
 	if err != nil {
-		return nil, ended(classCredential, nil)
+		return unsent, ended(classCredential, nil)
 	}
 	headers := http.Header{}
 	run.trace.InjectUpstream(headers)
-	networkSecret, err := s.providerNetworkSecret(run.sending, x.request.release, run.provider)
+	networkSecret, err := s.providerNetworkSecret(sending, x.request.release, run.provider)
 	if err != nil {
-		return nil, ended(classCredential, nil)
+		return unsent, ended(classCredential, nil)
 	}
 	target := transport.Target{Sensitive: &x.sensitive, CallerCredential: run.provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(run.target.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(run.provider, run.slot)}
-	result, failure := s.Deps.Media.Transport.Do(run.sending, target, encoded.call, transport.Options{Strict: encoded.template != nil, Headers: headers})
+	result, failure := s.Deps.Media.Transport.Do(sending, target, encoded.call, transport.Options{Strict: encoded.template != nil, Headers: headers})
+	answered := fact
 	if failure != nil {
-		run.fact.Status = failure.Status
-		return nil, ended(mediaClass(failure), &AttemptFailure{
+		answered.Status = failure.Status
+		return mediaSent{fact: answered, encoded: encoded, sending: sending, cancel: cancel}, ended(mediaClass(failure), &AttemptFailure{
 			Status:     failure.Status,
 			retryAfter: failure.RetryAfter,
 			upstream:   failure.Upstream,
 			dispatched: failure.Dispatched,
 		})
 	}
-	run.fact.Status = result.Status
-	return result, nil
+	answered.Status = result.Status
+	return mediaSent{fact: answered, encoded: encoded, result: result, sending: sending, cancel: cancel}, nil
 }
 
-func (run *mediaRun) verify(result *transport.Result) *attemptEnd {
-	strict := run.encoded.template
+func (run mediaRun) verify(sent mediaSent) *attemptEnd {
+	strict, result := sent.encoded.template, sent.result
 	if artifact := mediaArtifact(result.Payload); strict != nil && artifact != nil {
 		if _, err := artifact.BlobReference(); err != nil {
 			return ended(ClassProtocol, &AttemptFailure{dispatched: true})
@@ -108,85 +108,87 @@ func (run *mediaRun) verify(result *transport.Result) *attemptEnd {
 	if strict == nil || !result.Source.Valid() {
 		return nil
 	}
-	if _, err := strict.JSONResult(run.encoded.bound.Descriptor, result.Source); err != nil {
+	if _, err := strict.JSONResult(sent.encoded.bound.Descriptor, result.Source); err != nil {
 		if images, ok := result.Payload.(transport.Images); ok {
 			run.server.removeImages(images.ImageResult)
 		}
-		class := ClassProtocol
-		if run.encoded.call.Ambiguous {
-			class = classAmbiguous
+		if sent.encoded.call.Ambiguous {
+			return ended(classAmbiguous, &AttemptFailure{dispatched: true})
 		}
-		return ended(class, &AttemptFailure{dispatched: true})
+		return ended(ClassProtocol, &AttemptFailure{dispatched: true})
 	}
 	return nil
 }
 
-func (run *mediaRun) relay(result *transport.Result) *attemptEnd {
-	fact := &run.fact
-	fb := result.FirstByte
-	fact.FirstByte = &fb
-	fact.Class = "success"
-	fact.Usage = mediaUsage(run.encoded.effective, result)
-	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = upstream.Terminal
+func (run mediaRun) relay(sent mediaSent) (events.AttemptFact, *attemptEnd) {
+	result := sent.result
+	first := result.FirstByte
+	relayed := sent.fact
+	relayed.FirstByte = &first
+	relayed.Class = "success"
+	relayed.Usage = mediaUsage(sent.encoded.effective, result)
+	if relayed.Interaction != nil {
+		relayed.Interaction.UpstreamState = upstream.Terminal
 	}
-	events, ok := result.Payload.(transport.Events)
+	stream, ok := result.Payload.(transport.Events)
 	if !ok {
-		return nil
+		return relayed, nil
 	}
-	var failure *AttemptFailure
-	fact.Usage, fact.Committed, failure = run.server.streamMediaEvents(run.sending, run.w, run.x, events.Body, run.encoded.template, run.encoded.bound)
-	if failure != nil {
-		if run.encoded.call.Ambiguous && !failure.committed && failure.class == ClassTimeout {
-			failure.class = classAmbiguous
+	streamed, committed, failure := run.server.streamMediaEvents(sent.sending, run.w, run.x, stream.Body, sent.encoded.template, sent.encoded.bound)
+	relayed.Usage, relayed.Committed = streamed, committed
+	if failure == nil {
+		if relayed.Interaction != nil {
+			relayed.Interaction.ClientState = usage.ClientTerminal
 		}
-		return ended(failure.class, failure)
+		return relayed, nil
 	}
-	if fact.Interaction != nil {
-		fact.Interaction.ClientState = usage.ClientTerminal
+	if sent.encoded.call.Ambiguous && !failure.committed && failure.class == ClassTimeout {
+		return relayed, ended(classAmbiguous, failure)
 	}
-	return nil
+	return relayed, ended(failure.class, failure)
 }
 
-func (run *mediaRun) finishTrace() {
+func (run mediaRun) finishTrace(fact events.AttemptFact) {
 	if run.trace == nil {
 		return
 	}
-	if u := run.fact.Usage; u != nil {
+	if u := fact.Usage; u != nil {
 		run.trace.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}
-	run.trace.Finish(run.fact.Class, run.fact.Status)
+	run.trace.Finish(fact.Class, fact.Status)
 }
 
-func (run *mediaRun) fail(class string, f *AttemptFailure) (events.AttemptFact, *transport.Result, *AttemptFailure) {
-	fact := &run.fact
-	if f == nil {
-		f = &AttemptFailure{}
+func (run mediaRun) fail(fact events.AttemptFact, end *attemptEnd) (events.AttemptFact, *transport.Result, *AttemptFailure) {
+	f := AttemptFailure{}
+	if end.failure != nil {
+		f = *end.failure
 	}
-	f.class = class
-	fact.Class = class
-	fact.Committed = f.committed
+	f.class = end.class
 	f.accepted = fact.Status == http.StatusOK
 	f.Acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.Status, Accepted: f.accepted}.Acceptance()
-	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = f.Acceptance
+	failed := fact
+	failed.Class = end.class
+	failed.Committed = f.committed
+	if failed.Interaction != nil {
+		failed.Interaction.UpstreamState = f.Acceptance
 		if f.committed {
-			fact.Interaction.ClientState = usage.ClientPartial
+			failed.Interaction.ClientState = usage.ClientPartial
 		}
 	}
-	fact.Duration = run.server.Now().Sub(fact.StartedAt)
+	failed.Duration = run.server.Now().Sub(fact.StartedAt)
 	if f.retryAfter > 0 {
 		retry := f.retryAfter
-		fact.RetryAfter = &retry
+		failed.RetryAfter = &retry
 	}
-	fact.RecordEvidence(f.billingUncertain())
-	run.finishTrace()
-	return run.fact, nil, f
+	failed.RecordEvidence(f.billingUncertain())
+	run.finishTrace(failed)
+	return failed, nil, &f
 }
 
-func (run *mediaRun) succeed(result *transport.Result) (events.AttemptFact, *transport.Result, *AttemptFailure) {
-	run.fact.Duration = run.server.Now().Sub(run.fact.StartedAt)
-	run.fact.RecordEvidence(true)
-	run.finishTrace()
-	return run.fact, result, nil
+func (run mediaRun) succeed(fact events.AttemptFact, result *transport.Result) (events.AttemptFact, *transport.Result, *AttemptFailure) {
+	done := fact
+	done.Duration = run.server.Now().Sub(fact.StartedAt)
+	done.RecordEvidence(true)
+	run.finishTrace(done)
+	return done, result, nil
 }

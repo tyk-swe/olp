@@ -27,8 +27,8 @@ func (s surface) create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.kernel.Gate.Release(r.Context())
 	defer func() {
-		s.kernel.Finish(t.x, t.out, t.status)
-		s.kernel.SettleGeneration(r.Context(), t.x, t.pin)
+		s.kernel.Finish(t.x, t.end.out, t.end.status)
+		s.kernel.SettleGeneration(r.Context(), t.x, t.end.pin)
 	}()
 	input, body, e := t.readGeneration()
 	if e != nil {
@@ -46,12 +46,13 @@ func (s surface) create(w http.ResponseWriter, r *http.Request) {
 		t.refuse(e)
 		return
 	}
-	parent, e := t.pinGeneration(ctx, input, route)
+	pin, parent, e := t.pinGeneration(ctx, input, route)
+	t.end.pin = pin
 	if e != nil {
 		t.refuse(e)
 		return
 	}
-	response, e := t.sendGeneration(ctx, input, route, parent)
+	response, e := t.sendGeneration(ctx, pin, input, route, parent)
 	if response != nil {
 		defer response.Body.Close()
 	}
@@ -60,14 +61,14 @@ func (s surface) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Stream {
-		committed, err := t.relay(ctx, response, binding{store: input.Store, parent: parent.resource})
+		committed, err := t.relay(ctx, pin, response, binding{store: input.Store, parent: parent.resource})
 		t.streamed(committed, err, "The Interaction stream ended before its terminal contract.")
 		return
 	}
-	t.answerGeneration(ctx, response, input, parent)
+	t.answerGeneration(ctx, pin, response, input, parent)
 }
 
-func (t *turn) readGeneration() (geminilifecycle.InteractionRequest, []byte, *fault.Error) {
+func (t turn) readGeneration() (geminilifecycle.InteractionRequest, []byte, *fault.Error) {
 	query, err := url.ParseQuery(t.r.URL.RawQuery)
 	if err != nil || len(query["last_event_id"]) > 0 || len(query["stream"]) > 0 || len(query["include_input"]) > 0 {
 		return geminilifecycle.InteractionRequest{}, nil, fault.InvalidRequest("invalid_request", "Interaction create does not accept retrieval controls.", nil)
@@ -90,7 +91,7 @@ func (t *turn) readGeneration() (geminilifecycle.InteractionRequest, []byte, *fa
 	return input, body, nil
 }
 
-func (t *turn) admitGeneration(input geminilifecycle.InteractionRequest) (*routing.Route, *fault.Error) {
+func (t turn) admitGeneration(input geminilifecycle.InteractionRequest) (*routing.Route, *fault.Error) {
 	found, ok := t.x.Snapshot().FindRoute(input.Model)
 	if !ok {
 		return nil, fault.ModelNotFound(input.Model)
@@ -128,35 +129,33 @@ func (t *turn) admitGeneration(input geminilifecycle.InteractionRequest) (*routi
 	return route, nil
 }
 
-func (t *turn) pinGeneration(ctx context.Context, input geminilifecycle.InteractionRequest, route *routing.Route) (previous, *fault.Error) {
+func (t turn) pinGeneration(ctx context.Context, input geminilifecycle.InteractionRequest, route *routing.Route) (*kernel.Pin, previous, *fault.Error) {
 	if input.Previous == "" {
 		pin, e := t.kernel.SelectPinSurface(ctx, t.x, route, "generation", "gemini", t.x.Mode(), func(provider *routing.Provider, model string) bool {
 			return provider.ProfileID == profile && provider.Connector().Supports("generation", "gemini", t.x.Mode()) && provider.Supports(model, "generation", "gemini", t.x.Mode())
 		})
-		t.pin = pin
-		return previous{}, e
+		return pin, previous{}, e
 	}
 	parent, upstream, err := t.kernel.Deps.Resources.ReadInteractionContract(ctx, t.authority.ID, input.Previous)
 	if errors.Is(err, resources.ErrNotFound) || parent != nil && parent.RouteSlug != input.Model {
-		return previous{}, fault.InvalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", new("previous_interaction_id"))
+		return nil, previous{}, fault.InvalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", new("previous_interaction_id"))
 	}
 	if err != nil {
-		return previous{}, fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The previous Interaction cannot be read.")
+		return nil, previous{}, fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The previous Interaction cannot be read.")
 	}
 	pin, retained, e := t.kernel.ResolveResource(ctx, t.x, t.authority, parent, "generation", kernel.RetainedNewWork)
-	t.pin = pin
 	if e != nil || retained == nil || retained.Slug != route.Slug || !t.supports(&pin.Provider, pin.Model) {
-		return previous{}, kernel.PinUnavailable()
+		return pin, previous{}, kernel.PinUnavailable()
 	}
 	if e := t.kernel.GatePinnedGeneration(ctx, t.x, pin, "generation"); e != nil {
-		return previous{}, e
+		return pin, previous{}, e
 	}
-	return previous{resource: parent, upstream: upstream}, nil
+	return pin, previous{resource: parent, upstream: upstream}, nil
 }
 
-func (t *turn) sendGeneration(ctx context.Context, input geminilifecycle.InteractionRequest, route *routing.Route, parent previous) (*kernel.PinnedResponse, *fault.Error) {
+func (t turn) sendGeneration(ctx context.Context, pin *kernel.Pin, input geminilifecycle.InteractionRequest, route *routing.Route, parent previous) (*kernel.PinnedResponse, *fault.Error) {
 	if input.Background {
-		if e := kernel.UnboundedWorkLimits(t.x.AdmissionAuthority(t.x.Authority()), &t.pin.Provider, &t.pin.Slot, route); e != nil {
+		if e := kernel.UnboundedWorkLimits(t.x.AdmissionAuthority(t.x.Authority()), &pin.Provider, &pin.Slot, route); e != nil {
 			return nil, e
 		}
 	}
@@ -165,16 +164,16 @@ func (t *turn) sendGeneration(ctx context.Context, input geminilifecycle.Interac
 	if e := t.kernel.ReserveFallbackCost(ctx, t.x); e != nil {
 		return nil, e
 	}
-	connector := t.pin.Provider.Connector()
+	connector := pin.Provider.Connector()
 	endpoint, err := connector.InteractionsURL("", "")
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Interactions profile cannot address this model.")
 	}
-	bound, err := input.Bind(connector.Model(t.pin.Model), parent.upstream)
+	bound, err := input.Bind(connector.Model(pin.Model), parent.upstream)
 	if err != nil {
 		return nil, fault.InvalidRequest("invalid_interaction_request", "The Interaction identities could not be bound.", nil)
 	}
-	response, failure := t.kernel.PinnedDo(ctx, t.x, t.pin, http.MethodPost, endpoint, bound, "application/json")
+	response, failure := t.kernel.PinnedDo(ctx, t.x, pin, http.MethodPost, endpoint, bound, "application/json")
 	if failure != nil {
 		return nil, failure.Fault()
 	}
@@ -184,7 +183,7 @@ func (t *turn) sendGeneration(ctx context.Context, input geminilifecycle.Interac
 	return response, nil
 }
 
-func (t *turn) answerGeneration(ctx context.Context, response *kernel.PinnedResponse, input geminilifecycle.InteractionRequest, parent previous) {
+func (t turn) answerGeneration(ctx context.Context, pin *kernel.Pin, response *kernel.PinnedResponse, input geminilifecycle.InteractionRequest, parent previous) {
 	result, e := t.readResult(response, "The provider returned an invalid Interaction resource.")
 	if e != nil {
 		t.refuse(e)
@@ -200,7 +199,7 @@ func (t *turn) answerGeneration(ctx context.Context, response *kernel.PinnedResp
 	default:
 		response.Exchange.AcceptUnfinished()
 	}
-	projection, e := t.projectGeneration(ctx, response, input, parent, result)
+	projection, e := t.projectGeneration(ctx, pin, response, input, parent, result)
 	if e != nil {
 		t.refuse(e)
 		return
@@ -208,11 +207,11 @@ func (t *turn) answerGeneration(ctx context.Context, response *kernel.PinnedResp
 	t.deliver(response, projection, "The Interaction result could not be delivered.")
 }
 
-func (t *turn) projectGeneration(ctx context.Context, response *kernel.PinnedResponse, input geminilifecycle.InteractionRequest, parent previous, result geminilifecycle.InteractionResponse) ([]byte, *fault.Error) {
+func (t turn) projectGeneration(ctx context.Context, pin *kernel.Pin, response *kernel.PinnedResponse, input geminilifecycle.InteractionRequest, parent previous, result geminilifecycle.InteractionResponse) ([]byte, *fault.Error) {
 	localID := result.ID
 	if input.Store {
 		unfinished := !geminilifecycle.InteractionTurnFinished(result.Status)
-		stored, err := t.kernel.StoreInteraction(ctx, response.Exchange, t.pin, t.authority.ID, result.ID, result.Status, parent.resource, unfinished)
+		stored, err := t.kernel.StoreInteraction(ctx, response.Exchange, pin, t.authority.ID, result.ID, result.Status, parent.resource, unfinished)
 		if err != nil {
 			return nil, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction mapping could not be committed.")
 		}

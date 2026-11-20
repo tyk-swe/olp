@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (t *turn) readResult(response *kernel.PinnedResponse, invalid string) (geminilifecycle.InteractionResponse, *fault.Error) {
+func (t turn) readResult(response *kernel.PinnedResponse, invalid string) (geminilifecycle.InteractionResponse, *fault.Error) {
 	limit := t.responseLimit()
 	raw, err := response.ReadBody(limit)
 	if err != nil {
@@ -26,7 +26,7 @@ func (t *turn) readResult(response *kernel.PinnedResponse, invalid string) (gemi
 	return result, nil
 }
 
-func (t *turn) withoutCredentials(result geminilifecycle.InteractionResponse) (geminilifecycle.InteractionResponse, *fault.Error) {
+func (t turn) withoutCredentials(result geminilifecycle.InteractionResponse) (geminilifecycle.InteractionResponse, *fault.Error) {
 	if result.Status != "failed" {
 		return result, nil
 	}
@@ -37,14 +37,14 @@ func (t *turn) withoutCredentials(result geminilifecycle.InteractionResponse) (g
 	return geminilifecycle.InteractionResponse{Source: source, ID: result.ID, Status: result.Status}, nil
 }
 
-func (t *turn) bounded(projection []byte) *fault.Error {
+func (t turn) bounded(projection []byte) *fault.Error {
 	if int64(len(projection)) > t.responseLimit() {
 		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The projected Interaction exceeded its configured limit.")
 	}
 	return nil
 }
 
-func (t *turn) deliver(response *kernel.PinnedResponse, projection []byte, undelivered string) {
+func (t turn) deliver(response *kernel.PinnedResponse, projection []byte, undelivered string) {
 	generation := !t.x.ResourceCall()
 	t.w.Header().Set("Content-Type", "application/json")
 	t.x.ResponseHeaders(t.w.Header(), false)
@@ -63,18 +63,18 @@ func (t *turn) deliver(response *kernel.PinnedResponse, projection []byte, undel
 		if generation {
 			t.x.Failure.NoRetry = true
 		}
-		t.status, t.out = 0, &kernel.Outcome{Err: t.x.Failure, Committed: true, Cancelled: true}
+		t.end.status, t.end.out = 0, &kernel.Outcome{Err: t.x.Failure, Committed: true, Cancelled: true}
 		response.Exchange.Delivery(kernel.DeliveryState(n))
 		return
 	}
 	t.x.Delivered(t.kernel.Now())
-	t.status, t.out = response.StatusCode, &kernel.Outcome{Err: t.x.Failure, Committed: true}
+	t.end.status, t.end.out = response.StatusCode, &kernel.Outcome{Err: t.x.Failure, Committed: true}
 	response.Exchange.Delivery(usage.ClientTerminal)
 }
 
-func (t *turn) streamed(committed bool, err error, incomplete string) {
+func (t turn) streamed(committed bool, err error, incomplete string) {
 	if err == nil {
-		t.status, t.out = http.StatusOK, &kernel.Outcome{Err: t.x.Failure, Committed: true}
+		t.end.status, t.end.out = http.StatusOK, &kernel.Outcome{Err: t.x.Failure, Committed: true}
 		return
 	}
 	if errors.Is(err, fault.ErrClientWrite) || t.r.Context().Err() != nil {
@@ -82,15 +82,15 @@ func (t *turn) streamed(committed bool, err error, incomplete string) {
 		if !t.x.ResourceCall() {
 			t.x.Failure.NoRetry = true
 		}
-		t.status, t.out = 0, &kernel.Outcome{Err: t.x.Failure, Committed: committed, Cancelled: true}
+		t.end.status, t.end.out = 0, &kernel.Outcome{Err: t.x.Failure, Committed: committed, Cancelled: true}
 		return
 	}
 	t.x.Failure = fault.ServerError(http.StatusBadGateway, "interaction_incomplete", incomplete)
-	t.status = t.x.Failure.Status
+	t.end.status = t.x.Failure.Status
 	if !committed {
 		fault.WriteSurfaceError(t.w, t.x.Failure, "gemini")
 	}
-	t.out = &kernel.Outcome{Err: t.x.Failure, Committed: committed}
+	t.end.out = &kernel.Outcome{Err: t.x.Failure, Committed: committed}
 }
 
 // Untouched OIF strings keep their source escape spelling. Inspect decoded
