@@ -919,6 +919,10 @@ func openAIReplies(_ string, nth int) map[string]string {
 		"GET /responses/resp_provider-owned-1/input_items": `{"object":"list","data":[{"id":"msg_1","type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"first_id":"msg_1","last_id":"msg_1","has_more":false}`,
 		"DELETE /responses/resp_provider-owned-1":          `{"id":"resp_provider-owned-1","object":"response.deleted","deleted":true}`,
 	}
+	for _, request := range []string{"GET /responses/resp_provider-owned-1", "GET /responses/resp_provider-owned-1/input_items", "DELETE /responses/resp_provider-owned-1"} {
+		method, path, _ := strings.Cut(request, " ")
+		replies[method+" /v1"+path] = replies[request]
+	}
 	return replies
 }
 
@@ -946,7 +950,7 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 }
 
 type retainedObject struct {
-	ID, Status         string
+	ID, Status, Model  string
 	InputFileID        string `json:"input_file_id"`
 	ProcessingStatus   string `json:"processing_status"`
 	VectorStoreID      string `json:"vector_store_id"`
@@ -1142,11 +1146,13 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	}
 	g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 404)
 
+	native := &retainedUpstream{replies: openAIReplies}
 	strict := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
 		slug: "strict-responses", model: model, kind: "azure_openai", profile: "azure-v1-responses", fidelity: routing.FidelityStrict,
-		operations: []string{"generation"}, upstream: &retainedUpstream{replies: openAIReplies},
+		operations: []string{"generation"}, upstream: native,
 	})
 	strict.key(t, "strict-owner")
+	strict.key(t, "strict-stranger")
 	asked := time.Now()
 	bound := strict.call(t, "strict-owner", "POST", "/v1/responses", json, `{"model":"strict-responses","input":"hi","store":true}`, 200)
 	kept := storedResponses(t, pool, strict, "strict-owner")
@@ -1156,6 +1162,32 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if expiry := kept[0].expires; !expiry.After(asked) || expiry.After(asked.Add(resources.ContinuationLifetime)) {
 		t.Fatalf("a strict response expires at %s, want within the gateway's continuation lifetime rather than the provider's %s", expiry, providerExpiry)
 	}
+	if got := strict.call(t, "strict-owner", "GET", "/v1/responses/"+bound.ID, "", "", 200); got.ID != bound.ID || got.Model != "strict-responses" {
+		t.Fatalf("a strict response read returned %q of model %q, want %q of the route", got.ID, got.Model, bound.ID)
+	}
+	_, unstreamed := strict.send(t, "GET", "/v1/responses/"+bound.ID+"?stream=true", map[string]string{"Authorization": "Bearer strict-owner"}, "", 400)
+	if !strings.Contains(string(unstreamed), `"target_capability"`) || len(native.sent("GET /v1/responses/resp_provider-owned-1")) != 1 {
+		t.Fatalf("a strict response whose provider has no stream contract answered a streamed read with %s, want a capability refusal before the provider", unstreamed)
+	}
+	if got := strict.call(t, "strict-owner", "GET", "/v1/responses/"+bound.ID+"/input_items", "", "", 200); len(got.Data) != 1 {
+		t.Fatalf("a strict response's input items = %+v, want the provider's one item", got)
+	}
+	following := `{"model":"strict-responses","input":"again","previous_response_id":"` + bound.ID + `","store":true}`
+	strict.call(t, "strict-stranger", "GET", "/v1/responses/"+bound.ID, "", "", 404)
+	strict.call(t, "strict-stranger", "POST", "/v1/responses", json, following, 400)
+	strict.call(t, "strict-stranger", "DELETE", "/v1/responses/"+bound.ID, "", "", 404)
+	next := strict.call(t, "strict-owner", "POST", "/v1/responses", json, following, 200)
+	sent := native.sent("POST /v1/responses")
+	if !strings.HasPrefix(next.ID, "strict_response_") || next.ID == bound.ID || next.PreviousResponseID != bound.ID || len(sent) != 2 || !strings.Contains(sent[1].body, `"previous_response_id":"resp_provider-owned-1"`) {
+		t.Fatalf("a strict continuation returned %q after %q and reached the provider as %+v, want a new strict response that names the first by its gateway identifier and one provider request naming the provider's", next.ID, next.PreviousResponseID, sent)
+	}
+	if got := strict.call(t, "strict-owner", "DELETE", "/v1/responses/"+bound.ID, "", "", 200); !got.Deleted || got.ID != bound.ID {
+		t.Fatalf("a strict response delete = %+v", got)
+	}
+	if sent := native.sent("DELETE /v1/responses/resp_provider-owned-1"); len(sent) != 1 {
+		t.Fatalf("the provider saw %d deletes of the strict response, want only the owner's", len(sent))
+	}
+	strict.call(t, "strict-owner", "GET", "/v1/responses/"+bound.ID, "", "", 404)
 }
 
 type storedResponse struct {
@@ -3561,6 +3593,36 @@ func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesT
 	read("owner", unfinished, stream, 200)
 	if kept := storedResponses(t, pool, g, "owner"); kept[2].state != "completed" {
 		t.Errorf("a stream that ended completed left the stored response %q, want completed", kept[2].state)
+	}
+
+	native := &responseStreams{retainedUpstream: &retainedUpstream{replies: openAIReplies}}
+	g = newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "strict-streams", model: model, kind: "azure_openai", profile: "azure-v1-responses", fidelity: routing.FidelityStrict, streams: true,
+		operations: []string{"generation"}, upstream: native, sink: sink,
+	})
+	g.key(t, "owner")
+	bound := g.call(t, "owner", "POST", "/v1/responses", "application/json", `{"model":"strict-streams","input":"hi","store":true}`, 200).ID
+	for _, tc := range []struct {
+		name, query, kinds, asked, outcome, class, attempt string
+		events                                             []string
+	}{
+		{name: "a strict stream", query: stream + "&starting_after=1", events: []string{delta, completed}, kinds: "output_text.delta completed",
+			asked: "starting_after=1&stream=true", outcome: "success", attempt: "streaming success committed=true"},
+		{name: "a strict response the provider cut short", query: stream, events: []string{opened, responseEvent(1, "response.incomplete", provider(1), "incomplete", `,"incomplete_details":{"reason":"max_output_tokens"}`)},
+			kinds: "created incomplete", asked: "stream=true", outcome: "failure", class: "response_incomplete", attempt: "streaming protocol committed=true"},
+	} {
+		native.answers(200, sse, tc.events...)
+		_, raw, envelope := read("owner", bound, tc.query, 200)
+		kinds, delivered := readResponseStream(t, raw)
+		for _, event := range delivered {
+			if event.Response.ID != "" && (event.Response.ID != bound || event.Response.Model != "strict-streams") {
+				t.Errorf("%s named response %q of model %q, want %q of the route", tc.name, event.Response.ID, event.Response.Model, bound)
+			}
+		}
+		if got, asked := attempts(envelope), native.asked(); strings.Join(kinds, " ") != tc.kinds || len(asked) != 1 || asked[0] != tc.asked || envelope.Outcome != tc.outcome || envelope.ErrorClass != tc.class || got != tc.attempt {
+			t.Errorf("%s delivered %q after asking the provider %q and was recorded as %s %q with %q, want %q after %q recorded as %s %q with %q",
+				tc.name, kinds, asked, envelope.Outcome, envelope.ErrorClass, got, tc.kinds, tc.asked, tc.outcome, tc.class, tc.attempt)
+		}
 	}
 }
 
