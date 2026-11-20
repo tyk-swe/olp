@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { resolve } from '$app/paths';
   import { errorMessage } from '#lib/management/http.js';
+  import { OVERVIEW } from '#lib/shell/navigation.js';
   import {
     bookmarkOrigin,
     readInstallations,
@@ -69,7 +69,7 @@
     if (target === origin) return;
 
     window.location.assign(
-      bookmarkOrigin(target, origin, bookmarks) + resolve('overview')
+      bookmarkOrigin(target, origin, bookmarks) + OVERVIEW.href
     );
   }
 </script>

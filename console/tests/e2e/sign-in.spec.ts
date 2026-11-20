@@ -20,6 +20,32 @@ test('a signed-out visitor reaches the console only after signing in', async ({
   await expect(page.getByRole('link', { name: owner.name })).toBeVisible();
 });
 
+test('a bookmark opens the destination overview behind its own login', async ({
+  page
+}) => {
+  await page.goto('/keys');
+  await signIn(page);
+  await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
+
+  const { port } = new URL(page.url());
+  const destination = new URL(`http://localhost:${port}`);
+  const sidebar = page.getByRole('complementary');
+  await sidebar.getByLabel(/Choose installation/).click();
+  await sidebar.getByLabel('Bookmark name').fill('Destination');
+  await sidebar.getByLabel('Installation origin').fill(destination.origin);
+  await sidebar.getByRole('button', { name: 'Add bookmark' }).click();
+  await sidebar
+    .getByRole('combobox', { name: 'Switch installation' })
+    .selectOption(destination.origin);
+
+  await expect(page).toHaveURL(
+    new URL('/login?return_to=%2F', destination).href
+  );
+  await expect(
+    page.getByRole('button', { name: 'Sign in', exact: true })
+  ).toBeVisible();
+});
+
 test('installation branding restyles the sign-in page for signed-out visitors', async ({
   page,
   browser
