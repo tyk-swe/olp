@@ -37,6 +37,7 @@ func (s surface) query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	encoded, route, e := t.encoded(binding, route)
+	t.x.Route = route
 	if e != nil {
 		t.refuse(e)
 		return
@@ -112,11 +113,12 @@ func (t turn) encoded(binding *retrieval.Binding, route *routing.Route) ([]byte,
 	}
 	// Restrict selection to the binding's one target without changing the
 	// serving route revision or widening its certified capability tuple.
-	route.Targets = slices.DeleteFunc(slices.Clone(route.Targets), func(target routing.Target) bool { return target.ID != binding.TargetID })
-	if len(route.Targets) != 1 || route.Targets[0].ProviderModel != binding.Resource {
-		return nil, route, kernel.PolicyUnavailable("retrieval_binding_unavailable", "The binding's certified target is unavailable.")
+	restricted := *route
+	restricted.Targets = slices.DeleteFunc(slices.Clone(route.Targets), func(target routing.Target) bool { return target.ID != binding.TargetID })
+	if len(restricted.Targets) != 1 || restricted.Targets[0].ProviderModel != binding.Resource {
+		return nil, &restricted, kernel.PolicyUnavailable("retrieval_binding_unavailable", "The binding's certified target is unavailable.")
 	}
-	return encoded, route, nil
+	return encoded, &restricted, nil
 }
 
 func (t turn) pin(binding *retrieval.Binding, route *routing.Route, encoded []byte) (*kernel.Pin, *fault.Error) {
