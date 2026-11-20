@@ -2,11 +2,18 @@ package upstream
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 const vendorFixtures = "../../../tests/fixtures/vendors/"
@@ -123,5 +130,79 @@ func settles(result batches.Result) bool {
 		return result.ErrorClass != ""
 	default:
 		return false
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestVertexReconcilePagination(t *testing.T) {
+	t.Parallel()
+	const label = "submission-1"
+	const token = "next+/=&page"
+	job := func(id, submission string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"name":"projects/test-project/locations/us-central1/batchPredictionJobs/%s","state":"JOB_STATE_RUNNING","labels":{"olp_submission":%q}}`, id, submission))
+	}
+	type page struct {
+		Jobs []json.RawMessage `json:"batchPredictionJobs,omitempty"`
+		Next string            `json:"nextPageToken,omitempty"`
+	}
+	match := job("job-1", label)
+	other := job("other", "submission-2")
+	capped := make([]page, maxListPages)
+	for i := range capped {
+		capped[i] = page{Next: fmt.Sprintf("page-%d", i+2)}
+	}
+	capped[0].Jobs = []json.RawMessage{match}
+	tests := []struct {
+		name  string
+		pages []page
+		ids   []string
+		err   error
+	}{
+		{"match after empty page", []page{{Next: token}, {Jobs: []json.RawMessage{other, match}}}, []string{"job-1"}, nil},
+		{"two matches across pages", []page{{Jobs: []json.RawMessage{match}, Next: token}, {Jobs: []json.RawMessage{job("job-2", label)}}}, []string{"job-1", "job-2"}, nil},
+		{"exhausted without a match", []page{{Next: token}, {Jobs: []json.RawMessage{other}}}, nil, nil},
+		{"stalled cursor", []page{{Next: token}, {Next: token}}, nil, errListCursor},
+		{"page limit with a partial match", capped, nil, errListPageLimit},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			policy := &egress.Policy{}
+			reader, _ := New(connectors.NewAuth(policy, func(string) string { return "" }), policy).For(connectors.BatchVertex)
+			calls := 0
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if calls >= len(tc.pages) {
+					t.Fatalf("unexpected list request %d", calls+1)
+				}
+				query := r.URL.Query()
+				wantToken := ""
+				if calls > 0 {
+					wantToken = tc.pages[calls-1].Next
+				}
+				if query.Get("pageToken") != wantToken || query.Has("pageToken") != (calls > 0) ||
+					query.Get("filter") != `labels.olp_submission="`+label+`"` || query.Get("pageSize") != fmt.Sprint(listPageSize) {
+					t.Fatalf("list request %d: unexpected query %s", calls+1, query.Encode())
+				}
+				body, err := json.Marshal(tc.pages[calls])
+				if err != nil {
+					t.Fatal(err)
+				}
+				calls++
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			})}
+			config := connectors.Config{Kind: connectors.KindVertexAI, AuthMode: connectors.AuthNone, CloudProject: "test-project", CloudRegion: "us-central1"}
+			settlement := batches.Settlement{Intent: batches.Intent{Submission: batches.VertexSubmission{Label: label}}}
+			matches, err := reader.Reconcile(t.Context(), settlement, Target{Client: client, Config: config}, nil)
+			var ids []string
+			for _, match := range matches {
+				ids = append(ids, match.ID)
+			}
+			if !errors.Is(err, tc.err) || !slices.Equal(ids, tc.ids) || calls != len(tc.pages) {
+				t.Fatalf("got jobs %v, error %v after %d requests; want jobs %v, error %v after %d requests", ids, err, calls, tc.ids, tc.err, len(tc.pages))
+			}
+		})
 	}
 }
