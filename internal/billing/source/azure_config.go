@@ -34,9 +34,9 @@ func validAzurePath(value string, allowSlash bool) bool {
 		!slices.ContainsFunc(strings.Split(value, "/"), func(part string) bool { return part == "." || part == ".." })
 }
 
-func canonicalUUID(value string) (string, bool) {
+func canonicalUUID(value string) bool {
 	parsed, err := uuid.Parse(value)
-	return parsed.String(), err == nil && parsed.String() == strings.ToLower(value)
+	return err == nil && parsed.String() == strings.ToLower(value)
 }
 
 func parseAzureScope(raw json.RawMessage) (azureScope, error) {
@@ -48,11 +48,11 @@ func parseAzureScope(raw json.RawMessage) (azureScope, error) {
 		return azureScope{}, httpkit.Invalid("scope", "Provide a billing scope, export name, storage account, container, and optional prefix and subscription IDs.")
 	}
 	if strings.HasPrefix(strings.ToLower(scope.BillingScope), "/subscriptions/") {
-		if _, ok := canonicalUUID(strings.Split(scope.BillingScope, "/")[2]); !ok {
+		if !canonicalUUID(strings.Split(scope.BillingScope, "/")[2]) {
 			return azureScope{}, httpkit.Invalid("scope.billing_scope", "The subscription billing scope must contain a valid subscription ID.")
 		}
 	}
-	if slices.ContainsFunc(scope.SubscriptionIDs, func(id string) bool { _, ok := canonicalUUID(id); return !ok }) {
+	if slices.ContainsFunc(scope.SubscriptionIDs, func(id string) bool { return !canonicalUUID(id) }) {
 		return azureScope{}, httpkit.Invalid("scope.subscription_ids", "Subscription IDs must be UUIDs.")
 	}
 	return azureScope{

@@ -524,7 +524,7 @@ func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": input.Fidelity}}
 		return result, access.Event{Action: "route_draft.create", Resource: "route_draft", ID: id}, nil
 	})
 }

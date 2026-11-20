@@ -134,7 +134,7 @@ func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record
 	if err = httpkit.Match(r, current.ETag); err != nil {
 		return nil, probe.Target{}, err
 	}
-	credential, _, err := s.credentialFor(r.Context(), tx, current)
+	credential, err := s.credentialFor(r.Context(), tx, current)
 	if err != nil {
 		return nil, probe.Target{}, err
 	}
@@ -161,7 +161,8 @@ func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error
 	at := time.Now().UTC()
 	models, err := s.prober.ListModelFacts(r.Context(), target)
 	var discovered any
-	succeeded, detail := err == nil, ""
+	succeeded := err == nil
+	var detail string
 	if succeeded {
 		discovered = len(models)
 		detail = fmt.Sprintf("Reached the upstream; %d models listed.", len(models))
@@ -524,40 +525,34 @@ func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeed
 	return err
 }
 
-func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
+func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	slot := selectProbeSlot(slots, p.Connection.Document())
 	if slot == nil {
-		return nil, nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+		return nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
-	state := &credentialState{ID: slot.CredentialID, Version: slot.CredentialVersion, Revoked: slot.CredentialRevoked}
-
 	if !p.Connection.Document().CredentialRequired() {
-		return nil, state, nil
+		return nil, nil
 	}
-	if state.ID == nil && p.Connection.Document().Grant() {
-		return nil, state, httpkit.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
+	if slot.CredentialID == nil && p.Connection.Document().Grant() {
+		return nil, httpkit.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
 	}
-	if state.ID == nil {
-		return nil, state, httpkit.Fail(422, "credential_required", "Add a credential before probing this connection.")
+	if slot.CredentialID == nil {
+		return nil, httpkit.Fail(422, "credential_required", "Add a credential before probing this connection.")
 	}
-	if state.Revoked {
-		return nil, state, httpkit.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
+	if slot.CredentialRevoked {
+		return nil, httpkit.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
 	}
 	if slot.CredentialLapsed {
-		return nil, state, httpkit.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
+		return nil, httpkit.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
 	}
 	if err := slot.credentialFits(p.Connection.Document()); err != nil {
-		return nil, state, err
+		return nil, err
 	}
-	secret, err := s.readCredential(ctx, tx, *state.ID)
-	if err != nil {
-		return nil, state, err
-	}
-	return secret, state, nil
+	return s.readCredential(ctx, tx, *slot.CredentialID)
 }
 
 func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {

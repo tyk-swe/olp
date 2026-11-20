@@ -147,7 +147,7 @@ func (d connectionDialer) tunnel(ctx context.Context, dialer *net.Dialer, target
 	// The context owns this phase deadline as well as cancellation. Its
 	// callback closes the socket after Err is set. A second socket deadline
 	// can fire first, making a timed-out CONNECT look like a malformed reply.
-	connection := net.Conn(raw)
+	connection := raw
 	if d.proxy.Scheme == "https" {
 		secured := tls.Client(raw, &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: d.roots, ServerName: d.proxy.Hostname()})
 		tlsCtx, cancel := context.WithTimeout(ctx, d.tlsTimeout)
@@ -283,7 +283,7 @@ func socksConnect(connection net.Conn, target string, credentials connectionSecr
 	if reply[0] != 5 || reply[1] != 0 || reply[2] != 0 {
 		return errors.New("SOCKS5 proxy refused CONNECT")
 	}
-	length := 0
+	var length int
 	switch reply[3] {
 	case 1:
 		length = 4

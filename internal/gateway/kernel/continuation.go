@@ -216,7 +216,7 @@ func (s *Server) commitToolDelivery(ctx context.Context, x *Call, state *interac
 // replayContinuation answers a request from the delivery already committed for
 // it. That is before admission: the replay makes no attempt and holds no
 // reservation, so it has no allowance or metadata to state.
-func (s *Server) replayContinuation(w http.ResponseWriter, x *Call) (int, error) {
+func (s *Server) replayContinuation(w http.ResponseWriter, x *Call) error {
 	delivery := x.generation.continuation.replay
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-OLP-Delivery-Replay", "true")
@@ -226,14 +226,14 @@ func (s *Server) replayContinuation(w http.ResponseWriter, x *Call) (int, error)
 		w.WriteHeader(http.StatusOK)
 		for _, frame := range delivery.Frames {
 			if err := s.writeContinuationPayload(w, x, interaction.ContinuationFrame(frame)); err != nil {
-				return http.StatusOK, err
+				return err
 			}
 		}
-		return http.StatusOK, s.writeContinuationPayload(w, x, []byte("data: [DONE]\n\n"))
+		return s.writeContinuationPayload(w, x, []byte("data: [DONE]\n\n"))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	return http.StatusOK, s.writeContinuationPayload(w, x, delivery.Body)
+	return s.writeContinuationPayload(w, x, delivery.Body)
 }
 
 // Cached correspondence has the same bounded delivery obligation as its

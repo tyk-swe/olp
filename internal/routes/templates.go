@@ -191,7 +191,7 @@ func (t *template) json() map[string]any {
 	return map[string]any{
 		"id": t.ID, "name": t.Name, "provider_selector": t.ProviderSelector, "model_filter": t.ModelFilter,
 		"slug_pattern": t.SlugPattern, "overall_timeout_ms": t.OverallTimeoutMS, "max_attempts": t.MaxAttempts,
-		"fidelity": json.RawMessage(t.Fidelity), "routing_policy": t.RoutingPolicy, "auto_publish": t.AutoPublish,
+		"fidelity": t.Fidelity, "routing_policy": t.RoutingPolicy, "auto_publish": t.AutoPublish,
 		"project_id": t.ProjectID, "etag": t.ETag, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt,
 	}
 }

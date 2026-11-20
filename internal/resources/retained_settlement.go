@@ -466,7 +466,7 @@ WHERE e.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, i
 			end = *finalEnd
 		}
 	}
-	component := ""
+	var component string
 	switch operation {
 	case "fine_tuning":
 		component = "training"

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -102,7 +103,7 @@ func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.R
 		result.EffectiveRequest = &summary
 		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
 			safe := safeInspectionError(err)
-			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
+			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
 			return nil, safe
@@ -136,7 +137,7 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		bound, err := template.Bind(input)
 		if err != nil {
 			safe := safeInspectionError(err)
-			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
+			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
 			return nil, safe

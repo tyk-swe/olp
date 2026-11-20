@@ -37,7 +37,7 @@ func TestSpoolGivesBackEveryByteItDoesNotKeep(t *testing.T) {
 		},
 		"an upload over the spool capacity": {
 			io.MultiReader(strings.NewReader("1234"), strings.NewReader("5")), 64,
-			func(err error) bool { return errors.Is(err, ErrUnavailable) },
+			func(err error) bool { return errors.Is(err, ErrUnavailable) && !errors.Is(err, ErrSourceRead) },
 		},
 		"an upload without a limit": {
 			strings.NewReader("1"), 0,
@@ -45,7 +45,7 @@ func TestSpoolGivesBackEveryByteItDoesNotKeep(t *testing.T) {
 		},
 		"an upload whose source fails": {
 			io.MultiReader(strings.NewReader("12"), brokenSource{}), 64,
-			func(err error) bool { return errors.Is(err, ErrUnavailable) },
+			func(err error) bool { return errors.Is(err, ErrUnavailable) && errors.Is(err, ErrSourceRead) },
 		},
 	}
 	for name, c := range refused {

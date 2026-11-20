@@ -238,10 +238,11 @@ func (r *PinnedResponse) ReadBody(limit int64) ([]byte, error) {
 }
 
 func (e *PinnedExchange) readFailure() {
-	switch e.state.interrupted(nil) {
-	case context.Canceled:
+	interrupted := e.state.interrupted(nil)
+	switch {
+	case errors.Is(interrupted, context.Canceled):
 		e.Interrupt(ClassCancelled, true)
-	case context.DeadlineExceeded:
+	case errors.Is(interrupted, context.DeadlineExceeded):
 		e.Interrupt(ClassTimeout, false)
 	}
 }
@@ -258,7 +259,7 @@ func (r *PinnedResponse) StageBody(ctx context.Context, spool *staging.Spool, fi
 		return artifact, nil
 	}
 	_, tooLarge := errors.AsType[*staging.TooLargeError](err)
-	local := !tooLarge && (err == staging.ErrUnavailable || !errors.Is(err, staging.ErrUnavailable))
+	local := !tooLarge && !errors.Is(err, staging.ErrSourceRead)
 	r.Exchange.Interrupt(ClassProtocol, local)
 	r.Exchange.readFailure()
 	return nil, err

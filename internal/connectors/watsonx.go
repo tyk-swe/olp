@@ -95,7 +95,7 @@ func (s *watsonxStream) Read(p []byte) (int, error) {
 		}
 		frame, err := s.events.Next()
 		switch {
-		case err == io.EOF:
+		case errors.Is(err, io.EOF):
 			s.done = true
 			if s.terminal {
 				s.pending = []byte("data: [DONE]\n\n")

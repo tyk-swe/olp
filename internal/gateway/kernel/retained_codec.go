@@ -77,7 +77,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		var fileID string
 		for {
 			part, err := reader.NextPart()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
@@ -162,7 +162,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	var parts []partContent
 	for {
 		part, err := reader.NextRawPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

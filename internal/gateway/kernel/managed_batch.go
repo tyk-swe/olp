@@ -192,7 +192,7 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *
 		if spoolErr == nil {
 			_ = s.Deps.Staging.Remove(artifact.Handle)
 		}
-		if failure, ok := translated.err.(*fault.Error); ok {
+		if failure, ok := errors.AsType[*fault.Error](translated.err); ok {
 			return nil, BatchManifest{}, failure
 		}
 		return nil, BatchManifest{}, fault.InvalidRequest("unsupported_parameter", "The batch file could not be translated.", new("file"))
@@ -353,7 +353,7 @@ func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.Line
 
 func (t managedLineTarget) lineDefaults(operation wire.LineOperation) (protocols.Object, error) {
 	if t.pin.Provider.ProfileID == "" {
-		return protocols.Object(t.pin.Provider.ParameterDefaults), nil
+		return t.pin.Provider.ParameterDefaults, nil
 	}
 	defaults, _, err := t.pin.Provider.Connector().DefaultsFor(string(operation), t.pin.Model)
 	return defaults, err

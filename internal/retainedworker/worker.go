@@ -85,7 +85,7 @@ func (w *Worker) Pass(ctx context.Context) error {
 					}
 				}
 			}()
-			class := ""
+			var class string
 			select {
 			case sem <- struct{}{}:
 				class = w.poll(work, claim)
@@ -161,7 +161,7 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 		}
 		upstream = c.Hint
 	}
-	path, e, err := w.path(ctx, r, upstream, c.Operation)
+	path, e, err := w.path(ctx, r, upstream)
 	if err != nil {
 		return "unsupported_observation"
 	}
@@ -265,7 +265,7 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 	}
 	return ""
 }
-func (w *Worker) path(ctx context.Context, r *resources.Resource, upstream, operation string) (string, retainedapi.Endpoint, error) {
+func (w *Worker) path(ctx context.Context, r *resources.Resource, upstream string) (string, retainedapi.Endpoint, error) {
 	var family retainedapi.Family
 	for _, f := range retainedapi.Families() {
 		if f.Kind == r.Kind {
@@ -284,7 +284,7 @@ func (w *Worker) path(ctx context.Context, r *resources.Resource, upstream, oper
 	if family.Kind == "" {
 		return "", e, errors.New("unknown retained family")
 	}
-	path := ""
+	var path string
 	switch r.Kind {
 	case "fine_tuning_job":
 		path = "fine_tuning/jobs/" + url.PathEscape(upstream)

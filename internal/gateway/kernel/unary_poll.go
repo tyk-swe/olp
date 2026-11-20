@@ -127,7 +127,7 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 		if readFailure != nil {
 			return nil, readFailure
 		}
-		return e.terminal(raw, "")
+		return e.terminal(raw)
 	}
 	if response.StatusCode != http.StatusAccepted {
 		return nil, e.rejected(response)
@@ -145,7 +145,7 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 	return e.poll(location)
 }
 
-func (e *unaryExchange) terminal(raw []byte, location string) ([]byte, *unaryFailure) {
+func (e *unaryExchange) terminal(raw []byte) ([]byte, *unaryFailure) {
 	state, err := e.plan.PollState(raw)
 	if err != nil {
 		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}

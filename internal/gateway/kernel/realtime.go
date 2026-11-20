@@ -33,7 +33,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/realtimeresponses"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	acceptance "github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -155,12 +154,12 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	upstream, e := realtimeURL(p)
+	dialURL, e := realtimeURL(p)
 	if e != nil {
 		fail(e)
 		return
 	}
-	check := strings.Replace(upstream, "wss://", "https://", 1)
+	check := strings.Replace(dialURL, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
 	if u, e := url.Parse(check); e == nil {
 		u.RawQuery, u.Fragment = "", ""
@@ -188,7 +187,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		// Later transport errors are carried by close frames and the Attempt.
 		terminalStatus = http.StatusSwitchingProtocols
 	}
-	conn, e := realtimeDial(ctx, s, x, p, upstream)
+	conn, e := realtimeDial(ctx, s, x, p, dialURL)
 	if e != nil {
 
 		client.Close(websocket.StatusInternalError, "upstream unavailable")
@@ -232,10 +231,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}
 			if relayErr == nil {
-				fact.Interaction.UpstreamState = acceptance.Terminal
+				fact.Interaction.UpstreamState = upstream.Terminal
 				fact.Interaction.ClientState = usage.ClientTerminal
 			} else {
-				fact.Interaction.UpstreamState = acceptance.Unknown
+				fact.Interaction.UpstreamState = upstream.Unknown
 			}
 		}
 		if observedUsage != nil {
@@ -378,7 +377,7 @@ func realtimeDial(ctx context.Context, s *Server, x *Call, p *Pin, endpoint stri
 	fact.Class = "success"
 	fact.Status = http.StatusOK
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = acceptance.Accepted
+		fact.Interaction.UpstreamState = upstream.Accepted
 	}
 	fact.Committed = true
 	fact.Duration = s.Now().Sub(fact.StartedAt)

@@ -2,6 +2,7 @@ package codeforward
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -153,7 +154,7 @@ func (a *codeAttempt) scrubPaidStream(reader io.Reader, writer io.Writer) error 
 			if _, writeErr := writer.Write(pending.Bytes()); writeErr != nil {
 				return writeErr
 			}
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			_, copyErr := io.Copy(writer, reader)

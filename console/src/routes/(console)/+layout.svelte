@@ -90,9 +90,7 @@
       },
       loginDestination,
       async navigate(destination) {
-        // Every destination is either a resolved local route or a validated
-        // same-origin relative return path constructed above.
-        // eslint-disable-next-line svelte/no-navigation-without-resolve
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- every destination is a resolved local route or a validated same-origin relative return path.
         await goto(destination, { replace: true });
       }
     });

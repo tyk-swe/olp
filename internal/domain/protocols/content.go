@@ -52,7 +52,7 @@ func (w *inspector) inputFields(family wire.Format, fields map[string]json.RawMe
 	switch family {
 	case wire.Completions:
 		if fields != nil {
-			if _, ok := textInput(fields["prompt"]); !ok {
+			if !textInput(fields["prompt"]) {
 				w.err = errors.New("token-ID completion prompts have no text inspection contract")
 				return true
 			}

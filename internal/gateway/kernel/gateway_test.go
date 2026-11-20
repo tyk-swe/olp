@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -956,7 +957,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		writer := &bedrockFrameWriter{ResponseRecorder: httptest.NewRecorder()}
-		h.gateway.relayBedrockStream(t.Context(), writer, x, p, resp)
+		h.gateway.relayBedrockStream(t.Context(), writer, x, resp)
 		h.sink.mu.Lock()
 		defer h.sink.mu.Unlock()
 		if len(h.sink.envs) != 1 {
@@ -2736,6 +2737,44 @@ func TestARetainedRequestKeepsOnlyModelAndBillingFactsAndRefusesControlsThatSpen
 			var want, have any
 			if json.Unmarshal([]byte(tc.kept), &want) != nil || json.Unmarshal(got, &have) != nil || !reflect.DeepEqual(want, have) {
 				t.Fatalf("kept %s beyond the provider model, want %s", got, tc.kept)
+			}
+		})
+	}
+}
+
+func TestStagedBodyFailureBlamesTheProviderOnlyWhenItsBodyBreaks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		body   io.Reader
+		closed bool
+		local  bool
+	}{
+		{"provider body breaks", iotest.ErrReader(errors.New("connection reset")), false, false},
+		{"spool is unavailable", strings.NewReader("content"), true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = spool.Close() })
+			if tc.closed {
+				if err := spool.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			response := &PinnedResponse{
+				Response: &http.Response{Body: io.NopCloser(tc.body)},
+				Exchange: h.gateway.beginPinned(t.Context(), x, testPinnedTarget(h, 0), http.MethodGet),
+			}
+			if _, err := response.StageBody(t.Context(), spool, "file-content", "application/octet-stream", 64); err == nil {
+				t.Fatal("staging succeeded")
+			}
+			if fact := x.facts[0]; fact.Class != ClassProtocol || fact.LocalRefusal != tc.local {
+				t.Fatalf("got class %q local %v, want local %v", fact.Class, fact.LocalRefusal, tc.local)
 			}
 		})
 	}

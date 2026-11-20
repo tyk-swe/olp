@@ -142,7 +142,7 @@ func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.
 			}
 		}
 	case wire.Rerank:
-		err = validateRerank(r, fields)
+		err = validateRerank(fields)
 	default:
 		return errors.New("unknown request family")
 	}

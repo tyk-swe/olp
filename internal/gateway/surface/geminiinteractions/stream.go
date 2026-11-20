@@ -112,8 +112,7 @@ func (r relay) forward(ctx context.Context, frame sse.Frame, seen relayed) (rela
 	if len(output) > r.limit {
 		return bound, errors.New("projected Interaction event exceeds byte limit")
 	}
-	committed, err := r.write(output, event, bound.committed)
-	return relayed{local: bound.local, localID: bound.localID, committed: committed}, err
+	return relayed{local: bound.local, localID: bound.localID, committed: true}, r.write(output, event, bound.committed)
 }
 
 func (r *relay) accept(frame sse.Frame) (geminilifecycle.InteractionEvent, error) {
@@ -207,7 +206,7 @@ func (r relay) project(event geminilifecycle.InteractionEvent, seen relayed) ([]
 	return projected, nil
 }
 
-func (r relay) write(output []byte, event geminilifecycle.InteractionEvent, committed bool) (bool, error) {
+func (r relay) write(output []byte, event geminilifecycle.InteractionEvent, committed bool) error {
 	t := r.turn
 	controller := http.NewResponseController(t.w)
 	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
@@ -225,10 +224,10 @@ func (r relay) write(output []byte, event geminilifecycle.InteractionEvent, comm
 		if n > 0 {
 			r.exchange.Delivery(usage.ClientPartial)
 		}
-		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	if err := controller.Flush(); err != nil {
-		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	t.x.Delivered(t.kernel.Now())
 	switch {
@@ -239,7 +238,7 @@ func (r relay) write(output []byte, event geminilifecycle.InteractionEvent, comm
 	default:
 		r.exchange.Delivery(usage.ClientPartial)
 	}
-	return true, nil
+	return nil
 }
 
 func (r relay) interrupt(ctx context.Context, err error) {

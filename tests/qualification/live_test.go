@@ -220,10 +220,9 @@ func (s *service) liveInference(consumer *harness.Caller, slug string, l liveLan
 	for name, value := range l.headers {
 		headers[name] = value
 	}
-	status := 0
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		status, _ = s.Do(consumer, "POST", "/code/"+slug+"/"+l.path, liveBody(l.protocol, model), headers)
+		status, _ := s.Do(consumer, "POST", "/code/"+slug+"/"+l.path, liveBody(l.protocol, model), headers)
 		if status == http.StatusOK || !slices.Contains([]int{http.StatusNotFound, http.StatusBadGateway, http.StatusServiceUnavailable}, status) || time.Now().After(deadline) {
 			return status
 		}

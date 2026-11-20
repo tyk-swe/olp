@@ -57,7 +57,7 @@ func (s *Tracker) ClientFrame(typ websocket.MessageType, data []byte) {
 		s.unknown = true
 		return
 	}
-	eventType := ""
+	var eventType string
 	if flat, ok := flatFrame(data); ok {
 		eventType = flat.Type
 	} else {

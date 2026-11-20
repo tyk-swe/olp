@@ -35,6 +35,7 @@ const (
 
 var (
 	ErrUnavailable     = errors.New("media spool unavailable")
+	ErrSourceRead      = errors.New("media source unreadable")
 	ErrNotFound        = errors.New("media handle not found")
 	ErrInvalidHandle   = errors.New("invalid media handle")
 	ErrInvalidFilename = errors.New("invalid media filename")
@@ -257,7 +258,7 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 		if readErr != nil {
 			file.Close()
 			pending.abort(readErr)
-			return nil, fmt.Errorf("%w: %w", ErrUnavailable, readErr)
+			return nil, fmt.Errorf("%w: %w: %w", ErrUnavailable, ErrSourceRead, readErr)
 		}
 	}
 	if err = file.Close(); err != nil {

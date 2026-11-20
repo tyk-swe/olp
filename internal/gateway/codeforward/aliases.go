@@ -3,6 +3,7 @@ package codeforward
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -51,7 +52,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 	decoder := sse.NewRawDecoder(reader, codewire.MaxBody)
 	for {
 		frame, readErr := decoder.Next()
-		if readErr == io.EOF {
+		if errors.Is(readErr, io.EOF) {
 			a.finishCodeStream(ctx)
 			return nil
 		}

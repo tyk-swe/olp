@@ -2,6 +2,7 @@ package providerinvoke
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -96,7 +97,7 @@ func (b Binding) NetworkSecret(ctx context.Context) ([]byte, error) {
 
 func (b Binding) Client(ctx context.Context) (*http.Client, error) {
 	client, _, err := b.resolveClient(ctx)
-	if failure, ok := err.(*ResolutionError); ok {
+	if failure, ok := errors.AsType[*ResolutionError](err); ok {
 		return client, failure.Cause
 	}
 	return client, err

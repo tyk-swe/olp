@@ -208,13 +208,12 @@ func (b GeminiBatch) snapshot(body []byte) (Snapshot, error) {
 	}, nil
 }
 
-func decodeGeminiSnapshot(body []byte) (GeminiBatch, Snapshot, error) {
+func decodeGeminiSnapshot(body []byte) (Snapshot, error) {
 	batch, err := DecodeGeminiBatch(body)
 	if err != nil {
-		return GeminiBatch{}, Snapshot{}, err
+		return Snapshot{}, err
 	}
-	snapshot, err := batch.snapshot(body)
-	return batch, snapshot, err
+	return batch.snapshot(body)
 }
 
 func GeminiMetadata(body []byte, model, localInput, upstreamInput string) (json.RawMessage, error) {
@@ -272,7 +271,7 @@ func (r geminiReader) Poll(ctx context.Context, settlement batches.Settlement, t
 	if err != nil {
 		return Snapshot{}, err
 	}
-	_, snapshot, err := decodeGeminiSnapshot(summary)
+	snapshot, err := decodeGeminiSnapshot(summary)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -290,7 +289,7 @@ func (r geminiReader) pollTerminal(ctx context.Context, target Target, path, id 
 	if err != nil {
 		return Snapshot{}, tooLarge(err)
 	}
-	_, snapshot, err := decodeGeminiSnapshot(body)
+	snapshot, err := decodeGeminiSnapshot(body)
 	if err != nil || !snapshot.Terminal || snapshot.ID != id {
 		return Snapshot{}, ErrProviderConflict
 	}
@@ -362,7 +361,7 @@ func (r geminiReader) listPage(ctx context.Context, target Target, token string)
 	}
 	snapshots := make([]Snapshot, 0, len(operations))
 	for _, raw := range operations {
-		_, snapshot, err := decodeGeminiSnapshot(raw)
+		snapshot, err := decodeGeminiSnapshot(raw)
 		if err != nil {
 			return nil, "", err
 		}
