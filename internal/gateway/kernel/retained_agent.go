@@ -313,7 +313,7 @@ func (q agentRequest) exchange(ctx context.Context, pin *Pin, endpoint string, b
 	s, e, end := q.server, q.endpoint, q.reply.end
 	native, failure := s.PinnedDo(ctx, q.x, pin, e.Method, endpoint, body, "application/json")
 	if failure != nil {
-		q.reply.fail(q.refused(ctx, resource, failure))
+		q.reply.fail(q.refused(ctx, resource, creation, failure))
 		return
 	}
 	defer native.Body.Close()
@@ -347,7 +347,10 @@ func (q agentRequest) exchange(ctx context.Context, pin *Pin, endpoint string, b
 	s.WriteStateJSONStatus(q.reply.w, q.x, projected, end.status, native.Exchange)
 }
 
-func (q agentRequest) refused(ctx context.Context, resource *resources.Resource, failure *AttemptFailure) *fault.Error {
+func (q agentRequest) refused(ctx context.Context, resource *resources.Resource, creation *resources.Lifecycle, failure *AttemptFailure) *fault.Error {
+	if err := recordRetainedRejection(ctx, creation, failure); err != nil {
+		return err
+	}
 	if q.endpoint.Action == "create" || failure.Status != http.StatusNotFound {
 		return retainedPublicError(UpstreamError(failure), failure.Status)
 	}
