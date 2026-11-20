@@ -3219,3 +3219,140 @@ func TestAgentResourcesBindTheirBaseAgentPageNewestFirstAndKeepOrForgetWhatEachP
 		t.Fatalf("after the provider lost every agent the list answered %+v and the last is %q", page, kept(derived.ID))
 	}
 }
+
+func TestABatchFileUploadIsCheckedBeforeTheProviderKeptOnlyWhenTheProviderNamesItAndRefusedOffABatchRoute(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "upload-route", "batch-model"
+	provider := &storeProvider{issues: "1", scripted: map[string]string{}, statuses: map[string]int{}, objects: func(issues string) map[string]string {
+		return map[string]string{"POST /files": `{"id":"file-` + providerOwned + issues + `","object":"file","bytes":7,"created_at":1700000000,"filename":"batch.jsonl","purpose":"batch","status":"processed"}`}
+	}}
+	upstream := &retainedUpstream{replies: provider.replies, status: provider.status}
+	sink := &terminals{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream, sink: sink,
+	})
+	owner := g.key(t, "owner")
+	g.key(t, "elsewhere")
+	elsewhere := g.runtime.keys["elsewhere"]
+	elsewhere.Policy.AllowedRoutes = []string{"another"}
+	g.runtime.keys["elsewhere"] = elsewhere
+	part := func(name, filename, content string) string {
+		disposition := `form-data; name="` + name + `"`
+		if filename != "" {
+			disposition += `; filename="` + filename + "\"\r\nContent-Type: application/jsonl"
+		}
+		return "--b\r\nContent-Disposition: " + disposition + "\r\n\r\n" + content + "\r\n"
+	}
+	line := func(model string) string {
+		return `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + model + `","messages":[{"role":"user","content":"hi"}]}}` + "\n"
+	}
+	kept := func() []string {
+		t.Helper()
+		rows, err := pool.Query(t.Context(), `SELECT upstream_id FROM olp.provider_resources WHERE api_key_id=$1 ORDER BY upstream_id`, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	upload := func(name, key, route, form string, status int, code string, classes ...string) retainedObject {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), "POST", g.server.URL+"/v1/files", strings.NewReader(form+"--b--\r\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("Content-Type", "multipart/form-data; boundary=b")
+		if route != "" {
+			request.Header.Set("X-OLP-Route", route)
+		}
+		recorded, sent, stored := len(sink.all()), len(upstream.sent("POST /files")), kept()
+		response, err := g.server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		var reply struct {
+			retainedObject
+			Error struct{ Code string }
+		}
+		if err := json.Unmarshal(raw, &reply); err != nil || response.StatusCode != status || reply.Error.Code != code {
+			t.Fatalf("%s answered %d %s (%v), want %d with code %q", name, response.StatusCode, raw, err, status, code)
+		}
+		if strings.Contains(string(raw)+fmt.Sprint(response.Header), providerOwned) {
+			t.Fatalf("%s exposed a provider identifier: %v %s", name, response.Header, raw)
+		}
+		seen := sink.all()
+		if len(seen) != recorded+1 {
+			t.Fatalf("%s recorded %d requests, want one", name, len(seen)-recorded)
+		}
+		attempted := make([]string, len(seen[recorded].Attempts))
+		for i, attempt := range seen[recorded].Attempts {
+			attempted[i] = attempt.Class
+		}
+		if !slices.Equal(attempted, classes) {
+			t.Fatalf("%s recorded attempts %v, want %v", name, attempted, classes)
+		}
+		if asked := len(upstream.sent("POST /files")) - sent; asked != len(classes) {
+			t.Fatalf("%s reached the provider %d times, want %d", name, asked, len(classes))
+		}
+		if status != http.StatusOK && !slices.Equal(kept(), stored) {
+			t.Fatalf("%s failed but changed the kept files from %v to %v", name, stored, kept())
+		}
+		return reply.retainedObject
+	}
+	batch := part("purpose", "", "batch") + part("file", "batch.jsonl", line(slug))
+	for _, refused := range []struct {
+		name, key, route, form string
+		status                 int
+		code                   string
+	}{
+		{"an upload naming no route", "owner", "", batch, http.StatusBadRequest, "missing_required_parameter"},
+		{"an upload naming an unknown route", "owner", "nowhere", batch, http.StatusNotFound, "route_not_found"},
+		{"an upload by a key without the route", "elsewhere", slug, batch, http.StatusForbidden, "route_forbidden"},
+		{"an upload without a file", "owner", slug, part("purpose", "", "batch"), http.StatusBadRequest, "missing_required_parameter"},
+		{"an upload without a purpose", "owner", slug, part("file", "batch.jsonl", line(slug)), http.StatusBadRequest, "invalid_request"},
+		{"an upload of two files", "owner", slug, batch + part("file", "more.jsonl", line(slug)), http.StatusBadRequest, "invalid_request"},
+		{"a batch file that is not JSON lines", "owner", slug, part("purpose", "", "batch") + part("file", "batch.jsonl", "not json\n"), http.StatusBadRequest, "unsupported_parameter"},
+		{"a batch line for another model", "owner", slug, part("purpose", "", "batch") + part("file", "batch.jsonl", line("another")), http.StatusBadRequest, "unsupported_parameter"},
+	} {
+		upload(refused.name, refused.key, refused.route, refused.form, refused.status, refused.code)
+	}
+
+	provider.answers("POST /files", http.StatusInternalServerError, `{"error":{"message":"The provider broke.","type":"server_error"}}`)
+	upload("an upload the provider fails", "owner", slug, batch, http.StatusInternalServerError, "", "ambiguous")
+	provider.answers("POST /files", http.StatusBadRequest, `{"error":{"message":"The provider refused.","type":"invalid_request_error"}}`)
+	upload("an upload the provider refuses", "owner", slug, batch, http.StatusBadRequest, "", "upstream_client")
+	provider.answers("POST /files", http.StatusOK, `{"object":"file"}`)
+	upload("an upload the provider does not name", "owner", slug, batch, http.StatusBadGateway, "upstream_error", "protocol")
+	provider.answers("POST /files", http.StatusOK, `not json`)
+	upload("an upload the provider answers unreadably", "owner", slug, batch, http.StatusBadGateway, "upstream_error", "protocol")
+	provider.recovers("POST /files")
+
+	file := upload("a batch upload", "owner", slug, batch+part("note", "", "kept"), http.StatusOK, "", "success")
+	sent := upstream.sent("POST /files")
+	if body := sent[len(sent)-1].body; !strings.Contains(body, `"model":"`+model+`"`) || strings.Contains(body, slug) || !strings.Contains(body, `name="note"`) {
+		t.Fatalf("the provider received %q, want the provider model and the caller's extra field", body)
+	}
+	var state string
+	var manifest struct {
+		Adapter, Endpoint string
+		LineCount         int    `json:"line_count"`
+		Operation         string `json:"line_operation"`
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT state, metadata->'batch_manifest' FROM olp.provider_resources WHERE 'file_'||replace(id::text,'-','')=$1 AND upstream_id=$2 AND metadata->>'upstream_model'=$3`,
+		file.ID, "file-"+providerOwned+"1", model).Scan(&state, &manifest); err != nil {
+		t.Fatalf("the uploaded file %s is not kept under the provider's name and model: %v", file.ID, err)
+	}
+	if state != "processed" || manifest.Endpoint != "/v1/chat/completions" || manifest.LineCount != 1 || manifest.Operation != "generation" {
+		t.Fatalf("the uploaded file is kept as %q with manifest %+v, want the provider's status and one generation line", state, manifest)
+	}
+
+	g.republish(t, func(route *routing.Route) { route.Operations = []string{"generation"} })
+	upload("a batch upload on a route without batches", "owner", slug, batch, http.StatusBadRequest, "invalid_request")
+}
