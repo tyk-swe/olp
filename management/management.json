@@ -16793,6 +16793,16 @@
           "route_slug": {
             "type": "string"
           },
+          "revision": {
+            "description": "The published Code Mode route revision number.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "revision_id": {
+            "description": "The ID of the published route revision used to generate the configuration.",
+            "type": "string",
+            "format": "uuid"
+          },
           "small_model": {
             "description": "The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.",
             "type": [
@@ -16843,6 +16853,8 @@
         },
         "required": [
           "route_slug",
+          "revision",
+          "revision_id",
           "base_url",
           "native_models",
           "adapters",
