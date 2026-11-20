@@ -41,3 +41,26 @@ func TestExplicitProviderDiscountOverridesKindDiscount(t *testing.T) {
 		})
 	}
 }
+
+func TestPromotionDiscountsUseStorablePrecision(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		multiplier string
+		valid      bool
+	}{
+		{multiplier: "1.000000000000", valid: true},
+		{multiplier: "1.0000000000000", valid: false},
+	} {
+		t.Run(tc.multiplier, func(t *testing.T) {
+			_, err := Parse(contract.ConfigurationDocument{
+				Discounts: &[]contract.ConfigurationDiscountEntry{{
+					ProviderKind: contract.ProviderKindBedrock,
+					Multiplier:   tc.multiplier,
+				}},
+			})
+			if (err == nil) != tc.valid {
+				t.Errorf("parse multiplier %q: got error %v, want accepted = %t", tc.multiplier, err, tc.valid)
+			}
+		})
+	}
+}
