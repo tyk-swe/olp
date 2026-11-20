@@ -3149,8 +3149,9 @@ func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWor
 		}
 		return object.ID
 	}
+	const form = "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	file := created("/v1/files", "multipart/form-data; boundary=b", form, "file")
 	store := created("/v1/vector_stores", "application/json", `{"name":"notes"}`, "store")
-	file := created("/v1/files", "multipart/form-data; boundary=b", "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n", "file")
 	created("/v1/vector_stores/"+store+"/files", "application/json", `{"file_id":"`+file+`"}`, "attachment")
 
 	const search, compact = "/search", "/v1/responses/compact"
@@ -3244,6 +3245,20 @@ func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWor
 			}
 		})
 	}
+
+	t.Run("a fresh search uses the live mapping after provider ID reuse", func(t *testing.T) {
+		provider.answers("DELETE /files/"+providerFile, 200, `{"id":"`+providerFile+`","deleted":true}`)
+		g.call(t, "owner", "DELETE", "/v1/files/"+file, "", "", 200)
+		replacement := created("/v1/files", "multipart/form-data; boundary=b", form, "replacement-file")
+		if replacement == file {
+			t.Fatalf("replacement reused deleted gateway file ID %q", file)
+		}
+		provider.answers(searched, 200, found(providerFile))
+		_, raw := g.send(t, "POST", "/v1/vector_stores/"+store+search, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}, question, 200)
+		if !strings.Contains(string(raw), `"file_id":"`+replacement+`"`) {
+			t.Fatalf("search returned %s, want replacement file %q", raw, replacement)
+		}
+	})
 
 	unasked := func(path, route, want string) {
 		t.Helper()

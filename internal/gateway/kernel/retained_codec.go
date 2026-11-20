@@ -683,13 +683,13 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			}
 			return parent.ID, nil
 		}
-		bound, findErr := s.Deps.Resources.GetByUpstreamAsOf(ctx, identity, resource.CreatedAt)
+		bound, findErr := s.retainedResultReference(ctx, e, resource, identity)
 		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
 			// An echoed file reference may name the strict durable
 			// kind under the same serving identity.
 			strictIdentity := identity
 			strictIdentity.Kind = resources.KindStrictFile
-			bound, findErr = s.Deps.Resources.GetByUpstreamAsOf(ctx, strictIdentity, resource.CreatedAt)
+			bound, findErr = s.retainedResultReference(ctx, e, resource, strictIdentity)
 		}
 		resultFile := kind == resources.KindFile && resultFiles[id]
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {
@@ -733,4 +733,11 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 		return nil, err
 	}
 	return projected.Bytes(), nil
+}
+
+func (s *Server) retainedResultReference(ctx context.Context, e retainedapi.Endpoint, owner *resources.Resource, identity resources.NativeIdentity) (*resources.Resource, error) {
+	if e.Operation == "retrieval" {
+		return s.Deps.Resources.GetByUpstream(ctx, identity)
+	}
+	return s.Deps.Resources.GetByUpstreamAsOf(ctx, identity, owner.CreatedAt)
 }
