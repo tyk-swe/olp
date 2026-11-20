@@ -919,7 +919,8 @@ checks still apply. Disabling the account or revoking its grant still stops
 admissions on those pins.
 
 **Remaining eligible pins** counts nonretired model pins with a current grant
-and a live key, model, route, and pool assignment. Temporary cooldowns and
+and a live key, model, route, and pool assignment. The key's owner must still
+have project access. Temporary cooldowns and
 capacity limits do not subtract pins. **Last activity** shows the latest
 recorded routing decision. These are not counts of open requests. Use
 **Conversation trees** to inspect or retire pins when their conversations no

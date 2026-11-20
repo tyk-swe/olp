@@ -90,10 +90,10 @@ func TestCodeAccountEndpoints(t *testing.T) {
 		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
 	}
 	codeAccountConcurrencyWrites(t, s, owner, project, codex)
-	codeAccountDrainWrites(t, s, owner, project, claude, user)
+	codeAccountDrainWrites(t, s, owner, project, claude)
 }
 
-func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, project, id, user string) {
+func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, project, id string) {
 	t.Helper()
 	find := func() map[string]any {
 		t.Helper()
@@ -110,6 +110,22 @@ func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, pro
 	if initial["draining"] != false || initial["remaining_pins"] != float64(0) || initial["last_activity_at"] != nil {
 		t.Fatalf("unexpected drain progress on an unused account: %v", initial)
 	}
+	const viewerEmail = "code-viewer@example.com"
+	viewer := s.Invite(owner, viewerEmail, authz.RoleViewer)
+	profile := s.Want(viewer, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	user := profile["id"].(string)
+	s.Want(owner, "PATCH", "/api/v1/users/"+user, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	projectPath := "/api/v1/projects/" + project
+	membership := projectPath + "/members/" + user
+	currentProject := func() map[string]any {
+		t.Helper()
+		return s.Want(owner, "GET", projectPath, nil, nil, http.StatusOK)
+	}
+	grantAccess := func() {
+		t.Helper()
+		s.Want(owner, "PUT", membership, map[string]any{"role": "viewer"}, harness.ETag(currentProject()), http.StatusOK)
+	}
+	grantAccess()
 	binding := seedCodeAccountPin(t, s, project, id, user, initial["provider_id"].(string))
 	path := "/api/v1/code/accounts/" + id + "/drain"
 	start, stop := map[string]bool{"draining": true}, map[string]bool{"draining": false}
@@ -122,8 +138,15 @@ func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, pro
 		t.Fatalf("draining account lost its live pin or activity: %v", progress)
 	}
 	s.Want(owner, "PUT", path, stop, harness.ETag(initial), http.StatusPreconditionFailed)
-	viewer := s.Invite(owner, "code-viewer@example.com", authz.RoleViewer)
-	s.Want(viewer, "PUT", path, stop, harness.ETag(drained), http.StatusForbidden)
+	s.Want(s.Login(viewerEmail), "PUT", path, stop, harness.ETag(drained), http.StatusForbidden)
+	s.Want(owner, "DELETE", membership, nil, harness.ETag(currentProject()), http.StatusNoContent)
+	if missingAccess := find(); missingAccess["remaining_pins"] != float64(0) {
+		t.Fatalf("inaccessible pin counted after project membership removal: %v", missingAccess)
+	}
+	grantAccess()
+	if restoredAccess := find(); restoredAccess["remaining_pins"] != float64(1) {
+		t.Fatalf("live pin missing after project membership restoration: %v", restoredAccess)
+	}
 	if _, err := s.Pool.Exec(t.Context(), `UPDATE olp.code_bindings SET retired_at=now() WHERE id=$1`, binding); err != nil {
 		t.Fatal(err)
 	}

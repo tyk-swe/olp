@@ -105,13 +105,27 @@ func ReadGranted(ctx context.Context, q database.Queryer, providerName, projectI
 const remainingPins = `SELECT count(*) FROM olp.code_pins pin
 	JOIN olp.code_bindings b ON b.id=pin.root_id
 	JOIN olp.api_keys k ON k.id=b.api_key_id
-	JOIN olp.code_routes r ON r.id=b.route_id
+	JOIN olp.users u ON u.id=k.created_by
+	LEFT JOIN olp.workload_issuers wi ON wi.id=k.workload_issuer_id
+	JOIN olp.code_routes r ON r.id=b.route_id AND r.project_id=k.project_id
+	JOIN olp.projects project ON project.id=r.project_id
 	JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
 	JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid AND pa.account_id=pin.account_id
 	JOIN olp.code_pool_keys pk ON pk.pool_id=pa.pool_id AND pk.api_key_id=k.id
 	WHERE pin.account_id=x.id AND pin.principal=x.principal AND b.retired_at IS NULL
 	AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
+	AND (k.workload_issuer_id IS NULL OR wi.document->>'enabled'='true')
+	AND u.active AND u.oidc_authorized
+	AND (u.access_scope='global' OR EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=r.project_id))
+	AND k.policy->'scopes' ? 'inference'
+	AND ((coalesce(nullif(k.policy->'allowed_routes','null'::jsonb),'[]'::jsonb)='[]'::jsonb
+		AND coalesce(nullif(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb)='[]'::jsonb)
+		OR k.policy->'allowed_routes' ? r.slug
+		OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(nullif(k.policy->'allowed_route_groups','null'::jsonb)) g(name)
+			WHERE project.route_groups->g.name ? r.slug))
 	AND v.document->>'enabled'='true' AND v.connections ? x.provider_id::text
+	AND (v.document->'models' ? pin.model OR (v.document->>'model_rewriting'='true'
+		AND v.document->'models' ? (v.document->'aliases'->>pin.model)))
 	AND v.document->'models' ? coalesce(pin.target_model,pin.model)
 	AND x.models ? coalesce(pin.target_model,pin.model)`
 
