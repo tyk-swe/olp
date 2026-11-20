@@ -3576,6 +3576,15 @@ func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesT
 		}
 	}
 
+	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 3 || kept[0].state != "completed" || kept[2].state != "queued" {
+		t.Fatalf("the gateway kept %+v, want the first response completed and the third still queued", kept)
+	}
+	upstream.answers(200, sse, responseEvent(0, "response.created", provider(3), "in_progress", ""), responseEvent(1, "response.completed", provider(3), "completed", usage))
+	read("owner", unfinished, stream, 200)
+	if kept := storedResponses(t, pool, g, "owner"); kept[2].state != "completed" {
+		t.Errorf("a stream that ended completed left the stored response %q, want completed", kept[2].state)
+	}
+
 	for _, tc := range []struct {
 		name, key, query string
 		provider         int
@@ -3590,13 +3599,14 @@ func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesT
 		{name: "a reply that is no stream", key: "owner", query: stream, provider: 200, kind: "application/json", events: []string{`{"id":"` + provider(1) + `"}`},
 			status: 502, code: "fidelity_protocol_violation", attempt: "streaming protocol committed=false"},
 		{name: "a provider outage", key: "owner", query: stream, provider: 500, kind: "application/json", events: []string{`{"error":{"message":"down"}}`}, status: 500, attempt: "streaming upstream_server committed=false"},
-		{name: "a response the provider no longer has", key: "owner", query: stream, provider: 404, kind: "application/json", events: []string{`{"error":{"message":"gone"}}`},
-			status: 404, code: "not_found", attempt: "streaming upstream_client committed=false"},
 		{name: "another key", key: "stranger", query: stream, status: 404, code: "not_found"},
 		{name: "a stream flag that is no boolean", key: "owner", query: "?stream=maybe", status: 400, code: "invalid_request"},
 		{name: "a cursor without a stream", key: "owner", query: "?starting_after=1", status: 400, code: "invalid_request"},
 		{name: "an unknown control", key: "owner", query: stream + "&verbose=1", status: 400, code: "invalid_request"},
 		{name: "an include the gateway does not know", key: "owner", query: stream + "&include=everything", status: 400, code: "invalid_request"},
+		{name: "a response the provider no longer has", key: "owner", query: stream, provider: 404, kind: "application/json", events: []string{`{"error":{"message":"gone"}}`},
+			status: 404, code: "not_found", attempt: "streaming upstream_client committed=false"},
+		{name: "a retry after the provider confirmed the response was missing", key: "owner", query: stream, status: 404, code: "not_found"},
 	} {
 		script := tc.events
 		if tc.provider == 0 {
@@ -3612,15 +3622,6 @@ func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesT
 		if asked := upstream.asked(); (len(asked) != 0) != (tc.provider != 0) {
 			t.Errorf("%s reached the provider as %q, want a provider read only when the request is one the owner may stream", tc.name, asked)
 		}
-	}
-
-	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 3 || kept[0].state != "completed" || kept[2].state != "queued" {
-		t.Fatalf("the gateway kept %+v, want the first response completed and the third still queued", kept)
-	}
-	upstream.answers(200, sse, responseEvent(0, "response.created", provider(3), "in_progress", ""), responseEvent(1, "response.completed", provider(3), "completed", usage))
-	read("owner", unfinished, stream, 200)
-	if kept := storedResponses(t, pool, g, "owner"); kept[2].state != "completed" {
-		t.Errorf("a stream that ended completed left the stored response %q, want completed", kept[2].state)
 	}
 
 	native := &responseStreams{retainedUpstream: &retainedUpstream{replies: openAIReplies}}
