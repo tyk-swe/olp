@@ -19,6 +19,26 @@ func textInputs(raw json.RawMessage) ([]string, error) {
 	return list, nil
 }
 
+func embeddingInputCount(raw json.RawMessage) (int, bool) {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return 1, true
+	}
+	var texts []string
+	if json.Unmarshal(raw, &texts) == nil {
+		return len(texts), len(texts) > 0
+	}
+	var tokens []uint32
+	if json.Unmarshal(raw, &tokens) == nil {
+		return 1, len(tokens) > 0
+	}
+	var batches [][]uint32
+	if json.Unmarshal(raw, &batches) == nil {
+		return len(batches), len(batches) > 0
+	}
+	return 0, false
+}
+
 func embeddingFields(f Object, extra ...string) error {
 	allowed := map[string]bool{"model": true, "input": true, "dimensions": true, "encoding_format": true}
 	for _, name := range extra {

@@ -666,6 +666,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 	}{
 		{"complete", `{"index":0,"embedding":[0.5,0]},{"index":1,"embedding":[0.25,0.5]}`, http.StatusOK},
 		{"reordered", `{"index":1,"embedding":[0.25,0.5]},{"index":0,"embedding":[0.5,0]}`, http.StatusOK},
+		{"missing input", `{"index":0,"embedding":[0.5,0]}`, http.StatusBadGateway},
 		{"out of range", `{"index":0,"embedding":[0.5,0]},{"index":2,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
 		{"shifted", `{"index":1,"embedding":[0.5,0]},{"index":2,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
 		{"duplicate", `{"index":0,"embedding":[0.5,0]},{"index":0,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
@@ -707,6 +708,37 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 						t.Fatalf("vector identity changed %s", body)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestEmbeddingsCountTokenIDInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, data string
+		want              int
+	}{
+		{"batches", `[[1,2],[3,4]]`, `{"index":0,"embedding":[0.5,0]},{"index":1,"embedding":[0.25,0.5]}`, http.StatusOK},
+		{"missing batch", `[[1,2],[3,4]]`, `{"index":0,"embedding":[0.5,0]}`, http.StatusBadGateway},
+		{"one tokenized input", `[1024,2048]`, `{"index":0,"embedding":[0.5,0]}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				strictEmbeddings(snapshot)
+				route := snapshot.Routes[routeSlug]
+				route.MaxAttempts = 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, `{"data":[`+tc.data+`]}`))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":`+tc.input+`,"encoding_format":"float"}`), nil)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.want, body)
 			}
 		})
 	}
