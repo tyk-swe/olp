@@ -43,7 +43,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider resource authority is unavailable.")
 	}
 	if len(refs) > 0 && !x.authority.Policy.AllowProviderState {
-		return providerStateForbidden()
+		return ProviderStateForbidden()
 	}
 	x.mode = "unary"
 	if parsed.Stream {
@@ -68,7 +68,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 	var changes []oif.Change
 	for _, ref := range refs {
 		var resource *resources.Resource
-		var durable *durableDocument
+		var durable *DurableDocument
 		localID := ref.ID
 		if ref.Kind == "context_cache" {
 			// Gemini SDKs normalize resource names before generation, including
@@ -76,11 +76,11 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 			localID = strings.TrimPrefix(localID, "cachedContents/")
 		}
 		if ref.Kind == resources.KindFile {
-			resource, durable, err = s.readDurable(ctx, durableKind(resources.KindFile, ref.ID), x.keyID, ref.ID)
+			resource, durable, err = s.ReadDurable(ctx, DurableKind(resources.KindFile, ref.ID), x.keyID, ref.ID)
 		} else {
 			resource, err = s.Deps.Resources.Get(ctx, ref.Kind, x.keyID, localID)
 		}
-		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || retainedUnsettled(resource.State) || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.Now()) {
+		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || RetainedUnsettled(resource.State) || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.Now()) {
 			return fault.InvalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.Pointer)
 		}
 		if ref.Kind != resources.KindFile && (resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision) {
@@ -89,7 +89,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 		var p *Pin
 		var route *routing.Route
 		if durable != nil {
-			p, route, _ = s.admitDurable(ctx, x, x.authority, resource, durable, "generation", RetainedNewWork)
+			p, route, _ = s.AdmitDurable(ctx, x, x.authority, resource, durable, "generation", RetainedNewWork)
 		} else {
 			p, route, _ = s.ResolveResource(ctx, x, x.authority, resource, "generation", RetainedNewWork)
 		}
@@ -118,7 +118,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.E
 		}
 		bindings.resolved[ref.Pointer] = resource.UpstreamID
 		bindings.bound[ref.Kind+"\x00"+resource.UpstreamID] = resource
-		changes = append(changes, oif.Change{Pointer: ref.Pointer, Value: quotedResponseID(resource.UpstreamID), Origin: oif.ResourceBinding, Reason: "verified generation resource authority"})
+		changes = append(changes, oif.Change{Pointer: ref.Pointer, Value: QuotedResponseID(resource.UpstreamID), Origin: oif.ResourceBinding, Reason: "verified generation resource authority"})
 		if ref.Kind == "conversation" {
 			x.providerState = true
 		}

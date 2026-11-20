@@ -33,5 +33,5 @@ func CodePaidProtocol(provider Provider, model string, modes ...string) (codemod
 }
 
 func CodePaidLimitsMatch(liveProvider, frozenProvider *Limits, liveSlot, frozenSlot Slot) bool {
-	return reflect.DeepEqual(liveProvider, frozenProvider) && reflect.DeepEqual(liveSlot.limits(), frozenSlot.limits())
+	return reflect.DeepEqual(liveProvider, frozenProvider) && reflect.DeepEqual(liveSlot.Limits, frozenSlot.Limits)
 }

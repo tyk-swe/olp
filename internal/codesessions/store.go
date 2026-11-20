@@ -196,7 +196,7 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 	if err := validateCodeAdmission(input); err != nil {
 		return out, err
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return out, err
 	}
@@ -306,8 +306,8 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 		out.Attempt.ReservedTokens = in.Bound.Tokens
 		out.Attempt.BoundEvidence = &in.Bound.Evidence
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16,statement_timestamp()) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
 	if err != nil {
 		return out, err
 	}
@@ -678,17 +678,17 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in Admission, id, root string, 
 	if err != nil {
 		return none, err
 	}
-	outcomes := slices.Collect(func(yield func(codemode.Candidate) bool) {
-		for _, candidate := range candidates {
-			if !yield(candidate.outcome) {
-				return
-			}
-		}
-	})
-	chosen, ok := codemode.ChooseCandidate(outcomes)
-	if !ok || !chosen.Eligible() {
+	checkCapacity := codeGeneration(in.Operation.Name) || id == "" && root == ""
+	chosen, outcomes, err := chooseCodeAccount(ctx, tx, checkCapacity, candidates)
+	if err != nil {
+		return none, err
+	}
+	if !chosen.Eligible() {
 		if len(candidates) == 0 {
 			return none, codemode.Refuse(503, "code_account_unavailable")
+		}
+		if slices.ContainsFunc(outcomes, func(c codemode.Candidate) bool { return c.Position == chosen.Position && c.Busy }) {
+			return codeSelection{candidates: outcomes}, codeAccountBusy()
 		}
 		deadlines := slices.Collect(func(yield func(*time.Time) bool) {
 			for _, candidate := range candidates {
@@ -723,7 +723,8 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in Admission, id, root string, 
 // MarkDispatched is the irreversible pre-send transition. Network ambiguity
 // leaves uncertainty; it cannot be used to authorize a second dispatch.
 func (s *Store) MarkDispatched(ctx context.Context, id string) error {
-	r, err := s.pool.Exec(ctx, `UPDATE olp.code_attempts SET state='uncertain' WHERE id=$1 AND state='prepared'`, id)
+	r, err := s.pool.Exec(ctx, `UPDATE olp.code_attempts SET state='uncertain' WHERE id=$1 AND state='prepared'
+		AND (account_id IS NULL OR operation='prewarm' OR created_at>statement_timestamp()-make_interval(secs=>$2))`, id, float64(generationLeaseSeconds))
 	if err != nil {
 		return err
 	}

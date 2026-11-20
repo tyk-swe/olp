@@ -41,9 +41,9 @@ func (s *Server) providerNetworkSecret(ctx context.Context, pinned *release.Rele
 	return s.targetResolver().Bind(pinned, providerinvoke.Target{Provider: *provider}, nil).NetworkSecret(ctx)
 }
 
-// pinEligibility reports whether a pinned slot's credential version and its
+// PinEligibility reports whether a pinned slot's credential version and its
 // provider's network credential may still serve.
-func (s *Server) pinEligibility(p *Pin) routing.Eligibility {
+func (s *Server) PinEligibility(p *Pin) routing.Eligibility {
 	if p.Slot.CredentialID != nil {
 		if eligibility := s.Deps.Runtime.Eligibility(*p.Slot.CredentialID); eligibility != routing.Eligible {
 			return eligibility

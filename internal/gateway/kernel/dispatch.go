@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -120,15 +124,72 @@ func (s *Server) ReleaseHold(ctx context.Context, hold *dispatchHold) {
 	}
 }
 
-func (s *Server) settleSession(ctx context.Context, x *Call, p *Pin) {
+func (s *Server) SettleSession(ctx context.Context, x *Call, p *Pin) {
 	s.finishSessionDebit(ctx, x, x.Failure != nil)
 	settled := sessionSettlement(x)
 	if p != nil {
-		s.settleSessionHold(ctx, x, p.Hold, settled)
+		s.SettleSessionHold(ctx, x, p.Hold, settled)
 	}
-	s.settleCaps(ctx, x)
+	s.SettleCaps(ctx, x)
 	s.recordCost(x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
+}
+
+func (s *Server) BeginWebRTCSettlement(ctx context.Context, x *Call, rejected bool, failure *fault.Error) {
+	s.finishSessionDebit(ctx, x, failure != nil && !rejected)
+}
+
+func (s *Server) FinishWebRTCSettlement(ctx context.Context, x *Call, p *Pin, observed *wire.Usage, pending, rejected bool, failure *fault.Error) {
+	class := ClassProtocol
+	cancelled := false
+	if failure != nil {
+		switch {
+		case failure.Code == "key_revoked" || strings.HasPrefix(failure.Code, "provider_credential_"):
+			class = ClassCredential
+		case failure.Code == "realtime_session_expired":
+			class = ClassTimeout
+		}
+	}
+	if fact := x.LastAttemptFact(); fact != nil {
+		if fact.Interaction != nil {
+			if observed != nil {
+				fact.Interaction.ClientState = usage.ClientPartial
+			}
+			if failure == nil || rejected {
+				fact.Interaction.UpstreamState = upstream.Terminal
+				fact.Interaction.ClientState = usage.ClientTerminal
+			} else {
+				fact.Interaction.UpstreamState = upstream.Unknown
+			}
+		}
+		if observed != nil {
+			fact.Usage = observed
+			fact.UsageObserved = true
+			fact.UsageComplete = failure == nil && !pending
+			fact.BillingUncertain = !fact.UsageComplete
+		} else if x.dispatched && !rejected {
+			fact.UsageComplete = false
+			fact.BillingUncertain = true
+		}
+		if failure != nil && fact.Class == "success" {
+			fact.Class = class
+		}
+	}
+	status := http.StatusOK
+	var out *Outcome
+	if failure != nil {
+		x.Failure = failure
+		status = failure.Status
+		out = &Outcome{Err: failure, Committed: x.dispatched, Cancelled: cancelled}
+	} else {
+		out = &Outcome{Committed: true}
+	}
+	s.Finish(x, out, status)
+	settled := sessionSettlement(x)
+	s.SettleSessionHold(ctx, x, p.Hold, settled)
+	s.recordCost(x)
+	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
+	s.SettleCaps(ctx, x)
 }
 
 func sessionSettlement(x *Call) *int64 {
@@ -145,7 +206,7 @@ func sessionSettlement(x *Call) *int64 {
 	return new(max(x.estimate, *actual))
 }
 
-func (s *Server) settleSessionHold(ctx context.Context, x *Call, hold *dispatchHold, actual *int64) {
+func (s *Server) SettleSessionHold(ctx context.Context, x *Call, hold *dispatchHold, actual *int64) {
 	if hold == nil {
 		return
 	}
@@ -187,7 +248,7 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *Call, attempt ro
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
 		caps = [3]quota.CappedOwner{}
 	}
-	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
+	if err := s.ReserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
 		s.ReleaseHold(ctx, h)
 		return false, err
 	}
@@ -343,18 +404,18 @@ func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provi
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
 func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *routing.Slot, generation int64, failure *AttemptFailure, caller ...bool) bool {
-	if len(caller) != 0 && caller[0] && (failure.class == classCredential || failure.class == classRateLimit || failure.credentialRefused) {
+	if len(caller) != 0 && caller[0] && (failure.class == ClassCredential || failure.class == classRateLimit || failure.credentialRefused) {
 		return true
 	}
 	if failure.dispatched && slot.CredentialID != nil &&
-		(failure.credentialRefused || failure.class == classCredential || failure.Status == http.StatusUnauthorized) {
+		(failure.credentialRefused || failure.class == ClassCredential || failure.Status == http.StatusUnauthorized) {
 		// The upstream refused the credential, whatever rule classified the
 		// failure: a grant beneath it is refreshed early, which ends the
 		// cooldown (GrantRefreshed).
 		s.Deps.Runtime.CredentialRefused(*slot.CredentialID, generation)
 	}
 	switch failure.class {
-	case classCredential:
+	case ClassCredential:
 		if generation != s.slotGrantGeneration(slot) {
 			return false
 		}

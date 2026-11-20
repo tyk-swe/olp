@@ -37,7 +37,7 @@ func (s *Server) AuthorizeListedResource(ctx context.Context, authority keyautho
 	}
 	operation := "batch"
 	if res.Kind == resources.KindFile {
-		operation = retainedFileOperation(res)
+		operation = RetainedFileOperation(res)
 	}
 	resolved, err := s.Deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
@@ -149,12 +149,12 @@ const (
 	RetainedNewWork
 )
 
-// retainedContract serves a retained resource only under the contract it was
+// RetainedContract serves a retained resource only under the contract it was
 // created with. A strict resource is refused once its route is transformed,
 // and a transformed one cannot start new work once its route is strict. The
 // owner can always list, delete or cancel, so provider-held data can be
 // removed and running upstream work stopped whatever the route promises now.
-func retainedContract(strict bool, current routing.RouteFidelity, use RetainedUse) *fault.Error {
+func RetainedContract(strict bool, current routing.RouteFidelity, use RetainedUse) *fault.Error {
 	switch {
 	case use == RetainedHousekeeping:
 		return nil
@@ -184,17 +184,17 @@ func strictResourceKind(kind string) (strict, known bool) {
 }
 
 func retainedResourceContract(res *resources.Resource, original, current routing.RouteFidelity, use RetainedUse) *fault.Error {
-	if res.Kind == resources.KindFile && retainedFileOperation(res) != "batch" {
-		return retainedContract(original.Strict(), current, use)
+	if res.Kind == resources.KindFile && RetainedFileOperation(res) != "batch" {
+		return RetainedContract(original.Strict(), current, use)
 	}
 	if strict, known := strictResourceKind(res.Kind); known {
-		return retainedContract(strict, current, use)
+		return RetainedContract(strict, current, use)
 	}
 	switch res.Kind {
 	case resources.KindInteraction, "conversation", "vector_store", "context_cache":
 		// These kinds share a name under either fidelity. Their creation
 		// route supplies the contract before a historical pin is restored.
-		return retainedContract(original.Strict(), current, use)
+		return RetainedContract(original.Strict(), current, use)
 	}
 	return nil
 }
@@ -205,11 +205,11 @@ func (x *Call) retainedContentGate(resource *resources.Resource, route *routing.
 		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
 			return x.GuardrailSurfaceGate(route)
 		case resources.KindFile:
-			if adapter, err := resourceAdapter(resource); err != nil || retainedFileOperation(resource) != "batch" || adapter.Managed() {
+			if adapter, err := ResourceAdapter(resource); err != nil || RetainedFileOperation(resource) != "batch" || adapter.Managed() {
 				return x.GuardrailSurfaceGate(route)
 			}
 		case resources.KindBatch:
-			if adapter, err := resourceAdapter(resource); err != nil || adapter.Managed() {
+			if adapter, err := ResourceAdapter(resource); err != nil || adapter.Managed() {
 				return x.GuardrailSurfaceGate(route)
 			}
 		}
@@ -236,7 +236,7 @@ func (s *Server) ResolveResource(ctx context.Context, x *Call, authority keyauth
 	}
 	if current, published := x.request.release.Snapshot().FindRoute(res.RouteSlug); published {
 		if use != RetainedHousekeeping {
-			if e := s.checkRouteFidelity(ctx, &current); e != nil {
+			if e := s.CheckRouteFidelity(ctx, &current); e != nil {
 				return nil, nil, e
 			}
 		}
@@ -275,10 +275,10 @@ func (s *Server) ResolveResource(ctx context.Context, x *Call, authority keyauth
 	return p, route, nil
 }
 
-// admitStoredResponse admits a key to a retained response and returns the pin
+// AdmitStoredResponse admits a key to a retained response and returns the pin
 // that serves it. A strict response also needs provider state on the key and
 // the serving identity its contract recorded.
-func (s *Server) admitStoredResponse(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, contract *storedResponseContract, use RetainedUse) (*Pin, *routing.Route, *fault.Error) {
+func (s *Server) AdmitStoredResponse(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, contract *StoredResponseContract, use RetainedUse) (*Pin, *routing.Route, *fault.Error) {
 	if contract != nil {
 		current, ok := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.Now()) {
@@ -302,15 +302,15 @@ func (s *Server) admitStoredResponse(ctx context.Context, x *Call, authority key
 
 // authorizeResponseContract checks a key may use a strict retained response
 // whose pin is resolved later.
-func (s *Server) authorizeResponseContract(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, contract *storedResponseContract, use RetainedUse) *fault.Error {
-	_, _, e := s.admitStoredResponse(ctx, x, authority, res, contract, use)
+func (s *Server) authorizeResponseContract(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, contract *StoredResponseContract, use RetainedUse) *fault.Error {
+	_, _, e := s.AdmitStoredResponse(ctx, x, authority, res, contract, use)
 	return e
 }
 
-// admitDurable admits a key to a retained file or batch and returns the pin
+// AdmitDurable admits a key to a retained file or batch and returns the pin
 // that serves it. A strict one also needs provider state on the key and the
 // serving identity its document recorded.
-func (s *Server) admitDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *durableDocument, operation string, use RetainedUse) (*Pin, *routing.Route, *fault.Error) {
+func (s *Server) AdmitDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *DurableDocument, operation string, use RetainedUse) (*Pin, *routing.Route, *fault.Error) {
 	if doc != nil {
 		current, ok := x.Snapshot().FindRoute(r.RouteSlug)
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.Now()) {
@@ -333,13 +333,13 @@ func (s *Server) admitDurable(ctx context.Context, x *Call, authority keyauthori
 	return p, route, nil
 }
 
-// authorizeDurable checks a key may use a strict retained file or batch; a
+// AuthorizeDurable checks a key may use a strict retained file or batch; a
 // transformed one (doc is nil) is checked when its pin is resolved.
-func (s *Server) authorizeDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *durableDocument, operation string, use RetainedUse) *fault.Error {
+func (s *Server) AuthorizeDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *DurableDocument, operation string, use RetainedUse) *fault.Error {
 	if doc == nil {
 		return nil
 	}
-	_, _, e := s.admitDurable(ctx, x, authority, r, doc, operation, use)
+	_, _, e := s.AdmitDurable(ctx, x, authority, r, doc, operation, use)
 	return e
 }
 

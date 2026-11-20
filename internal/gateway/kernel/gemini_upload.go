@@ -62,7 +62,7 @@ func ValidateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 	return nil
 }
 
-func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
+func (s *Server) UploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
 	endpoint, err := GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.Egress)
 	if err != nil {
 		return nil, "", nil, geminiManagedUploadFailure(ClassConnect, false)
@@ -112,13 +112,13 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, p
 	var result struct {
 		File json.RawMessage `json:"file"`
 	}
-	var fileObject map[string]json.RawMessage
+	var FileObject map[string]json.RawMessage
 	if json.Unmarshal(body, &result) != nil || len(result.File) == 0 ||
-		json.Unmarshal(result.File, &fileObject) != nil {
+		json.Unmarshal(result.File, &FileObject) != nil {
 		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	var name string
-	if json.Unmarshal(fileObject["name"], &name) != nil {
+	if json.Unmarshal(FileObject["name"], &name) != nil {
 		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
 	}
 	if _, err := GeminiFileID(name); err != nil {
@@ -160,7 +160,7 @@ func (s *Server) GeminiPinnedRequest(ctx context.Context, x *Call, p *Pin, metho
 		if ctx.Err() != nil {
 			return nil, exchange.fail(ClassCancelled, nil)
 		}
-		return nil, exchange.fail(classCredential, nil)
+		return nil, exchange.fail(ClassCredential, nil)
 	}
 	for name, values := range headers {
 		req.Header.Del(name)

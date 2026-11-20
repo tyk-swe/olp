@@ -15,14 +15,14 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func responsePath(cfg connectors.Config, suffix string) string {
+func ResponsePath(cfg connectors.Config, suffix string) string {
 	if cfg.Kind == "azure_openai" && cfg.Hosting() != "azure-v1" && cfg.Hosting() != "azure-responses-legacy" {
 		return "deployments/responses" + suffix
 	}
 	return "responses" + suffix
 }
 
-func providerStateForbidden() *fault.Error {
+func ProviderStateForbidden() *fault.Error {
 	return fault.PermissionError("provider_state_forbidden", "This API key does not allow provider state; provider-retained content requires the allow_provider_state policy.")
 }
 
@@ -83,7 +83,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *Call, authority keya
 	if previous == "" {
 		return nil
 	}
-	res, contract, err := s.readResponseResource(ctx, authority.ID, previous)
+	res, contract, err := s.ReadResponseResource(ctx, authority.ID, previous)
 	if errors.Is(err, resources.ErrNotFound) {
 		param := "previous_response_id"
 		return fault.InvalidRequest("invalid_previous_response_id", "previous_response_id must name a stored response owned by this key.", &param)
@@ -199,9 +199,9 @@ func (s *Server) previousResponseLocal(ctx context.Context, identity resources.N
 	return res.ID
 }
 
-// mapPreviousResponse maps a non-strict response object's echoed
+// MapPreviousResponse maps a non-strict response object's echoed
 // previous_response_id so callers only see gateway-owned response ids.
-func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, identity resources.NativeIdentity, pin *resources.Resource) ([]byte, error) {
+func (s *Server) MapPreviousResponse(ctx context.Context, body []byte, identity resources.NativeIdentity, pin *resources.Resource) ([]byte, error) {
 	upstream, ok := upstreamString(body, "previous_response_id")
 	if !ok {
 		return body, nil

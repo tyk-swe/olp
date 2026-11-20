@@ -45,6 +45,10 @@ type BatchManifest struct {
 	ManifestDigest string                  `json:"manifest_digest,omitempty"`
 }
 
+func (m BatchManifest) Usable(adapter connectors.BatchAdapter) bool {
+	return m.Adapter == adapter && m.Endpoint != "" && m.LineCount >= 1 && m.ManifestDigest != ""
+}
+
 func (m BatchManifest) withAdapter(adapter connectors.BatchAdapter) BatchManifest {
 	m.Adapter = adapter
 	return m
@@ -66,7 +70,7 @@ type managedFileRecord struct {
 	CompletionWindow string            `json:"completion_window,omitempty"`
 }
 
-func decodeManagedFileRecord(metadata json.RawMessage) (managedFileRecord, error) {
+func DecodeManagedFileRecord(metadata json.RawMessage) (managedFileRecord, error) {
 	var record managedFileRecord
 	if err := json.Unmarshal(metadata, &record); err != nil {
 		return managedFileRecord{}, ErrGeminiBatchFidelity
@@ -74,7 +78,7 @@ func decodeManagedFileRecord(metadata json.RawMessage) (managedFileRecord, error
 	return record, nil
 }
 
-func resourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, error) {
+func ResourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, error) {
 	var metadata struct {
 		Adapter string `json:"adapter"`
 	}
@@ -87,16 +91,16 @@ func resourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, err
 	return connectors.ParseBatchAdapter(metadata.Adapter)
 }
 
-var errProviderFileMetadata = errors.New("invalid provider file metadata")
+var ErrProviderFileMetadata = errors.New("invalid provider file metadata")
 
-func managedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest BatchManifest, role string) (json.RawMessage, error) {
-	record, err := decodeManagedFileRecord(prior)
+func ManagedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest BatchManifest, role string) (json.RawMessage, error) {
+	record, err := DecodeManagedFileRecord(prior)
 	if err != nil {
 		return nil, err
 	}
 	file, err := decodeManagedProviderFile(adapter, response)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errProviderFileMetadata, err)
+		return nil, fmt.Errorf("%w: %w", ErrProviderFileMetadata, err)
 	}
 	if manifest.Adapter != "" {
 		return json.Marshal(managedFileRecord{BatchManifest: manifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file})
@@ -167,7 +171,7 @@ type translatedBatch struct {
 	err      error
 }
 
-func (s *Server) translateManagedBatchInput(ctx context.Context, p *Pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, BatchManifest, *fault.Error) {
+func (s *Server) TranslateManagedBatchInput(ctx context.Context, p *Pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, BatchManifest, *fault.Error) {
 	opened, err := s.Deps.Staging.Open(file.Handle)
 	if err != nil {
 		return nil, BatchManifest{}, fault.ServerError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
@@ -420,14 +424,14 @@ func (s *Server) BatchLineDigest(customID string) ([]byte, bool) {
 	return digester.Digest(secrets.BatchLineDigest, customID), true
 }
 
-func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapter, endpoint string, window batchWindow, upstreamFileID, model string, manifest BatchManifest, id uuid.UUID) ([]byte, *fault.Error) {
+func ManagedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapter, endpoint string, window BatchWindow, upstreamFileID, model string, manifest BatchManifest, id uuid.UUID) ([]byte, *fault.Error) {
 	metadata, err := batchClientMetadata(source)
 	if adapter == connectors.BatchGeminiManaged {
 		if err != nil {
 			return nil, fault.InvalidRequest("invalid_request", "metadata must be a string map.", new("metadata"))
 		}
 		_, windowSupplied := source.Root().Lookup("completion_window")
-		if !windowSupplied || window.label != "24h" || endpoint != manifest.Endpoint || manifest.LineOperation != wire.LineGeneration ||
+		if !windowSupplied || window.Label != "24h" || endpoint != manifest.Endpoint || manifest.LineOperation != wire.LineGeneration ||
 			manifest.LineCount < 1 || upstreamFileID == "" {
 			return nil, fault.InvalidRequest("invalid_request", "Gemini managed batches require a matching generation manifest and completion_window=24h.", nil)
 		}
@@ -444,7 +448,7 @@ func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapte
 	}
 	return marshalBatchBody(mistralBatchBody{
 		Endpoint: endpoint, InputFiles: []string{upstreamFileID}, Model: model,
-		TimeoutHours: int64(window.length / time.Hour), Metadata: metadata,
+		TimeoutHours: int64(window.Length / time.Hour), Metadata: metadata,
 	})
 }
 

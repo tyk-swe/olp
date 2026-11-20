@@ -45,7 +45,7 @@ func sameCredential(a, b *string) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
-func (s *Server) retainedResponseLimit() int64 {
+func (s *Server) RetainedResponseLimit() int64 {
 	if s.Config.MaxResponseBytes > 0 && s.Config.MaxResponseBytes < retainedBodyLimit {
 		return s.Config.MaxResponseBytes
 	}
@@ -114,7 +114,7 @@ func (s *Server) projectRetainedAgent(ctx context.Context, resource *resources.R
 
 // Provider errors may echo native resource identifiers. Preserve the stable
 // HTTP status while keeping provider identities outside public errors.
-func retainedPublicError(err *fault.Error, status int) *fault.Error {
+func RetainedPublicError(err *fault.Error, status int) *fault.Error {
 	out := *err
 	if status >= http.StatusBadRequest && status <= 599 {
 		out.Status = status
@@ -167,7 +167,7 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *Call, p *Pin, route *r
 		}
 		provider, slot = &copyProvider, &copySlot
 	}
-	gate := s.gateAttempt(ctx, x, p.attempt, provider, slot, quota.CombinedDemand(max(resourceEstimate, x.estimate)), s.Now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateAttempt(ctx, x, p.attempt, provider, slot, quota.CombinedDemand(max(ResourceEstimate, x.estimate)), s.Now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
@@ -232,6 +232,6 @@ func (s *Server) retainedControlPolicy(x *Call, p *Pin, route *routing.Route) *f
 	return nil
 }
 
-func retainedUnsettled(state string) bool {
+func RetainedUnsettled(state string) bool {
 	return state == "submitting" || state == "submission_unknown" || state == "not_accepted"
 }

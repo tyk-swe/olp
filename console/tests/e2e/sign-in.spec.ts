@@ -16,7 +16,9 @@ test('a signed-out visitor reaches the console only after signing in', async ({
 
   await signIn(page);
 
-  await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'API keys', exact: true })
+  ).toBeVisible();
   await expect(page.getByRole('link', { name: owner.name })).toBeVisible();
 });
 
@@ -25,7 +27,9 @@ test('a bookmark opens the destination overview behind its own login', async ({
 }) => {
   await page.goto('/keys');
   await signIn(page);
-  await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'API keys', exact: true })
+  ).toBeVisible();
 
   const { port } = new URL(page.url());
   const destination = new URL(`http://localhost:${port}`);

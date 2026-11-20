@@ -28,7 +28,7 @@ func parseAccount(e contract.ConfigurationCodeAccount) (Account, error) {
 	if httpkit.ValidText("code", e.Project, 100) != nil || httpkit.ValidText("code", e.Provider, 100) != nil || httpkit.ValidText("code", e.CredentialRef, 200) != nil {
 		return Account{}, httpkit.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 	}
-	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Settings: codeaccounts.Settings{Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}}
+	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Settings: codeaccounts.Settings{Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor)), MaxConcurrency: promotion.Pointer(e.MaxConcurrency)}}
 	return account, account.Settings.Validate()
 }
 
@@ -63,7 +63,7 @@ func renderAccount(a Account) (contract.ConfigurationCodeAccount, error) {
 	if err != nil {
 		return contract.ConfigurationCodeAccount{}, err
 	}
-	return contract.ConfigurationCodeAccount{Id: id, Project: a.Project, Provider: a.Provider, CredentialRef: a.CredentialRef, Name: a.Name, Enabled: a.Enabled, Models: promotion.NonNil(slices.Clone(a.Models)), ExtraUsageEnabled: promotion.Nullable(a.ExtraUsageEnabled), CycleAnchor: promotion.Nullable(cycle)}, nil
+	return contract.ConfigurationCodeAccount{Id: id, Project: a.Project, Provider: a.Provider, CredentialRef: a.CredentialRef, Name: a.Name, Enabled: a.Enabled, Models: promotion.NonNil(slices.Clone(a.Models)), ExtraUsageEnabled: promotion.Nullable(a.ExtraUsageEnabled), CycleAnchor: promotion.Nullable(cycle), MaxConcurrency: promotion.Nullable(a.MaxConcurrency)}, nil
 }
 
 func date(value *string) (*openapi_types.Date, error) {

@@ -603,8 +603,8 @@ func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 			h := newHarness(t, Config{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				x := &Call{family: tc.family, request: h.gateway.begin(w, r), facts: slices.Clone(tc.facts)}
-				out := &mediaOutcome{status: http.StatusOK}
-				h.gateway.deliverMediaJSON(w, x, out, []byte(tc.body))
+				out := &MediaOutcome{status: http.StatusOK}
+				h.gateway.DeliverMediaJSON(w, x, out, []byte(tc.body))
 				h.gateway.finishMedia(x, out, out.status)
 			}))
 			defer server.Close()
@@ -697,23 +697,23 @@ func TestEachKindOfMediaProviderFailureIsClassifiedAndOnlyAStartedStreamIsCommit
 		{name: "rate limited", replies: failed(http.StatusTooManyRequests),
 			status: http.StatusTooManyRequests, code: "upstream_rate_limit", class: classRateLimit, attemptStatus: http.StatusTooManyRequests},
 		{name: "credential refused", replies: failed(http.StatusUnauthorized),
-			status: http.StatusBadGateway, code: "upstream_authentication_failed", class: classCredential, attemptStatus: http.StatusUnauthorized},
+			status: http.StatusBadGateway, code: "upstream_authentication_failed", class: ClassCredential, attemptStatus: http.StatusUnauthorized},
 		{name: "request rejected", replies: failed(http.StatusBadRequest),
 			status: http.StatusBadRequest, code: "upstream_rejected", class: classUpstreamClient, attemptStatus: http.StatusBadRequest},
 		{name: "provider error", replies: failed(http.StatusInternalServerError),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous, attemptStatus: http.StatusInternalServerError},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous, attemptStatus: http.StatusInternalServerError},
 		{name: "unreadable reply", replies: reply("application/json", "not json"),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "transformed reply without data", replies: reply("application/json", `{"created":1}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "transformed reply with null data", replies: reply("application/json", `{"data":null}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "transformed reply with empty data", replies: reply("application/json", `{"data":[]}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "strict reply without the image", replies: reply("application/json", `{"created":1}`), strict: true,
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "strict reply with empty data", replies: reply("application/json", `{"data":[]}`), strict: true,
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
 		{name: "stream that never starts", replies: reply("text/event-stream", ""), streams: true,
 			status: http.StatusBadGateway, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK},
 		{name: "stream cut after its first frame", replies: reply("text/event-stream", delta), streams: true,

@@ -25,7 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-var errGeminiManagedBatchState = errors.New("Gemini managed batch state is unknown")
+var ErrGeminiManagedBatchState = errors.New("Gemini managed batch state is unknown")
 
 type geminiManagedCounts struct {
 	Total     *int64 `json:"total,omitempty"`
@@ -47,12 +47,12 @@ type geminiManagedRecord struct {
 	ResponsesFile    string               `json:"gemini_responses_file,omitempty"`
 }
 
-type geminiManagedState struct {
-	metadata json.RawMessage
-	status   string
+type GeminiManagedState struct {
+	Metadata json.RawMessage
+	Status   string
 }
 
-func newGeminiManagedRecord(localInput string, manifest BatchManifest, clientMetadata json.RawMessage) geminiManagedRecord {
+func NewGeminiManagedRecord(localInput string, manifest BatchManifest, clientMetadata json.RawMessage) geminiManagedRecord {
 	record := geminiManagedRecord{BatchManifest: manifest, CompletionWindow: "24h", LocalInputFileID: localInput}
 	if string(clientMetadata) != "null" {
 		record.ClientMetadata = clientMetadata
@@ -60,7 +60,7 @@ func newGeminiManagedRecord(localInput string, manifest BatchManifest, clientMet
 	return record
 }
 
-func decodeGeminiManagedRecord(metadata json.RawMessage) (geminiManagedRecord, error) {
+func DecodeGeminiManagedRecord(metadata json.RawMessage) (geminiManagedRecord, error) {
 	var record geminiManagedRecord
 	if err := json.Unmarshal(metadata, &record); err != nil {
 		return geminiManagedRecord{}, ErrGeminiBatchFidelity
@@ -68,7 +68,7 @@ func decodeGeminiManagedRecord(metadata json.RawMessage) (geminiManagedRecord, e
 	return record, nil
 }
 
-func geminiManagedBatchMetadata(body []byte, model string, base geminiManagedRecord) (geminiManagedState, error) {
+func GeminiManagedBatchMetadata(body []byte, model string, base geminiManagedRecord) (GeminiManagedState, error) {
 	var provider struct {
 		State    string `json:"state"`
 		Metadata struct {
@@ -80,15 +80,15 @@ func geminiManagedBatchMetadata(body []byte, model string, base geminiManagedRec
 		BatchStats *geminiBatchStats `json:"batchStats"`
 	}
 	if err := json.Unmarshal(body, &provider); err != nil {
-		return geminiManagedState{}, errors.New("Gemini batch object is malformed")
+		return GeminiManagedState{}, errors.New("Gemini batch object is malformed")
 	}
 	status, ok := upstream.GeminiStatus(cmp.Or(provider.Metadata.State, provider.State))
 	if !ok {
-		return geminiManagedState{}, errGeminiManagedBatchState
+		return GeminiManagedState{}, ErrGeminiManagedBatchState
 	}
 	lifecycle, err := upstream.GeminiMetadata(body, model, "", "")
 	if err != nil {
-		return geminiManagedState{}, err
+		return GeminiManagedState{}, err
 	}
 	record := base
 	record.Adapter = connectors.BatchGeminiManaged
@@ -97,7 +97,7 @@ func geminiManagedBatchMetadata(body []byte, model string, base geminiManagedRec
 	record.CompletedAt = optionalUnix(provider.Metadata.EndTime)
 	record.RequestCounts = cmp.Or(provider.Metadata.BatchStats, provider.BatchStats).counts()
 	encoded, err := json.Marshal(record)
-	return geminiManagedState{metadata: encoded, status: status}, err
+	return GeminiManagedState{Metadata: encoded, Status: status}, err
 }
 
 type geminiBatchStats struct {
@@ -133,7 +133,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	if err != nil {
 		return nil, nil, ErrGeminiBatchFidelity
 	}
-	batch, err := decodeGeminiManagedRecord(owner.Metadata)
+	batch, err := DecodeGeminiManagedRecord(owner.Metadata)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -156,8 +156,8 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	return s.Deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, view("output"), view("error"))
 }
 
-func geminiManagedFileName(resource *resources.Resource) (string, error) {
-	record, err := decodeManagedFileRecord(resource.Metadata)
+func GeminiManagedFileName(resource *resources.Resource) (string, error) {
+	record, err := DecodeManagedFileRecord(resource.Metadata)
 	if err != nil {
 		return "", err
 	}
@@ -165,12 +165,12 @@ func geminiManagedFileName(resource *resources.Resource) (string, error) {
 }
 
 func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resources.Resource) ([]byte, error) {
-	record, err := decodeGeminiManagedRecord(resource.Metadata)
+	record, err := DecodeGeminiManagedRecord(resource.Metadata)
 	if err != nil || len(record.ProviderBatch) == 0 {
 		return nil, ErrGeminiBatchFidelity
 	}
 	if record.Status == "" {
-		return nil, errGeminiManagedBatchState
+		return nil, ErrGeminiManagedBatchState
 	}
 	object := map[string]any{
 		"id": resource.ID, "object": "batch", "endpoint": record.Endpoint,
@@ -204,8 +204,8 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	return json.Marshal(object)
 }
 
-func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *Call, resource *resources.Resource, p *Pin) *fault.Error {
-	record, err := decodeManagedFileRecord(resource.Metadata)
+func (s *Server) GeminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *Call, resource *resources.Resource, p *Pin) *fault.Error {
+	record, err := DecodeManagedFileRecord(resource.Metadata)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}

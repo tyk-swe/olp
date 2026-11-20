@@ -13,13 +13,5 @@ func (l *Limits) TokenLimited() bool {
 }
 
 func (s *Slot) TokenLimited() bool {
-	return s != nil && (s.TokensPerMinute != nil || s.InputTokensPerMinute != nil || s.OutputTokensPerMinute != nil)
-}
-
-func (s Slot) limits() Limits {
-	return Limits{
-		RequestsPerMinute: s.RequestsPerMinute, TokensPerMinute: s.TokensPerMinute,
-		InputTokensPerMinute: s.InputTokensPerMinute, OutputTokensPerMinute: s.OutputTokensPerMinute,
-		MaxConcurrency: s.MaxConcurrency, Supply: s.Supply,
-	}
+	return s != nil && s.Limits.TokenLimited()
 }

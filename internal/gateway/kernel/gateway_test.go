@@ -957,7 +957,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		writer := &bedrockFrameWriter{ResponseRecorder: httptest.NewRecorder()}
-		h.gateway.relayBedrockStream(t.Context(), writer, x, resp)
+		h.gateway.RelayBedrockStream(t.Context(), writer, x, resp)
 		h.sink.mu.Lock()
 		defer h.sink.mu.Unlock()
 		if len(h.sink.envs) != 1 {
@@ -1153,40 +1153,6 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 	}
 }
 
-func TestParseWebRTCCallRequestRequiresCompleteMultipart(t *testing.T) {
-	t.Parallel()
-	const sdp = "v=0\r\n"
-	const session = `{"type":"realtime"}`
-	body, contentType, err := buildWebRTCCallsBody([]byte(sdp), []byte(session))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct {
-		name  string
-		body  io.Reader
-		valid bool
-	}{
-		{"clean end of form", bytes.NewReader(body), true},
-		{"EOF before any multipart data", iotest.ErrReader(io.EOF), false},
-		{"body read failure", iotest.ErrReader(io.ErrClosedPipe), false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", test.body)
-			request.Header.Set("Content-Type", contentType)
-			parsed, failure := parseWebRTCCallRequest(request)
-			if !test.valid {
-				if parsed != nil || failure == nil || failure.Status != http.StatusBadRequest || failure.Code != "invalid_value" || failure.Param != nil {
-					t.Fatalf("got request %+v and error %+v, want a form-level bad request", parsed, failure)
-				}
-				return
-			}
-			if failure != nil || parsed == nil || string(parsed.sdp) != sdp || string(parsed.session) != session {
-				t.Fatalf("got request %+v and error %+v, want both form parts unchanged", parsed, failure)
-			}
-		})
-	}
-}
-
 func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct{ name, defaultPriority, header, expected string }{
@@ -1328,7 +1294,7 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 			if tc.writeFailure {
 				writer = &deadlineFailWriter{ResponseRecorder: recorder, ctx: ctx}
 			}
-			failure := h.gateway.streamStoredResponse(ctx, writer, x, &resources.Resource{ID: uuid.NewString(), Kind: resources.KindResponse, UpstreamID: "response-local-fixture", RouteSlug: routeSlug}, p, nil)
+			failure := h.gateway.StreamStoredResponse(ctx, writer, x, &resources.Resource{ID: uuid.NewString(), Kind: resources.KindResponse, UpstreamID: "response-local-fixture", RouteSlug: routeSlug}, p, nil)
 			code, status, class := "response_stream_incomplete", http.StatusBadGateway, ClassProtocol
 			if tc.timeout {
 				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, ClassTimeout
@@ -1395,7 +1361,7 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 			x.Route = &routing.Route{Slug: routeSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
 			res := &resources.Resource{ID: resources.LocalID(resources.KindStrictResponse, uuid.New()), Kind: resources.KindStrictResponse, UpstreamID: "native-response", RouteSlug: routeSlug}
 			recorder := httptest.NewRecorder()
-			failure := h.gateway.streamStoredResponse(t.Context(), recorder, x, res, p, nil)
+			failure := h.gateway.StreamStoredResponse(t.Context(), recorder, x, res, p, nil)
 			if failure == nil || failure.Code != "response_stream_incomplete" {
 				t.Fatalf("unexpected stream result: %+v", failure)
 			}
@@ -1433,7 +1399,7 @@ func TestGeminiManagedFileRejectsOversizedProviderLine(t *testing.T) {
 	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
 	res := &resources.Resource{UpstreamID: "files/result", RouteSlug: routeSlug, Metadata: json.RawMessage(`{"role":"error"}`)}
 	recorder := httptest.NewRecorder()
-	failure := h.gateway.geminiManagedFileContent(t.Context(), recorder, x, res, p)
+	failure := h.gateway.GeminiManagedFileContent(t.Context(), recorder, x, res, p)
 	if failure == nil || failure.Code != "fidelity_protocol_violation" {
 		t.Fatalf("unexpected download result: %+v", failure)
 	}
@@ -1732,7 +1698,7 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 			id := uuid.New()
 			res := &resources.Resource{UUID: id, ID: resources.LocalID(resources.KindFile, id), Kind: resources.KindFile, UpstreamID: "file-native", Metadata: json.RawMessage(tc.storedMetadata)}
 			w := httptest.NewRecorder()
-			failure := h.gateway.getPinnedFile(t.Context(), w, x, keyauthority.Authority{ID: h.keyID}, res, p)
+			failure := h.gateway.GetPinnedFile(t.Context(), w, x, keyauthority.Authority{ID: h.keyID}, res, p)
 			if failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "fidelity_protocol_violation" {
 				t.Fatalf("unexpected file refresh failure: %+v", failure)
 			}

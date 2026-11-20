@@ -208,7 +208,7 @@ func (l retainedListing) advance(ctx context.Context, from retainedScan, target 
 
 func (l retainedListing) candidate(ctx context.Context, resource *resources.Resource) (retainedListEntry, bool, *fault.Error) {
 	s, x := l.server, l.x
-	if retainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+	if RetainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 		return retainedListEntry{}, false, nil
 	}
 	p, route, resolveErr := s.ResolveResource(ctx, x, l.authority, resource, l.endpoint.Operation, RetainedRetrieval)
@@ -317,7 +317,7 @@ func (l retainedListing) ask(ctx context.Context, entry retainedListEntry) (*Pin
 	if callErr.Status == http.StatusNotFound {
 		return nil, true, nil
 	}
-	return nil, false, retainedPublicError(UpstreamError(callErr), callErr.Status)
+	return nil, false, RetainedPublicError(UpstreamError(callErr), callErr.Status)
 }
 
 func (l retainedListing) forget(ctx context.Context, resource *resources.Resource) *fault.Error {
@@ -333,7 +333,7 @@ func (l retainedListing) accept(ctx context.Context, resource *resources.Resourc
 	s, e := l.server, l.endpoint
 	invalid := fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource.")
 	uncommitted := fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
-	body, readErr := native.ReadBody(s.retainedResponseLimit())
+	body, readErr := native.ReadBody(s.RetainedResponseLimit())
 	native.Body.Close()
 	if readErr != nil || !retainedNames(e, body, resource.UpstreamID) {
 		return retainedAccepted{}, invalid

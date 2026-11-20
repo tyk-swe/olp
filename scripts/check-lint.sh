@@ -49,6 +49,13 @@ declare -A gateway_imports=(
   [surface/geminiinteractions]="fault kernel"
   [surface/geministate]="fault kernel"
   [surface/playground]="fault kernel publishedprompt"
+  [surface/retrieval]="fault kernel"
+  [surface/media]="fault kernel"
+  [surface/openaistate]="fault generationrefs ingress kernel"
+  [surface/bedrock]="fault kernel"
+  [surface/realtime]="fault ingress kernel quota realtimeresponses"
+  [surface/nativeduplex]="fault ingress kernel"
+  [surface/geminilive]="fault ingress kernel quota"
   [kernel]="codeforward delegation events fault generationrefs guardstream health ingress models publishedprompt quota realtimeresponses traceingest"
 )
 while read -r package imports; do

@@ -70,11 +70,11 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	end := &retainedEnd{status: http.StatusInternalServerError}
 	defer func() {
 		s.Finish(x, nil, end.status)
-		s.retainedSettle(r.Context(), x, end.pin)
+		s.SettleRetained(r.Context(), x, end.pin)
 	}()
 	reply := retainedReply{w: w, x: x, action: e.Action, surface: e.Surface, end: end}
 	if !authority.Policy.AllowProviderState {
-		reply.fail(providerStateForbidden())
+		reply.fail(ProviderStateForbidden())
 		return
 	}
 	if e.Action == "list" && len(e.Ancestors) == 0 {

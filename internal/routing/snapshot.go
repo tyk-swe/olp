@@ -48,22 +48,17 @@ type Capability struct {
 
 // Slot is a credential slot pinned to an exact credential version.
 type Slot struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Enabled               bool     `json:"enabled"`
-	Priority              int      `json:"priority"`
-	Weight                int64    `json:"weight"`
-	CredentialID          *string  `json:"credential_id"`
-	CredentialVersion     *int     `json:"credential_version"`
-	AllowedModels         []string `json:"allowed_models,omitempty"`
-	AllowedRoutes         []string `json:"allowed_routes,omitempty"`
-	AllowedAPIKeys        []string `json:"allowed_api_keys,omitempty"`
-	RequestsPerMinute     *int64   `json:"requests_per_minute,omitempty"`
-	TokensPerMinute       *int64   `json:"tokens_per_minute,omitempty"`
-	InputTokensPerMinute  *int64   `json:"input_tokens_per_minute,omitempty"`
-	OutputTokensPerMinute *int64   `json:"output_tokens_per_minute,omitempty"`
-	MaxConcurrency        *int64   `json:"max_concurrency,omitempty"`
-	Supply
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Enabled           bool     `json:"enabled"`
+	Priority          int      `json:"priority"`
+	Weight            int64    `json:"weight"`
+	CredentialID      *string  `json:"credential_id"`
+	CredentialVersion *int     `json:"credential_version"`
+	AllowedModels     []string `json:"allowed_models,omitempty"`
+	AllowedRoutes     []string `json:"allowed_routes,omitempty"`
+	AllowedAPIKeys    []string `json:"allowed_api_keys,omitempty"`
+	Limits
 }
 
 // Allows applies the published slot restrictions shared by live requests and
@@ -79,9 +74,8 @@ func (s *Slot) AllowsModelRoute(model, route string) bool {
 		(len(s.AllowedRoutes) == 0 || slices.Contains(s.AllowedRoutes, route))
 }
 
-// Limits is the connection-level quota published for one provider. A nil
-// Limits means the connection publishes no quota of its own and a nil member
-// means that dimension is unbounded; slots carry their own limits separately.
+// Limits is the quota published for a provider connection or credential slot.
+// A nil member means that dimension is unbounded.
 // Every member is omitted from the serving JSON when unset so a snapshot
 // published before connection quotas existed keeps its digest.
 type Limits struct {

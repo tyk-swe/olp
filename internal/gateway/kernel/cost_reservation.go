@@ -132,6 +132,10 @@ func (s *Server) ReserveFallbackCost(ctx context.Context, x *Call) *fault.Error 
 // reserveSessionCost holds the price of a realtime session's selected attempt.
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
+func (s *Server) ReserveSessionCost(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, ttl time.Duration) *fault.Error {
+	return s.reserveSessionCost(ctx, x, authority, p.attempt, ttl)
+}
+
 func (s *Server) reserveSessionCost(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *fault.Error {
 	if s.Deps.Runtime != nil {
 		if release := s.Deps.Runtime.Release(); release != nil {
@@ -239,7 +243,7 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 	var input, reply int64
 	generation := false
 	if x.generation.parsed == nil && x.unary == nil {
-		input = max(resourceEstimate, x.estimate)
+		input = max(ResourceEstimate, x.estimate)
 		if x.operationName() == "generation" || x.operationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 			generation = true
@@ -281,7 +285,7 @@ func (x *Call) targetCostBound(provider routing.Provider, target routing.Target,
 		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {
-		input, reply := max(resourceEstimate, x.estimate), int64(0)
+		input, reply := max(ResourceEstimate, x.estimate), int64(0)
 		if x.operationName() == "generation" || x.operationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 		}
@@ -391,7 +395,7 @@ func (x *Call) responseCost() (rates.Cost, bool) {
 // never was gives everything back. Either way this runs before the usage event
 // is consumed or after, and the reservation script makes the order immaterial.
 func (s *Server) settleAdmission(ctx context.Context, x *Call) {
-	s.settleCaps(ctx, x)
+	s.SettleCaps(ctx, x)
 	if x.cacheRateLease != nil {
 		zero := int64(0)
 		// A cache embedding uses this shared request reservation even when the
