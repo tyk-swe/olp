@@ -3356,3 +3356,205 @@ func TestABatchFileUploadIsCheckedBeforeTheProviderKeptOnlyWhenTheProviderNamesI
 	g.republish(t, func(route *routing.Route) { route.Operations = []string{"generation"} })
 	upload("a batch upload on a route without batches", "owner", slug, batch, http.StatusBadRequest, "invalid_request")
 }
+
+type responseStreams struct {
+	*retainedUpstream
+	mu      sync.Mutex
+	queries []string
+	body    string
+	kind    string
+	status  int
+}
+
+func (p *responseStreams) answers(status int, kind string, events ...string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.queries, p.body, p.kind, p.status = nil, strings.Join(events, ""), kind, status
+}
+
+func (p *responseStreams) asked() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.queries)
+}
+
+func (p *responseStreams) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" || r.URL.Query().Get("stream") != "true" {
+		p.retainedUpstream.ServeHTTP(w, r)
+		return
+	}
+	p.mu.Lock()
+	p.queries = append(p.queries, r.URL.RawQuery)
+	body, kind, status := p.body, p.kind, p.status
+	p.mu.Unlock()
+	w.Header().Set("Content-Type", kind)
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
+}
+
+func responseEvent(sequence int, kind, id, status, extra string) string {
+	return fmt.Sprintf("event: %s\ndata: {\"type\":%q,\"sequence_number\":%d,\"response\":{\"id\":%q,\"object\":\"response\",\"created_at\":1700000000,\"status\":%q,\"model\":\"provider-model\",\"output\":[]%s}}\n\n", kind, kind, sequence, id, status, extra)
+}
+
+type responseStreamEvent struct {
+	Type     string
+	Response struct {
+		ID, Model          string
+		PreviousResponseID string `json:"previous_response_id"`
+	}
+}
+
+func readResponseStream(t *testing.T, raw []byte) (kinds []string, events []responseStreamEvent) {
+	t.Helper()
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		data, found := strings.CutPrefix(line, "data: ")
+		if !found {
+			continue
+		}
+		var event responseStreamEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			t.Fatalf("event %q: %v", data, err)
+		}
+		kinds, events = append(kinds, strings.TrimPrefix(event.Type, "response.")), append(events, event)
+	}
+	return kinds, events
+}
+
+func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesTheStoredStateAndEndsWhereTheProviderBreaks(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model, stream, sse = "stored-streams", "responses-model", "?stream=true", "text/event-stream"
+	sink := &terminals{}
+	upstream := &responseStreams{retainedUpstream: &retainedUpstream{replies: func(request string, nth int) map[string]string {
+		replies := openAIReplies(request, nth)
+		if nth == 3 {
+			replies["POST /responses"] = `{"id":"resp_` + providerOwned + `-3","object":"response","created_at":1700000000,"background":true,"status":"queued","model":"provider-model","output":[]}`
+		}
+		return replies
+	}}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", streams: true, operations: []string{"generation"}, upstream: upstream, sink: sink,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	create := func(previous string) string {
+		return g.call(t, "owner", "POST", "/v1/responses", "application/json", `{"model":"`+slug+`","input":"hi",`+previous+`"store":true}`, 200).ID
+	}
+	first := create("")
+	second := create(`"previous_response_id":"` + first + `",`)
+	unfinished := create(`"background":true,`)
+	provider := func(n int) string { return fmt.Sprintf("resp_%s-%d", providerOwned, n) }
+	const usage = `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`
+	const delta = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n"
+	opened := responseEvent(0, "response.created", provider(1), "in_progress", "")
+	completed := responseEvent(3, "response.completed", provider(1), "completed", usage)
+
+	read := func(key, id, query string, status int) (http.Header, []byte, events.Envelope) {
+		t.Helper()
+		before := len(sink.all())
+		header, raw := g.send(t, "GET", "/v1/responses/"+id+query, map[string]string{"Authorization": "Bearer " + key}, "", status)
+		harness.Eventually(t, "the read's usage record", time.Second, func() (bool, string) { return len(sink.all()) > before, "" })
+		recorded := sink.all()
+		return header, raw, recorded[len(recorded)-1]
+	}
+	attempts := func(envelope events.Envelope) string {
+		seen := make([]string, len(envelope.Attempts))
+		for i, attempt := range envelope.Attempts {
+			seen[i] = fmt.Sprintf("%s %s committed=%t", attempt.Mode, attempt.Class, attempt.Committed)
+		}
+		return strings.Join(seen, ", ")
+	}
+
+	for _, tc := range []struct {
+		name, id, query string
+		events          []string
+		kinds, previous string
+		asked           string
+		outcome, class  string
+		attempt         string
+	}{
+		{name: "a whole stream", id: first, query: stream, events: []string{opened, responseEvent(1, "response.in_progress", provider(1), "in_progress", ""), delta, completed},
+			kinds: "created in_progress output_text.delta completed", asked: "api-version=&stream=true", outcome: "success", attempt: "streaming success committed=true"},
+		{name: "a stream resumed after an event", id: first, query: stream + "&starting_after=1&include_obfuscation=false", events: []string{delta, completed},
+			kinds: "output_text.delta completed", asked: "api-version=&include_obfuscation=false&starting_after=1&stream=true", outcome: "success", attempt: "streaming success committed=true"},
+		{name: "a continuation", id: second, query: stream, events: []string{
+			responseEvent(0, "response.created", provider(2), "in_progress", `,"previous_response_id":"`+provider(1)+`"`),
+			responseEvent(1, "response.completed", provider(2), "completed", `,"previous_response_id":"`+provider(1)+`"`+usage),
+		}, kinds: "created completed", previous: first, asked: "api-version=&stream=true", outcome: "success", attempt: "streaming success committed=true"},
+		{name: "a response the provider cut short", id: first, query: stream, events: []string{opened, responseEvent(1, "response.incomplete", provider(1), "incomplete", `,"incomplete_details":{"reason":"max_output_tokens"}`)},
+			kinds: "created incomplete", asked: "api-version=&stream=true", outcome: "success", attempt: "streaming success committed=true"},
+		{name: "a response the provider failed", id: first, query: stream, events: []string{opened, responseEvent(1, "response.failed", provider(1), "failed", `,"error":{"code":"server_error","message":"refused listed-secret"}`)},
+			kinds: "created failed", asked: "api-version=&stream=true", outcome: "failure", class: "upstream_response_failed", attempt: "streaming upstream_server committed=true"},
+		{name: "a stream that turns to another response", id: first, query: stream, events: []string{opened, delta, responseEvent(3, "response.completed", provider(2), "completed", usage)},
+			kinds: "created output_text.delta", asked: "api-version=&stream=true", outcome: "failure", class: "response_stream_incomplete", attempt: "streaming protocol committed=true"},
+		{name: "a stream without its end", id: first, query: stream, events: []string{opened, delta},
+			kinds: "created output_text.delta", asked: "api-version=&stream=true", outcome: "failure", class: "response_stream_incomplete", attempt: "streaming protocol committed=true"},
+	} {
+		upstream.answers(200, sse, tc.events...)
+		header, raw, envelope := read("owner", tc.id, tc.query, 200)
+		kinds, delivered := readResponseStream(t, raw)
+		if header.Get("Content-Type") != sse || header.Get("Cache-Control") != "no-store" || strings.Join(kinds, " ") != tc.kinds || strings.Contains(string(raw), "listed-secret") {
+			t.Errorf("%s reached the caller as %q with cache control %q carrying %q, want an uncached event stream of %q without the provider credential: %s",
+				tc.name, header.Get("Content-Type"), header.Get("Cache-Control"), kinds, tc.kinds, raw)
+		}
+		for _, event := range delivered {
+			if event.Response.ID != "" && (event.Response.ID != tc.id || event.Response.Model != slug || event.Response.PreviousResponseID != tc.previous) {
+				t.Errorf("%s named response %q of model %q after %q, want %q of %q after %q", tc.name, event.Response.ID, event.Response.Model, event.Response.PreviousResponseID, tc.id, slug, tc.previous)
+			}
+		}
+		if asked := upstream.asked(); len(asked) != 1 || asked[0] != tc.asked {
+			t.Errorf("%s asked the provider %q, want one read with %q", tc.name, asked, tc.asked)
+		}
+		if got := attempts(envelope); envelope.Outcome != tc.outcome || envelope.ErrorClass != tc.class || !envelope.Committed || envelope.FirstByte == nil || got != tc.attempt {
+			t.Errorf("%s was recorded as %s %q committed=%t first byte %v with attempts %q, want %s %q delivered with %q",
+				tc.name, envelope.Outcome, envelope.ErrorClass, envelope.Committed, envelope.FirstByte, got, tc.outcome, tc.class, tc.attempt)
+		}
+	}
+
+	for _, tc := range []struct {
+		name, key, query string
+		provider         int
+		kind             string
+		events           []string
+		status           int
+		code, attempt    string
+	}{
+		{name: "a stream that opens on another response", key: "owner", query: stream, provider: 200, kind: sse, events: []string{responseEvent(0, "response.created", provider(2), "in_progress", "")},
+			status: 502, code: "response_stream_incomplete", attempt: "streaming protocol committed=false"},
+		{name: "an empty stream", key: "owner", query: stream, provider: 200, kind: sse, status: 502, code: "response_stream_incomplete", attempt: "streaming protocol committed=false"},
+		{name: "a reply that is no stream", key: "owner", query: stream, provider: 200, kind: "application/json", events: []string{`{"id":"` + provider(1) + `"}`},
+			status: 502, code: "fidelity_protocol_violation", attempt: "streaming protocol committed=false"},
+		{name: "a provider outage", key: "owner", query: stream, provider: 500, kind: "application/json", events: []string{`{"error":{"message":"down"}}`}, status: 500, attempt: "streaming upstream_server committed=false"},
+		{name: "a response the provider no longer has", key: "owner", query: stream, provider: 404, kind: "application/json", events: []string{`{"error":{"message":"gone"}}`},
+			status: 404, code: "not_found", attempt: "streaming upstream_client committed=false"},
+		{name: "another key", key: "stranger", query: stream, status: 404, code: "not_found"},
+		{name: "a stream flag that is no boolean", key: "owner", query: "?stream=maybe", status: 400, code: "invalid_request"},
+		{name: "a cursor without a stream", key: "owner", query: "?starting_after=1", status: 400, code: "invalid_request"},
+		{name: "an unknown control", key: "owner", query: stream + "&verbose=1", status: 400, code: "invalid_request"},
+		{name: "an include the gateway does not know", key: "owner", query: stream + "&include=everything", status: 400, code: "invalid_request"},
+	} {
+		script := tc.events
+		if tc.provider == 0 {
+			script = []string{opened, completed}
+		}
+		upstream.answers(cmp.Or(tc.provider, 200), cmp.Or(tc.kind, sse), script...)
+		_, raw, envelope := read(tc.key, first, tc.query, tc.status)
+		var refusal struct{ Error struct{ Code string } }
+		_ = json.Unmarshal(raw, &refusal)
+		if got := attempts(envelope); refusal.Error.Code != tc.code || envelope.Committed || envelope.FirstByte != nil || got != tc.attempt {
+			t.Errorf("%s answered %q recorded committed=%t with attempts %q, want %q undelivered with %q: %s", tc.name, refusal.Error.Code, envelope.Committed, got, tc.code, tc.attempt, raw)
+		}
+		if asked := upstream.asked(); (len(asked) != 0) != (tc.provider != 0) {
+			t.Errorf("%s reached the provider as %q, want a provider read only when the request is one the owner may stream", tc.name, asked)
+		}
+	}
+
+	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 3 || kept[0].state != "completed" || kept[2].state != "queued" {
+		t.Fatalf("the gateway kept %+v, want the first response completed and the third still queued", kept)
+	}
+	upstream.answers(200, sse, responseEvent(0, "response.created", provider(3), "in_progress", ""), responseEvent(1, "response.completed", provider(3), "completed", usage))
+	read("owner", unfinished, stream, 200)
+	if kept := storedResponses(t, pool, g, "owner"); kept[2].state != "completed" {
+		t.Errorf("a stream that ended completed left the stored response %q, want completed", kept[2].state)
+	}
+}
