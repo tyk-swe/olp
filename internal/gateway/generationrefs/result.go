@@ -58,10 +58,7 @@ func ProjectResult(source oif.Document, resolve Resolve) (oif.Document, error) {
 }
 
 func (resolve Resolve) result(root oif.Value) ([]oif.Change, error) {
-	response, pointer := root, ""
-	if nested, present := root.Lookup("response"); present {
-		response, pointer = nested, "/response"
-	}
+	response, pointer := wholeResponse(root)
 	whole, err := resolve.response(response, pointer)
 	if err != nil {
 		return nil, err
@@ -82,6 +79,13 @@ func (resolve Resolve) result(root oif.Value) ([]oif.Change, error) {
 		return nil, err
 	}
 	return slices.Concat(whole, items, parts, annotations), nil
+}
+
+func wholeResponse(root oif.Value) (oif.Value, string) {
+	if nested, present := root.Lookup("response"); present {
+		return nested, "/response"
+	}
+	return root, ""
 }
 
 func (resolve Resolve) response(value oif.Value, pointer string) ([]oif.Change, error) {
@@ -131,14 +135,9 @@ func (resolve Resolve) item(value oif.Value, pointer string) ([]oif.Change, erro
 	if name == "code_interpreter_call" {
 		return nil, resources.ErrContract
 	}
-	var found []oif.Change
-	if name == "file_search_call" {
-		results, _ := value.Lookup("results")
-		searched, err := resolve.each(results, pointer+"/results", resolve.searchResult)
-		if err != nil {
-			return nil, err
-		}
-		found = searched
+	found, err := resolve.searched(name, value, pointer)
+	if err != nil {
+		return nil, err
 	}
 	parts, _ := value.Lookup("content")
 	cited, err := resolve.each(parts, pointer+"/content", resolve.content)
@@ -146,6 +145,14 @@ func (resolve Resolve) item(value oif.Value, pointer string) ([]oif.Change, erro
 		return nil, err
 	}
 	return slices.Concat(found, cited), nil
+}
+
+func (resolve Resolve) searched(name string, item oif.Value, pointer string) ([]oif.Change, error) {
+	if name != "file_search_call" {
+		return nil, nil
+	}
+	results, _ := item.Lookup("results")
+	return resolve.each(results, pointer+"/results", resolve.searchResult)
 }
 
 func (resolve Resolve) searchResult(result oif.Value, pointer string) ([]oif.Change, error) {
