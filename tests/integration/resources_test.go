@@ -3241,6 +3241,9 @@ func TestAgentResourcesBindTheirBaseAgentPageNewestFirstAndKeepOrForgetWhatEachP
 	provider.answers("POST /agents", http.StatusBadRequest, rejection)
 	header, _ = ask("owner", "POST", agents, helper, "refused", http.StatusBadRequest, "provider_resource_error", "upstream_client")
 	refused := header.Get("X-OLP-Resource-ID")
+	if state := kept(refused); state != "not_accepted" {
+		t.Fatalf("a refused agent creation is kept as %q, want not_accepted", state)
+	}
 	provider.answers("POST /agents", http.StatusInternalServerError, outage)
 	header, _ = ask("owner", "POST", agents, helper, "unknown", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
 	unknown := header.Get("X-OLP-Resource-ID")
