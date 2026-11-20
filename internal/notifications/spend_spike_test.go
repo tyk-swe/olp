@@ -121,12 +121,28 @@ func TestExtractDaysScopesBaselineToActualCurrency(t *testing.T) {
 		point(12, "20", "USD", 1),
 		point(11, "20", "EUR", 0),
 	}}
-	days := extractDays(series, window)
+	days := extractDays(series, window, nil)
 	if days.state != dayQualified || days.actual.String() != "150" {
 		t.Fatalf("days = %+v, want qualified actual 150", days)
 	}
 	if len(days.baseline) != 1 || days.baseline[0].String() != "20" {
 		t.Fatalf("baseline = %v, want one USD priced day of 20", days.baseline)
+	}
+}
+
+func TestExtractDaysLeavesGapDaysOutOfBaseline(t *testing.T) {
+	t.Parallel()
+	window := spikeWindowFor(time.Date(2026, time.March, 15, 10, 0, 0, 0, time.UTC), 14)
+	point := func(day int, cost string) reports.Point {
+		return reports.Point{
+			Bucket: time.Date(2026, time.March, day, 0, 0, 0, 0, time.UTC),
+			Totals: reports.Totals{RequestCount: 2, EstimatedCost: &cost},
+		}
+	}
+	series := reports.Series{Items: []reports.Point{point(14, "150"), point(13, "20"), point(12, "3")}}
+	days := extractDays(series, window, []time.Time{time.Date(2026, time.March, 12, 0, 0, 0, 0, time.UTC)})
+	if len(days.baseline) != 1 || days.baseline[0].String() != "20" {
+		t.Fatalf("baseline = %v, want only the day of 20 that has no ingestion gap", days.baseline)
 	}
 }
 

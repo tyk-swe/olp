@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -78,8 +79,9 @@ func spikeDecided(ctx context.Context, tx pgx.Tx, ruleID, subject string, dayEnd
 }
 
 func (c spendSpikeConfig) readDays(ctx context.Context, tx pgx.Tx, rule signalRule, window spikeWindow, env signalEnv) (spikeDays, bool, error) {
-	filters := reports.Filters{Start: window.baselineStart, End: window.dayEnd, Projects: reports.OnlyProjects(*rule.project)}
-	completeness, err := reports.ReadCompleteness(ctx, tx, filters, env.workerClock())
+	project := reports.OnlyProjects(*rule.project)
+	day := reports.Filters{Start: window.dayStart, End: window.dayEnd, Projects: project}
+	completeness, err := reports.ReadCompleteness(ctx, tx, day, env.workerClock())
 	if err != nil {
 		return spikeDays{}, false, err
 	}
@@ -87,14 +89,19 @@ func (c spendSpikeConfig) readDays(ctx context.Context, tx pgx.Tx, rule signalRu
 		!completeness.Coverage.RangeComplete || !completeness.Consumer.Complete() {
 		return spikeDays{}, false, nil
 	}
+	gapDays, err := reports.ReadGapDays(ctx, tx, window.baselineStart, window.dayStart)
+	if err != nil {
+		return spikeDays{}, false, err
+	}
+	filters := reports.Filters{Start: window.baselineStart, End: window.dayEnd, Projects: project}
 	series, err := reports.ReadSeries(ctx, tx, filters, reports.GranularityDay)
 	if err != nil {
 		return spikeDays{}, false, err
 	}
-	return extractDays(series, window), true, nil
+	return extractDays(series, window, gapDays), true, nil
 }
 
-func extractDays(series reports.Series, window spikeWindow) spikeDays {
+func extractDays(series reports.Series, window spikeWindow, gapDays []time.Time) spikeDays {
 	days := spikeDays{baseline: []decimal.Decimal{}}
 	for _, point := range series.Items {
 		if point.Bucket.UTC().Equal(window.dayStart) {
@@ -103,7 +110,7 @@ func extractDays(series reports.Series, window spikeWindow) spikeDays {
 	}
 	for _, point := range series.Items {
 		bucket := point.Bucket.UTC()
-		if bucket.Before(window.baselineStart) || !bucket.Before(window.dayStart) {
+		if bucket.Before(window.baselineStart) || !bucket.Before(window.dayStart) || slices.ContainsFunc(gapDays, bucket.Equal) {
 			continue
 		}
 		if state, cost, currency := qualifyDay(point.Totals); state == dayQualified && sameCurrency(currency, days.currency) {
@@ -173,7 +180,7 @@ func (c spendSpikeConfig) decide(days spikeDays) (spikeEvidence, bool) {
 
 func (c spendSpikeConfig) queue(ctx context.Context, tx pgx.Tx, rule signalRule, window spikeWindow, days spikeDays, evidence spikeEvidence, env signalEnv) (int, error) {
 	id := env.newID()
-	dedupKey := "spend_spike:" + window.dayStart.Format(time.DateOnly)
+	dedupKey := "spend_spike:" + rule.id + ":" + window.dayStart.Format(time.DateOnly)
 	usagePath := "/usage?" + url.Values{
 		"project_id": {*rule.project},
 		"start":      {window.dayStart.Format(time.RFC3339)},

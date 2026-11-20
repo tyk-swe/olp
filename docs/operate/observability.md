@@ -326,7 +326,9 @@ at least `minimum_history_days` days qualify (default 7) and the day clears
 both `increase_percent` (default 50) and `minimum_increase` in the pricing
 currency (default 10). Days with unpriced or incomplete usage never count as
 zero, and an incompletely priced day is rechecked on later worker passes
-instead of firing. The payload freezes the actual spend, the baseline, the
+instead of firing. A baseline day that overlaps a request metadata ingestion
+gap is left out of the mean, and the rule does not fire for a day that overlaps
+one. The payload freezes the actual spend, the baseline, the
 increase and a relative `usage_path` for that project and day. The rule only
 notifies and never changes a budget or blocks traffic.
 

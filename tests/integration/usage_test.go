@@ -1230,11 +1230,11 @@ func TestSpendSpikeNotifications(t *testing.T) {
 		t.Helper()
 		destination, rule := uuid.NewString(), uuid.NewString()
 		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
- VALUES($1,'spike',$2,$3,$1,$4)`, destination, receiver.URL, projectID, fixture.ownerID); err != nil {
+ VALUES($1::uuid,$1::text,$2,$3,$1::uuid,$4)`, destination, receiver.URL, projectID, fixture.ownerID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,destination_id,etag,created_by,created_at)
- VALUES($1,'spike',$2,'spend.spike',$3,$1,$4,$5)`, rule, projectID, destination, fixture.ownerID, today.AddDate(0, 0, -60)); err != nil {
+ VALUES($1::uuid,$1::text,$2,'spend.spike',$3,$1::uuid,$4,$5)`, rule, projectID, destination, fixture.ownerID, today.AddDate(0, 0, -60)); err != nil {
 			t.Fatal(err)
 		}
 		return rule
@@ -1254,7 +1254,14 @@ func TestSpendSpikeNotifications(t *testing.T) {
 	}
 
 	fired := spikeRule(fixture.projectID)
+	sameDay := spikeRule(fixture.projectID)
 	history(fixture.keyID, "20", 7, "150", 0)
+	gapDay := yesterday.AddDate(0, 0, -8)
+	seed(fixture.keyID, gapDay, "2000", 0)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_ingestion_gaps(id,gateway_instance,event_count,reason,first_observed_at,last_observed_at)
+ VALUES($1,'spike',1,'spike',$2,$2)`, uuid.NewString(), gapDay.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 
 	quietProject, quietKey := extraProject()
 	quiet := spikeRule(quietProject)
@@ -1275,7 +1282,7 @@ func TestSpendSpikeNotifications(t *testing.T) {
 	deliverNotifications(t, pool, nil)
 	deliverNotifications(t, pool, nil)
 
-	for rule, want := range map[string]int{fired: 1, quiet: 0, shortHistory: 0, unpriced: 0, smallChange: 0} {
+	for rule, want := range map[string]int{fired: 1, sameDay: 1, quiet: 0, shortHistory: 0, unpriced: 0, smallChange: 0} {
 		var deliveries int
 		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.notification_deliveries WHERE rule_id=$1`, rule).Scan(&deliveries); err != nil {
 			t.Fatal(err)
@@ -1299,7 +1306,15 @@ func TestSpendSpikeNotifications(t *testing.T) {
 	if !strings.Contains(usagePath, "project_id="+fixture.projectID) || !strings.Contains(usagePath, yesterday.Format("2006-01-02")) {
 		t.Errorf("usage path %q does not link the fired project and day", usagePath)
 	}
-	if got, want := received(bodies), []string{"spend.spike resolved=false"}; !slices.Equal(got, want) {
+	var dedupKeys int
+	if err := pool.QueryRow(t.Context(), `SELECT count(DISTINCT dedup_key) FROM olp.notification_deliveries WHERE rule_id=ANY($1::uuid[])`,
+		[]string{fired, sameDay}).Scan(&dedupKeys); err != nil {
+		t.Fatal(err)
+	}
+	if dedupKeys != 2 {
+		t.Errorf("two rules alerting on one project and day share a deduplication key, want one key per rule")
+	}
+	if got, want := received(bodies), []string{"spend.spike resolved=false", "spend.spike resolved=false"}; !slices.Equal(got, want) {
 		t.Errorf("receiver got %v, want %v", got, want)
 	}
 }
