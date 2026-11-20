@@ -73,8 +73,6 @@
     "internal/gateway/kernel/gemini_live.go Server.geminiLive",
     "internal/gateway/kernel/gemini_live.go Server.relayGeminiLive",
     "internal/gateway/kernel/gemini_managed.go Server.translateGeminiManagedContent",
-    "internal/gateway/kernel/generation_references.go generationReferences",
-    "internal/gateway/kernel/generation_result_references.go projectGenerationReferences",
     "internal/gateway/kernel/guardrails.go Server.modelGuardrail",
     "internal/gateway/kernel/native_duplex.go Server.nativeDuplex",
     "internal/gateway/kernel/native_duplex.go Server.relayNativeDuplex",

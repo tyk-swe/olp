@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/generationrefs"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -241,12 +242,12 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
 		}
-		refs, err := responseInputReferences(document)
+		refs, err := generationrefs.InInputItems(document)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
 		resp.Exchange.Complete(ClassSuccess)
-		projected, err := projectResponseInputReferences(document, refs, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		projected, err := generationrefs.ProjectInputItems(document, refs, s.generationResultResolver(ctx, x, res.NativeIdentity()))
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
