@@ -2,6 +2,7 @@ package generationrefs
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,126 +46,162 @@ func ProjectInputItems(source oif.Document, refs []Reference, resolve Resolve) (
 	return oif.Apply(source, changes)
 }
 
-// ProjectResult overlays documented result references, including
-// partial stream items. It never interprets function arguments or tool output
-// strings as resource identifiers, and cannot adopt an unknown native object.
+// ProjectResult overlays documented result references, including partial
+// stream items. It never interprets function arguments or tool output strings
+// as resource identifiers, and cannot adopt an unknown native object.
 func ProjectResult(source oif.Document, resolve Resolve) (oif.Document, error) {
-	var changes []oif.Change
-	bind := func(value oif.Value, pointer, kind string) error {
-		if value.Kind() == oif.Absent || value.Kind() == oif.Null {
-			return nil
-		}
-		id, valid := value.Text()
-		if !valid || id == "" {
-			return resources.ErrContract
-		}
-		local, err := resolve(kind, id)
-		if err != nil || local == "" {
-			return resources.ErrNotFound
-		}
-		changes = append(changes, oif.Change{Pointer: pointer, Value: quoted(local), Origin: oif.ResourceBinding, Reason: "owned generation result reference"})
-		return nil
-	}
-	annotation := func(value oif.Value, pointer string) error {
-		kind, _ := value.Lookup("type")
-		if name, _ := kind.Text(); name == "container_file_citation" {
-			return resources.ErrContract
-		}
-		if name, _ := kind.Text(); name != "file_citation" {
-			return nil
-		}
-		id, _ := value.Lookup("file_id")
-		return bind(id, pointer+"/file_id", resources.KindFile)
-	}
-	content := func(value oif.Value, pointer string) error {
-		annotations, _ := value.Lookup("annotations")
-		for i, value := range annotations.Elements() {
-			if err := annotation(value, pointer+"/annotations/"+strconv.Itoa(i)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	item := func(value oif.Value, pointer string) error {
-		kind, _ := value.Lookup("type")
-		if name, _ := kind.Text(); name == "code_interpreter_call" {
-			return resources.ErrContract
-		}
-		if name, _ := kind.Text(); name == "file_search_call" {
-			results, _ := value.Lookup("results")
-			for i, result := range results.Elements() {
-				path := pointer + "/results/" + strconv.Itoa(i)
-				for _, ref := range []struct{ field, kind string }{{"file_id", resources.KindFile}, {"vector_store_id", "vector_store"}} {
-					id, _ := result.Lookup(ref.field)
-					if err := bind(id, path+"/"+ref.field, ref.kind); err != nil {
-						return err
-					}
-				}
-			}
-		}
-		parts, _ := value.Lookup("content")
-		for i, part := range parts.Elements() {
-			if err := content(part, pointer+"/content/"+strconv.Itoa(i)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	response := func(value oif.Value, pointer string) error {
-		conversation, present := value.Lookup("conversation")
-		if present && conversation.Kind() != oif.Null {
-			path := pointer + "/conversation"
-			if conversation.Kind() == oif.Object {
-				conversation, _ = conversation.Lookup("id")
-				path += "/id"
-			}
-			if err := bind(conversation, path, "conversation"); err != nil {
-				return err
-			}
-		}
-		tools, _ := value.Lookup("tools")
-		for i, tool := range tools.Elements() {
-			kind, _ := tool.Lookup("type")
-			if name, _ := kind.Text(); name != "file_search" {
-				continue
-			}
-			ids, _ := tool.Lookup("vector_store_ids")
-			for j, id := range ids.Elements() {
-				if err := bind(id, pointer+"/tools/"+strconv.Itoa(i)+"/vector_store_ids/"+strconv.Itoa(j), "vector_store"); err != nil {
-					return err
-				}
-			}
-		}
-		output, _ := value.Lookup("output")
-		for i, value := range output.Elements() {
-			if err := item(value, pointer+"/output/"+strconv.Itoa(i)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	root := source.Root()
-	if nested, present := root.Lookup("response"); present {
-		if err := response(nested, "/response"); err != nil {
-			return oif.Document{}, err
-		}
-	} else if err := response(root, ""); err != nil {
+	changes, err := resolve.result(source.Root())
+	if err != nil {
 		return oif.Document{}, err
 	}
-	if value, present := root.Lookup("item"); present {
-		if err := item(value, "/item"); err != nil {
-			return oif.Document{}, err
-		}
-	}
-	if value, present := root.Lookup("part"); present {
-		if err := content(value, "/part"); err != nil {
-			return oif.Document{}, err
-		}
-	}
-	if value, present := root.Lookup("annotation"); present {
-		if err := annotation(value, "/annotation"); err != nil {
-			return oif.Document{}, err
-		}
-	}
 	return oif.Apply(source, changes)
+}
+
+func (resolve Resolve) result(root oif.Value) ([]oif.Change, error) {
+	response, pointer := root, ""
+	if nested, present := root.Lookup("response"); present {
+		response, pointer = nested, "/response"
+	}
+	whole, err := resolve.response(response, pointer)
+	if err != nil {
+		return nil, err
+	}
+	item, _ := root.Lookup("item")
+	items, err := resolve.item(item, "/item")
+	if err != nil {
+		return nil, err
+	}
+	part, _ := root.Lookup("part")
+	parts, err := resolve.content(part, "/part")
+	if err != nil {
+		return nil, err
+	}
+	annotation, _ := root.Lookup("annotation")
+	annotations, err := resolve.annotation(annotation, "/annotation")
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(whole, items, parts, annotations), nil
+}
+
+func (resolve Resolve) response(value oif.Value, pointer string) ([]oif.Change, error) {
+	conversation, err := resolve.conversation(value, pointer+"/conversation")
+	if err != nil {
+		return nil, err
+	}
+	tools, _ := value.Lookup("tools")
+	stores, err := resolve.each(tools, pointer+"/tools", resolve.searchedStores)
+	if err != nil {
+		return nil, err
+	}
+	output, _ := value.Lookup("output")
+	items, err := resolve.each(output, pointer+"/output", resolve.item)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(conversation, stores, items), nil
+}
+
+func (resolve Resolve) conversation(response oif.Value, pointer string) ([]oif.Change, error) {
+	conversation, present := response.Lookup("conversation")
+	if !present || conversation.Kind() == oif.Null {
+		return nil, nil
+	}
+	if conversation.Kind() != oif.Object {
+		return resolve.bind(conversation, pointer, "conversation")
+	}
+	id, _ := conversation.Lookup("id")
+	return resolve.bind(id, pointer+"/id", "conversation")
+}
+
+func (resolve Resolve) searchedStores(tool oif.Value, pointer string) ([]oif.Change, error) {
+	kind, _ := tool.Lookup("type")
+	if name, _ := kind.Text(); name != "file_search" {
+		return nil, nil
+	}
+	ids, _ := tool.Lookup("vector_store_ids")
+	return resolve.each(ids, pointer+"/vector_store_ids", func(id oif.Value, pointer string) ([]oif.Change, error) {
+		return resolve.bind(id, pointer, "vector_store")
+	})
+}
+
+func (resolve Resolve) item(value oif.Value, pointer string) ([]oif.Change, error) {
+	kind, _ := value.Lookup("type")
+	name, _ := kind.Text()
+	if name == "code_interpreter_call" {
+		return nil, resources.ErrContract
+	}
+	var found []oif.Change
+	if name == "file_search_call" {
+		results, _ := value.Lookup("results")
+		searched, err := resolve.each(results, pointer+"/results", resolve.searchResult)
+		if err != nil {
+			return nil, err
+		}
+		found = searched
+	}
+	parts, _ := value.Lookup("content")
+	cited, err := resolve.each(parts, pointer+"/content", resolve.content)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(found, cited), nil
+}
+
+func (resolve Resolve) searchResult(result oif.Value, pointer string) ([]oif.Change, error) {
+	file, _ := result.Lookup("file_id")
+	files, err := resolve.bind(file, pointer+"/file_id", resources.KindFile)
+	if err != nil {
+		return nil, err
+	}
+	store, _ := result.Lookup("vector_store_id")
+	stores, err := resolve.bind(store, pointer+"/vector_store_id", "vector_store")
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(files, stores), nil
+}
+
+func (resolve Resolve) content(value oif.Value, pointer string) ([]oif.Change, error) {
+	annotations, _ := value.Lookup("annotations")
+	return resolve.each(annotations, pointer+"/annotations", resolve.annotation)
+}
+
+func (resolve Resolve) annotation(value oif.Value, pointer string) ([]oif.Change, error) {
+	kind, _ := value.Lookup("type")
+	switch name, _ := kind.Text(); name {
+	case "container_file_citation":
+		return nil, resources.ErrContract
+	case "file_citation":
+		id, _ := value.Lookup("file_id")
+		return resolve.bind(id, pointer+"/file_id", resources.KindFile)
+	}
+	return nil, nil
+}
+
+func (resolve Resolve) each(list oif.Value, pointer string, one func(oif.Value, string) ([]oif.Change, error)) ([]oif.Change, error) {
+	var out []oif.Change
+	for i, value := range list.Elements() {
+		changes, err := one(value, pointer+"/"+strconv.Itoa(i))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, changes...)
+	}
+	return out, nil
+}
+
+func (resolve Resolve) bind(value oif.Value, pointer, kind string) ([]oif.Change, error) {
+	if value.Kind() == oif.Absent || value.Kind() == oif.Null {
+		return nil, nil
+	}
+	id, valid := value.Text()
+	if !valid || id == "" {
+		return nil, resources.ErrContract
+	}
+	local, err := resolve(kind, id)
+	if err != nil || local == "" {
+		return nil, resources.ErrNotFound
+	}
+	return []oif.Change{{Pointer: pointer, Value: quoted(local), Origin: oif.ResourceBinding, Reason: "owned generation result reference"}}, nil
 }

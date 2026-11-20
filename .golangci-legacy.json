@@ -73,8 +73,6 @@
     "internal/gateway/kernel/gemini_live.go Server.geminiLive",
     "internal/gateway/kernel/gemini_live.go Server.relayGeminiLive",
     "internal/gateway/kernel/gemini_managed.go Server.translateGeminiManagedContent",
-    "internal/gateway/generationrefs/request.go InRequest",
-    "internal/gateway/generationrefs/result.go ProjectResult",
     "internal/gateway/kernel/guardrails.go Server.modelGuardrail",
     "internal/gateway/kernel/native_duplex.go Server.nativeDuplex",
     "internal/gateway/kernel/native_duplex.go Server.relayNativeDuplex",
