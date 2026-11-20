@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -44,6 +45,8 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -400,7 +403,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	certified := make([]routing.RevisionCapability, 0, len(plan.operations)*len(modes))
 	capabilities := make([]routing.Capability, 0, len(plan.operations)*len(modes))
 	for _, operation := range plan.operations {
-		for _, mode := range modes {
+		for _, mode := range operationModes(operation, modes) {
 			certified = append(certified, routing.RevisionCapability{Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: mode, Source: "certified"})
 			capabilities = append(capabilities, routing.Capability{Model: plan.model, Operation: operation, Surface: cmp.Or(plan.surface, "openai"), Mode: mode, ToolCalls: plan.tools != nil})
 		}
@@ -459,13 +462,31 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
 	}
 	g.fleet = fleet.New(runner)
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	stored, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.runtime_releases (id,sequence,sha256,snapshot,created_by)
+		SELECT $1,coalesce(max(sequence),0)+1,repeat('0',64),$2,$3 FROM olp.runtime_releases`, snapshot.Generation.ID, stored, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mediaTransport := transport.New(transport.Deps{
+		Client: policy.Client(kernel.UpstreamHeaderTimeout), Auth: connectors.NewAuth(policy, func(string) string { return "" }),
+		Egress: policy, Spool: spool, MaxResponseBytes: 1 << 20, Log: quiet,
+	})
+	jobStore := jobs.NewStore(pool)
 	server := kernel.New(kernel.Dependencies{
+		Media: &kernel.MediaDeps{Transport: mediaTransport, Store: jobStore, Jobs: jobs.New(jobs.Deps{
+			Store: jobStore, Transport: mediaTransport, Credentials: g.runtime, Gaps: &atomic.Uint64{}, Log: quiet, Now: time.Now,
+		})},
 		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
 		Sink:      plan.sink,
 		Admission: quota.NewAdmission(limiter, g.fleet, nil, nil),
-		Egress:    &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Egress:    policy,
+		Log:       quiet,
 		Getenv:    func(string) string { return "" },
 		Digester:  secrets.NewAuthKey(make([]byte, 32), "listed-resources"),
 		Resources: g.store,
@@ -510,6 +531,13 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 		g.t.Fatal(err)
 	}
 	return routeID, revisionID
+}
+
+func operationModes(operation string, modes []string) []string {
+	if operation == "video_create" {
+		return []string{"async"}
+	}
+	return modes
 }
 
 func (g *storedGateway) republish(t *testing.T, edit func(*routing.Route)) {
@@ -3811,4 +3839,272 @@ func TestANegotiatedToolContinuationKeepsTheProvidersTurnReplaysItsDeliveryAndRe
 	broken := submission()
 	ask("provider stream cut inside a tool call", "owner", broken, "", cut, 502, "provider_protocol_error", "streaming protocol committed=false")
 	ask("cut stream again", "owner", broken, "", cut, 409, "continuation_outcome_unknown")
+}
+
+func videoObjects(issues string) map[string]string {
+	replies := map[string]string{"POST /videos": providerVideo(issues, "queued")}
+	for _, n := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+		replies["GET /videos/video_"+providerOwned+n] = providerVideo(n, "completed")
+		replies["GET /videos/video_"+providerOwned+n+"/content"] = "MP4DATA"
+		replies["DELETE /videos/video_"+providerOwned+n] = `{"id":"video_` + providerOwned + n + `","object":"video.deleted","deleted":true}`
+	}
+	return replies
+}
+
+func providerVideo(n, status string) string {
+	return `{"id":"video_` + providerOwned + n + `","object":"video","status":"` + status + `","model":"video-model","created_at":1,"seconds":"4","size":"720x1280","progress":0}`
+}
+
+type videoReply struct {
+	ID, Status, Model string
+	Deleted           bool
+	HasMore           bool   `json:"has_more"`
+	FirstID           string `json:"first_id"`
+	LastID            string `json:"last_id"`
+	Data              []struct{ ID, Status string }
+	Error             struct{ Code string }
+	raw               string
+	contentType       string
+}
+
+func (r videoReply) listed() []string {
+	ids := make([]string, len(r.Data))
+	for i, item := range r.Data {
+		ids[i] = item.ID
+	}
+	return ids
+}
+
+func videoForm(fields ...string) (string, string) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	for i := 0; i+1 < len(fields); i += 2 {
+		_ = form.WriteField(fields[i], fields[i+1])
+	}
+	_ = form.Close()
+	return form.FormDataContentType(), body.String()
+}
+
+func TestVideoJobsHideProviderIdentifiersPageNewestFirstIsolateKeysAndKeepOrForgetWhatEachProviderAnswerDecides(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "studio", "video-model"
+	provider := &storeProvider{issues: "1", objects: videoObjects, scripted: map[string]string{}, statuses: map[string]int{}}
+	upstream := &retainedUpstream{replies: provider.replies, status: provider.status, headers: func(r *http.Request) map[string]string {
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			return map[string]string{"Content-Type": "video/mp4"}
+		}
+		return nil
+	}}
+	sink := &terminals{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{slug: slug, model: model, kind: "openai_compatible", sink: sink,
+		operations: []string{"video_create", "video_get", "video_content", "video_delete", "video_list"}, upstream: upstream})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	providerVideoPath := func(n string) string { return "/videos/video_" + providerOwned + n }
+	asked := func() int {
+		upstream.mu.Lock()
+		defer upstream.mu.Unlock()
+		return len(upstream.calls)
+	}
+	ask := func(name, key, method, path string, fields []string, status int, code string, attempts ...string) videoReply {
+		t.Helper()
+		settled := len(sink.all())
+		contentType, body := "", ""
+		if fields != nil {
+			contentType, body = videoForm(fields...)
+		}
+		header, raw := g.send(t, method, path, map[string]string{"Authorization": "Bearer " + key, "Content-Type": contentType}, body, status)
+		reply := videoReply{raw: string(raw), contentType: header.Get("Content-Type")}
+		_ = json.Unmarshal(raw, &reply)
+		if reply.Error.Code != code {
+			t.Fatalf("%s: answered %s, want code %q", name, raw, code)
+		}
+		harness.Eventually(t, name+" is recorded", time.Second, func() (bool, string) { return len(sink.all()) > settled, "no terminal record" })
+		seen := []string{}
+		for _, attempt := range sink.all()[settled].Attempts {
+			seen = append(seen, fmt.Sprintf("%s committed=%v uncertain=%v", attempt.Class, attempt.Committed, attempt.BillingUncertain))
+		}
+		if !slices.Equal(seen, attempts) {
+			t.Fatalf("%s: provider attempts %v, want %v", name, seen, attempts)
+		}
+		return reply
+	}
+	unasked := func(name, key, method, path string, fields []string, status int, code string) videoReply {
+		t.Helper()
+		before := asked()
+		reply := ask(name, key, method, path, fields, status, code)
+		if asked() != before {
+			t.Fatalf("%s: the provider was asked", name)
+		}
+		return reply
+	}
+	kept := func() []string {
+		t.Helper()
+		rows, err := pool.Query(t.Context(), `SELECT lifecycle_state||' '||state||' '||coalesce(upstream_job_id,'unnamed') FROM olp.media_jobs ORDER BY created_at, id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return jobs
+	}
+	job := func(n, lifecycle, state string) string {
+		return lifecycle + " " + state + " video_" + providerOwned + n
+	}
+	prompt := []string{"model", slug, "prompt", "a cat", "seconds", "4"}
+
+	for _, refusal := range []struct {
+		name, key, path string
+		fields          []string
+		status          int
+		code            string
+	}{
+		{"a creation without a prompt", "owner", "/v1/videos", []string{"model", slug, "seconds", "4"}, 400, "invalid_request"},
+		{"a creation of an unsupported length", "owner", "/v1/videos", []string{"model", slug, "prompt", "a cat", "seconds", "5"}, 400, "invalid_request"},
+		{"a creation on an unknown route", "owner", "/v1/videos", []string{"model", "elsewhere", "prompt", "a cat"}, 404, "route_not_found"},
+	} {
+		unasked(refusal.name, refusal.key, http.MethodPost, refusal.path, refusal.fields, refusal.status, refusal.code)
+	}
+	if jobs := kept(); len(jobs) != 0 {
+		t.Fatalf("refused creations kept %v", jobs)
+	}
+
+	first := ask("a creation", "owner", http.MethodPost, "/v1/videos", prompt, 201, "", "success committed=true uncertain=false")
+	if _, err := uuid.Parse(first.ID); err != nil || first.Model != slug || first.Status != "queued" {
+		t.Fatalf("created video = %s, want a gateway identifier under the route name", first.raw)
+	}
+	creation := upstream.sent("POST /videos")
+	if len(creation) != 1 || creation[0].authorization != "Bearer listed-secret" || !strings.Contains(creation[0].body, model) || strings.Contains(creation[0].body, slug) || !strings.Contains(creation[0].body, "a cat") {
+		t.Fatalf("provider creation = %+v, want the provider model and the prompt under the provider credential", creation)
+	}
+
+	for _, broken := range []struct {
+		name, body string
+		provider   int
+		status     int
+		code       string
+		attempt    string
+	}{
+		{"a creation the provider refuses", `{"error":{"message":"no","type":"invalid_request_error"}}`, 400, 400, "upstream_rejected", "upstream_client committed=false uncertain=false"},
+		{"a creation the provider fails", `{"error":{"message":"down"}}`, 500, 502, "ambiguous_upstream_result", "ambiguous committed=false uncertain=true"},
+		{"a creation the provider answers without a job", `{"object":"video","status":"queued"}`, 200, 502, "provider_protocol_error", "success committed=false uncertain=true"},
+		{"a creation the provider answers with a list", `[]`, 200, 502, "ambiguous_upstream_result", "ambiguous committed=false uncertain=true"},
+	} {
+		provider.answers("POST /videos", broken.provider, broken.body)
+		ask(broken.name, "owner", http.MethodPost, "/v1/videos", prompt, broken.status, broken.code, broken.attempt)
+	}
+	provider.recovers("POST /videos")
+	unsettled := []string{job("1", "active", "queued"), "deleted queued unnamed", "create_ambiguous queued unnamed", "create_ambiguous queued unnamed", "create_ambiguous queued unnamed"}
+	if jobs := kept(); !slices.Equal(jobs, unsettled) {
+		t.Fatalf("after one accepted, one refused and three uncertain creations the gateway keeps %v, want %v", jobs, unsettled)
+	}
+
+	provider.creates("2")
+	second := ask("a second creation", "owner", http.MethodPost, "/v1/videos", prompt, 201, "", "success committed=true uncertain=false")
+	provider.creates("3")
+	third := ask("a third creation", "owner", http.MethodPost, "/v1/videos", prompt, 201, "", "success committed=true uncertain=false")
+
+	refreshed := "success committed=true uncertain=false"
+	listed := ask("a list of unfinished videos", "owner", http.MethodGet, "/v1/videos", nil, 200, "", refreshed, refreshed, refreshed)
+	if want := []string{third.ID, second.ID, first.ID}; !slices.Equal(listed.listed(), want) || listed.HasMore || listed.Data[0].Status != "completed" {
+		t.Fatalf("list = %s, want the accepted videos %v newest first, each asked of the provider and now completed", listed.raw, want)
+	}
+	for _, page := range []struct {
+		name, query string
+		want        []string
+		more        bool
+	}{
+		{"the first page", "?limit=1", []string{third.ID}, true},
+		{"the page after a cursor", "?limit=1&after=" + third.ID, []string{second.ID}, true},
+		{"the oldest first", "?order=asc", []string{first.ID, second.ID, third.ID}, false},
+	} {
+		got := ask(page.name, "owner", http.MethodGet, "/v1/videos"+page.query, nil, 200, "")
+		if !slices.Equal(got.listed(), page.want) || got.HasMore != page.more || got.FirstID != page.want[0] || got.LastID != page.want[len(page.want)-1] {
+			t.Fatalf("%s = %s, want %v with more=%v", page.name, got.raw, page.want, page.more)
+		}
+	}
+	for _, refusal := range []struct{ name, method, key, path, code string }{
+		{"a list in an unknown order", http.MethodGet, "owner", "/v1/videos?order=up", "invalid_request"},
+		{"a list of no videos", http.MethodGet, "owner", "/v1/videos?limit=0", "invalid_request"},
+		{"a list after a cursor that is no identifier", http.MethodGet, "owner", "/v1/videos?after=nope", "invalid_request"},
+		{"a list after a cursor that names no video", http.MethodGet, "owner", "/v1/videos?after=" + uuid.NewString(), "invalid_request"},
+		{"a list with an unknown parameter", http.MethodGet, "owner", "/v1/videos?color=red", "invalid_request"},
+		{"a content variant the gateway does not know", http.MethodGet, "owner", "/v1/videos/" + second.ID + "/content?variant=nope", "invalid_request"},
+	} {
+		unasked(refusal.name, refusal.key, refusal.method, refusal.path, nil, 400, refusal.code)
+	}
+	for _, hidden := range []struct{ name, method, key, path, code string }{
+		{"another key's read", http.MethodGet, "stranger", "/v1/videos/" + first.ID, "video_not_found"},
+		{"another key's download", http.MethodGet, "stranger", "/v1/videos/" + first.ID + "/content", "video_not_found"},
+		{"another key's delete", http.MethodDelete, "stranger", "/v1/videos/" + first.ID, "video_not_found"},
+		{"a read of no identifier", http.MethodGet, "owner", "/v1/videos/nope", "video_not_found"},
+		{"a read of an unknown video", http.MethodGet, "owner", "/v1/videos/" + uuid.NewString(), "media_job_not_found"},
+	} {
+		unasked(hidden.name, hidden.key, hidden.method, hidden.path, nil, 404, hidden.code)
+	}
+	if strangers := unasked("another key's list", "stranger", http.MethodGet, "/v1/videos", nil, 200, ""); len(strangers.Data) != 0 {
+		t.Fatalf("another key lists %s", strangers.raw)
+	}
+
+	read := ask("a read", "owner", http.MethodGet, "/v1/videos/"+first.ID, nil, 200, "", "success committed=true uncertain=false")
+	if read.ID != first.ID || read.Model != slug || read.Status != "completed" {
+		t.Fatalf("read = %s, want the completed video under its gateway identifier and route name", read.raw)
+	}
+	for _, broken := range []struct {
+		name, body string
+		provider   int
+		status     int
+		code       string
+		attempt    string
+	}{
+		{"a read the provider fails", `{"error":{"message":"down"}}`, 500, 502, "upstream_unavailable", "upstream_server committed=false uncertain=true"},
+		{"a read the provider cannot find", `{"error":{"message":"gone"}}`, 404, 404, "upstream_rejected", "upstream_client committed=false uncertain=false"},
+		{"a read the provider answers with a list", `[]`, 200, 502, "provider_protocol_error", "protocol committed=false uncertain=true"},
+	} {
+		provider.answers("GET "+providerVideoPath("1"), broken.provider, broken.body)
+		ask(broken.name, "owner", http.MethodGet, "/v1/videos/"+first.ID, nil, broken.status, broken.code, broken.attempt)
+	}
+	provider.recovers("GET " + providerVideoPath("1"))
+
+	thumbnail := ask("a download", "owner", http.MethodGet, "/v1/videos/"+second.ID+"/content?variant=thumbnail", nil, 200, "", "success committed=true uncertain=false")
+	downloads := upstream.sent("GET " + providerVideoPath("2") + "/content")
+	if thumbnail.raw != "MP4DATA" || thumbnail.contentType != "video/mp4" || len(downloads) != 1 || downloads[0].query != "variant=thumbnail" {
+		t.Fatalf("download = %q as %q through %+v, want the provider's bytes, type and the asked variant", thumbnail.raw, thumbnail.contentType, downloads)
+	}
+	provider.answers("GET "+providerVideoPath("2")+"/content", 404, `{"error":{"message":"gone"}}`)
+	ask("a download the provider cannot find", "owner", http.MethodGet, "/v1/videos/"+second.ID+"/content", nil, 404, "upstream_rejected", "upstream_client committed=false uncertain=false")
+	provider.answers("GET "+providerVideoPath("2")+"/content", 500, `{"error":{"message":"down"}}`)
+	ask("a download the provider fails", "owner", http.MethodGet, "/v1/videos/"+second.ID+"/content", nil, 502, "upstream_unavailable", "upstream_server committed=false uncertain=true")
+
+	provider.answers("DELETE "+providerVideoPath("2"), 500, `{"error":{"message":"down"}}`)
+	ask("a delete the provider fails", "owner", http.MethodDelete, "/v1/videos/"+second.ID, nil, 502, "ambiguous_upstream_result", "ambiguous committed=false uncertain=true")
+	provider.answers("DELETE "+providerVideoPath("2"), 200, `{"id":"video_`+providerOwned+`2","object":"video.deleted","deleted":false}`)
+	ask("a delete the provider declines", "owner", http.MethodDelete, "/v1/videos/"+second.ID, nil, 502, "upstream_rejected", "success committed=true uncertain=false")
+	if still := ask("a read after two failed deletes", "owner", http.MethodGet, "/v1/videos/"+second.ID, nil, 200, "", "success committed=true uncertain=false"); still.ID != second.ID {
+		t.Fatalf("a video whose delete failed reads as %s", still.raw)
+	}
+	provider.answers("DELETE "+providerVideoPath("2"), 404, `{"error":{"message":"gone"}}`)
+	gone := ask("a delete the provider has already forgotten", "owner", http.MethodDelete, "/v1/videos/"+second.ID, nil, 200, "", "upstream_client committed=false uncertain=false")
+	again := unasked("a repeated delete", "owner", http.MethodDelete, "/v1/videos/"+second.ID, nil, 200, "")
+	if !gone.Deleted || gone.ID != second.ID || !again.Deleted || again.ID != second.ID {
+		t.Fatalf("deletes = %s then %s, want the gateway identifier deleted both times", gone.raw, again.raw)
+	}
+	unasked("a read of a deleted video", "owner", http.MethodGet, "/v1/videos/"+second.ID, nil, 404, "video_not_found")
+	unasked("a download of a deleted video", "owner", http.MethodGet, "/v1/videos/"+second.ID+"/content", nil, 404, "video_not_found")
+	if removed := ask("a delete", "owner", http.MethodDelete, "/v1/videos/"+third.ID, nil, 200, "", "success committed=true uncertain=false"); !removed.Deleted || len(upstream.sent("DELETE "+providerVideoPath("3"))) != 1 {
+		t.Fatalf("delete = %s, want one provider delete", removed.raw)
+	}
+	if left := ask("a list after the deletes", "owner", http.MethodGet, "/v1/videos", nil, 200, ""); !slices.Equal(left.listed(), []string{first.ID}) {
+		t.Fatalf("list after the deletes = %s, want only %s", left.raw, first.ID)
+	}
+	settled := append(slices.Clone(unsettled[1:]), job("1", "active", "succeeded"), job("2", "deleted", "succeeded"), job("3", "deleted", "succeeded"))
+	slices.Sort(settled)
+	jobs := kept()
+	slices.Sort(jobs)
+	if !slices.Equal(jobs, settled) {
+		t.Fatalf("the gateway keeps %v, want %v", jobs, settled)
+	}
 }
