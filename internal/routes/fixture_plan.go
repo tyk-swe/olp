@@ -91,23 +91,28 @@ func summarizeFixturePlan(plan explanation, snapshot *routing.Snapshot) fixtureP
 }
 
 func diffFixturePlans(before, after fixturePlan) []string {
-	changes := []string{}
-	if !sameFixtureValue(before.Winner, after.Winner) {
-		changes = append(changes, "winner")
-	}
-	if (before.Winner == nil) != (after.Winner == nil) ||
-		!maps.Equal(fixtureFacts(before.Targets, eligibilityFact), fixtureFacts(after.Targets, eligibilityFact)) {
-		changes = append(changes, "eligibility")
-	}
-	if !slices.Equal(effectiveFixtureSelectors(before), effectiveFixtureSelectors(after)) {
-		changes = append(changes, "selector")
-	}
-	if !sameFixtureValue(before.Reason, after.Reason) ||
+	winnerChanged := !sameFixtureValue(before.Winner, after.Winner)
+	eligibilityChanged := (before.Winner == nil) != (after.Winner == nil) ||
+		!maps.Equal(fixtureFacts(before.Targets, eligibilityFact), fixtureFacts(after.Targets, eligibilityFact))
+	selectorChanged := !slices.Equal(effectiveFixtureSelectors(before), effectiveFixtureSelectors(after))
+	reasonChanged := !sameFixtureValue(before.Reason, after.Reason) ||
 		!slices.EqualFunc(before.Fallbacks, after.Fallbacks, sameFixtureFallback) ||
-		!maps.Equal(fixtureFacts(before.Targets, reasonFact), fixtureFacts(after.Targets, reasonFact)) {
-		changes = append(changes, "reason")
-	}
-	return changes
+		!maps.Equal(fixtureFacts(before.Targets, reasonFact), fixtureFacts(after.Targets, reasonFact))
+	return slices.AppendSeq([]string{}, func(yield func(string) bool) {
+		for _, change := range [...]struct {
+			name    string
+			changed bool
+		}{
+			{"winner", winnerChanged},
+			{"eligibility", eligibilityChanged},
+			{"selector", selectorChanged},
+			{"reason", reasonChanged},
+		} {
+			if change.changed && !yield(change.name) {
+				return
+			}
+		}
+	})
 }
 
 func effectiveFixtureSelectors(plan fixturePlan) []fixtureSelector {
