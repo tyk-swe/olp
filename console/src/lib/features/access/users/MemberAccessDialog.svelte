@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import Dialog from '#lib/components/Dialog.svelte';
-  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
   import type { User } from './api';
   import { ROLE_DETAILS, SCOPE_DETAILS } from './roles';
 

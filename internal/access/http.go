@@ -10,24 +10,23 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
-const sessionCookie = "__Host-olp_session"
-const csrfCookie = "__Host-olp_csrf"
-const recentCookie = "__Host-olp_recent_auth"
+const SessionCookie = "__Host-olp_session"
+const CSRFCookie = "__Host-olp_csrf"
+const RecentCookie = "__Host-olp_recent_auth"
 const csrfHeader = "X-CSRF-Token"
-const sessionTTL = 24 * time.Hour
+const SessionTTL = 24 * time.Hour
 
 type Config struct {
 	RuntimePublisher     func(context.Context, pgx.Tx, string) error
@@ -35,16 +34,13 @@ type Config struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 	Log                  *slog.Logger
 
-	OIDCClient                  *http.Client
-	ClientIP                    func(*http.Request) string
-	LimitsEnforced              bool
-	LocalLoginDisabled          bool
-	ManagementNetworkRestricted bool
-	ResponseCacheConfigured     bool
+	OIDCClient         *http.Client
+	ClientIP           func(*http.Request) string
+	LimitsEnforced     bool
+	LocalLoginDisabled bool
 }
 
 type Server struct {
@@ -53,35 +49,21 @@ type Server struct {
 	Installation, Origin string
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
-	Bootstrap            func() (string, bool)
 	Egress               *egress.Policy
 
-	log                         *slog.Logger
-	oidcClient                  *http.Client
-	resolveClientIP             func(*http.Request) string
-	limitsEnforced              bool
-	localLoginDisabled          bool
-	managementNetworkRestricted bool
-	responseCacheConfigured     bool
-	passwordSlots               chan struct{}
-	dummyPassword               string
-}
-
-func bootstrapSource(injected func() (string, bool)) func() (string, bool) {
-	if injected != nil {
-		return injected
-	}
-	return func() (string, bool) { return "", false }
+	log                *slog.Logger
+	oidcClient         *http.Client
+	resolveClientIP    func(*http.Request) string
+	limitsEnforced     bool
+	localLoginDisabled bool
 }
 
 func New(cfg Config) *Server {
 	return &Server{
 		RuntimePublisher: cfg.RuntimePublisher, Pool: cfg.Pool, Installation: cfg.Installation,
-		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: bootstrapSource(cfg.Bootstrap),
+		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys,
 		Egress: cfg.Egress, log: cfg.Log, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
 		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
-		managementNetworkRestricted: cfg.ManagementNetworkRestricted, responseCacheConfigured: cfg.ResponseCacheConfigured,
-		passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()),
 	}
 }
 
@@ -117,11 +99,17 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 	return nil
 }
 
-func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+func (s *Server) LimitsEnforced() bool { return s.limitsEnforced }
+
+func (s *Server) LocalLoginDisabled() bool { return s.localLoginDisabled }
+
+func (s *Server) IdentityClient() *http.Client { return s.oidcClient }
+
+func (s *Server) guard(w http.ResponseWriter, r *http.Request, o routeOptions) (*http.Request, context.CancelFunc, error) {
 	// Management responses carry credentials and member data; the public
 	// perimeter adds the rest of the API's security headers.
 	w.Header().Set("Cache-Control", "no-store")
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), o.timeout)
 	deadline, _ := ctx.Deadline()
 	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
 		cancel()
@@ -129,36 +117,32 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	}
 	// Resolve the client once so audit rows written by any package attribute
 	// the same trusted-proxy client address that admission uses.
-	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.clientIP(r)))
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	_, machine := managementBearer(r)
-	// SCIM declares only bearer-token alternatives; cookie origins cannot
-	// grant access there. Unauthenticated SCIM writes still receive a 401.
-	if machine || strings.HasPrefix(r.URL.Path, "/scim/") {
+	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.ClientIP(r)))
+	r.Body = http.MaxBytesReader(w, r.Body, o.maxBody)
+	if _, machine := managementBearer(r); machine || o.browser == anyOrigin {
 		return r, cancel, nil
 	}
-	// The SAML POST receiver verifies a signed, solicited response and redirects
-	// to a same-origin completion that requires the initiating browser cookie.
-	if r.Method == "POST" && r.URL.Path == "/api/v1/saml/acs" {
-		return r, cancel, nil
-	}
+	return r, cancel, s.checkBrowser(r, o.browser)
+}
+
+func (s *Server) checkBrowser(r *http.Request, policy browserPolicy) error {
 	if err := checkCookies(r); err != nil {
-		return r, cancel, err
+		return err
 	}
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-		return r, cancel, httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
+		return httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
 	}
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" && r.URL.Path != "/api/v1/saml/complete" {
-		return r, cancel, httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && policy != crossSiteNavigation {
+		return httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
-	return r, cancel, nil
+	return nil
 }
 
 // serve applies the management transport guards, runs fn, and writes its
 // Reply or problem.
-func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Request) (httpkit.Reply, error)) http.HandlerFunc {
+func (s *Server) serve(o routeOptions, fn func(*http.Request) (httpkit.Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, maxBody, timeout)
+		r, cancel, err := s.guard(w, r, o)
 		defer cancel()
 		var result httpkit.Reply
 		if err == nil {
@@ -192,16 +176,18 @@ func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Reque
 		}
 		w.WriteHeader(result.Status)
 		if result.Body != nil {
-			json.NewEncoder(w).Encode(result.Body)
+			encoder := json.NewEncoder(w)
+			encoder.SetEscapeHTML(!result.DisableHTMLEscaping)
+			encoder.Encode(result.Body)
 		}
 	}
 }
 
 // serveStream is serve for a handler that writes its own response; a problem
 // is written only while nothing has been committed.
-func (s *Server) serveStream(maxBody int64, timeout time.Duration, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
+func (s *Server) serveStream(o routeOptions, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r, cancel, err := s.guard(w, r, maxBody, timeout)
+		r, cancel, err := s.guard(w, r, o)
 		defer cancel()
 		tracker := &streamWriter{ResponseWriter: w}
 		if err == nil {
@@ -235,18 +221,19 @@ func (w *streamWriter) Unwrap() http.ResponseWriter {
 func (s *Server) writeProblem(w http.ResponseWriter, err error) {
 	p, known := httpkit.ProblemFor(err)
 	if !known {
-		s.log.Error("management request failed", failure(err)...)
+		s.LogFailure("management request failed", err)
 	}
 	httpkit.RenderProblem(w, p)
 }
 
-// failure describes an unexpected error by category only, because driver and
+// LogFailure logs an unexpected error by category only, because driver and
 // wrapped errors can contain SQL values or credentials.
-func failure(err error) []any {
+func (s *Server) LogFailure(message string, err error) {
 	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return []any{"error_type", fmt.Sprintf("%T", err), "sqlstate", pg.Code}
+		s.log.Error(message, "error_type", fmt.Sprintf("%T", err), "sqlstate", pg.Code)
+		return
 	}
-	return []any{"error_type", fmt.Sprintf("%T", err)}
+	s.log.Error(message, "error_type", fmt.Sprintf("%T", err))
 }
 
 func checkCookies(r *http.Request) error {
@@ -261,31 +248,20 @@ func checkCookies(r *http.Request) error {
 	}
 	return nil
 }
-func cookieValue(r *http.Request, name string) string {
+func CookieValue(r *http.Request, name string) string {
 	c, err := r.Cookie(name)
 	if err != nil {
 		return ""
 	}
 	return c.Value
 }
-func cookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
+func NewCookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: httpOnly, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())}
 }
-func clearCookie(name string) *http.Cookie { c := cookie(name, "", 0, true); c.MaxAge = -1; return c }
-func email(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	a, err := mail.ParseAddress(value)
-	if err != nil || a.Address != value || len(value) > 254 {
-		return "", httpkit.Invalid("email", "Enter a valid email address.")
-	}
-	return value, nil
-}
-func password(value string) error {
-	n := utf8.RuneCountInString(value)
-	if n < 12 || n > 1024 {
-		return httpkit.Invalid("password", "Use 12–1024 characters.")
-	}
-	return nil
+func ClearCookie(name string) *http.Cookie {
+	c := NewCookie(name, "", 0, true)
+	c.MaxAge = -1
+	return c
 }
 func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 	tx, err := s.Pool.Begin(r.Context())
@@ -304,7 +280,7 @@ type clientIPKey struct{}
 
 // clientIP resolves the request's client address through the trusted-proxy
 // resolver when one is configured.
-func (s *Server) clientIP(r *http.Request) string {
+func (s *Server) ClientIP(r *http.Request) string {
 	if s.resolveClientIP != nil {
 		return s.resolveClientIP(r)
 	}
@@ -330,15 +306,11 @@ func auditSource(r *http.Request) any {
 
 // Audit records a metadata-only audit event inside the mutation's
 // transaction, attributed to actor.
-func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string) error {
+func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string) error {
 	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
 }
 
-func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
-	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, projectID)
-}
-
-func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
+func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
 	source := auditSource(r)
 	family := "other"
 	agent := r.UserAgent()
@@ -349,11 +321,10 @@ func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Acto
 		}
 	}
 	var userID, tokenID any
-	if actor.user != "" {
-		userID = actor.user
-	}
-	if actor.token != "" {
-		tokenID = actor.token
+	if user, token := actor.Subject(); user != "" {
+		userID = user
+	} else if token != "" {
+		tokenID = token
 	}
 	_, err := tx.Exec(ctx, auditInsertSQL, httpkit.NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
 	return err

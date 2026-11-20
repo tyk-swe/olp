@@ -162,7 +162,7 @@ request-size or idle-timeout bounds. Enable WebSocket upgrades for
 native duplex paths under `/native/` when they are used.
 
 The checked-in chart Ingress routes exactly these prefixes, which
-`internal/surface` also reserves from the console. Vite does not proxy
+`internal/domain/surface` also reserves from the console. Vite does not proxy
 WebSockets; use the Go listener directly for local realtime and Gemini Live
 clients.
 
@@ -423,7 +423,8 @@ docker run --rm -v "$PWD/deploy/secrets:/old:ro" \
 docker compose -f deploy/compose.yaml up -d
 ```
 
-init-secrets keeps the copied files and adds the setup token and `pgpass`.
+The initializer keeps the copied files and adds the setup token, a password
+file for the application, and `pgpass` for PostgreSQL clients.
 
 The image includes SPDX attestations for the runtime plus Go and console build
 stages. Inspect them with

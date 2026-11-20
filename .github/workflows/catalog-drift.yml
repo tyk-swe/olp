@@ -35,7 +35,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.OLP_LIVE_DEEPSEEK_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.OLP_LIVE_CEREBRAS_API_KEY }}
           MOONSHOT_API_KEY: ${{ secrets.OLP_LIVE_MOONSHOT_API_KEY }}
-        run: go run ./internal/catalog/cmd/catalogdrift > "$RUNNER_TEMP/drift.md"
+        run: go run ./cmd/catalogdrift > "$RUNNER_TEMP/drift.md"
       - name: Update the catalog-drift issue
         env:
           GH_TOKEN: ${{ github.token }}

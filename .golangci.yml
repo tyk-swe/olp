@@ -1,0 +1,79 @@
+version: "2"
+run:
+  build-tags: [integration, e2e, qualification, qualificationlive]
+linters:
+  default: none
+  enable: [depguard, forbidigo, funlen, revive, staticcheck, unused]
+  settings:
+    staticcheck:
+      checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1023]
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: \.(BeginMutation|CompleteReplay)$
+          pkg: ^github\.com/tyk-swe/olp/internal/access$
+          msg: Return access.Mutate, access.Remove or access.Transact instead of opening the management transaction by hand.
+    funlen:
+      lines: 100
+      statements: -1
+      ignore-comments: true
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments: [{ max: 500, skipComments: true, skipBlankLines: true }]
+    depguard:
+      rules:
+        serving:
+          files: ["**/internal/gateway/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/access$
+              desc: The gateway serves inference and must not depend on the management kit. Pass what it needs in through cmd/olp.
+        management:
+          files: ["**/internal/access/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/gateway
+              desc: The management kit must not depend on the gateway. Wire the two together in cmd/olp.
+        domain:
+          files: ["**/internal/domain/**", "!$test"]
+          list-mode: lax
+          allow:
+            - github.com/tyk-swe/olp/internal/domain
+            - github.com/tyk-swe/olp/internal/catalog$
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal
+              desc: internal/domain is pure vocabulary and logic. It imports only internal/domain, plus the signed reference catalog.
+            - pkg: net/http
+              desc: internal/domain does no I/O. Take the value in as an argument and do the request in the caller.
+            - pkg: database/sql
+              desc: internal/domain does no I/O. Query in the feature that owns the table.
+            - pkg: github.com/jackc/pgx
+              desc: internal/domain does no I/O. Query in the feature that owns the table.
+            - pkg: github.com/valkey-io
+              desc: internal/domain does no I/O. Read the shared state in the caller.
+        platform:
+          files: ["**/internal/platform/**", "!$test"]
+          list-mode: lax
+          allow:
+            - github.com/tyk-swe/olp/internal/platform
+            - github.com/tyk-swe/olp/internal/domain
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal
+              desc: internal/platform is infrastructure that every feature builds on, so it must not import a feature.
+        library:
+          files: ["**/internal/**"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/cmd
+              desc: Only cmd packages wire the process. Move shared code into internal.
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters: [funlen, revive]
+      - path: \.gen\.go$
+        linters: [funlen, revive]
+      - path: (^|/)internal/access/
+        linters: [forbidigo]
+      - path: _test\.go$
+        linters: [forbidigo]
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { notify } from '#lib/components/toasts.svelte.js';
-  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
+  import { listRoutes } from '#lib/features/routes/index.js';
+  import type { RouteDraftEditorState } from '#lib/features/routes/index.js';
   import type { components } from '#lib/management/schema.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { listRoutes } from '#lib/features/routes/api.js';
   import { cacheStatistics, purgeCache } from './api';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();

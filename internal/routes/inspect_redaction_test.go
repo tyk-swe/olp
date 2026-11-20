@@ -8,8 +8,39 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 )
+
+func TestDecisionInspectionRejectsInvalidInlineMedia(t *testing.T) {
+	t.Parallel()
+	server := &Server{InlineMedia: protocols.InlineMediaLimits{Items: 1, ItemBytes: 1, TotalBytes: 1}}
+	for _, tc := range []struct {
+		name, data string
+		valid      bool
+	}{
+		{name: "valid base64", data: "AA==", valid: true},
+		{name: "malformed base64", data: "private-image!"},
+		{name: "over decoded byte limit", data: "AAA="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := json.RawMessage(fmt.Sprintf(`{"model":"review","input":{"type":"image","data":%q,"mime_type":"image/png"},"questions":{"check":{"type":"noul","instructions":"Is there a cat?"}}}`, tc.data))
+			_, request, _, err := server.inspectorAnyRequest(body, "decision", "gemini", "unary", "", "review", false)
+			if tc.valid {
+				if err != nil || request == nil {
+					t.Fatalf("valid request was refused: %v", err)
+				}
+				return
+			}
+			problem, ok := httpkit.ProblemFor(err)
+			if !ok || problem.Field != "request" || strings.Contains(problem.Detail, tc.data) || request != nil {
+				t.Fatalf("invalid media should be refused without repeating caller content: %v", err)
+			}
+		})
+	}
+}
 
 func inspected(t *testing.T, body string, provenance ...oif.Provenance) inspectedRequest {
 	t.Helper()

@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { errorMessage } from '#lib/management/http.js';
-  import {
-    enrollMFA,
-    verifyMFA,
-    type MFAEnrollment,
-    type MFAVerification
-  } from './api';
-  import type { MFARequest } from './prompt.svelte';
+  import { enrollMFA, verifyMFA } from './api';
+  import type {
+    MFAEnrollment,
+    MFAVerification
+  } from '#lib/session/mfaChallenge.js';
+  import type { MFARequest } from '#lib/session/mfaPrompt.svelte.js';
   let {
     request,
     onComplete

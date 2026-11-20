@@ -6,8 +6,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjects } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { listProjects, projectKeys } from '#lib/features/access/index.js';
   import { agentKeys } from './agentKeys';
   import { listToolCalls } from './api';
 

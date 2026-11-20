@@ -183,6 +183,39 @@ describe('route draft editor', () => {
     expect(state.notice).toContain('Draft saved');
   });
 
+  it('saves new content policy rules after removing a middle rule', async () => {
+    const { replace } = serveEditor();
+    const saved = vi.fn<(body: unknown) => void>();
+    replace.mockImplementationOnce(async (request) => {
+      saved(await request.json());
+      return json({ ...draft, etag: 'version-2' });
+    });
+    const state = await editor();
+    const addRule = (pattern: string) => {
+      state.addPolicyRule();
+      state.policyRules = state.policyRules.map((rule) =>
+        rule.pattern ? rule : { ...rule, pattern }
+      );
+    };
+    addRule('first');
+    addRule('removed');
+    addRule('third');
+    state.removePolicyRule(1);
+    addRule('replacement');
+
+    await state.save(draft);
+
+    expect(saved).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        content_policy: {
+          rules: ['first', 'third', 'replacement'].map((pattern) =>
+            expect.objectContaining({ pattern })
+          )
+        }
+      })
+    );
+  });
+
   it('preserves edits made while a save is in flight', async () => {
     const { replace } = serveEditor();
     const state = await editor();

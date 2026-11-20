@@ -2,8 +2,8 @@
   import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { FIXED_ROLES } from '../session/authorization';
-  import { useRole } from '../session/useRole.svelte';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';
   import { samlKeys } from './samlKeys';
   const access = useRole();

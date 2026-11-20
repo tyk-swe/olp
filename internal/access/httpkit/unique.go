@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 const nullablePackage = "github.com/oapi-codegen/nullable"

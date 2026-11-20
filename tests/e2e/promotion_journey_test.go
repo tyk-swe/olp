@@ -17,7 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -103,8 +104,8 @@ func installationPolicyDocument(exported map[string]any) map[string]any {
 
 func (s *service) installationToken(owner *harness.Caller, name string) *harness.Caller {
 	s.T.Helper()
-	scopes := make([]string, 0, len(access.TokenScopes()))
-	for _, operation := range access.TokenScopes() {
+	scopes := make([]string, 0, len(authz.TokenScopes()))
+	for _, operation := range authz.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
 	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{
@@ -122,6 +123,9 @@ func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) *h
 	budget := s.Want(operator, "GET", "/api/v1/budgets/installation", nil, nil, http.StatusOK)
 	s.Want(operator, "PUT", "/api/v1/budgets/installation", map[string]any{"policy": map[string]any{"monthly_cost_limit": "500.00"}}, harness.ETag(budget), http.StatusOK)
 	organization := fixture.ids["organization_id"]
+	missingProjects := "/api/v1/organizations/" + uuid.NewString() + "/projects"
+	s.Want(operator, "GET", missingProjects, nil, nil, http.StatusNotFound)
+	s.Want(operator, "POST", missingProjects, map[string]any{"name": "Missing parent"}, harness.Idempotent(), http.StatusNotFound)
 	second := s.Want(operator, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "Promotion-Second"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 	s.Want(operator, "POST", "/api/v1/route-templates", map[string]any{
 		"name": "promotion-template", "provider_selector": "provider:" + fixture.ids["provider_id"], "model_filter": "*",

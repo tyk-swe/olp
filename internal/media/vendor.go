@@ -2,7 +2,7 @@ package media
 
 import (
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 type encoder[P Params] func(r *Request, p P, cfg connectors.Config, model string) (*UpstreamCall, *Error)

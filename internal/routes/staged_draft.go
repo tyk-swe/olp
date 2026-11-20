@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -99,7 +99,7 @@ func StageDraftPolicy(ctx context.Context, tx pgx.Tx, draftID, etag, actor strin
 	return err
 }
 
-func ReadOpenDrafts(ctx context.Context, q access.Queryer) ([]OpenDraft, error) {
+func ReadOpenDrafts(ctx context.Context, q database.Queryer) ([]OpenDraft, error) {
 	rows, err := q.Query(ctx, `SELECT d.id::text,d.slug,d.project_id::text,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.fidelity,d.behavior,
 		COALESCE(d.catalog_expose_upstream_models,(SELECT c.expose_upstream_models FROM olp.model_catalog_route_settings c JOIN olp.routes r ON r.id=c.route_id WHERE r.slug=d.slug),false),p.policy,false
 		FROM olp.route_drafts d LEFT JOIN olp.routing_policies p ON p.scope='route-draft' AND p.scope_id=d.id
@@ -113,7 +113,7 @@ func ReadOpenDrafts(ctx context.Context, q access.Queryer) ([]OpenDraft, error) 
 	})
 }
 
-func ReadPublishedRoutes(ctx context.Context, q access.Queryer) ([]PublishedRoute, error) {
+func ReadPublishedRoutes(ctx context.Context, q database.Queryer) ([]PublishedRoute, error) {
 	rows, err := q.Query(ctx, `SELECT r.id::text,r.slug,r.project_id::text,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.fidelity,v.behavior,
 		COALESCE((SELECT c.expose_upstream_models FROM olp.model_catalog_route_settings c WHERE c.route_id=r.id),false),v.routing_policy,r.state='retired'
 		FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id ORDER BY r.slug`)

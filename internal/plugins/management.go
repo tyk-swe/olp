@@ -19,10 +19,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -65,7 +67,7 @@ func (s *Management) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/permit", s.permit, access.MaxBody(64<<10), access.Deadline(time.Minute))
 }
 
-func (s *Management) list(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) list(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" WHERE $1 OR p.executable IS NULL ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest", s.Unconfined != nil)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -82,7 +84,7 @@ func (s *Management) list(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	return httpkit.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
 }
 
-func (s *Management) get(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) get(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -93,7 +95,7 @@ func (s *Management) get(r *http.Request, _ access.Principal) (httpkit.Reply, er
 
 // load reads an installed plugin that the deployment lets the API show: an
 // unconfined plugin only where the unconfined tier is enabled.
-func (s *Management) load(ctx context.Context, q access.Queryer, digest string) (contract.Plugin, error) {
+func (s *Management) load(ctx context.Context, q database.Queryer, digest string) (contract.Plugin, error) {
 	plugin, err := loadPlugin(ctx, q, digest)
 	if err == nil && !plugin.Executable.IsNull() && s.Unconfined == nil {
 		return contract.Plugin{}, pgx.ErrNoRows
@@ -101,7 +103,7 @@ func (s *Management) load(ctx context.Context, q access.Queryer, digest string) 
 	return plugin, err
 }
 
-func (s *Management) install(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	// The route authorizes before reading an upload of up to 32 MiB.
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/wasm" {
 		return httpkit.Reply{}, httpkit.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
@@ -126,38 +128,33 @@ func (s *Management) install(r *http.Request, _ access.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var count int
-	if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.plugins").Scan(&count); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if count >= maxInstalled {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
-	}
-	tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
-		digest, abi.Version, data, module, len(module), httpkit.NewID(), p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	status := http.StatusOK
-	if tag.RowsAffected() == 1 {
-		status = http.StatusCreated
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.install", "plugin", digest, "success"); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var count int
+		if err := tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.plugins").Scan(&count); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	installed, err := loadPlugin(r.Context(), tx, digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}, tx.Commit(r.Context())
+		if count >= maxInstalled {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
+		}
+		tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
+			digest, abi.Version, data, module, len(module), httpkit.NewID(), p.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		installed, err := loadPlugin(r.Context(), tx, digest)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Reply{Status: http.StatusOK, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}
+		if tag.RowsAffected() == 0 {
+			return reply, access.Event{}, nil
+		}
+		reply.Status = http.StatusCreated
+		return reply, access.Event{Action: "plugin.install", Resource: "plugin", ID: digest}, nil
+	})
 }
 
-func (s *Management) approve(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) approve(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -166,94 +163,83 @@ func (s *Management) approve(r *http.Request, _ access.Principal) (httpkit.Reply
 	if err = httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	plugin, err := s.load(r.Context(), tx, digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, plugin.Etag.String()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !plugin.ApprovedAt.IsNull() {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
-	}
-	if !slices.Equal(slices.Sorted(slices.Values(input.Origins)), slices.Sorted(slices.Values(plugin.Manifest.Origins))) {
-		return httpkit.Reply{}, &httpkit.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
-			Detail: "Approve exactly the origins the plugin declares; review them again."}
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, httpkit.NewID(), digest); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.approve", "plugin", digest, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if plugin, err = loadPlugin(r.Context(), tx, digest); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply, err := httpkit.Detail(plugin, plugin.Etag.String()), tx.Commit(r.Context())
+	reply, err := access.Transact(s.Access, r, s.matched(r, digest), func(tx pgx.Tx, p authz.Principal, plugin contract.Plugin) (httpkit.Reply, access.Event, error) {
+		if !plugin.ApprovedAt.IsNull() {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
+		}
+		if !slices.Equal(slices.Sorted(slices.Values(input.Origins)), slices.Sorted(slices.Values(plugin.Manifest.Origins))) {
+			return httpkit.Reply{}, access.Event{}, &httpkit.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
+				Detail: "Approve exactly the origins the plugin declares; review them again."}
+		}
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, httpkit.NewID(), digest); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		approved, err := loadPlugin(r.Context(), tx, digest)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(approved, approved.Etag.String()), access.Event{Action: "plugin.approve", Resource: "plugin", ID: digest}, nil
+	})
 	if err == nil {
 		s.Host.Prepare(digest)
 	}
 	return reply, err
 }
 
-func (s *Management) uninstall(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Management) uninstall(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	plugin, err := s.load(r.Context(), tx, digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, plugin.Etag.String()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	// Configuration writes hold the same installation lock, so no revision can pin
-	// the plugin between this check and the delete.
-	pinning, err := pinningResources(r.Context(), tx, digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if len(pinning) > 0 {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
-	}
-	retired, err := retireGrants(r.Context(), tx, digest)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	for _, credentialID := range retired {
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if len(retired) > 0 {
-		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.uninstall", "plugin", digest, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply, err := httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+	reply, err := access.Transact(s.Access, r, s.matched(r, digest), func(tx pgx.Tx, p authz.Principal, _ contract.Plugin) (httpkit.Reply, access.Event, error) {
+		return s.remove(r, tx, p, digest)
+	})
 	if err == nil {
 		// The plugin's cached code here stops; every other replica's copy is
 		// evicted when its next usability recheck observes the removal.
 		s.Host.Evict(digest)
 	}
 	return reply, err
+}
+
+func (s *Management) matched(r *http.Request, digest string) func(pgx.Tx, authz.Principal) (contract.Plugin, error) {
+	return func(tx pgx.Tx, _ authz.Principal) (contract.Plugin, error) {
+		plugin, err := s.load(r.Context(), tx, digest)
+		if err != nil {
+			return contract.Plugin{}, err
+		}
+		return plugin, httpkit.Match(r, plugin.Etag.String())
+	}
+}
+
+func (s *Management) remove(r *http.Request, tx pgx.Tx, p authz.Principal, digest string) (httpkit.Reply, access.Event, error) {
+	// Configuration writes hold the same installation lock, so no revision can pin
+	// the plugin between this check and the delete.
+	pinning, err := pinningResources(r.Context(), tx, digest)
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	if len(pinning) > 0 {
+		return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
+	}
+	retired, err := retireGrants(r.Context(), tx, digest)
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	for _, credentialID := range retired {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+	}
+	if len(retired) > 0 {
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+	}
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "plugin.uninstall", Resource: "plugin", ID: digest}, nil
 }
 
 // retireGrants retires, as a plugin build is uninstalled, the unrevoked
@@ -290,7 +276,7 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 }
 
 // pinningResources names resources whose drafts or immutable revisions pin a plugin digest.
-func pinningResources(ctx context.Context, q access.Queryer, digest string) (string, error) {
+func pinningResources(ctx context.Context, q database.Queryer, digest string) (string, error) {
 	rows, err := q.Query(ctx, `SELECT name FROM (SELECT p.name, p.id FROM olp.providers p
 		WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=$1
 		   OR EXISTS (SELECT 1 FROM olp.provider_revisions r WHERE r.provider_id=p.id AND r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=$1)

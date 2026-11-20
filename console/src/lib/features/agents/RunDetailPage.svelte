@@ -8,7 +8,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { getRun, listRunSpans } from './api';
   import { agentKeys } from './agentKeys';
 

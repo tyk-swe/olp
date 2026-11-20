@@ -9,12 +9,12 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
-	"github.com/tyk-swe/olp/internal/protocols/awsframe"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/awsframe"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
 )
 
 func (c Config) EventStream() bool {

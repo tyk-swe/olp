@@ -1,11 +1,14 @@
 import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
-import { routeKeys } from '#lib/features/routes/routeKeys.js';
-import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
-import { hasOutputRules } from '#lib/features/routes/routeEditor.js';
-import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
-import { listApiKeys } from '#lib/features/access/api-keys/api.js';
-import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+import {
+  routeKeys,
+  listRoutes,
+  selectActiveRoutes,
+  simulateRouting,
+  hasOutputRules,
+  inspectionDialects
+} from '#lib/features/routes/index.js';
+import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
 import {
   nativeObject,
   parseNativeJSON,
@@ -131,11 +134,14 @@ export function resolvePlaygroundPlan(
     activeOperation: operation,
     submissionError,
     inspection: {
-      surface: publicNativeOperations.has(operation)
-        ? 'openai'
-        : registeredNative
-          ? 'native'
-          : input.surface,
+      surface:
+        dialect === 'gemini-decisions'
+          ? 'gemini'
+          : publicNativeOperations.has(operation)
+            ? 'openai'
+            : registeredNative
+              ? 'native'
+              : input.surface,
       mode:
         operation === 'realtime'
           ? 'realtime'
@@ -156,7 +162,15 @@ export function resolvePlaygroundPlan(
 }
 
 export class PlaygroundState {
-  routing = $state('{}');
+  private routingPreferences = $state('{}');
+  get routing() {
+    return this.routingPreferences;
+  }
+  set routing(value: string) {
+    if (value === this.routingPreferences) return;
+    this.routingPreferences = value;
+    if (this.streamEnabled) void this.checkStreamCapability();
+  }
   mode = $state<Mode>('text');
   composer = $state<Composer>('basic');
   operation = $state<PlaygroundOperation>('generation');
@@ -191,7 +205,8 @@ export class PlaygroundState {
   completedRequest = $state<PlaygroundRequest | null>(null);
   routes = createQuery(() => ({
     queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
+    queryFn: ({ signal }) => listRoutes(signal),
+    select: selectActiveRoutes
   }));
   apiKeys = createQuery(() => ({
     queryKey: apiKeyKeys.list(),

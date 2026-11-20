@@ -7,17 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -295,12 +296,13 @@ func (stubLedgerInstaller) InstallSnapshot(context.Context, limits.Snapshot) (li
 
 func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
 	t.Parallel()
-	_, address := harness.Database(t)
+	const poolTimeout = 100 * time.Millisecond
+	owner, address := harness.Database(t)
 	config, err := database.Configuration(address, 2, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
+	config.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(poolTimeout.Milliseconds(), 10)
 	pool, err := database.Open(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +316,28 @@ func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
 		t.Fatal("got no leader on a fresh database, want the reconciliation leader")
 	}
 	defer leader.Close(t.Context())
-	if _, err := leader.Reconcile(t.Context(), stubLedgerInstaller{}, time.Now()); err != nil {
-		t.Fatalf("got %v reconciling under a 1ms pool statement timeout, want the leader pass to run under its own budget", err)
+	blocker, err := owner.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.WithoutCancel(t.Context()))
+	if _, err := blocker.Exec(t.Context(), `LOCK TABLE olp.api_keys IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	reconciled := make(chan error, 1)
+	go func() {
+		_, err := leader.Reconcile(context.WithoutCancel(t.Context()), stubLedgerInstaller{}, time.Now())
+		reconciled <- err
+	}()
+	select {
+	case err := <-reconciled:
+		t.Fatalf("got %v from a pass that waits behind a table lock, want it still waiting after the pool's %s statement timeout", err, poolTimeout)
+	case <-time.After(3 * poolTimeout):
+	}
+	if err := blocker.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reconciled; err != nil {
+		t.Fatalf("got %v from a pass that outlasted the pool's %s statement timeout, want the leader pass to run under its own budget", err, poolTimeout)
 	}
 }

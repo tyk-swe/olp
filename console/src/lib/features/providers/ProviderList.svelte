@@ -3,7 +3,7 @@
   import ProviderBulkActions from './ProviderBulkActions.svelte';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -18,7 +18,7 @@
   } from '#lib/listing/pagination.js';
   import { debouncedSearch } from '#lib/listing/search.svelte.js';
   import type { ProviderListState } from './providerPagination';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, stateLabel } from '#lib/format.js';
   import {
     providerStatus,

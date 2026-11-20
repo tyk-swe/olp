@@ -5,9 +5,9 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -60,7 +60,7 @@ func renderPublication(p *Publication) (*contract.ConfigurationCodePublication, 
 	return &contract.ConfigurationCodePublication{Policy: policy, Connections: connections, PaidConnections: &paid}, nil
 }
 
-func (p Publication) resolve(ctx context.Context, q access.Queryer, slug, projectID string, in scope) (*frozen, error) {
+func (p Publication) resolve(ctx context.Context, q database.Queryer, slug, projectID string, in scope) (*frozen, error) {
 	pinned, err := promotion.TryMap(slices.Sorted(maps.Keys(p.Connections)), func(name string) (pin, error) {
 		return p.Connections[name].resolve(ctx, q, name, projectID, p.Policy.Pool, in)
 	})
@@ -89,7 +89,7 @@ func (f *frozen) same(document *codemode.Route, connections map[string]connectio
 	return same(frozen{Policy: inputOf(*document), Connections: connections, Paid: paid}, *f)
 }
 
-func portablePublication(ctx context.Context, q access.Queryer, document *codemode.Route, connections map[string]connection.Configuration, paid map[string]routing.Provider, slots map[string]PaidTarget) (*Publication, error) {
+func portablePublication(ctx context.Context, q database.Queryer, document *codemode.Route, connections map[string]connection.Configuration, paid map[string]routing.Provider, slots map[string]PaidTarget) (*Publication, error) {
 	if document == nil {
 		return nil, nil
 	}

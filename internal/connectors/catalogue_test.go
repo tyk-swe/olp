@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 func providersOf(p Profile) []Config {

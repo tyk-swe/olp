@@ -45,14 +45,14 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 	if _, err := liveBinding(ctx, tx, item.Binding); err != nil {
 		return Authorization{}, err
 	}
+	client, clientErr := newOAuthClient(s.egress, item.Binding, "", "")
+	if clientErr != nil {
+		return Authorization{}, httpkit.Fail(503, "grant_authorization_unavailable", "Personal authorization is unavailable. Try polling this enrollment again.")
+	}
+	defer client.client.CloseIdleConnections()
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
 	}
-	client, clientErr := s.oauthClient(ctx, item.Binding, "", "")
-	if clientErr != nil {
-		return Authorization{}, clientErr
-	}
-	defer client.client.CloseIdleConnections()
 	token, pollErr := client.config.Exchange(client.context(ctx), "", oauth2.SetAuthURLParam("grant_type", "urn:ietf:params:oauth:grant-type:device_code"), oauth2.SetAuthURLParam("device_code", session.DeviceCode))
 	if pollErr == nil {
 		if err := s.completeGrant(ctx, item, attempt, token); err != nil {

@@ -8,7 +8,7 @@
     useBranding,
     type Branding
   } from '#lib/shell/branding/branding.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   const defaultAccent = '#2f64ee';
   const access = useRole();

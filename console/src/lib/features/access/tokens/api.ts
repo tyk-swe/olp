@@ -1,6 +1,12 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  mutationHeaders
+} from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
@@ -45,7 +51,7 @@ export async function createManagementToken(
 ): Promise<ManagementTokenSecret> {
   return unwrap(
     await apiClient.POST('/api/v1/management-tokens', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: {
         name,
         scopes,
@@ -67,10 +73,7 @@ export async function revokeManagementToken(
       {
         params: {
           path: { management_token_id: id },
-          header: {
-            'If-Match': etag,
-            'Idempotency-Key': requestId
-          }
+          header: mutationHeaders(etag, requestId)
         }
       }
     )

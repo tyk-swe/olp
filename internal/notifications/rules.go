@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -233,14 +233,14 @@ func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationE
 	return nil
 }
 
-func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createNotificationRule(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input ruleInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return create(s, r, rules, creation[ruleTarget]{projectID: input.ProjectID, fingerprint: input,
 		parse: func(projectID *string) (ruleTarget, error) { return parseRule(input, projectID) },
-		insert: func(tx pgx.Tx, p access.Principal, _ *string, target ruleTarget, id, etag string) error {
+		insert: func(tx pgx.Tx, p authz.Principal, _ *string, target ruleTarget, id, etag string) error {
 			if err := checkReferences(r.Context(), tx, target); err != nil {
 				return err
 			}
@@ -254,7 +254,7 @@ func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (ht
 		}})
 }
 
-func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateNotificationRule(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	patch, err := decodePatch(r, "rule", "Unknown notification rule field.", rulePatchFields)
 	if err != nil {
 		return httpkit.Reply{}, err

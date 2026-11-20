@@ -8,9 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -52,7 +53,7 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	return Desired{Pricing: pricing, Discounts: discounts, RateCards: cards}, nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Desired, error) {
+func Read(ctx context.Context, q database.Queryer) (Desired, error) {
 	providers, err := readProviders(ctx, q)
 	if err != nil {
 		return Desired{}, err
@@ -82,7 +83,7 @@ func Render(state Desired) Fragment {
 
 func Planner(desired Desired, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			destination, err := readDestination(ctx, q)
 			if err != nil {
 				return nil, err
@@ -108,7 +109,7 @@ func Planner(desired Desired, names promotion.Names) promotion.Planner {
 }
 
 func Applier(desired Desired, normalizer pricebook.Normalizer) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
 		destination, err := readDestination(ctx, tx)
 		if err != nil {
 			return err
@@ -134,7 +135,7 @@ func parsePricing(value nullable.Nullable[contract.ConfigurationPricingEntry]) (
 	return &Pricing{EffectiveAt: entry.EffectiveAt, Prices: promotion.Map(entry.Prices, parsePrice)}, nil
 }
 
-func readPricing(ctx context.Context, q access.Queryer, providers promotion.Directory) (*Pricing, error) {
+func readPricing(ctx context.Context, q database.Queryer, providers promotion.Directory) (*Pricing, error) {
 	revisions, _, err := pricebook.ListRevisions(ctx, q, nil, 1)
 	if err != nil || len(revisions) == 0 {
 		return nil, err
@@ -161,7 +162,7 @@ func pricingChanged(desired, current *Pricing) bool {
 	return current == nil || len(desired.Prices) != len(current.Prices) || !samePrices(desired.Prices, current.Prices, "")
 }
 
-func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, providers promotion.Directory, now time.Time) ([]promotion.Item, error) {
+func planPricing(ctx context.Context, q database.Queryer, desired *Pricing, providers promotion.Directory, now time.Time) ([]promotion.Item, error) {
 	if desired == nil {
 		return nil, nil
 	}
@@ -179,7 +180,7 @@ func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, provid
 	}
 }
 
-func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, desired *Pricing, providers promotion.Directory, normalizer pricebook.Normalizer) error {
+func applyPricing(ctx context.Context, tx pgx.Tx, principal authz.Principal, desired *Pricing, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if desired == nil {
 		return nil
 	}
@@ -187,7 +188,7 @@ func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, de
 	if err != nil || !pricingChanged(desired, current) {
 		return err
 	}
-	if err := principal.Authorize(access.Settings); err != nil {
+	if err := principal.Authorize(authz.Settings); err != nil {
 		return err
 	}
 	prices, resolveErr := resolvePrices(desired.Prices, providers)

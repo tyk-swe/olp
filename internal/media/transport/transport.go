@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -187,7 +187,7 @@ func (t *Transport) do(ctx context.Context, target Target, sensitive *egress.Sen
 	if failure != nil {
 		dispatched := *failure
 		dispatched.Dispatched = true
-		dispatched.Ambiguous = call.Ambiguous && failure.Class != upstream.ClientError
+		dispatched.Ambiguous = call.Ambiguous && failure.Class != upstream.ClientError && failure.Class != upstream.ContentFilter
 		return nil, &dispatched
 	}
 	return &Result{Status: resp.StatusCode, FirstByte: firstByte, Source: source, Payload: payload}, nil

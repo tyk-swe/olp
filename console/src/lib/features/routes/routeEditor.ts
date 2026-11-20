@@ -4,12 +4,12 @@ import type {
   CreateRouteDraftInput,
   ReplaceRouteDraftInput
 } from '#lib/features/routes/api.js';
-import type { ProviderModelInventory } from '#lib/features/providers/models.js';
+import { lifecycleNotice } from '#lib/features/providers/index.js';
+import type {
+  ProviderModelInventory,
+  LifecycleNotice
+} from '#lib/features/providers/index.js';
 import { isJsonObject } from '#lib/editing/json.js';
-import {
-  lifecycleNotice,
-  type LifecycleNotice
-} from '#lib/features/providers/provider-models/lifecycle.js';
 import { validatePassthroughConfig } from './routePassthrough';
 
 export type EditableTarget = {
@@ -258,6 +258,7 @@ export function surfacesFor(operation: string): string[] {
   if (operation === 'passthrough') return ['native'];
   if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
+  if (operation === 'decision') return ['openai', 'gemini'];
   if (operation === 'generation')
     return ['openai', 'anthropic', 'gemini', 'bedrock'];
   if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];

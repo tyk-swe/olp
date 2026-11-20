@@ -9,12 +9,12 @@
     currentSession,
     logout,
     type AuthenticationCapabilities
-  } from '#lib/features/access/session/api.js';
+  } from '#lib/session/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getSetupStatus } from '#lib/features/access/setup/api.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
-  import type { AuthenticationSnapshot } from '#lib/features/access/session/state.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { sessionKeys } from '#lib/session/sessionKeys.js';
+  import type { AuthenticationSnapshot } from '#lib/session/state.js';
   import AppShell from '#lib/shell/AppShell.svelte';
   import BrandingHead from '#lib/shell/branding/BrandingHead.svelte';
   import BrandMark from '#lib/shell/BrandMark.svelte';

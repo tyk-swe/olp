@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, mutationHeaders } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import { nativeObject } from '#lib/nativeJson.js';
 
@@ -75,7 +75,7 @@ export async function createNetworkCredential(
       {
         params: {
           path: { provider_id: providerId },
-          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
+          header: mutationHeaders(etag, requestId)
         },
         body: { credential }
       }
@@ -95,7 +95,7 @@ export async function revokeNetworkCredential(
       {
         params: {
           path: { provider_id: providerId, credential_id: credentialId },
-          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
+          header: mutationHeaders(etag, requestId)
         }
       }
     )

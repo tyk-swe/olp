@@ -15,7 +15,7 @@
   } from '#lib/editing/focusError.js';
   import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import RouteCacheEditor from '#lib/features/caching/RouteCacheEditor.svelte';
+  import { RouteCacheEditor } from '#lib/features/caching/index.js';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import { errorMessage } from '#lib/management/http.js';
@@ -23,7 +23,7 @@
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '#lib/format.js';
   import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
   let {
     routeId
   }: {

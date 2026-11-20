@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublication"
 	"github.com/tyk-swe/olp/internal/promotion/code"
@@ -143,7 +143,7 @@ func (s server) parse(document contract.ConfigurationDocument, declared *contrac
 	}, nil
 }
 
-func read(ctx context.Context, q access.Queryer) (snapshot, error) {
+func read(ctx context.Context, q database.Queryer) (snapshot, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return snapshot{}, err

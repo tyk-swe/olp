@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secretstore"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 )
 
 const externalCredentialTTL = time.Minute
@@ -128,7 +128,7 @@ func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets
 	}
 }
 
-func readExternalReferences(ctx context.Context, q access.Queryer, ids []string) (map[string]secretstore.Reference, error) {
+func readExternalReferences(ctx context.Context, q database.Queryer, ids []string) (map[string]secretstore.Reference, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,external_reference FROM olp.provider_credentials WHERE id=ANY($1::uuid[]) AND external_reference IS NOT NULL", ids)
 	if err != nil {
 		return nil, err

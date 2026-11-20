@@ -1,7 +1,12 @@
-import { parseMFAChallenge } from '#lib/features/access/mfa/api.js';
+import { parseMFAChallenge } from '#lib/session/mfaChallenge.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapOutcome } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapOutcome,
+  ifMatch
+} from '#lib/management/http.js';
 
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList =
@@ -30,7 +35,7 @@ export async function updateProfile(
   input: ProfileUpdate
 ): Promise<UserProfile> {
   const { data, error, response } = await apiClient.PATCH('/api/v1/profile', {
-    params: { header: { 'If-Match': profile.etag } },
+    params: { header: ifMatch(profile.etag) },
     body: input
   });
   return unwrap({ data, error, response });
@@ -73,7 +78,7 @@ export async function changePassword(
   const { data, error, response } = await apiClient.POST(
     '/api/v1/profile/password',
     {
-      params: { header: { 'If-Match': profile.etag } },
+      params: { header: ifMatch(profile.etag) },
       body: input
     }
   );
@@ -87,7 +92,7 @@ export async function enrollPassword(
   const { data, error, response } = await apiClient.POST(
     '/api/v1/profile/password/enroll',
     {
-      params: { header: { 'If-Match': profile.etag } },
+      params: { header: ifMatch(profile.etag) },
       body: input
     }
   );

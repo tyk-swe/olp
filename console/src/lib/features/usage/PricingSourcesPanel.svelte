@@ -2,7 +2,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createPricingSource,
     getReferenceCatalog,

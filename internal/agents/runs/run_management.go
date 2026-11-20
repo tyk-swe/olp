@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type RunView struct {
@@ -72,7 +72,7 @@ type RunDetailView struct {
 const runColumns = `id::text AS id, api_key_id::text AS api_key_id, project_id::text AS project_id,
  revision_id::text AS revision_id, route_revision_id::text AS route_revision_id, created_at`
 
-func (s *Management) listRuns(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) listRuns(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -83,7 +83,7 @@ func (s *Management) listRuns(r *http.Request, p access.Principal) (httpkit.Repl
 		if err != nil || id == uuid.Nil || id.String() != project {
 			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
-		if err := p.Project(&project, access.View); err != nil {
+		if err := p.Project(&project, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -100,7 +100,7 @@ func (s *Management) listRuns(r *http.Request, p access.Principal) (httpkit.Repl
 	return httpkit.ListReplyBy(items, page, func(item RunView) string { return item.ID }), nil
 }
 
-func (s *Management) visibleRun(r *http.Request, p access.Principal) (RunView, error) {
+func (s *Management) visibleRun(r *http.Request, p authz.Principal) (RunView, error) {
 	id, err := httpkit.IDParam(r, "run_id")
 	if err != nil {
 		return RunView{}, err
@@ -113,13 +113,13 @@ func (s *Management) visibleRun(r *http.Request, p access.Principal) (RunView, e
 	if err != nil {
 		return RunView{}, err
 	}
-	if err := p.Project(&run.ProjectID, access.View); err != nil {
+	if err := p.Project(&run.ProjectID, authz.View); err != nil {
 		return RunView{}, err
 	}
 	return run, nil
 }
 
-func (s *Management) getRun(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) getRun(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -152,7 +152,7 @@ func (s *Management) getRun(r *http.Request, p access.Principal) (httpkit.Reply,
 	return httpkit.OK(RunDetailView{RunView: run, Steps: append([]RunStepView{}, steps...), Approvals: append([]RunApprovalView{}, approvals...)}), nil
 }
 
-func (s *Management) listRunSpans(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Management) listRunSpans(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
 		return httpkit.Reply{}, err

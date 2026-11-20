@@ -1,6 +1,7 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { projectOptions } from '#lib/features/access/index.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -8,13 +9,13 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
+  import type { ProjectMembership } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import type { ProjectMembership } from '#lib/features/access/projects/api.js';
   import { formatDate } from '#lib/format.js';
   import ExportSinkHistory from './ExportSinkHistory.svelte';
   import {
@@ -425,7 +426,7 @@
             <label for="sink-filter-project">Only for project</label
             ><EntityPicker
               id="sink-filter-project"
-              kind="project"
+              source={projectOptions}
               bind:value={sinkFilterProject}
               emptyLabel="All projects"
             />

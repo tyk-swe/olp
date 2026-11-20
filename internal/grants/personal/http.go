@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type authorizeRequest struct {
@@ -16,7 +16,7 @@ type completionRequest struct {
 	State string `json:"state"`
 }
 
-func (s *Server) authorize(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) authorize(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -35,7 +35,7 @@ func (s *Server) authorize(r *http.Request, p access.Principal) (httpkit.Reply, 
 	return httpkit.Detail(result, ""), nil
 }
 
-func (s *Server) complete(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) complete(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -57,7 +57,7 @@ func (s *Server) complete(r *http.Request, p access.Principal) (httpkit.Reply, e
 	return httpkit.Detail(result, ""), nil
 }
 
-func (s *Server) poll(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) poll(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}

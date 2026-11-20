@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -34,7 +34,7 @@ type storedSlot struct {
 	allowedAPIKeys []string
 }
 
-func Read(ctx context.Context, q access.Queryer) ([]Entry, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Entry, error) {
 	destinations, err := readDestinations(ctx, q)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func Read(ctx context.Context, q access.Queryer) ([]Entry, error) {
 	}), nil
 }
 
-func readDestinations(ctx context.Context, q access.Queryer) (map[string]destination, error) {
+func readDestinations(ctx context.Context, q database.Queryer) (map[string]destination, error) {
 	rows, err := providers.ReadProviderSnapshots(ctx, q)
 	if err != nil {
 		return nil, err

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 

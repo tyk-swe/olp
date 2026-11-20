@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type Management struct {
@@ -25,7 +26,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.access.Route(mux, "GET /api/v1/a2a-tasks/{task_id}/remote", m.remote, access.Deadline(35*time.Second))
 	m.access.Route(mux, "POST /api/v1/a2a-tasks/{task_id}/cancel", m.remote, access.Deadline(35*time.Second))
 }
-func (m *Management) remote(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (m *Management) remote(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, idErr := httpkit.ParseUUID(r.PathValue("task_id"))
 	if idErr != nil {
 		return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
@@ -37,7 +38,7 @@ func (m *Management) remote(r *http.Request, principal access.Principal) (httpki
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := principal.Project(&task.ProjectID, access.Change); err != nil {
+	if err := principal.Project(&task.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	remote, remoteErr := func() (*protocol.Task, error) {

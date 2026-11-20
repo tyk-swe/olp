@@ -1,17 +1,20 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import { listProjects } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import {
-    decisionRows,
-    type ExplanationRow
-  } from '#lib/features/routes/routingExplanation.js';
+    listProviders,
+    providerKeys
+  } from '#lib/features/providers/index.js';
+  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import {
+    listRoutes,
+    selectActiveRoutes,
+    simulateRouting,
+    routeKeys,
+    decisionRows
+  } from '#lib/features/routes/index.js';
+  import type { ExplanationRow } from '#lib/features/routes/index.js';
   import { operationKinds } from '#lib/features/usage/history/api.js';
   import { quoteUsage, type PricingQuote } from '#lib/features/usage/quote.js';
 
@@ -56,7 +59,8 @@
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listRoutes(signal)
+    queryFn: ({ signal }) => listRoutes(signal),
+    select: selectActiveRoutes
   }));
   const providers = createQuery(() => ({
     queryKey: providerKeys.all(),
@@ -70,7 +74,8 @@
   }));
 
   $effect(() => {
-    if (!route && routes.data?.[0]) route = routes.data[0].slug;
+    if (!routes.data?.some((item) => item.slug === route))
+      route = routes.data?.[0]?.slug ?? '';
   });
   $effect(() => {
     if (!providerId && providers.data?.[0]) providerId = providers.data[0].id;

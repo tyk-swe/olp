@@ -18,7 +18,7 @@
     type RouteRevision,
     type RouteRevisionDiff
   } from '#lib/features/routes/api.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { fidelityLabel } from '#lib/features/routes/routeEditor.js';
   import { formatDate, formatInteger } from '#lib/format.js';
 

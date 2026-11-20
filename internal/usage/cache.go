@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 )
 
 // CacheEvidence contains no content; budget debits remain separate from billing.

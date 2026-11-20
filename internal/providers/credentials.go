@@ -13,14 +13,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
-func (s *Server) credentials(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) credentials(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -60,7 +62,7 @@ type rotateRequest struct {
 }
 
 // Published revisions keep the credential version they were activated with.
-func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -95,7 +97,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	_, replayed, err := a.Replay(r, tx, p, input)
@@ -148,18 +150,15 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (httpkit.Reply, err
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, locked *record) (httpkit.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if locked.ETag != current.ETag {
-			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 		}
 		rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, source)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", rotated.ID, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, nil
+		return httpkit.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, access.Event{Action: "provider.credential.rotate", Resource: "provider_credential", ID: rotated.ID}, nil
 	})
 }
 
@@ -172,9 +171,9 @@ type credentialChange struct {
 }
 
 // Only settings administrators may name an external credential reference.
-func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, access.Principal) (*record, error) {
+func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, authz.Principal) (*record, error) {
 	lock := changeable(ctx, id)
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		if err := authorizeCredential(p, source); err != nil {
 			return nil, err
 		}
@@ -184,8 +183,8 @@ func referencing(ctx context.Context, id string, source credentialSource) func(p
 
 // Revoking makes a version unusable in drafts, published revisions and the
 // gateways that learn it through the authority refresh, and ends its grant.
-func (s *Server) revoke(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) revoke(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		credentialID, err := httpkit.IDParam(r, "credential_id")
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -309,9 +308,9 @@ func decodeCredential(plain *string, reference *secretstore.Reference) (credenti
 // External references spend the installation's workload authority. An
 // installation operator must approve the exact version for this provider;
 // project managers may use approved versions but cannot introduce references.
-func authorizeCredential(p access.Principal, source credentialSource) error {
+func authorizeCredential(p authz.Principal, source credentialSource) error {
 	if _, external := source.(externalCredential); external {
-		return p.Authorize(access.Settings)
+		return p.Authorize(authz.Settings)
 	}
 	return nil
 }
@@ -357,7 +356,7 @@ func insertCredentialVersion(ctx context.Context, tx pgx.Tx, providerID string, 
 	return id, version, err
 }
 
-func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string) ([]byte, error) {
+func (s *Server) readCredential(ctx context.Context, q database.Queryer, id string) ([]byte, error) {
 	var referenceJSON []byte
 	if err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1", id).Scan(&referenceJSON); err != nil {
 		return nil, err
@@ -383,7 +382,7 @@ func (s *Server) BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID,
 	return err
 }
 
-func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error) {
+func (s *Server) CredentialEquals(ctx context.Context, q database.Queryer, credentialID, secret string) (bool, error) {
 	current, err := s.access.Keys.Read(ctx, q, s.access.Installation, credentialID, secrets.ProviderCredential)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -395,7 +394,7 @@ func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credent
 	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
 }
 
-func (s *Server) ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
+func (s *Server) ExternalCredentialEquals(ctx context.Context, q database.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
 	var data []byte
 	err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", credentialID).Scan(&data)
 	if errors.Is(err, pgx.ErrNoRows) {

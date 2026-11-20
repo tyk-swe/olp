@@ -5,11 +5,14 @@ import (
 	"context"
 	"slices"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 )
@@ -73,17 +76,17 @@ func invalidGrant(p grant) bool {
 	return httpkit.ValidText("project", p.Project, 100) != nil || !p.Role.Valid()
 }
 
-func readSCIM(ctx context.Context, q access.Queryer) ([]group, error) {
-	stored, err := access.ReadSCIMGroupMappings(ctx, q)
+func readSCIM(ctx context.Context, q database.Queryer) ([]group, error) {
+	stored, err := signin.ReadSCIMGroupMappings(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(stored, func(mapping access.SCIMGroupMapping) group {
+	return promotion.Map(stored, func(mapping signin.SCIMGroupMapping) group {
 		return group{
 			Name:        mapping.Name,
 			Role:        promotion.Nullable((*contract.ConfigurationSCIMGroupMappingRole)(mapping.Role)),
 			AccessScope: contract.ConfigurationSCIMGroupMappingAccessScope(mapping.AccessScope),
-			Projects: promotion.Map(mapping.Projects, func(g access.SCIMProjectGrant) grant {
+			Projects: promotion.Map(mapping.Projects, func(g signin.SCIMProjectGrant) grant {
 				return grant{Project: g.Project, Role: contract.ConfigurationSCIMGroupMappingProjectsRole(g.Role)}
 			}),
 		}
@@ -102,7 +105,7 @@ func sortedGrants(grants []grant) []grant {
 	}))
 }
 
-func planSCIM(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Item, error) {
+func planSCIM(ctx context.Context, q database.Queryer, d Desired) ([]promotion.Item, error) {
 	if len(d.groups) == 0 {
 		return nil, nil
 	}
@@ -137,7 +140,7 @@ func planSCIM(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Ite
 }
 
 func SCIMApplier(d Desired, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(d.groups) == 0 {
 			return nil
 		}
@@ -158,7 +161,7 @@ func SCIMApplier(d Desired, deps Deps) promotion.Applier {
 			if err != nil {
 				return err
 			}
-			return deps.Access.StoreSCIMMapping(ctx, tx, p, g.Name, mapping)
+			return deps.SignIn.StoreSCIMMapping(ctx, tx, p, g.Name, mapping)
 		})
 	}
 }

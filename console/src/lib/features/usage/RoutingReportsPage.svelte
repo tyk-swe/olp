@@ -4,7 +4,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { dateTimeLocalValue, formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { defaultUsageState } from './usageState';
   import {
     selectorSavings,

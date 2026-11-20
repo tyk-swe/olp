@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 //go:embed scripts/session_create.lua

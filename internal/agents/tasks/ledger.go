@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type Store struct {

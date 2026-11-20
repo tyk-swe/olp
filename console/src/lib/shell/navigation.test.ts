@@ -1,6 +1,6 @@
 import { setupProgress } from '#lib/features/overview/setupProgress.js';
 import { describe, expect, it } from 'vitest';
-import type { Grant } from '#lib/features/access/session/authorization.js';
+import type { Grant } from '#lib/session/authorization.js';
 import {
   MANAGEMENT_REQUIREMENTS,
   type ManagementOperation

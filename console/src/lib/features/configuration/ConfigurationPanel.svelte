@@ -3,7 +3,7 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import { parseExternalReference } from '#lib/features/providers/externalReference.js';
+  import { parseExternalReference } from '#lib/features/providers/index.js';
   import { resolve } from '$app/paths';
   import { parseNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
   import { ApiProblem, errorMessage } from '#lib/management/http.js';

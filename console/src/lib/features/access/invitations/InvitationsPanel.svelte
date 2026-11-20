@@ -7,7 +7,7 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { invitationKeys } from '#lib/features/access/invitations/invitationKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -24,8 +24,8 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
-  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';

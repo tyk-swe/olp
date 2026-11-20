@@ -4,9 +4,10 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -52,7 +53,7 @@ func portableConnection(configuration connection.Configuration) Connection {
 	return Connection{Configuration: configuration.WithNetworkCredential(""), Network: stored}
 }
 
-func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
+func (c Connection) resolve(ctx context.Context, q database.Queryer, name, project, pool string, in scope) (pin, error) {
 	prepared, err := connection.Prepare(ctx, in.deps.Drafts.ConnectionPolicy(q), c.Configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return pin{}, httpkit.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
@@ -79,8 +80,8 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 	return pin{provider: id, configuration: bound}, err
 }
 
-func enrolled(ctx context.Context, q access.Queryer, providerID string, configuration connection.Configuration, pool string, in scope) error {
-	at := slices.IndexFunc(in.pools, func(p resolved[access.CodePoolInput]) bool { return p.ref == pool })
+func enrolled(ctx context.Context, q database.Queryer, providerID string, configuration connection.Configuration, pool string, in scope) error {
+	at := slices.IndexFunc(in.pools, func(p resolved[codeadmin.PoolInput]) bool { return p.ref == pool })
 	if at < 0 {
 		return httpkit.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
 	}

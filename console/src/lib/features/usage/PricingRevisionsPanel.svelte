@@ -1,6 +1,7 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -22,14 +23,14 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { dateTimeLocalValue, formatDate } from '#lib/format.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
+    listProviderKinds,
     listProviderVendors,
-    type ProviderKind
-  } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+    providerKeys
+  } from '#lib/features/providers/index.js';
+  import type { ProviderKind } from '#lib/features/providers/index.js';
   import { operationKinds } from './history/api';
   import {
     createPricingRevision,
@@ -334,7 +335,7 @@
         <div class="form-field">
           <label for="provider-id">Only for provider</label><EntityPicker
             id="provider-id"
-            kind="provider"
+            source={providerOptions}
             bind:value={providerId}
             emptyLabel="Every provider of this kind"
             disabled={!canEditPricing}

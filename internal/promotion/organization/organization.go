@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -40,7 +40,7 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 	})), byName), nil
 }
 
-func Read(ctx context.Context, q access.Queryer) ([]Organization, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Organization, error) {
 	stored, err := projects.ReadOrganizationBudgets(ctx, q)
 	if err != nil {
 		return nil, err

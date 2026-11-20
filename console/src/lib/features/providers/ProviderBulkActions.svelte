@@ -6,7 +6,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '#lib/features/routes/api.js';
+  import { listRoutes } from '#lib/features/routes/index.js';
   import { providerKeys } from './providerKeys';
   import {
     activateProvider,

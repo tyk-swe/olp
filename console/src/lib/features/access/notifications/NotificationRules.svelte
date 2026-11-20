@@ -9,6 +9,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { notificationKeys } from './notificationKeys';
+  import { canChangeNotification } from './presentation';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -42,6 +43,11 @@
     canDelete
   }: { canManage: boolean; installationWide: boolean; canDelete: boolean } =
     $props();
+  const canChange = (rule: NotificationRule) =>
+    canChangeNotification(rule.project_id, {
+      project: canManage,
+      installation: installationWide
+    });
   let creating = $state(false);
   let error = $state('');
   const ruleIntent = useMutationIntent();
@@ -175,7 +181,7 @@
   });
 
   function startRuleEdit(rule: NotificationRule) {
-    if (editRuleBusy) return;
+    if (editRuleBusy || !canChange(rule)) return;
     editingRule = rule;
     editRuleId = rule.id;
     editRuleName = rule.name;
@@ -189,7 +195,7 @@
 
   async function saveRule(rule: NotificationRule) {
     if (
-      !canManage ||
+      !canChange(rule) ||
       editRuleBusy ||
       !editRuleName.trim() ||
       !editRuleDestinationId
@@ -235,7 +241,7 @@
   }
 
   async function toggleRule(rule: NotificationRule) {
-    if (!canManage) return;
+    if (!canChange(rule)) return;
     const isCurrent = captureOwner();
     error = '';
     try {
@@ -471,8 +477,8 @@
             >Subject</th
           ><th scope="col">Window</th><th scope="col">Configuration</th><th
             scope="col">Destination</th
-          ><th scope="col">Enabled</th>{#if canManage}<th scope="col"
-              ><span class="sr-only">Actions</span></th
+          ><th scope="col">Enabled</th>{#if canManage || installationWide}<th
+              scope="col"><span class="sr-only">Actions</span></th
             >{/if}</tr
         ></thead
       >
@@ -562,31 +568,31 @@
                 ><span class="mono">{configurationLabel(rule)}</span></td
               ><td>{rule.destination_name}</td><td
                 >{rule.enabled ? 'Yes' : 'No'}</td
-              >{#if canManage}<td
-                  ><button
-                    class="text-button"
-                    type="button"
-                    disabled={editRuleBusy}
-                    onclick={() => startRuleEdit(rule)}>Edit</button
-                  ><button
-                    class="text-button"
-                    type="button"
-                    onclick={() => toggleRule(rule)}
-                    >{rule.enabled ? 'Disable' : 'Enable'}</button
-                  >
-                  {#if canDelete}<ConfirmAction
-                      danger
-                      label="Delete rule"
-                      description={`Delete ${rule.name}. Referenced resources cannot be deleted`}
-                      identity={`${rule.id}:${rule.etag}`}
-                      run={(requestId) =>
-                        deleteNotificationRule(rule, requestId)}
-                      done={async () => {
-                        await queryClient.invalidateQueries({
-                          queryKey: notificationKeys.root
-                        });
-                      }}
-                    />{/if}</td
+              >{#if canManage || installationWide}<td
+                  >{#if canChange(rule)}<button
+                      class="text-button"
+                      type="button"
+                      disabled={editRuleBusy}
+                      onclick={() => startRuleEdit(rule)}>Edit</button
+                    ><button
+                      class="text-button"
+                      type="button"
+                      onclick={() => toggleRule(rule)}
+                      >{rule.enabled ? 'Disable' : 'Enable'}</button
+                    >
+                    {#if canDelete}<ConfirmAction
+                        danger
+                        label="Delete rule"
+                        description={`Delete ${rule.name}. Referenced resources cannot be deleted`}
+                        identity={`${rule.id}:${rule.etag}`}
+                        run={(requestId) =>
+                          deleteNotificationRule(rule, requestId)}
+                        done={async () => {
+                          await queryClient.invalidateQueries({
+                            queryKey: notificationKeys.root
+                          });
+                        }}
+                      />{/if}{/if}</td
                 >{/if}</tr
             >
           {/if}

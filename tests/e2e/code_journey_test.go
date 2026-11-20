@@ -5,6 +5,7 @@ package e2e_test
 import (
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,5 +85,39 @@ func TestCodeAccountEndpoints(t *testing.T) {
 	}
 	if want := map[string]bool{codex: false, minimax: true, claude: true}; !maps.Equal(eligible, want) {
 		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
+	}
+}
+
+func TestCodeBudgetWritesReplayGuardStaleAndAuditEachWrite(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := func(name string) string {
+		return s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": name}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	}
+	home, other := project("code-budget-home"), project("code-budget-other")
+	budget := func(project string, daily int) map[string]any {
+		return map[string]any{"project_id": project, "daily_tokens": daily, "enabled": true}
+	}
+	key := harness.Idempotent()
+	created := s.Want(owner, "POST", "/api/v1/code/budgets", budget(home, 100), key, http.StatusCreated)
+	if replayed := s.Want(owner, "POST", "/api/v1/code/budgets", budget(home, 100), key, http.StatusCreated); replayed["id"] != created["id"] {
+		t.Fatalf("replayed create answered budget %v, want %v", replayed["id"], created["id"])
+	}
+	id := created["id"].(string)
+	path := "/api/v1/code/budgets/" + id
+	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+	if status, raw := s.Do(owner, "PUT", path, budget(home, 200), harness.Idempotent(stale)); status != http.StatusPreconditionFailed {
+		t.Fatalf("stale update: %s", describe(status, raw))
+	}
+	if status, raw := s.Do(owner, "PUT", path, budget(other, 200), harness.Idempotent(harness.ETag(created))); status != http.StatusUnprocessableEntity {
+		t.Fatalf("update that moves the budget to another project: %s", describe(status, raw))
+	}
+	updated := s.Want(owner, "PUT", path, budget(home, 200), harness.Idempotent(harness.ETag(created)), http.StatusOK)
+	if updated["daily_tokens"] != float64(200) || updated["etag"] == created["etag"] {
+		t.Fatalf("updated budget = %v, want the new cap and a new etag", updated)
+	}
+	if actions, want := auditActions(t, s, id), []string{"code_budget.write", "code_budget.write"}; !slices.Equal(actions, want) {
+		t.Fatalf("audit actions = %v, want %v", actions, want)
 	}
 }

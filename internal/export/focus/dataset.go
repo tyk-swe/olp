@@ -14,7 +14,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 const (

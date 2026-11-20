@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/antigravityauth"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -34,12 +35,12 @@ type credentialImportSlot struct {
 }
 
 func (s *Server) importCredentials(adapter codemode.Adapter) access.Handler {
-	return func(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 		return s.importCredentialsAs(r, p, adapter)
 	}
 }
 
-func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapter codemode.Adapter) (httpkit.Reply, error) {
+func (s *Server) importCredentialsAs(r *http.Request, p authz.Principal, adapter codemode.Adapter) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -52,7 +53,7 @@ func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapte
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := httpkit.Match(r, current.ETag); err != nil {
@@ -113,32 +114,29 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	locked, err := lockProvider(ctx, tx, current.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(locked.ProjectID, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := httpkit.Match(r, locked.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
-		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
-		httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, tx.Commit(ctx)
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		locked, err := lockProvider(ctx, tx, current.ID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(locked.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, locked.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+			Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
+			httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, access.Event{}, nil
+	})
 }
 
 type importedCredential struct {

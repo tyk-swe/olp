@@ -15309,6 +15309,7 @@
           "openai-completions",
           "openai-decisions",
           "systemone",
+          "gemini-decisions",
           "mistral-ocr",
           "azure-document-intelligence-ocr",
           "vertex-document-processing-ocr",
@@ -26553,7 +26554,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Exact decimal; null outside the imported range."
+                  "description": "Exact decimal when covered, or null for mixed invoice currencies or no coverage."
                 },
                 "invoiced_currency": {
                   "type": [
@@ -26663,7 +26664,8 @@
                   "type": [
                     "string",
                     "null"
-                  ]
+                  ],
+                  "description": "Exact decimal in the report currency, or null when there is no coverage or the invoices include a different currency."
                 },
                 "capture_rate": {
                   "type": [
@@ -54458,6 +54460,16 @@
               }
             },
             "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Organization not found"
           }
         },
         "security": [
@@ -54517,7 +54529,7 @@
                 }
               }
             },
-            "description": "Project created; the creator is its first manager",
+            "description": "Project created with access inherited from its organization",
             "headers": {
               "Location": {
                 "description": "Path of the created resource",
@@ -54546,6 +54558,16 @@
               }
             },
             "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Organization not found"
           },
           "409": {
             "content": {
@@ -70780,6 +70802,9 @@
           },
           "422": {
             "description": "Invalid enrollment"
+          },
+          "503": {
+            "description": "OAuth client setup is unavailable. The enrollment can be polled again."
           }
         },
         "parameters": [

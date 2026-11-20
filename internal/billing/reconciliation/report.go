@@ -194,7 +194,7 @@ func (d day) captureRate(currency string) (nullable.Nullable[string], nullable.N
 }
 
 func (d day) invoicedCost() nullable.Nullable[string] {
-	if !d.covered {
+	if !d.covered || len(d.invoice.Currencies) > 1 {
 		return nullable.NewNullNullable[string]()
 	}
 	return nullable.NewNullableWithValue(d.invoice.Amount.String())
@@ -213,12 +213,13 @@ func summarize(days []day, currency string) summary {
 		if !d.covered {
 			continue
 		}
-		reason, unavailable := d.unavailableReason(currency)
 		s.covered = true
 		s.attributedCovered = s.attributedCovered.Add(d.spend.Attributed)
-		s.invoiced = s.invoiced.Add(d.invoice.Amount)
 		s.currencyMismatch = s.currencyMismatch ||
-			unavailable && reason == contract.ReconciliationReportItemsCaptureRateUnavailableReasonCurrencyMismatch
+			len(d.invoice.Currencies) > 0 && !slices.Equal(d.invoice.Currencies, []string{currency})
+		if !s.currencyMismatch {
+			s.invoiced = s.invoiced.Add(d.invoice.Amount)
+		}
 	}
 	return s
 }
@@ -249,7 +250,7 @@ func (s summary) captureRate() (nullable.Nullable[string], nullable.Nullable[str
 }
 
 func (s summary) invoicedCost() nullable.Nullable[string] {
-	if !s.covered {
+	if !s.covered || s.currencyMismatch {
 		return nullable.NewNullNullable[string]()
 	}
 	return nullable.NewNullableWithValue(s.invoiced.String())

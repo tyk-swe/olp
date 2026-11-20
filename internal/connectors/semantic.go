@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 func (c Config) DeclaresSemanticHeader(name string) bool {

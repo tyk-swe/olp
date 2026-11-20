@@ -12,7 +12,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 )
 
 type Period struct {

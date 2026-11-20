@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 const routingKeyLimit = 512

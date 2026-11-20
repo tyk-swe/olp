@@ -11,6 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -68,7 +69,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.access.Route(mux, "DELETE /api/v1/mcp-user-grants/{grant_id}", s.revoke)
 }
 
-func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -89,7 +90,7 @@ func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply,
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, id).Scan(&project, &draft); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&project, access.Change); err != nil {
+	if err := p.Project(&project, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var keyProject string
@@ -111,7 +112,7 @@ func (s *Server) startAgent(r *http.Request, p access.Principal) (httpkit.Reply,
 	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -132,7 +133,7 @@ func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&server.ProjectID, access.Change); err != nil {
+	if err := p.Project(&server.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var project string
@@ -154,7 +155,7 @@ func (s *Server) start(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) claim(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -186,7 +187,7 @@ func grantProblem(err error) error {
 	return err
 }
 
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -211,7 +212,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error
 	return httpkit.ListReplyBy(items, page, func(item Standing) string { return item.ID }), nil
 }
 
-func (s *Server) revoke(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revoke(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
 		return httpkit.Reply{}, httpkit.Forbidden()
 	}
@@ -219,25 +220,19 @@ func (s *Server) revoke(r *http.Request, p access.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var project, member string
-	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,COALESCE(member_id::text,'') FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if member != p.UserID() {
-		if err := p.Project(&project, access.Change); err != nil {
-			return httpkit.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var project, member string
+		if err := tx.QueryRow(r.Context(), `SELECT project_id::text,COALESCE(member_id::text,'') FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if _, err := tx.Exec(r.Context(), `UPDATE olp.mcp_user_grants SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1`, id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "mcp_grant_revoke", "mcp_user_grant", id, "success", &project); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+		if member != p.UserID() {
+			if err := p.Project(&project, authz.Change); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE olp.mcp_user_grants SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1`, id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "mcp_grant_revoke", Resource: "mcp_user_grant", ID: id, Project: &project}, nil
+	})
 }

@@ -9,12 +9,12 @@
     authenticationCapabilities,
     beginOidcLogin,
     type AuthenticationCapabilities
-  } from '#lib/features/access/session/api.js';
-  import { login } from '#lib/features/access/session/authentication.js';
+  } from '#lib/session/api.js';
+  import { login } from '#lib/session/authentication.js';
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { relativeReturnTo } from '#lib/features/access/session/relativeReturnTo.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { relativeReturnTo } from '#lib/session/relativeReturnTo.js';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
 
   let email = $state('');

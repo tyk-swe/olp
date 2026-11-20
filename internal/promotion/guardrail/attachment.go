@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/authz"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+	"github.com/tyk-swe/olp/internal/platform/database"
 
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -137,7 +139,7 @@ func sameSlot(a, b Attachment) bool {
 }
 
 func PolicyApplier(desired Section) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -150,7 +152,7 @@ func PolicyApplier(desired Section) promotion.Applier {
 }
 
 func ToolsetApplier(desired Section) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -173,7 +175,7 @@ type draft struct{ id string }
 func (published) destination() {}
 func (draft) destination()     {}
 
-func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, a Attachment) error {
+func applyAttachment(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, a Attachment) error {
 	project, err := projectID(directory, a.Policy.Project)
 	if err != nil {
 		return err
@@ -186,7 +188,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	if err != nil {
 		return err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	switch t := target.(type) {
@@ -194,7 +196,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 		return guardrailattachment.Stage(ctx, tx, p.UserID(), t.id, revision, a.Order)
 	case published:
 		placed := guardrails.Attachment{Scope: guardrails.Scope(describe(a.Scope).kind), ScopeID: guardrails.ProjectOf(t.id), PolicyRevisionID: revision, Order: a.Order}
-		if err := guardrailattachment.Authorize(ctx, tx, p, placed, access.Change); err != nil {
+		if err := guardrailattachment.Authorize(ctx, tx, p, placed, authz.Change); err != nil {
 			return err
 		}
 		return guardrailattachment.Place(ctx, tx, p.UserID(), placed)
@@ -202,7 +204,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	return httpkit.Invalid("guardrail_attachments", invalidAttachment)
 }
 
-func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, scope Scope, project *string) (destination, error) {
+func resolveScope(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, scope Scope, project *string) (destination, error) {
 	switch s := scope.(type) {
 	case Installation:
 		if !p.AllProjects {
@@ -217,7 +219,7 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory 
 		if !found {
 			return nil, promotion.UnknownOrganization(s.Name)
 		}
-		return published{&id}, p.Organization(id, access.Change)
+		return published{&id}, p.Organization(id, authz.Change)
 	case Project:
 		id, err := projectID(directory, s.Name)
 		return published{id}, err
@@ -254,7 +256,7 @@ func resolveKey(ctx context.Context, tx pgx.Tx, directory promotion.Directory, k
 	if err != nil {
 		return nil, err
 	}
-	keys, err := access.ReadKeysNamed(ctx, tx, owner, key.Name)
+	keys, err := apikeys.ReadKeysNamed(ctx, tx, owner, key.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +291,7 @@ func toolsetOutsideProject() error {
 	return httpkit.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
 }
 
-func activeRevision(ctx context.Context, q access.Queryer, project *string, name string) (string, error) {
+func activeRevision(ctx context.Context, q database.Queryer, project *string, name string) (string, error) {
 	current, err := guardrailpolicy.FindLatest(ctx, q, project, name)
 	if err != nil {
 		return "", err

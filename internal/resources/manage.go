@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -31,7 +32,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "GET /api/v1/provider-resource-contracts", m.contracts)
 }
 
-func (m *Management) contracts(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) contracts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	items := make([]map[string]any, 0)
 	for _, family := range retainedapi.Families() {
 		implemented := false
@@ -119,7 +120,7 @@ type providerResourceSettlement = struct {
 	UncertainResults int64                        `json:"uncertain_results"`
 }
 
-func (m *Management) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	filters := manageFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {

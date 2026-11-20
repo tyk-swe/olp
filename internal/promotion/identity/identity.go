@@ -5,15 +5,19 @@ import (
 	"net/http"
 	"slices"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Desired struct {
-	saml     *access.SAMLDefinition
+	saml     *signin.SAMLDefinition
 	groups   []contract.ConfigurationSCIMGroupMapping
 	issuers  []contract.ConfigurationWorkloadIssuer
 	declared map[string]contract.ConfigurationProjectEntry
@@ -27,6 +31,7 @@ type Fragment struct {
 
 type Deps struct {
 	Access   *access.Server
+	SignIn   *signin.Server
 	Identity *http.Client
 }
 
@@ -46,7 +51,7 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	return Desired{saml: definition, groups: groups, issuers: issuers, declared: declaredProjects(document.Projects)}, nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Desired, error) {
+func Read(ctx context.Context, q database.Queryer) (Desired, error) {
 	definition, err := readSAML(ctx, q)
 	if err != nil {
 		return Desired{}, err
@@ -78,17 +83,17 @@ func Render(d Desired) (Fragment, error) {
 	}, nil
 }
 
-func Authorize(d Desired, p access.Principal) error {
+func Authorize(d Desired, p authz.Principal) error {
 	if d.saml == nil && len(d.groups) == 0 && len(d.issuers) == 0 {
 		return nil
 	}
-	return p.Authorize(access.Access)
+	return p.Authorize(authz.Access)
 }
 
 func Planner(d Desired) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(_ context.Context, _ access.Queryer, p access.Principal) error { return Authorize(d, p) },
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Authorize: func(_ context.Context, _ database.Queryer, p authz.Principal) error { return Authorize(d, p) },
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			definition, err := planSAML(ctx, q, d.saml)
 			if err != nil {
 				return nil, err

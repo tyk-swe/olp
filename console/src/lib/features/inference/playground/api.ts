@@ -10,6 +10,7 @@ export type PlaygroundRequest = Omit<
   surface?: 'openai' | 'anthropic' | 'gemini';
 };
 export type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
+const maxPlaygroundResponseBytes = 32 * 1024 * 1024;
 
 export type PlaygroundOperation =
   | 'generation'
@@ -56,7 +57,8 @@ export async function runPlayground(
       headers: { 'cache-control': 'no-store' },
       body: input
     },
-    [['response']]
+    [['response'], ['structured_output']],
+    maxPlaygroundResponseBytes
   );
 }
 

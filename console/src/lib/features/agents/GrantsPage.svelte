@@ -9,7 +9,7 @@
   import { writable } from 'svelte/store';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime

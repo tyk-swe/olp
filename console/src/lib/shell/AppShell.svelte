@@ -2,8 +2,8 @@
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import type { Snippet } from 'svelte';
-  import type { SessionUser } from '#lib/features/access/session/api.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import type { SessionUser } from '#lib/session/api.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
   import CommandPalette from '#lib/shell/CommandPalette.svelte';
   import NavIcon from '#lib/shell/NavIcon.svelte';

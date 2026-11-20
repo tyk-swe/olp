@@ -9,20 +9,23 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/release"
 
-	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -42,8 +45,8 @@ type codeRoute struct {
 	Adapters []codemode.Adapter `json:"adapters"`
 }
 
-func (s *Server) codeRoutes(r *http.Request, p access.Principal) (httpkit.Reply, error) {
-	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
+func (s *Server) codeRoutes(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	return codeadmin.List(s.Access, r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
 		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
 		||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("v.connections")+`)
 		FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
@@ -71,7 +74,7 @@ type CodeRouteInput struct {
 	Enabled                 bool                           `json:"enabled"`
 }
 
-func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) writeCodeRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var in CodeRouteInput
 	if err := httpkit.Decode(r, &in); err != nil {
 		return httpkit.Reply{}, err
@@ -80,64 +83,51 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (httpkit.Re
 	if validationError != nil {
 		return httpkit.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
+	return codeadmin.Write(s.Access, r, codeadmin.Routes, input.ProjectID, input, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
-func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) publishCodeRoute(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var document []byte
-	var project, etag string
-	if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(&project, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var route codemode.Route
-	if err = json.Unmarshal(document, &route); err != nil {
-		return httpkit.Reply{}, err
-	}
-	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	route = published.Route
-	adapters := published.Adapters
-	if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
-		return httpkit.Reply{}, err
-	}
+	return access.Mutate(s.Access, r, id, func(tx pgx.Tx, p authz.Principal) (codeDraft, error) {
+		var document []byte
+		var project, etag string
+		if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
+			return codeDraft{}, err
+		}
+		if err = p.Project(&project, authz.Change); err != nil {
+			return codeDraft{}, err
+		}
+		return codeDraft{document: document, etag: etag}, nil
+	}, func(tx pgx.Tx, p authz.Principal, draft codeDraft) (httpkit.Reply, access.Event, error) {
+		document, etag := draft.document, draft.etag
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var route codemode.Route
+		if err = json.Unmarshal(document, &route); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		route = published.Route
+		adapters := published.Adapters
+		if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
 
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_route.publish", "code_route", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	out := httpkit.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
-	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return out, tx.Commit(r.Context())
+		out := httpkit.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
+		return out, access.Event{Action: "code_route.publish", Resource: "code_route", ID: id}, nil
+	})
 }
 
-func (s *Server) codeRevisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) codeRevisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -146,7 +136,7 @@ func (s *Server) codeRevisions(r *http.Request, p access.Principal) (httpkit.Rep
 	if err = s.Access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.code_routes WHERE id=$1`, id).Scan(&project); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, access.View); err != nil {
+	if err = p.Project(&project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	page, err := httpkit.Page(r)
@@ -206,12 +196,12 @@ func UnpublishCodeRoute(ctx context.Context, tx pgx.Tx, id string) error {
 	return err
 }
 
-func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
+func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
 	in, validationError := raw.Validated()
 	if validationError != nil {
 		return nil, validationError
 	}
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
@@ -278,12 +268,12 @@ func (in CodeRouteInput) validate() error {
 	return nil
 }
 
-func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
 	project, projectError := httpkit.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
 	}
-	if err := p.Project(&project, access.Change); err != nil {
+	if err := p.Project(&project, authz.Change); err != nil {
 		return nil, err
 	}
 	route := in
@@ -389,7 +379,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	return &codeRoute{Route: route, Adapters: adapters}, nil
 }
 
-func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Route) (map[string]routing.Provider, error) {
+func CodePaidProviders(ctx context.Context, tx database.Queryer, route codemode.Route) (map[string]routing.Provider, error) {
 	if len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		return map[string]routing.Provider{}, nil
 	}
@@ -508,4 +498,9 @@ func validatedCodeRouteTargets(input map[string]codemode.PaidTarget) (map[string
 	}()
 
 	return paidTargets, nil
+}
+
+type codeDraft struct {
+	document []byte
+	etag     string
 }

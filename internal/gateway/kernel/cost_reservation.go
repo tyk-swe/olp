@@ -1,0 +1,515 @@
+package kernel
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"time"
+
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+)
+
+// costBudgeted reports whether this request spends against a caller budget.
+// Estimation and growth use the same named-route boundary as admission, even
+// after the request moves to a fallback route.
+func (x *Call) costBudgeted(authority keyauthority.Authority) bool {
+	authority = x.AdmissionAuthority(authority)
+	return callerCostBudgeted(&authority, x.limitRoute())
+}
+
+// attemptCostReservation holds the price of the one attempt a request runs on,
+// such as a video create, which never fails over because a second target would
+// mint a second job.
+func (x *Call) attemptCostReservation(authority keyauthority.Authority, attempt routing.Attempt) quota.CostReservation {
+	if !x.costBudgeted(authority) {
+		return quota.CostReservation{}
+	}
+	bound := x.attemptCostBound(attempt)
+	charge := x.attemptChargeBound(attempt, bound)
+	if bound.IsZero() && charge.IsZero() {
+		return quota.CostReservation{}
+	}
+	return quota.CostReservation{Amount: bound.String(), Charge: charge.String(), RequestID: x.request.accountingID()}
+}
+
+// costReservation prices the request for admission: the most it could cost
+// across the attempts it may dispatch, from the price list the gateway holds,
+// which is the revision accounting will pin it to. Settlement bills every
+// attempt that reported usage, a retry through another credential slot
+// included, so the bound is their sum; it is replaced by the cost of what was
+// actually dispatched.
+func (s *Server) costReservation(x *Call, authority keyauthority.Authority) quota.CostReservation {
+	if x.workflow != nil {
+		return quota.CostReservation{}
+	}
+	if s.Deps.Runtime != nil {
+		if release := s.Deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
+		}
+	}
+	if !x.costBudgeted(authority) {
+		return quota.CostReservation{}
+	}
+	if x.routingInputs == nil && s.Deps.Runtime != nil {
+		x.routingInputs = s.Deps.Runtime.RoutingInputs()
+	}
+	bound := s.routeCostBound(x)
+	charge := s.routeChargeBound(x)
+	if bound.IsZero() && charge.IsZero() {
+		return quota.CostReservation{}
+	}
+	return quota.CostReservation{Amount: bound.String(), Charge: charge.String(), RequestID: x.request.accountingID()}
+}
+
+// routeChargeBound is the reservation's charge-side total over the same
+// dispatches: each attempt's pinned card prices the bound it could bill, and
+// an unpinned request keeps the cost bound, as accounting will charge it the
+// same amount it costs.
+func (s *Server) routeChargeBound(x *Call) rates.Cost {
+	return s.routeBound(x, func(attempt routing.Attempt) rates.Cost {
+		return x.attemptChargeBound(attempt, x.attemptCostBound(attempt))
+	})
+}
+
+func (s *Server) routeCostBound(x *Call) rates.Cost {
+	return s.routeBound(x, x.attemptCostBound)
+}
+
+func (s *Server) routeBound(x *Call, boundOf func(routing.Attempt) rates.Cost) rates.Cost {
+	var bound rates.Cost
+	attempts := x.attempts
+	if retryDispatches(x.Route) > 1 {
+		// Retries are optional: an early cheap target can fail over without
+		// using them, leaving the budget for a more expensive target's retries.
+		// Price the dearest possible dispatches first to cover either path.
+		attempts = slices.Clone(attempts)
+		slices.SortStableFunc(attempts, func(a, b routing.Attempt) int {
+			return boundOf(b).Cmp(boundOf(a))
+		})
+	}
+	s.walkDispatchable(x, attempts, func(attempt routing.Attempt) {
+		// Each visit is a dispatch that may be billed on its own.
+		bound = bound.Add(boundOf(attempt))
+	})
+	return bound
+}
+
+// reserveFallbackCost covers the remaining route's work alongside the bound
+// already dispatched, even when an earlier attempt could not report its usage.
+func (s *Server) ReserveFallbackCost(ctx context.Context, x *Call) *fault.Error {
+	if x.workflow != nil {
+		return nil
+	}
+	if s.Deps.Runtime != nil {
+		if release := s.Deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
+		}
+	}
+	if x.lease == nil || !x.costBudgeted(x.authority) {
+		return nil
+	}
+	bound := x.spentCost.Add(s.routeCostBound(x))
+	charge := x.spentCharge.Add(s.routeChargeBound(x))
+	if bound.IsZero() && charge.IsZero() {
+		return nil
+	}
+	deadline, _ := ctx.Deadline()
+	return s.growCost(ctx, x.lease, bound.String(), charge.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+}
+
+// reserveSessionCost holds the price of a realtime session's selected attempt.
+// A session admits apart from choosing its target, so the hold follows the
+// selection, before the provider is dialled.
+func (s *Server) reserveSessionCost(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *fault.Error {
+	if s.Deps.Runtime != nil {
+		if release := s.Deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
+		}
+	}
+	if x.routingInputs == nil && s.Deps.Runtime != nil {
+		x.routingInputs = s.Deps.Runtime.RoutingInputs()
+	}
+	hold := x.attemptCostReservation(authority, attempt)
+	if x.lease == nil || hold.Amount == "" || x.sessionDebit != nil {
+		return nil
+	}
+	return s.growCost(ctx, x.lease, hold.Amount, hold.Charge, hold.RequestID, ttl)
+}
+
+func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *fault.Error {
+	if e := s.Deps.Admission.CheckCostAccounting(ctx); e != nil {
+		return e
+	}
+	if s.Deps.Admission != nil && s.Deps.Admission.PendingCostAccountingReady != nil {
+		for _, owner := range lease.CostOwnerIDs() {
+			if e := s.Deps.Admission.CheckPendingCostAccounting(ctx, owner); e != nil {
+				return e
+			}
+		}
+	}
+	decision, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
+	defer cancel()
+	err := lease.GrowCost(decision, cost, charge, requestID, ttl)
+	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
+		s.Deps.Admission.RecordRejection(exceeded.Dimension)
+		return quota.RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+	}
+	if err != nil {
+		return quota.LimitsUnavailable()
+	}
+	return nil
+}
+
+// attemptCostBound is the most one attempt could cost, and nothing when it has no
+// price list to be priced by or the price list lacks a rate the request needs:
+// an attempt nobody can price is not reserved for, and accounting records it as
+// unpriced as it always has. Prices come from the routing inputs the gateway
+// refreshes, and a stale list prices nothing.
+func (x *Call) attemptCostBound(attempt routing.Attempt) rates.Cost {
+	if x.callerCostExempt() || attempt.Price == nil {
+		return rates.Cost{}
+	}
+	if x.committed(attempt.ProviderID) {
+		// Provisioned capacity owes nothing per attempt, so nothing is
+		// reserved for it.
+		return rates.Cost{}
+	}
+	var provider routing.Provider
+	if snapshot := x.Snapshot(); snapshot != nil {
+		var ok bool
+		if provider, ok = snapshot.FindProvider(attempt.ProviderID); !ok && (x.generation.parsed != nil || x.unary != nil) {
+			return rates.Cost{}
+		}
+	} else if x.generation.parsed != nil || x.unary != nil {
+		return rates.Cost{}
+	}
+	bound, _ := x.targetCostBound(provider, routing.Target{ID: attempt.TargetID, ProviderID: attempt.ProviderID, ProviderModel: attempt.UpstreamModel}, attempt.Price, attempt.Discount)
+	return bound
+}
+
+// attemptChargeBound is the most one attempt could charge under the card the
+// request pinned — the explicit rate's own bound, or the cost bound marked up —
+// and the cost bound itself when the request holds no card. A committed
+// attempt bounds nothing on cost but is still billable through an explicit
+// card rate, so the charge bound is computed independently.
+func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost) rates.Cost {
+	if x.callerCostExempt() {
+		return rates.Cost{}
+	}
+	rev := x.attemptCardRevision(attempt.ProviderID, x.request.startedAt)
+	if rev == nil {
+		return costBound
+	}
+	provider, ok := x.Snapshot().FindProvider(attempt.ProviderID)
+	if !ok {
+		return costBound
+	}
+	if x.media != nil || x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+		u := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}
+		if x.media != nil {
+			var ok bool
+			u, ok = videoCreateUsage(x.media)
+			if !ok {
+				return costBound
+			}
+		}
+		var priced *rates.Cost
+		if attempt.Price != nil {
+			if _, ok := attempt.Price.Cost(u, x.request.startedAt, true, attempt.Discount); ok {
+				c := costBound
+				priced = &c
+			}
+		}
+		bound, _ := rev.Charge(u, x.request.startedAt, true, priced,
+			string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
+		return bound
+	}
+	var input, reply int64
+	generation := false
+	if x.generation.parsed == nil && x.unary == nil {
+		input = max(resourceEstimate, x.estimate)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+			generation = true
+		}
+	} else {
+		admitted, err := x.attemptEstimate(&provider, attempt.TargetID, attempt.UpstreamModel)
+		if err != nil {
+			return rates.Cost{}
+		}
+		input, reply = admitted.input, admitted.reply
+		generation = reply > 0
+	}
+	bound, _ := rev.ChargeBound(input, reply, generation, x.request.startedAt, costBound,
+		string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
+	return bound
+}
+
+// targetCostBound is attemptCostBound for a planned candidate rather than a
+// dispatched attempt: the same worst case under the same pinned price and
+// discount, or false when the request cannot be bounded.
+func (x *Call) targetCostBound(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
+	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
+		return rates.Cost{}, false
+	}
+	if x.callerCostExempt() || price == nil {
+		return rates.Cost{}, false
+	}
+	if x.committed(provider.ID) {
+		return rates.Cost{}, true
+	}
+	if x.media != nil {
+		u, ok := videoCreateUsage(x.media)
+		if !ok {
+			return rates.Cost{}, false
+		}
+		return price.Cost(u, x.request.startedAt, true, discount)
+	}
+	if x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)
+	}
+	if x.generation.parsed == nil && x.unary == nil {
+		input, reply := max(resourceEstimate, x.estimate), int64(0)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+		}
+		return price.CostBound(input, reply, reply > 0, x.request.startedAt, discount)
+	}
+	admitted, err := x.attemptEstimate(&provider, target.ID, target.ProviderModel)
+	if err != nil {
+		return rates.Cost{}, false
+	}
+	return price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, discount)
+}
+
+func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
+	if m == nil {
+		return usage.AttemptUsage{}, false
+	}
+	seconds, video := m.VideoSeconds()
+	if !video {
+		return usage.AttemptUsage{}, false
+	}
+	return usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, true
+}
+
+// committed reports whether the attempt's provider settled under provisioned
+// capacity, whose usage has a price but no marginal cost.
+func (x *Call) committed(providerID string) bool {
+	snapshot := x.Snapshot()
+	if snapshot == nil {
+		return false
+	}
+	if x.currentCommitments != nil {
+		snapshot = x.currentCommitments
+	}
+	return snapshot.CommitmentAt(providerID, time.Now()) != nil
+}
+
+// settledCost is what the request cost, from the attempts that reported usage,
+// each priced by the price list it was dispatched under exactly as accounting
+// will price it. An attempt whose usage was never observed, is still to be
+// reconciled or may have been billed without being reported has no cost here,
+// as it has none in the accounting tables until its evidence arrives. It is a
+// pure function of the attempts, so it can be read at any point after they have
+// been recorded.
+func (x *Call) settledCost() rates.Cost { return x.costOf("") }
+
+// costOf is settledCost restricted to the attempts whose spend counts against
+// a capped owner, or over every attempt when owner is empty.
+func (x *Call) costOf(owner string) rates.Cost {
+	var total rates.Cost
+	operation := x.operationName()
+	for index := range x.facts {
+		fact := &x.facts[index]
+		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
+			continue
+		}
+		if cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
+			if !x.factCommitted(fact) {
+				total = total.Add(cost)
+			}
+		}
+	}
+	return total
+}
+
+// responseCost is what the request cost as the response to a caller can state it,
+// and false when it cannot: that is when accounting would record the request as
+// unpriced, or as having cost nothing it could be charged for. Every attempt that
+// was billed or may have been has to be priced for the answer to be the cost of the
+// request, as it has to be for the request's spend to be one a budget can count. An
+// attempt that reached a provider with no price list, or whose price lacks a rate
+// for what it used, is unpriced, and so is a success that reported no usage. An
+// attempt that may have been billed without reporting usage is priced, and adds
+// nothing until its usage arrives, as it adds nothing in the accounting tables.
+func (x *Call) responseCost() (rates.Cost, bool) {
+	if x.cacheHit() {
+		return rates.Cost{}, true
+	}
+	var total rates.Cost
+	billable := false
+	operation := x.operationName()
+	for index := range x.facts {
+		fact := &x.facts[index]
+		if !fact.UsageObserved && !fact.BillingUncertain {
+			continue
+		}
+		billable = true
+		if fact.Price == nil || !fact.UsageObserved && fact.Class == ClassSuccess {
+			return rates.Cost{}, false
+		}
+		if !fact.UsageObserved {
+			continue
+		}
+		cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount)
+		if !ok {
+			return rates.Cost{}, false
+		}
+		if !x.factCommitted(fact) {
+			total = total.Add(cost)
+		}
+	}
+	return total, billable
+}
+
+// settleAdmission finishes the reservations a request holds once it has ended,
+// whether it succeeded, failed or its client went away. A request that was handed
+// to a provider replaces the cost it reserved with the cost it incurred; one that
+// never was gives everything back. Either way this runs before the usage event
+// is consumed or after, and the reservation script makes the order immaterial.
+func (s *Server) settleAdmission(ctx context.Context, x *Call) {
+	s.settleCaps(ctx, x)
+	if x.cacheRateLease != nil {
+		zero := int64(0)
+		// A cache embedding uses this shared request reservation even when the
+		// parent's subsequent token or cost admission fails.
+		consumed := x.dispatched || x.cacheHit() || x.cache != nil && x.cache.embeddingDispatched
+		quota.SettleKey(ctx, x.cacheRateLease, consumed, &zero, s.Log)
+	}
+	if x.lease == nil {
+		// A request that reserved nothing has nothing to settle, and is not made to
+		// total the tokens it would have settled.
+		return
+	}
+	s.recordCost(x)
+	if x.operationOverride == "guardrail" {
+		actual := x.estimate
+		quota.SettleKey(ctx, x.lease, x.dispatched, &actual, s.Log)
+		return
+	}
+	if first := x.generation.firstStep; first != nil {
+		quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.Log)
+		return
+	}
+	quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.Log)
+}
+
+// settledCharge is what the request's consumers owe from the attempts that
+// reported usage, priced under the card each attempt resolved exactly as
+// accounting will charge it: an unpriced or uncharged attempt adds nothing.
+// Commitment zeroes a priced cost before the card sees it — a marked-up zero is
+// zero, and a fact with no card charges its zero cost — while an explicit card
+// rate still prices a committed or provider-unpriced attempt.
+func (s *Server) settledCharge(x *Call) rates.Cost {
+	var total rates.Cost
+	operation := x.operationName()
+	for index := range x.facts {
+		fact := &x.facts[index]
+		if fact.BudgetExempt || !fact.UsageObserved {
+			continue
+		}
+		var cost rates.Cost
+		var costPtr *rates.Cost
+		if fact.Price != nil {
+			if priced, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
+				cost = priced
+				if x.factCommitted(fact) {
+					cost = rates.Cost{}
+				}
+				costPtr = &cost
+			}
+		}
+		rev := fact.CardRev
+		if rev == nil {
+			// No card: the charge is the cost itself.
+			total = total.Add(cost)
+			continue
+		}
+		provider := x.Snapshot().Provider(fact.ProviderID)
+		if charge, ok := rev.Charge(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), costPtr,
+			string(provider.Kind), provider.VendorID, fact.UpstreamModel, operation); ok {
+			total = total.Add(charge)
+		}
+	}
+	return total
+}
+
+func (x *Call) attemptCardRevision(providerID string, at time.Time) *rates.RoutingCardRevision {
+	return x.attemptCardRevisionForRoute(providerID, x.Route, at)
+}
+
+func (x *Call) attemptCardRevisionForRoute(providerID string, route *routing.Route, at time.Time) *rates.RoutingCardRevision {
+	revision, _ := x.resolveAttemptCardRevision(providerID, route, at)
+	return revision
+}
+
+func (x *Call) resolveAttemptCardRevision(providerID string, route *routing.Route, at time.Time) (*rates.RoutingCardRevision, bool) {
+	if x.cardPinned {
+		return x.cardRev, true
+	}
+	inputs := x.routingInputs
+	if inputs == nil {
+		return nil, false
+	}
+	// The consumer is the aggregate-ownership project: the key's, then the
+	// provider's, then the route's — the same precedence accounting applies.
+	project := x.authority.ProjectID
+	if project == nil {
+		if snapshot := x.Snapshot(); snapshot != nil {
+			if provider, ok := snapshot.FindProvider(providerID); ok {
+				project = provider.ProjectID
+			}
+		}
+	}
+	if project == nil && route != nil {
+		project = route.ProjectID
+	}
+	return inputs.RateCardRevision(project, at)
+}
+
+// recordCost gives a lease that holds a cost estimate what the request cost, for
+// settlement to replace the estimate with.
+func (s *Server) recordCost(x *Call) {
+	if x.cacheHit() && x.lease.HasCostReservation() {
+		x.lease.SetActualCost(x.cache.budgetCost, x.cache.budgetCharge)
+		return
+	}
+	if x.dispatched && x.lease.HasCostReservation() {
+		x.lease.SetActualCost(x.settledCost().String(), s.settledCharge(x).String())
+	}
+}
+
+func (x *Call) factCommitted(fact *events.AttemptFact) bool {
+	if fact.CommitmentPinned {
+		return fact.Commitment != nil
+	}
+	snapshot := x.Snapshot()
+	if snapshot == nil {
+		return false
+	}
+	p, ok := snapshot.FindProvider(fact.ProviderID)
+	return ok && p.CommitmentAt(fact.StartedAt) != nil
+}

@@ -9,9 +9,9 @@
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
-    listOidcIdentities
-  } from '#lib/features/access/profile/api.js';
-  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+    listOidcIdentities,
+    reauthenticateWithPassword
+  } from '#lib/features/access/index.js';
   import {
     listMCPExecutables,
     reviewMCPExecutable,

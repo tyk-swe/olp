@@ -3,7 +3,7 @@ package admission
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/surface"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // RetryAfterOverload is the retry hint every admission rejection carries.
