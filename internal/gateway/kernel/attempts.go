@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -72,8 +73,9 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter at
 // conditions the route met.
 func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
 	deadline, _ := ctx.Deadline()
-	run := &routeRun[Result]{ctx: ctx, server: s, call: x, adapter: adapter, deadline: deadline}
+	run := routeRun[Result]{ctx: ctx, server: s, call: x, adapter: adapter, deadline: deadline}
 	snapshot := x.Snapshot()
+	var seen routeEvidence
 	for _, attempt := range x.attempts {
 		if run.over() {
 			break
@@ -89,11 +91,12 @@ func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attem
 		if step.then == finished {
 			return step.out, step.conditions
 		}
+		seen = seen.and(step.seen)
 		if step.then == leaveRoute {
 			break
 		}
 	}
-	return run.exhausted()
+	return run.exhausted(seen)
 }
 
 type routeRun[Result any] struct {
@@ -102,10 +105,31 @@ type routeRun[Result any] struct {
 	call     *Call
 	adapter  attemptAdapter[Result]
 	deadline time.Time
+}
 
+// routeEvidence is what failed attempts leave behind for the answer a route
+// gives when none of them served.
+type routeEvidence struct {
 	last        *AttemptFailure
 	unmeterable bool
 	met         []string
+}
+
+func (e routeEvidence) and(later routeEvidence) routeEvidence {
+	met := slices.Clone(e.met)
+	for _, condition := range later.met {
+		if !slices.Contains(met, condition) {
+			met = append(met, condition)
+		}
+	}
+	return routeEvidence{last: cmp.Or(later.last, e.last), unmeterable: e.unmeterable || later.unmeterable, met: met}
+}
+
+func refusedBy(failure *AttemptFailure) routeEvidence {
+	if condition := fallbackCondition(failure.class); condition != "" {
+		return routeEvidence{last: failure, met: []string{condition}}
+	}
+	return routeEvidence{last: failure}
 }
 
 type routeFlow int
@@ -122,38 +146,43 @@ type routeStep[Result any] struct {
 	then       routeFlow
 	out        attemptOutcome[Result]
 	conditions []string
+	seen       routeEvidence
 }
 
-func (r *routeRun[Result]) over() bool {
+func (r routeRun[Result]) over() bool {
 	return r.call.spent >= r.call.budget || r.ctx.Err() != nil
 }
 
-func (r *routeRun[Result]) finish(out attemptOutcome[Result], conditions ...string) routeStep[Result] {
+func (r routeRun[Result]) finish(out attemptOutcome[Result], conditions ...string) routeStep[Result] {
 	return routeStep[Result]{then: finished, out: out, conditions: conditions}
 }
 
-func (r *routeRun[Result]) target(attempt routing.Attempt, provider *routing.Provider) routeStep[Result] {
+func (r routeRun[Result]) target(attempt routing.Attempt, provider *routing.Provider) routeStep[Result] {
 	slots := r.server.slots(r.call, attempt, provider)
 	retry := 0
+	var seen routeEvidence
 	for i := 0; i < len(slots) && !r.over(); {
 		if !r.call.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slots[i], false) {
 			i, retry = i+1, 0
 			continue
 		}
 		step := r.slot(attempt, provider, slots[i], retry)
+		seen = seen.and(step.seen)
 		switch step.then {
 		case retrySlot:
 			retry++
 		case tryNextSlot:
 			i, retry = i+1, 0
-		default:
+		case finished:
 			return step
+		default:
+			return routeStep[Result]{then: step.then, seen: seen}
 		}
 	}
-	return routeStep[Result]{then: tryNextTarget}
+	return routeStep[Result]{then: tryNextTarget, seen: seen}
 }
 
-func (r *routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int) routeStep[Result] {
+func (r routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int) routeStep[Result] {
 	estimate := r.adapter.estimate(attempt, provider)
 	gate := r.server.gateAttempt(r.ctx, r.call, attempt, provider, &slot, estimate, r.deadline)
 	switch gate.verdict {
@@ -164,8 +193,7 @@ func (r *routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provi
 	case gateRejected:
 		return r.rejected(attempt, slot, gate.rejection)
 	case gateUnmeterable:
-		r.unmeterable = true
-		return routeStep[Result]{then: afterQuota(gate.quota)}
+		return routeStep[Result]{then: afterQuota(gate.quota), seen: routeEvidence{unmeterable: true}}
 	case gateAdmitted:
 		return r.dispatch(attempt, provider, slot, retry, estimate, gate.hold)
 	}
@@ -184,16 +212,14 @@ func afterQuota(scope string) routeFlow {
 
 // rejected records a local quota refusal. It consumes an attempt but provides
 // no upstream evidence, so it never updates provider health.
-func (r *routeRun[Result]) rejected(attempt routing.Attempt, slot routing.Slot, rejection *AttemptFailure) routeStep[Result] {
+func (r routeRun[Result]) rejected(attempt routing.Attempt, slot routing.Slot, rejection *AttemptFailure) routeStep[Result] {
 	x := r.call
 	x.spent++
 	x.facts = append(x.facts, r.server.rejectedFact(x, attempt, slot, x.spent, rejection))
-	r.last = rejection
-	r.met = meet(r.met, rejection.class)
-	return routeStep[Result]{then: afterQuota(rejection.quota)}
+	return routeStep[Result]{then: afterQuota(rejection.quota), seen: refusedBy(rejection)}
 }
 
-func (r *routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int, estimate int64, hold *dispatchHold) routeStep[Result] {
+func (r routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int, estimate int64, hold *dispatchHold) routeStep[Result] {
 	s, x := r.server, r.call
 	ready, admissionErr := hold.begin(r.ctx, s, x, attempt, provider, slot)
 	if admissionErr != nil {
@@ -225,7 +251,7 @@ func (r *routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.P
 	return r.failed(provider, slot, retry, failure, fact.CredentialSource == "caller")
 }
 
-func (r *routeRun[Result]) failed(provider *routing.Provider, slot routing.Slot, retry int, failure *AttemptFailure, callerCredential bool) routeStep[Result] {
+func (r routeRun[Result]) failed(provider *routing.Provider, slot routing.Slot, retry int, failure *AttemptFailure, callerCredential bool) routeStep[Result] {
 	s, x := r.server, r.call
 	if failure.overall || !failoverAllowed(failure.class, failure.committed) {
 		s.cooldownFailure(r.ctx, provider.ID, &slot, x.grantGeneration, failure, callerCredential)
@@ -245,16 +271,13 @@ func (r *routeRun[Result]) failed(provider *routing.Provider, slot routing.Slot,
 		}
 		return routeStep[Result]{then: retrySlot}
 	}
-	next := s.cooldownFailure(r.ctx, provider.ID, &slot, x.grantGeneration, failure, callerCredential)
-	r.last = failure
-	r.met = meet(r.met, failure.class)
-	if next {
-		return routeStep[Result]{then: tryNextTarget}
+	if s.cooldownFailure(r.ctx, provider.ID, &slot, x.grantGeneration, failure, callerCredential) {
+		return routeStep[Result]{then: tryNextTarget, seen: refusedBy(failure)}
 	}
-	return routeStep[Result]{then: tryNextSlot}
+	return routeStep[Result]{then: tryNextSlot, seen: refusedBy(failure)}
 }
 
-func (r *routeRun[Result]) exhausted() (attemptOutcome[Result], []string) {
+func (r routeRun[Result]) exhausted(seen routeEvidence) (attemptOutcome[Result], []string) {
 	switch {
 	case r.ctx.Err() != nil && errors.Is(context.Cause(r.ctx), context.DeadlineExceeded):
 		return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()}, nil
@@ -263,22 +286,15 @@ func (r *routeRun[Result]) exhausted() (attemptOutcome[Result], []string) {
 	}
 	// Every attempt the route could make failed in a way another target, or
 	// another route, might not.
-	met := append(r.met, routing.FallbackExhausted)
+	met := append(slices.Clone(seen.met), routing.FallbackExhausted)
 	switch {
-	case r.last != nil:
-		return attemptOutcome[Result]{err: r.last.Fault()}, met
-	case r.unmeterable:
+	case seen.last != nil:
+		return attemptOutcome[Result]{err: seen.last.Fault()}, met
+	case seen.unmeterable:
 		// Every eligible target had a quota that could not be consulted.
 		return attemptOutcome[Result]{err: quota.LimitsUnavailable()}, met
 	}
 	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+r.call.named().Slug+"`.")}, met
-}
-
-func meet(met []string, class string) []string {
-	if condition := fallbackCondition(class); condition != "" && !slices.Contains(met, condition) {
-		return append(met, condition)
-	}
-	return met
 }
 
 // retryWait reports how long to wait before retrying a failed attempt on the
