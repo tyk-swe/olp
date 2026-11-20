@@ -526,6 +526,16 @@ func (s *Server) BatchObject(ctx context.Context, res *resources.Resource) ([]by
 			if !valid || upstream == "" {
 				return nil, resources.ErrContract
 			}
+			if name == "input_file_id" {
+				var source struct {
+					InputFileID string `json:"input_file_id"`
+				}
+				if err := json.Unmarshal(contract.Source, &source); err != nil || source.InputFileID == "" {
+					return nil, resources.ErrContract
+				}
+				files[name] = source.InputFileID
+				continue
+			}
 			mapped, err := s.mapUpstreamFile(ctx, res, upstream, strings.TrimSuffix(name, "_file_id"))
 			if err != nil {
 				return nil, err
@@ -570,7 +580,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = kind, upstreamID
-	if existing, err := s.Deps.Resources.GetByUpstream(ctx, identity); err == nil {
+	if existing, err := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -610,7 +620,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		}
 		// Another authorized poll may have installed the same output-file
 		// mapping concurrently. A collision owned by someone else still fails.
-		if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+		if existing, readErr := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); readErr == nil {
 			return existing, nil
 		}
 		return nil, err
@@ -619,7 +629,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+	if existing, readErr := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); readErr == nil {
 		return existing, nil
 	}
 	return nil, err

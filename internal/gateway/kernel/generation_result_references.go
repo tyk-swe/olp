@@ -4,13 +4,40 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/generationrefs"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-func (s *Server) GenerationResultResolver(ctx context.Context, x *Call, identity resources.NativeIdentity) generationrefs.Resolve {
+type resultOwner struct {
+	identity resources.NativeIdentity
+	storedAt *time.Time
+}
+
+func liveResult(identity resources.NativeIdentity) resultOwner {
+	return resultOwner{identity: identity}
+}
+
+func storedResult(response *resources.Resource) resultOwner {
+	return resultOwner{identity: response.NativeIdentity(), storedAt: &response.CreatedAt}
+}
+
+func (o resultOwner) find(ctx context.Context, store *resources.Store, kind, upstream string) (*resources.Resource, error) {
+	identity := o.identity
+	identity.Kind, identity.UpstreamID, identity.ParentID = kind, upstream, nil
+	if o.storedAt == nil {
+		return store.GetByUpstreamIncludingDeleted(ctx, identity)
+	}
+	return store.GetByUpstreamAsOf(ctx, identity, *o.storedAt)
+}
+
+func (s *Server) StoredGenerationResultResolver(ctx context.Context, x *Call, response *resources.Resource) generationrefs.Resolve {
+	return s.generationResultResolver(ctx, x, storedResult(response))
+}
+
+func (s *Server) generationResultResolver(ctx context.Context, x *Call, owner resultOwner) generationrefs.Resolve {
 	return func(kind, upstream string) (string, error) {
 		key := kind + "\x00" + upstream
 		if x.generation.resources != nil {
@@ -21,11 +48,9 @@ func (s *Server) GenerationResultResolver(ctx context.Context, x *Call, identity
 		if s.Deps.Resources == nil {
 			return "", resources.ErrNotFound
 		}
-		identity.Kind, identity.UpstreamID, identity.ParentID = kind, upstream, nil
-		resource, err := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		resource, err := owner.find(ctx, s.Deps.Resources, kind, upstream)
 		if errors.Is(err, resources.ErrNotFound) && kind == resources.KindFile {
-			identity.Kind = resources.KindStrictFile
-			resource, err = s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+			resource, err = owner.find(ctx, s.Deps.Resources, resources.KindStrictFile, upstream)
 		}
 		if err != nil {
 			return "", err
@@ -37,19 +62,23 @@ func (s *Server) GenerationResultResolver(ctx context.Context, x *Call, identity
 	}
 }
 
-func (s *Server) MapGenerationResultReferences(ctx context.Context, x *Call, identity resources.NativeIdentity, body []byte) ([]byte, error) {
+func (s *Server) MapStoredGenerationResultReferences(ctx context.Context, x *Call, response *resources.Resource, body []byte) ([]byte, error) {
+	return s.mapGenerationResultReferences(ctx, x, storedResult(response), body)
+}
+
+func (s *Server) mapGenerationResultReferences(ctx context.Context, x *Call, owner resultOwner, body []byte) ([]byte, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
 	if err != nil {
 		return nil, err
 	}
-	projected, err := generationrefs.ProjectResult(doc, s.GenerationResultResolver(ctx, x, identity))
+	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, owner))
 	if err != nil {
 		return nil, err
 	}
 	return projected.Bytes(), nil
 }
 
-func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, identity resources.NativeIdentity, frame []byte) ([]byte, error) {
+func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, owner resultOwner, frame []byte) ([]byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
 		return frame, nil
@@ -62,7 +91,7 @@ func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, ident
 	if err != nil {
 		return nil, err
 	}
-	projected, err := generationrefs.ProjectResult(doc, s.GenerationResultResolver(ctx, x, identity))
+	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, owner))
 	if err != nil {
 		return nil, err
 	}

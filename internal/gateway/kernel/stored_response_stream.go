@@ -194,7 +194,7 @@ func (t storedStream) project(ctx context.Context, frame []byte) ([]byte, error)
 	if err != nil || len(projected) > t.limit {
 		return nil, errors.New("retained response event could not be projected")
 	}
-	mapped, err := t.server.mapGenerationReferenceFrame(ctx, t.x, t.resource.NativeIdentity(), projected)
+	mapped, err := t.server.mapGenerationReferenceFrame(ctx, t.x, storedResult(t.resource), projected)
 	if err != nil {
 		return nil, &responseLocalRefusal{cause: err}
 	}
