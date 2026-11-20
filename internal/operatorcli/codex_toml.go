@@ -181,46 +181,19 @@ type codexEdit struct {
 }
 
 func (doc codexDocument) edit(replacements [len(codexKeys)]string, journal string, joined bool) []byte {
-	newline := "\n"
-	if first := bytes.IndexByte(doc.text, '\n'); first > 0 && doc.text[first-1] == '\r' {
-		newline = "\r\n"
-	}
+	newline := codexNewline(doc.text)
 	edits := make([]codexEdit, 0, len(codexKeys)+1)
 	if doc.journal.end != 0 {
-		span := doc.journal
 		if journal == "" {
-			span = doc.wholeLine(span)
+			edits = append(edits, codexEdit{codexSpan: doc.wholeLine(doc.journal)})
+		} else {
+			edits = append(edits, codexEdit{doc.journal, journal})
 		}
-		edits = append(edits, codexEdit{span, journal})
 	} else if journal != "" {
 		edits = append(edits, codexEdit{text: journal + newline})
 	}
 	for index, replacement := range replacements {
-		span := doc.fields[index]
-		switch {
-		case span.start == span.end && replacement == "":
-			continue
-		case span.start == span.end && replacement != "":
-			if index == codexOLPProvider {
-				span = codexSpan{len(doc.text), len(doc.text)}
-				if joined {
-					replacement = newline + replacement
-				}
-			}
-			replacement += newline
-		case span.start != span.end && replacement == "":
-			span = doc.wholeLine(span)
-			if index == codexOLPProvider && joined && span.end == len(doc.text) && span.start > 0 && doc.text[span.start-1] == '\n' {
-				start := span.start - 1
-				if start > 0 && doc.text[start-1] == '\r' {
-					start--
-				}
-				if !slices.ContainsFunc(edits, func(edit codexEdit) bool { return edit.end > start }) {
-					span.start = start
-				}
-			}
-		}
-		edits = append(edits, codexEdit{span, replacement})
+		edits = append(edits, doc.settingEdit(index, replacement, newline, joined, edits))
 	}
 	slices.SortStableFunc(edits, func(a, b codexEdit) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
@@ -236,10 +209,46 @@ func (doc codexDocument) edit(replacements [len(codexKeys)]string, journal strin
 	return out.Bytes()
 }
 
-func (doc codexDocument) wholeLine(span codexSpan) codexSpan {
-	span.start = codexLineStart(doc.text, span.start)
-	if after := bytes.IndexByte(doc.text[span.end:], '\n'); after >= 0 {
-		span.end += after + 1
+func (doc codexDocument) settingEdit(index int, replacement, newline string, joined bool, prior []codexEdit) codexEdit {
+	span := doc.fields[index]
+	if span.start == span.end {
+		if replacement == "" {
+			return codexEdit{}
+		}
+		if index != codexOLPProvider {
+			return codexEdit{text: replacement + newline}
+		}
+		end := codexSpan{len(doc.text), len(doc.text)}
+		if joined {
+			return codexEdit{end, newline + replacement + newline}
+		}
+		return codexEdit{end, replacement + newline}
 	}
-	return span
+	if replacement != "" {
+		return codexEdit{span, replacement}
+	}
+	line := doc.wholeLine(span)
+	if index != codexOLPProvider || !joined || line.end != len(doc.text) || line.start == 0 || doc.text[line.start-1] != '\n' {
+		return codexEdit{codexSpan: line}
+	}
+	start := codexLineEnd(doc.text, line.start-1)
+	if slices.ContainsFunc(prior, func(edit codexEdit) bool { return edit.end > start }) {
+		return codexEdit{codexSpan: line}
+	}
+	return codexEdit{codexSpan: codexSpan{start, line.end}}
+}
+
+func codexNewline(text []byte) string {
+	if first := bytes.IndexByte(text, '\n'); first > 0 && text[first-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func (doc codexDocument) wholeLine(span codexSpan) codexSpan {
+	start := codexLineStart(doc.text, span.start)
+	if after := bytes.IndexByte(doc.text[span.end:], '\n'); after >= 0 {
+		return codexSpan{start, span.end + after + 1}
+	}
+	return codexSpan{start, span.end}
 }
