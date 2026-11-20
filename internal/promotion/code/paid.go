@@ -245,8 +245,7 @@ func (c PaidConnection) frozenSlot(ctx context.Context, q database.Queryer, slot
 	return routing.RevisionSlot{Default: slot.Default, Slot: routing.Slot{
 		ID: live.ID, Name: slot.Name, Enabled: slot.Enabled, Priority: slot.Priority, Weight: slot.Weight, CredentialID: credential, CredentialVersion: versionOf(credential, live),
 		AllowedModels: slot.AllowedModels, AllowedRoutes: slot.AllowedRoutes, AllowedAPIKeys: keys,
-		MaxConcurrency: slot.Limits.MaxConcurrency, RequestsPerMinute: slot.Limits.RequestsPerMinute, TokensPerMinute: slot.Limits.TokensPerMinute,
-		InputTokensPerMinute: slot.Limits.InputTokensPerMinute, OutputTokensPerMinute: slot.Limits.OutputTokensPerMinute, Supply: slot.Limits.Supply,
+		Limits: slot.Limits.Serving(),
 	}}, nil
 }
 
