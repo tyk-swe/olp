@@ -231,6 +231,7 @@
     "GET /api/v1/usage/shadow-experiments": "YYYYYYYYYYY-",
     "GET /api/v1/usage/summary": "YYYYYYYYYYY-",
     "GET /api/v1/usage/time-series": "YYYYYYYYYYY-",
+    "GET /api/v1/usage/unpriced-breakdown": "YYYYYYYYYYY-",
     "GET /api/v1/users": "Y-Y-----Y-Y-",
     "GET /api/v1/users/{user_id}": "Y-Y-----Y-Y-",
     "GET /api/v1/workload-issuers": "Y-------Y---",

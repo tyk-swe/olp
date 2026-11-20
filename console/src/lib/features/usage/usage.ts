@@ -83,6 +83,18 @@ export async function usageCompleteness(
   return unwrap({ data, error, response });
 }
 
+export async function unpricedBreakdown(
+  filters: UsageFilters,
+  signal?: AbortSignal
+) {
+  return unwrap(
+    await apiClient.GET('/api/v1/usage/unpriced-breakdown', {
+      params: { query: compactQuery(filters) },
+      signal
+    })
+  );
+}
+
 export async function exportUsageCsv(
   filters: UsageFilters,
   dimension: UsageDimension

@@ -14135,6 +14135,63 @@
         },
         "type": "object"
       },
+      "UnpricedBreakdownItem": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model",
+          "operation",
+          "cause",
+          "attempt_count"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "no_applicable_price",
+              "missing_price_component",
+              "incomplete_usage",
+              "unknown",
+              "not_recorded"
+            ],
+            "description": "Cause recorded at accounting time. not_recorded identifies older usage with no stored cause."
+          },
+          "attempt_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "sample_request_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Representative request ID when request history is still available to the caller."
+          }
+        }
+      },
+      "UnpricedBreakdownResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnpricedBreakdownItem"
+            }
+          }
+        }
+      },
       "UsageBreakdownItem": {
         "properties": {
           "cache_write_1h_input_tokens": {
@@ -46844,6 +46901,158 @@
         "tags": [
           "usage"
         ]
+      }
+    },
+    "/api/v1/usage/unpriced-breakdown": {
+      "get": {
+        "operationId": "usage_unpriced_breakdown",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of groups (defaults to 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnpricedBreakdownResponse"
+                }
+              }
+            },
+            "description": "Unpriced attempt breakdown"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ],
+        "description": "Unpriced billable attempts grouped by provider, upstream model, operation and recorded cause. Results are ranked by attempt count. Retained hourly rollups contribute only for whole hours."
       }
     },
     "/api/v1/usage/summary": {

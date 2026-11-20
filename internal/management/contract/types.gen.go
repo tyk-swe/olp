@@ -6979,6 +6979,33 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
+// Defines values for UnpricedBreakdownItemCause.
+const (
+	UnpricedBreakdownItemCauseIncompleteUsage       UnpricedBreakdownItemCause = "incomplete_usage"
+	UnpricedBreakdownItemCauseMissingPriceComponent UnpricedBreakdownItemCause = "missing_price_component"
+	UnpricedBreakdownItemCauseNoApplicablePrice     UnpricedBreakdownItemCause = "no_applicable_price"
+	UnpricedBreakdownItemCauseNotRecorded           UnpricedBreakdownItemCause = "not_recorded"
+	UnpricedBreakdownItemCauseUnknown               UnpricedBreakdownItemCause = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the UnpricedBreakdownItemCause enum.
+func (e UnpricedBreakdownItemCause) Valid() bool {
+	switch e {
+	case UnpricedBreakdownItemCauseIncompleteUsage:
+		return true
+	case UnpricedBreakdownItemCauseMissingPriceComponent:
+		return true
+	case UnpricedBreakdownItemCauseNoApplicablePrice:
+		return true
+	case UnpricedBreakdownItemCauseNotRecorded:
+		return true
+	case UnpricedBreakdownItemCauseUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateApiKeyRequestCostBasis.
 const (
 	UpdateApiKeyRequestCostBasisCharge UpdateApiKeyRequestCostBasis = "charge"
@@ -16876,6 +16903,28 @@ type UnconfinedPluginPermitRequest struct {
 	Digest string `json:"digest"`
 }
 
+// UnpricedBreakdownItem defines model for UnpricedBreakdownItem.
+type UnpricedBreakdownItem struct {
+	AttemptCount int64 `json:"attempt_count"`
+
+	// Cause Cause recorded at accounting time. not_recorded identifies older usage with no stored cause.
+	Cause      UnpricedBreakdownItemCause `json:"cause"`
+	Model      string                     `json:"model"`
+	Operation  string                     `json:"operation"`
+	ProviderId openapi_types.UUID         `json:"provider_id"`
+
+	// SampleRequestId Representative request ID when request history is still available to the caller.
+	SampleRequestId *openapi_types.UUID `json:"sample_request_id,omitempty"`
+}
+
+// UnpricedBreakdownItemCause Cause recorded at accounting time. not_recorded identifies older usage with no stored cause.
+type UnpricedBreakdownItemCause string
+
+// UnpricedBreakdownResponse defines model for UnpricedBreakdownResponse.
+type UnpricedBreakdownResponse struct {
+	Items []UnpricedBreakdownItem `json:"items"`
+}
+
 // UnrepresentablePrice A price component the catalog lists that pricing revisions cannot yet hold, in the vendor's own terms.
 type UnrepresentablePrice struct {
 	Component string `json:"component"`
@@ -19592,6 +19641,32 @@ type UsageTimeSeriesParams struct {
 
 	// Granularity Bucket size: hour or day
 	Granularity *string `form:"granularity,omitempty" json:"granularity,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+}
+
+// UsageUnpricedBreakdownParams defines parameters for UsageUnpricedBreakdown.
+type UsageUnpricedBreakdownParams struct {
+	Start      time.Time           `form:"start" json:"start"`
+	End        time.Time           `form:"end" json:"end"`
+	Route      *string             `form:"route,omitempty" json:"route,omitempty"`
+	ProviderId *openapi_types.UUID `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
+	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+
+	// Limit Maximum number of groups (defaults to 50)
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
 	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
