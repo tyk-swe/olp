@@ -27,13 +27,14 @@ type storedStream struct {
 	projection responseProjection
 	exchange   *PinnedExchange
 	limit      int
-	progress   *storedStreamProgress
 }
 
-// storedStreamProgress is the one value a stored stream writes: the codec
-// calls emit and observe per event, and the ending reads what they saw.
-type storedStreamProgress struct {
-	committed, incomplete, failed bool
+type storedStreamStatus struct {
+	incomplete, failed bool
+}
+
+func (seen storedStreamStatus) after(status string) storedStreamStatus {
+	return storedStreamStatus{incomplete: seen.incomplete || status == "incomplete", failed: seen.failed || status == "failed"}
 }
 
 func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *Call, res *resources.Resource, p *Pin, query url.Values) *fault.Error {
@@ -58,12 +59,24 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	if err != nil || mediaType != "text/event-stream" {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
 	}
-	stream := storedStream{server: s, x: x, resource: res, projection: projection, exchange: resp.Exchange, limit: s.storedEventLimit(), progress: &storedStreamProgress{}}
+	stream := storedStream{server: s, x: x, resource: res, projection: projection, exchange: resp.Exchange, limit: s.storedEventLimit()}
+	// The codec reports each event through a callback, so the two results the
+	// ending needs are folded here and nowhere else.
+	var committed bool
+	var seen storedStreamStatus
 	_, streamErr := protocols.StreamWithEvents(wire.Responses, wire.Responses,
 		p.Provider.Connector().StreamPayload(resp.Body, stream.limit), stream.limit, x.Route.Slug, true,
-		func(frame []byte) error { return stream.emit(ctx, w, frame) },
-		func(event oif.Event) error { return stream.observe(ctx, event) })
-	return stream.end(ctx, streamErr)
+		func(frame []byte) error {
+			var err error
+			committed, err = stream.emit(ctx, w, frame, committed)
+			return err
+		},
+		func(event oif.Event) error {
+			var err error
+			seen, err = stream.observe(ctx, event, seen)
+			return err
+		})
+	return stream.end(ctx, streamErr, committed, seen)
 }
 
 func storedStreamProjection(x *Call, res *resources.Resource, p *Pin) (responseProjection, *fault.Error) {
@@ -92,24 +105,25 @@ func (t storedStream) strict() bool {
 	return t.resource.Kind == resources.KindStrictResponse
 }
 
-func (t storedStream) observe(ctx context.Context, event oif.Event) error {
+func (t storedStream) observe(ctx context.Context, event oif.Event, seen storedStreamStatus) (storedStreamStatus, error) {
 	observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
 	if err != nil {
-		return err
+		return seen, err
 	}
 	if !lifecycle {
-		return nil
+		return seen, nil
 	}
 	if err := t.identified(event); err != nil {
-		return err
+		return seen, err
 	}
-	t.settle(observation.Status)
+	now := seen.after(observation.Status)
+	t.settle(now, observation.Status)
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
 	if t.server.applyResponseObservation(commitCtx, t.resource.ID, observation) != nil {
-		return &responseLocalRefusal{cause: errors.New("retained response observation could not be committed")}
+		return now, &responseLocalRefusal{cause: errors.New("retained response observation could not be committed")}
 	}
-	return nil
+	return now, nil
 }
 
 func (t storedStream) identified(event oif.Event) error {
@@ -125,34 +139,27 @@ func (t storedStream) identified(event oif.Event) error {
 	return nil
 }
 
-func (t storedStream) settle(status string) {
-	if status == "incomplete" {
-		t.progress.incomplete = true
-	}
-	if status == "failed" {
-		t.progress.failed = true
-	}
+func (t storedStream) settle(seen storedStreamStatus, status string) {
 	switch {
-	case t.progress.failed:
+	case seen.failed:
 		t.exchange.Complete(ClassUpstreamServer)
-	case t.progress.incomplete && t.strict():
+	case seen.incomplete && t.strict():
 		t.exchange.Complete(ClassProtocol)
 	case wire.ResponseStatusFinished(status):
 		t.exchange.Complete(ClassSuccess)
 	}
 }
 
-func (t storedStream) emit(ctx context.Context, w http.ResponseWriter, frame []byte) error {
+func (t storedStream) emit(ctx context.Context, w http.ResponseWriter, frame []byte, committed bool) (bool, error) {
 	projected, err := t.project(ctx, frame)
 	if err != nil {
-		return err
+		return committed, err
 	}
-	if !t.progress.committed {
+	if !committed {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-store")
 		t.x.ResponseHeaders(w.Header(), true)
 		w.WriteHeader(http.StatusOK)
-		t.progress.committed = true
 		t.exchange.Delivery(usage.ClientUnobserved)
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
@@ -163,14 +170,14 @@ func (t storedStream) emit(ctx context.Context, w http.ResponseWriter, frame []b
 		if err == nil {
 			err = io.ErrShortWrite
 		}
-		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	if err := http.NewResponseController(w).Flush(); err != nil {
-		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	t.x.Delivered(t.server.Now())
 	t.exchange.Delivery(usage.ClientPartial)
-	return nil
+	return true, nil
 }
 
 func (t storedStream) project(ctx context.Context, frame []byte) ([]byte, error) {
@@ -202,22 +209,22 @@ func (t storedStream) project(ctx context.Context, frame []byte) ([]byte, error)
 	return redacted, nil
 }
 
-func (t storedStream) end(ctx context.Context, streamErr error) *fault.Error {
+func (t storedStream) end(ctx context.Context, streamErr error, committed bool, seen storedStreamStatus) *fault.Error {
 	switch {
 	case streamErr != nil && (errors.Is(streamErr, fault.ErrClientWrite) || errors.Is(ctx.Err(), context.Canceled)):
 		// The client left; the provider is not at fault.
 		t.x.Failure = (&AttemptFailure{class: ClassCancelled}).Fault()
 		t.exchange.Interrupt(ClassCancelled, true)
-		t.server.Finish(t.x, &Outcome{Err: t.x.Failure, Committed: t.progress.committed, Cancelled: true}, 0)
+		t.server.Finish(t.x, &Outcome{Err: t.x.Failure, Committed: committed, Cancelled: true}, 0)
 		return nil
 	case streamErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		t.x.Failure = (&AttemptFailure{class: ClassTimeout}).Fault()
 		t.exchange.Interrupt(ClassTimeout, false)
-		return t.undelivered()
+		return t.undelivered(committed)
 	case streamErr != nil:
-		t.x.Failure = t.broken(streamErr)
-		return t.undelivered()
-	case t.progress.incomplete && t.strict():
+		t.x.Failure = t.broken(streamErr, seen)
+		return t.undelivered(committed)
+	case seen.incomplete && t.strict():
 		t.x.Failure = fault.ServerError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
 		t.exchange.Delivery(usage.ClientTerminal)
 		t.server.Finish(t.x, &Outcome{Err: t.x.Failure, Committed: true}, http.StatusOK)
@@ -229,8 +236,8 @@ func (t storedStream) end(ctx context.Context, streamErr error) *fault.Error {
 	return nil
 }
 
-func (t storedStream) broken(streamErr error) *fault.Error {
-	if _, upstream := errors.AsType[*wire.UpstreamError](streamErr); upstream && t.progress.failed {
+func (t storedStream) broken(streamErr error, seen storedStreamStatus) *fault.Error {
+	if _, upstream := errors.AsType[*wire.UpstreamError](streamErr); upstream && seen.failed {
 		return fault.ServerError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 	}
 	_, local := errors.AsType[*responseLocalRefusal](streamErr)
@@ -238,8 +245,8 @@ func (t storedStream) broken(streamErr error) *fault.Error {
 	return fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
 }
 
-func (t storedStream) undelivered() *fault.Error {
-	if !t.progress.committed {
+func (t storedStream) undelivered(committed bool) *fault.Error {
+	if !committed {
 		return t.x.Failure
 	}
 	t.server.Finish(t.x, &Outcome{Err: t.x.Failure, Committed: true}, http.StatusOK)
