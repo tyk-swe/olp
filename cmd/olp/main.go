@@ -43,6 +43,7 @@ func run(ctx context.Context, args []string) error {
 			return nil
 		case "help", "--help", "-h":
 			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp init-secrets --dir DIR --database-dir DIR\n       olp setup-token\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]\n       olp <keys|routes|providers|usage|config|api> COMMAND [options]\n       olp client-env CLIENT --url ORIGIN --key-file FILE [--model ROUTE] [--format FORMAT] [--surface SURFACE]")
+			fmt.Println("       olp code-setup <preview|apply|status|detach> [options]")
 			return nil
 		case "account":
 			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {

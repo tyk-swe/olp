@@ -86,6 +86,39 @@ func TestCodeAccountEndpoints(t *testing.T) {
 	if want := map[string]bool{codex: false, minimax: true, claude: true}; !maps.Equal(eligible, want) {
 		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
 	}
+	codeAccountConcurrencyWrites(t, s, owner, project, codex)
+}
+
+func codeAccountConcurrencyWrites(t *testing.T, s *service, owner *harness.Caller, project, id string) {
+	t.Helper()
+	list := "/api/v1/code/accounts?project_id=" + project
+	find := func() map[string]any {
+		for _, item := range s.Want(owner, "GET", list, nil, nil, http.StatusOK)["items"].([]any) {
+			account := item.(map[string]any)
+			if account["id"] == id {
+				return account
+			}
+		}
+		t.Fatal("enrolled account not found")
+		return nil
+	}
+	initial := find()
+	body := map[string]any{
+		"project_id": project, "provider_id": initial["provider_id"], "credential_id": initial["credential_id"],
+		"name": initial["name"], "models": initial["models"], "enabled": true, "max_concurrency": 0,
+	}
+	path := "/api/v1/code/accounts/" + id
+	s.Want(owner, "PUT", path, body, harness.ETag(initial), http.StatusUnprocessableEntity)
+	body["max_concurrency"] = 2
+	limited := s.Want(owner, "PUT", path, body, harness.ETag(initial), http.StatusOK)
+	if limited["max_concurrency"] != float64(2) || find()["max_concurrency"] != float64(2) {
+		t.Fatalf("updated account = %v, want limit persisted and returned", limited["max_concurrency"])
+	}
+	body["max_concurrency"] = nil
+	cleared := s.Want(owner, "PUT", path, body, harness.ETag(limited), http.StatusOK)
+	if cleared["max_concurrency"] != nil || find()["max_concurrency"] != nil {
+		t.Fatal("clearing the limit left an account cap configured")
+	}
 }
 
 func TestCodeBudgetWritesReplayGuardStaleAndAuditEachWrite(t *testing.T) {

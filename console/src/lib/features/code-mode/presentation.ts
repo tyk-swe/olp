@@ -273,6 +273,7 @@ type CodeSkipClass = CodeDecision['skipped'][number]['class'];
 
 const skipClassLabels: Record<CodeSkipClass, string> = {
   cooldown: 'in cooldown',
+  busy: 'at the account generation limit',
   band: 'lower allowance band',
   weight: 'weighted score',
   tree: 'tree account served',
@@ -292,6 +293,8 @@ export function recoveryReasonLabel(attempt: CodeAttempt): string {
 }
 
 export function refusalAdvice(code: string): string {
+  if (code === 'code_account_busy')
+    return 'Retry the same conversation shortly. The account has reached its simultaneous generation limit.';
   if (code === 'code_ip_not_allowed')
     return 'Check the API key’s allowed client networks and the gateway’s trusted-proxy configuration.';
   if (

@@ -42,12 +42,14 @@ type segment struct {
 	rest int64
 	// heuristic is the charge for the whole segment, rest included.
 	heuristic int64
+	category  category
 }
 
 // input is what walking a request's prompt found: the text a counter counts,
 // and the charges that do not depend on the counter.
 type input struct {
-	text []segment
+	breakdown *inputBreakdown
+	text      []segment
 	// kept is the bytes of text the segments hold, and bytes the bytes of text
 	// the walk read. retain is how many bytes may be kept, retainBytes unless a
 	// test says otherwise.
@@ -76,11 +78,16 @@ type input struct {
 // addText adds one text. A text that is part of a request's document is a view
 // of it, and a segment that keeps a view would hold the document up, so what is
 // kept of one is copied.
-func (in *input) addText(text string, view bool) {
+func (in *input) addText(text string, view bool, part category) {
 	if text == "" {
 		return
 	}
 	charge := HeuristicTokens(text)
+	if in.breakdown != nil {
+		in.breakdown.heuristic[part] = addBounded(in.breakdown.heuristic[part], charge)
+	} else {
+		part = unclassified
+	}
 	in.heuristic = addBounded(in.heuristic, charge)
 	in.bytes += int64(len(text))
 	retain := retainBytes
@@ -92,16 +99,22 @@ func (in *input) addText(text string, view bool) {
 		if view {
 			text = strings.Clone(text)
 		}
-		in.text = append(in.text, segment{text: text, heuristic: charge})
+		in.text = append(in.text, segment{text: text, heuristic: charge, category: part})
 		in.kept += len(text)
 		return
 	}
 	if room > 0 {
 		// The prefix is copied so that it does not hold the whole text up.
 		prefix := strings.Clone(prefixOf(text, room))
-		in.text = append(in.text, segment{text: prefix, rest: int64(len(text) - len(prefix)), heuristic: charge})
+		if in.breakdown != nil && prefix == "" {
+			in.breakdown.overflow[part] += int64(len(text))
+		}
+		in.text = append(in.text, segment{text: prefix, rest: int64(len(text) - len(prefix)), heuristic: charge, category: part})
 		in.kept = retain
 		return
+	}
+	if in.breakdown != nil {
+		in.breakdown.overflow[part] += int64(len(text))
 	}
 	if n := len(in.text); n > 0 && in.text[n-1].text == "" {
 		last := &in.text[n-1]
@@ -112,10 +125,15 @@ func (in *input) addText(text string, view bool) {
 	in.text = append(in.text, segment{rest: int64(len(text)), heuristic: charge})
 }
 
-func (in *input) addFlat(tokens int64) { in.flat = addBounded(in.flat, tokens) }
+func (in *input) addFlat(tokens int64, part category) {
+	in.flat = addBounded(in.flat, tokens)
+	if in.breakdown != nil {
+		in.breakdown.flat[part] = addBounded(in.breakdown.flat[part], tokens)
+	}
+}
 
 func (in *input) addMedia(tokens int64) {
-	in.addFlat(tokens)
+	in.addFlat(tokens, media)
 	in.approx = true
 }
 
@@ -126,6 +144,12 @@ func (in *input) empty() bool {
 
 // equal reports whether any counter would count the two the same.
 func (in *input) equal(other *input) bool {
+	if (in.breakdown == nil) != (other.breakdown == nil) {
+		return false
+	}
+	if in.breakdown != nil && *in.breakdown != *other.breakdown {
+		return false
+	}
 	if in.flat != other.flat || in.approx != other.approx || in.messages != other.messages || in.names != other.names ||
 		in.bytes != other.bytes || len(in.text) != len(other.text) || len(in.roles) != len(other.roles) {
 		return false
@@ -141,8 +165,15 @@ func (in *input) equal(other *input) bool {
 	if in.bytes+roleBytes(in.roles) > ExactBytes {
 		return false
 	}
-	return sameElements(in.text, other.text, func(a, b segment) int { return strings.Compare(a.text, b.text) }) &&
+	return sameElements(in.text, other.text, compareSegments) &&
 		sameElements(in.roles, other.roles, strings.Compare)
+}
+
+func compareSegments(a, b segment) int {
+	if a.category != b.category {
+		return int(a.category) - int(b.category)
+	}
+	return strings.Compare(a.text, b.text)
 }
 
 // sameElements reports whether a and b hold the same elements, in any order.
@@ -167,8 +198,11 @@ func roleBytes(roles []string) int64 {
 // recognise, because a reservation is reconciled against the usage the
 // upstream reports as soon as the attempt ends.
 type walker struct {
-	in *input
+	in       *input
+	category category
 }
+
+func (w walker) with(part category) walker { return walker{in: w.in, category: part} }
 
 // promptFields are the fields of a request that walkInput reads, in any
 // dialect.
@@ -206,45 +240,47 @@ func requestFields(request *wire.Request) func(string) node {
 // walkInput reads the prompt fields of a request of the given family, asking
 // field for each one by name.
 func walkInput(in *input, family wire.Format, field func(string) node) {
-	w := walker{in}
+	w := walker{in: in}
+	dialogue := w.with(conversation)
+	definitions := w.with(toolSchemas)
 	switch family {
 	case wire.Completions:
-		w.embedding(field("prompt"))
+		dialogue.embedding(field("prompt"))
 	case wire.Chat:
-		w.items(field("messages"))
+		dialogue.items(field("messages"))
 	case wire.Embeddings:
 		w.embedding(field("input"))
 	case wire.Responses, wire.InputTokens, wire.Moderation:
-		w.items(field("input"))
-		w.instructions(field("instructions"))
+		dialogue.items(field("input"))
+		w.with(instructions).instructions(field("instructions"))
 	}
 	if family.Surface() != "openai" {
-		w.dialectMessages(field("messages"))
-		w.dialectSystem(field("system"))
-		w.dialectMessages(field("contents"))
-		w.dialectSystem(field("systemInstruction"))
-		w.dialectRequest(field("generateContentRequest"))
+		dialogue.dialectMessages(field("messages"))
+		w.with(instructions).dialectSystem(field("system"))
+		dialogue.dialectMessages(field("contents"))
+		w.with(instructions).dialectSystem(field("systemInstruction"))
+		dialogue.dialectRequest(field("generateContentRequest"))
 		switch family {
 		case wire.MistralFIM:
 			// The model reads the code on both sides of the gap.
-			w.text(field("prompt"))
-			w.text(field("suffix"))
+			dialogue.text(field("prompt"))
+			dialogue.text(field("suffix"))
 		case wire.CohereChat:
 			// Grounding documents are prompt text, in a rendering Cohere
 			// does not document.
 			w.schema(field("documents"))
 		}
-		w.schema(field("tools"))
+		definitions.schema(field("tools"))
 		if family.Surface() == "bedrock" {
 			// Converse holds its tool catalogue beside the conversation, where
 			// the other dialects hold it in tools; Gemini's toolConfig only
 			// chooses among the tools it already holds.
-			w.schema(field("toolConfig"))
+			definitions.schema(field("toolConfig"))
 		}
 		w.structured(family, field)
 		return
 	}
-	w.tools(field("tools"))
+	definitions.tools(field("tools"))
 	w.structured(family, field)
 }
 
@@ -288,7 +324,7 @@ func (w walker) generationConfig(n node) {
 func (w walker) text(n node) bool {
 	text, view, ok := n.text()
 	if ok {
-		w.in.addText(text, view)
+		w.in.addText(text, view, w.category)
 	}
 	return ok
 }
@@ -321,26 +357,28 @@ func (w walker) items(n node) {
 			continue
 		}
 		w.message(item)
+		parts := w.with(itemCategory(item))
+		calls := w.with(toolCallsResults)
 		if item.get("type").source() == `"reasoning"` {
-			w.reasoning(item)
+			w.with(unclassified).reasoning(item)
 		}
 		// A responses tool result carries what it returned in `output`.
-		w.content(item.get("content"))
-		w.content(item.get("output"))
+		parts.content(item.get("content"))
+		calls.content(item.get("output"))
 		// The identifiers and arguments a message travels with are prompt text
 		// like any other; `call_id` and `arguments` are the responses spelling
 		// of the chat tool-call fields.
-		w.text(item.get("name"))
+		parts.text(item.get("name"))
 		for _, name := range [...]string{"tool_call_id", "call_id", "arguments"} {
-			w.toolText(item.get(name))
+			calls.toolText(item.get(name))
 		}
 		for _, n := range item.get("tool_calls").elements() {
 			call := n.object()
 			if function := call.get("function").object(); function.exists() {
 				call = function
 			}
-			w.toolText(call.get("name"))
-			w.toolText(call.get("arguments"))
+			calls.toolText(call.get("name"))
+			calls.toolText(call.get("arguments"))
 		}
 	}
 }
@@ -392,7 +430,7 @@ func roleOf(n node) (string, bool) {
 // reads as a message of their own.
 func (w walker) instructions(n node) {
 	if text, view, ok := n.text(); ok && text != "" {
-		w.in.addText(text, view)
+		w.in.addText(text, view, w.category)
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "system")
 	}
@@ -443,7 +481,7 @@ func (w walker) tools(n node) {
 // caller happened to send removed.
 func (w walker) schema(n node) {
 	if text := SchemaText(n.bytes()); text != "" {
-		w.in.addText(text, false)
+		w.in.addText(text, false, w.category)
 		w.in.approx = true
 	}
 }
@@ -471,7 +509,7 @@ func (w walker) embedding(n node) {
 	for _, item := range n.elements() {
 		var token uint32
 		if json.Unmarshal(item.bytes(), &token) == nil {
-			w.in.addFlat(1)
+			w.in.addFlat(1, w.category)
 		} else {
 			w.embedding(item)
 		}
@@ -505,8 +543,8 @@ func (w walker) dialectSystem(n node) {
 func (w walker) dialectRequest(n node) {
 	w.dialect(n)
 	inner := n.object()
-	w.schema(inner.get("tools"))
-	w.generationConfig(inner.get("generationConfig"))
+	w.with(toolSchemas).schema(inner.get("tools"))
+	w.with(unclassified).generationConfig(inner.get("generationConfig"))
 	for _, n := range inner.get("contents").elements() {
 		if item := n.object(); item.exists() {
 			w.in.messages++
@@ -544,7 +582,7 @@ func (w walker) dialect(n node) {
 	switch f.get("type").source() {
 	case `"thinking"`:
 		// The text the model reasoned in, which it reads again in a tool loop.
-		w.toolText(f.get("thinking"))
+		w.with(unclassified).toolText(f.get("thinking"))
 		w.in.approx = true
 		return
 	case `"redacted_thinking"`:
@@ -556,7 +594,8 @@ func (w walker) dialect(n node) {
 		return
 	}
 	// A tool call or its result, whichever keys carry its text.
-	if kind := f.get("type").source(); kind == `"tool_use"` || kind == `"tool_result"` {
+	part := dialectCategory(w.category, f)
+	if isNativeToolBlock(f) {
 		w.in.approx = true
 	}
 	for _, key := range [...]string{"text", "content", "parts", "contents", "systemInstruction", "functionResponse", "functionCall", "input", "output"} {
@@ -564,8 +603,12 @@ func (w walker) dialect(n node) {
 			switch key {
 			case "functionResponse", "functionCall", "input", "output":
 				w.in.approx = true
+				w.with(toolCallsResults).dialect(value)
+			case "systemInstruction":
+				w.with(instructions).dialect(value)
+			default:
+				w.with(part).dialect(value)
 			}
-			w.dialect(value)
 		}
 	}
 }

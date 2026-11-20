@@ -530,6 +530,10 @@ and retirement, and `If-Match` on updates and publication.
 2. Create a code account with `project_id`, `provider_id`, `credential_id`,
    `name`, `enabled` and an explicit `models` array. Account identity survives
    credential rotation only when both provider and principal remain the same.
+   Set **Maximum simultaneous generations** (API field `max_concurrency`) to a
+   positive integer to cap the account across all gateway replicas, routes and
+   keys. Leave it blank or send `null` for no account cap.
+   Finish upgrading every gateway replica before enabling the cap.
 3. Create a pool and assign accounts and API keys explicitly; accounts of
    several adapters may share one. A `shared` pool has no owner. A `personal`
    pool names `owner_user_id` and accepts only keys
@@ -627,6 +631,34 @@ shell evaluation check. This does not establish native client startup on
 Windows or macOS, or live subscription qualification on any platform.
 
 ### Codex
+
+Use the OLP CLI to set up one published route in the user configuration
+without merging TOML by hand. Set `OLP_MANAGEMENT_URL` and
+`OLP_MANAGEMENT_TOKEN_FILE` as for other management commands. Use the route
+ID from the console and pass the public gateway URL:
+
+```sh
+olp code-setup preview --route "$ROUTE_ID" --gateway-url "$GATEWAY_URL"
+olp code-setup apply --route "$ROUTE_ID" --gateway-url "$GATEWAY_URL" --revision "$REVISION_ID"
+olp code-setup status
+olp code-setup detach
+```
+
+Preview shows the destination, endpoint, model, and published revision without
+writing. Copy the revision ID from preview to make apply refuse a newer
+publication. Add `--model MODEL` to both commands to select a model rather than
+using the route's default. Apply only manages the top-level `model` and
+`model_provider` settings and the `[model_providers.olp]` table. It saves the
+previous settings in a comment in the same file. Keep that comment for
+detach. Apply and detach leave other settings alone. MCP servers and tool
+permissions are never changed by the CLI. Merge optional MCP configuration
+separately if you need it.
+
+Status and detach work offline. If a managed setting was edited, both name the
+conflicting setting and detach leaves the entire file untouched. Restore the
+installed setting before retrying detach, or remove the setup comment and manage
+the file by hand. Unsupported shapes, including inline OLP provider tables and
+custom keys in the OLP provider, are refused without writing.
 
 The controlled suite resolves the unmodified official Codex CLI from npm **latest** on each run. This
 example demonstrates its tested provider configuration, not a real-account
@@ -877,6 +909,15 @@ the principal stored in the binding.
 Request rate, token rate and concurrency reuse shared admission. Those estimates
 do not establish hard token bounds. Subscription traffic excludes ordinary
 monetary spending limits; dollar estimates are informational.
+
+A new conversation can use another eligible account if its preferred account
+is at capacity. An existing pin stays put. If no allowed account has room,
+HTTP returns `429 code_account_busy` with `Retry-After`. On an open WebSocket,
+the gateway closes the socket with code `1013` and reason `code_account_busy`.
+Retry the same conversation after a short delay. Local saturation does not change account
+health, replay the request or send it to paid fallback. An idle WebSocket and
+prewarming do not use generation slots. Completion and cancellation release the
+slot even if final token usage is unknown. Abandoned slots expire after 11 minutes.
 
 Hard token budgets are optional. An enabled matching budget requires an
 adapter-proven conservative bound before dispatch. Project-wide, route-scoped and

@@ -71,12 +71,21 @@ type counted struct {
 	family  Family
 	count   Count
 	context int64
+	detail  *Breakdown
 }
 
 // Walk reads the prompt of a request. A nil request is a generation with no
 // prompt, as admission sees one that named nothing.
 func Walk(request *wire.Request) *Prompt {
-	p := &Prompt{request: request, generation: request == nil || request.Family.Operation() == wire.OperationGeneration, tally: &tally{}}
+	return walk(request, nil)
+}
+
+func WalkWithBreakdown(request *wire.Request) *Prompt {
+	return walk(request, &inputBreakdown{})
+}
+
+func walk(request *wire.Request, breakdown *inputBreakdown) *Prompt {
+	p := &Prompt{request: request, generation: request == nil || request.Family.Operation() == wire.OperationGeneration, tally: &tally{}, in: input{breakdown: breakdown}}
 	if request != nil {
 		walkInput(&p.in, request.Family, requestFields(request))
 	}
@@ -113,22 +122,24 @@ func (p *Prompt) Follow(source *Prompt) {
 // Input counts the prompt for a counter, caching the count by the counter's
 // family. It is the tokens of the input alone, without any allowed reply.
 func (p *Prompt) Input(c Counter) Count {
-	count, _ := p.input(c)
+	count, _, _ := p.input(c)
 	return count
 }
 
-func (p *Prompt) input(c Counter) (Count, int64) {
+func (p *Prompt) input(c Counter) (Count, int64, *Breakdown) {
 	family := c.Family()
 	t := p.tally
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, entry := range t.counted {
 		if entry.family == family {
-			return p.retainedCount(entry.count, entry.context)
+			count, context := p.retainedCount(entry.count, entry.context)
+			return count, context, entry.detail
 		}
 	}
 	var count Count
 	var context int64
+	var detail *Breakdown
 	batch := false
 	if p.request != nil && p.request.Family == wire.Completions {
 		prompt, _ := p.request.OIF().Document().Root().Lookup("prompt")
@@ -138,8 +149,14 @@ func (p *Prompt) input(c Counter) (Count, int64) {
 			budget := ExactBytes
 			for _, item := range items {
 				var single input
-				walker{&single}.embedding(valueNode(item))
-				part := c.countWithBudget(&single, false, &budget)
+				if p.in.breakdown != nil {
+					single.breakdown = &inputBreakdown{}
+				}
+				walker{in: &single, category: conversation}.embedding(valueNode(item))
+				part, components := c.countWithBudget(&single, false, &budget)
+				if part.Tokens > context || detail == nil {
+					detail = components
+				}
 				context = max(context, part.Tokens)
 				count.Tokens = addBounded(count.Tokens, part.Tokens)
 				if count.Provenance == "" {
@@ -151,14 +168,15 @@ func (p *Prompt) input(c Counter) (Count, int64) {
 		}
 	}
 	if !batch {
-		count = c.count(&p.in, false)
+		count, detail = c.countWithBudget(&p.in, false, nil)
 		context = count.Tokens
 	}
-	t.counted = append(t.counted, counted{family, count, context})
+	t.counted = append(t.counted, counted{family, count, context, detail})
 	if t.observe != nil {
 		t.observe(family)
 	}
-	return p.retainedCount(count, context)
+	total, withRetained := p.retainedCount(count, context)
+	return total, withRetained, detail
 }
 
 // Estimate is what admission reserves for one request on one model's counter.
@@ -169,6 +187,7 @@ type Estimate struct {
 	// ContextInput is the largest individual prompt; batch totals are billed
 	// together but do not share a model context window.
 	ContextInput int64
+	Breakdown    *Breakdown
 	// Output is the reply bound the request or its provider named, and nil when
 	// neither did. Candidates is how many replies it asked for.
 	Output     *int64
@@ -220,7 +239,7 @@ func (e Estimate) Reply() int64 {
 // its candidates, and the text of an input field the caller omitted, or of a
 // member its generation config left out.
 func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estimate {
-	count, context := p.input(c)
+	count, context, detail := p.input(c)
 	e := Estimate{Input: count.Tokens, ContextInput: context, Provenance: count.Provenance, Family: c.Family(), Candidates: 1, generation: p.generation}
 	if extra, ok := p.defaulted(defaults); ok {
 		// The reply is primed once, by whichever input has the first message.
@@ -232,9 +251,12 @@ func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estima
 	if !p.generation {
 		e.Input = max(e.Input, 1)
 		e.ContextInput = max(e.ContextInput, 1)
-		return e
+	} else {
+		e.Output, e.Candidates = OutputBounds(p.request, defaults)
 	}
-	e.Output, e.Candidates = OutputBounds(p.request, defaults)
+	if detail != nil {
+		e.Breakdown = detail.withRemainder(e.ContextInput)
+	}
 	if p.request != nil && p.request.Family == wire.Completions {
 		copies := int64(1)
 		for _, name := range []string{"n", "best_of"} {
@@ -334,11 +356,12 @@ func rank(p Provenance) int {
 // adds the family's framing, without priming the reply again when primed says
 // another input already did. Flat charges stand outside both.
 func (c Counter) count(in *input, primed bool) Count {
-	return c.countWithBudget(in, primed, nil)
+	count, _ := c.countWithBudget(in, primed, nil)
+	return count
 }
 
 // A completion batch shares one exact-tokenization allowance across prompts.
-func (c Counter) countWithBudget(in *input, primed bool, budget *int) Count {
+func (c Counter) countWithBudget(in *input, primed bool, budget *int) (Count, *Breakdown) {
 	m := c.Meter()
 	if budget != nil {
 		m.budget = min(m.budget, *budget)
@@ -349,19 +372,15 @@ func (c Counter) countWithBudget(in *input, primed bool, budget *int) Count {
 	}
 	if m.encoding == nil {
 		tokens, provenance := c.scale(in.heuristic)
-		return Count{addBounded(tokens, in.flat), provenance}
-	}
-	for _, s := range in.text {
-		m.add(s.text, s.rest, s.heuristic)
-	}
-	// Roles are text a tokenizer reads, and a meter that has degraded to the
-	// heuristic has none to read them with.
-	if m.encoding != nil {
-		for _, role := range in.roles {
-			m.Add(role)
+		total := addBounded(tokens, in.flat)
+		if in.breakdown != nil {
+			return Count{total, provenance}, (meteredBreakdown{}).finish(m, *in.breakdown, in.heuristic, tokens, total)
 		}
+		return Count{total, provenance}, nil
 	}
+	parts := meterInput(&m, in)
 	tokens, provenance := m.Total()
+	textTokens := tokens
 	if m.encoding != nil {
 		// The framing is the family's own, and what it frames was counted exactly
 		// even when the tail was charged at the heuristic after it, so it is
@@ -379,5 +398,31 @@ func (c Counter) countWithBudget(in *input, primed bool, budget *int) Count {
 			provenance = ProvenanceCalibrated
 		}
 	}
-	return Count{addBounded(tokens, in.flat), provenance}
+	total := addBounded(tokens, in.flat)
+	if in.breakdown != nil {
+		return Count{total, provenance}, parts.finish(m, *in.breakdown, m.heuristic, textTokens, total)
+	}
+	return Count{total, provenance}, nil
+}
+
+func meterInput(m *Meter, in *input) meteredBreakdown {
+	var parts meteredBreakdown
+	for _, s := range in.text {
+		if in.breakdown == nil {
+			m.add(s.text, s.rest, s.heuristic)
+		} else {
+			parts.add(m, s, s.category)
+		}
+	}
+	if m.encoding == nil {
+		return parts
+	}
+	for _, role := range in.roles {
+		if in.breakdown == nil {
+			m.Add(role)
+		} else {
+			parts.add(m, segment{text: role, heuristic: -1}, unclassified)
+		}
+	}
+	return parts
 }

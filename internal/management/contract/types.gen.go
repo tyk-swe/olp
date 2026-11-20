@@ -1456,6 +1456,7 @@ func (e CodeDecisionReason) Valid() bool {
 // Defines values for CodeDecisionSkippedClass.
 const (
 	CodeDecisionSkippedClassBand        CodeDecisionSkippedClass = "band"
+	CodeDecisionSkippedClassBusy        CodeDecisionSkippedClass = "busy"
 	CodeDecisionSkippedClassCooldown    CodeDecisionSkippedClass = "cooldown"
 	CodeDecisionSkippedClassTree        CodeDecisionSkippedClass = "tree"
 	CodeDecisionSkippedClassUnavailable CodeDecisionSkippedClass = "unavailable"
@@ -1466,6 +1467,8 @@ const (
 func (e CodeDecisionSkippedClass) Valid() bool {
 	switch e {
 	case CodeDecisionSkippedClassBand:
+		return true
+	case CodeDecisionSkippedClassBusy:
 		return true
 	case CodeDecisionSkippedClassCooldown:
 		return true
@@ -8939,11 +8942,14 @@ type CodeAccount struct {
 	// HealthObservedAt Time of the latest serving health observation. Enrollment and refresh do not qualify serving health.
 	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
 	Id               openapi_types.UUID           `json:"id"`
-	Models           []string                     `json:"models"`
-	Name             string                       `json:"name"`
-	Principal        string                       `json:"principal"`
-	ProjectId        openapi_types.UUID           `json:"project_id"`
-	ProviderId       openapi_types.UUID           `json:"provider_id"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	Principal      string                                       `json:"principal"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	ProviderId     openapi_types.UUID                           `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
@@ -8988,6 +8994,9 @@ type CodeAccountList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// CodeAccountMaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+type CodeAccountMaxConcurrency = int32
+
 // CodeAccountWrite defines model for CodeAccountWrite.
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
@@ -8998,10 +9007,13 @@ type CodeAccountWrite struct {
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
-	Models            []string                `json:"models"`
-	Name              string                  `json:"name"`
-	ProjectId         openapi_types.UUID      `json:"project_id"`
-	ProviderId        openapi_types.UUID      `json:"provider_id"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency,omitempty"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	ProviderId     openapi_types.UUID                           `json:"provider_id"`
 }
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
@@ -9232,7 +9244,13 @@ type CodeClientConfiguration struct {
 	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
 	Platform          CodeClientPlatform `json:"platform"`
 	QualificationGaps []string           `json:"qualification_gaps"`
-	RouteSlug         string             `json:"route_slug"`
+
+	// Revision The published Code Mode route revision number.
+	Revision int `json:"revision"`
+
+	// RevisionId The ID of the published route revision used to generate the configuration.
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	RouteSlug  string             `json:"route_slug"`
 
 	// SmallModel The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
@@ -9313,7 +9331,7 @@ type CodeDecision struct {
 	Skipped []struct {
 		AccountId openapi_types.UUID `json:"account_id"`
 
-		// Class Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+		// Class Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
 		Class CodeDecisionSkippedClass `json:"class"`
 	} `json:"skipped"`
 }
@@ -9327,7 +9345,7 @@ type CodeDecisionEvidence string
 // CodeDecisionReason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
 type CodeDecisionReason string
 
-// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
 type CodeDecisionSkippedClass string
 
 // CodeDecisionList defines model for CodeDecisionList.
@@ -9707,10 +9725,13 @@ type ConfigurationCodeAccount struct {
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
 	Id                openapi_types.UUID      `json:"id"`
-	Models            []string                `json:"models"`
-	Name              string                  `json:"name"`
-	Project           string                  `json:"project"`
-	Provider          string                  `json:"provider"`
+
+	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
+	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency,omitempty"`
+	Models         []string                                     `json:"models"`
+	Name           string                                       `json:"name"`
+	Project        string                                       `json:"project"`
+	Provider       string                                       `json:"provider"`
 }
 
 // ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
@@ -15578,6 +15599,18 @@ type RouteCatalogExposureResponse struct {
 	ExposeUpstreamModels bool   `json:"expose_upstream_models"`
 }
 
+// RouteContextWindowPreview Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
+type RouteContextWindowPreview struct {
+	// InputBreakdown Input tokens by category, summing to estimated_input_tokens. Null for a caller-supplied estimate.
+	InputBreakdown nullable.Nullable[RouteInputTokenBreakdown] `json:"input_breakdown"`
+
+	// RemainingTokens Model context length less estimated input and any output bound used by the preview, per completion. Negative means over the window. Null if the limit, input or retained context is unknown.
+	RemainingTokens nullable.Nullable[int64] `json:"remaining_tokens"`
+
+	// RetainedContextUnknown The request references provider-held or opaque context not included in the inline estimate.
+	RetainedContextUnknown bool `json:"retained_context_unknown"`
+}
+
 // RouteDetailResponse defines model for RouteDetailResponse.
 type RouteDetailResponse struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -15717,6 +15750,16 @@ type RouteFidelityMode string
 
 // RouteGroups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
 type RouteGroups map[string][]string
+
+// RouteInputTokenBreakdown Counts for the prompt checked against the window. For batched completions, this is the largest prompt. Unclassified includes framing and counted material outside the named categories.
+type RouteInputTokenBreakdown struct {
+	Conversation     int64 `json:"conversation"`
+	Instructions     int64 `json:"instructions"`
+	Media            int64 `json:"media"`
+	ToolCallsResults int64 `json:"tool_calls_results"`
+	ToolSchemas      int64 `json:"tool_schemas"`
+	Unclassified     int64 `json:"unclassified"`
+}
 
 // RouteLeg The route that served an attempt when it is not the route the caller named.
 type RouteLeg struct {
@@ -16064,8 +16107,11 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt          nullable.Nullable[int]                `json:"attempt,omitempty"`
-	ContextLength    nullable.Nullable[int64]              `json:"context_length,omitempty"`
+	Attempt       nullable.Nullable[int]   `json:"attempt,omitempty"`
+	ContextLength nullable.Nullable[int64] `json:"context_length,omitempty"`
+
+	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
+	ContextWindow    *RouteContextWindowPreview            `json:"context_window,omitempty"`
 	CredentialSlotId nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
 	Eligible         bool                                  `json:"eligible"`
 
