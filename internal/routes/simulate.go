@@ -71,18 +71,35 @@ func tokenDemand(estimated, output *int64) (*routing.TokenDemand, error) {
 // reply bound the caller names replaces the one the request names, whatever
 // supplies the input.
 type simulatedDemand struct {
-	fixed     *routing.TokenDemand
-	prompt    *estimate.Prompt
-	output    *int64
-	estimates map[string]estimate.Estimate
+	fixed                  *routing.TokenDemand
+	prompt                 *estimate.Prompt
+	output                 *int64
+	sampleGeneration       bool
+	retainedContextUnknown bool
+	estimates              map[string]simulatedEstimate
+}
+
+type simulatedEstimate struct {
+	estimate.Estimate
+	retainedContextUnknown bool
 }
 
 func newSimulatedDemand(parsed *wire.Request, input simulationInput, fixed *routing.TokenDemand) *simulatedDemand {
-	d := &simulatedDemand{fixed: fixed, output: input.MaxOutputTokens}
+	d := &simulatedDemand{fixed: fixed, output: input.MaxOutputTokens, sampleGeneration: parsed != nil && input.Operation == "generation"}
+	if d.sampleGeneration {
+		d.retainedContextUnknown = hasUnmeasuredContext(parsed)
+	}
 	if parsed != nil && input.EstimatedInputTokens == nil {
-		d.prompt, d.estimates = estimate.Walk(parsed), map[string]estimate.Estimate{}
+		d.prompt, d.estimates = d.walk(parsed), map[string]simulatedEstimate{}
 	}
 	return d
+}
+
+func (d *simulatedDemand) walk(request *wire.Request) *estimate.Prompt {
+	if d.sampleGeneration {
+		return estimate.WalkWithBreakdown(request)
+	}
+	return estimate.Walk(request)
 }
 
 // outputBound is the reply bound a target's own request is weighed by: the one
@@ -131,14 +148,14 @@ func (d *simulatedDemand) prepared(target routing.Target, request *wire.Request)
 	if d.prompt == nil {
 		return d.fixed
 	}
-	prompt := estimate.Walk(request)
+	prompt := d.walk(request)
 	prompt.Follow(d.prompt)
 	return d.measure(target, prompt)
 }
 
 func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt) *routing.TokenDemand {
 	e := prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
-	d.estimates[target.ID] = e
+	d.estimates[target.ID] = simulatedEstimate{Estimate: e, retainedContextUnknown: d.sampleGeneration && hasUnmeasuredContext(prompt.Request())}
 	demand := &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output

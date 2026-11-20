@@ -577,7 +577,17 @@ nor a request an unconfined plugin carried whose outcome is unknown; see
 `POST /api/v1/routing/simulate` and draft/playground preview share the execution
 planner. Supply operation/surface/mode/preferences, optional key/seed/native request.
 Results include exclusions/order/slots/prices/measurement freshness and target-
-prepared input tokens/provenance/family. Simulations also report each target's
+prepared input tokens/provenance/family. A generation preview shows the model's
+context limit, estimated input, any per-completion output reservation used for
+the window check, and remaining headroom. The input breakdown adds up to the
+estimate and separates instructions, conversation, tool schemas, tool calls and
+results, media, and unclassified input such as message framing. With no output
+bound applied, headroom is shown after input alone. An unknown model limit or
+unmeasured provider-held context makes headroom unknown. These are planning
+estimates, not billed usage. Preview doesn't send inference or store request
+content.
+
+Simulations also report each target's
 `estimated_cost`: the `minimum` prices the input estimate at the cheapest
 input-side rate the selected tier carries, plus the per-request fee; the
 `maximum` is the worst case the gateway would reserve. Server-side tool fees and

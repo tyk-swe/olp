@@ -223,7 +223,8 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 			}
 			if counted.prompt != nil {
 				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
-				to, ok := counted.estimates[target.ID]
+				prepared, ok := counted.estimates[target.ID]
+				to := prepared.Estimate
 				if !ok {
 					to = from
 				}
@@ -274,7 +275,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	leg := simulatedLeg{
 		Route: slug, Selectors: plan.Selectors,
 		GatewayExecution: workflowCapability,
-		Decisions:        inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates, workflowCapability),
+		Decisions:        inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted, workflowCapability),
 	}
 	if leg.Selectors == nil {
 		leg.Selectors = []routing.SelectorOutcome{}
