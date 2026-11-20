@@ -123,9 +123,7 @@ func replaceChatWorkflowUsage(fields, usage Object, maxBytes int) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	updated := maps.Clone(fields)
-	updated["usage"] = raw(replacement)
-	body, err := json.Marshal(updated)
+	body, err := json.Marshal(overlayChatWorkflowFields(fields, Object{"usage": raw(replacement)}))
 	if len(body) > maxBytes {
 		return nil, wire.ErrAggregateTooLarge
 	}
@@ -140,24 +138,37 @@ func mergeChatWorkflowUsage(final json.RawMessage, usage Object) (Object, error)
 	if err != nil {
 		return nil, err
 	}
-	overlaid := maps.Clone(usage)
-	for _, key := range []string{"prompt_tokens_details", "completion_tokens_details"} {
-		if !present(fields[key]) || !present(usage[key]) {
-			continue
+	updates := maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for key, value := range usage {
+			if !yield(key, mergeChatWorkflowDetail(key, fields[key], value)) {
+				return
+			}
 		}
-		details, err := object(fields[key])
-		if err != nil {
-			return nil, err
-		}
-		counters, err := object(usage[key])
-		if err != nil {
-			return nil, err
-		}
-		maps.Copy(details, counters)
-		overlaid[key] = raw(details)
+	})
+	return overlayChatWorkflowFields(fields, updates), nil
+}
+
+func mergeChatWorkflowDetail(key string, final, projected json.RawMessage) json.RawMessage {
+	if key != "prompt_tokens_details" && key != "completion_tokens_details" || !present(final) {
+		return projected
 	}
-	maps.Copy(fields, overlaid)
-	return fields, nil
+	details, err := object(final)
+	if err != nil {
+		return projected
+	}
+	counters, _ := object(projected)
+	return raw(overlayChatWorkflowFields(details, counters))
+}
+
+func overlayChatWorkflowFields(base, updates Object) Object {
+	return maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for key, value := range base {
+			if _, replaced := updates[key]; !replaced && !yield(key, value) {
+				return
+			}
+		}
+		maps.All(updates)(yield)
+	})
 }
 
 func chatWorkflowUsageFields(usage *wire.Usage) Object {
