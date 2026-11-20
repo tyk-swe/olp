@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/tyk-swe/olp/plugin/abi"
 )
@@ -311,9 +312,11 @@ func carry(ctx context.Context, params json.RawMessage) (any, error) {
 	if response.Body == nil {
 		return nil, sendPart(ctx, head)
 	}
-	defer response.Body.Close()
+	closeBody := sync.OnceFunc(func() { _ = response.Body.Close() })
+	defer closeBody()
 	// A body that ignores the call's context still stops when OLP cancels.
-	defer context.AfterFunc(ctx, func() { response.Body.Close() })()
+	stop := context.AfterFunc(ctx, closeBody)
+	defer stop()
 	if err = sendPart(ctx, head); err != nil {
 		return nil, err
 	}
