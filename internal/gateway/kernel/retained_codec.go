@@ -739,5 +739,5 @@ func (s *Server) retainedResultReference(ctx context.Context, e retainedapi.Endp
 	if e.Operation == "retrieval" {
 		return s.Deps.Resources.GetByUpstream(ctx, identity)
 	}
-	return s.Deps.Resources.GetByUpstreamAsOf(ctx, identity, owner.CreatedAt)
+	return s.Deps.Resources.GetReferenceOf(ctx, owner, identity)
 }

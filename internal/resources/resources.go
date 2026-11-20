@@ -238,7 +238,11 @@ func (s *Store) GetBatchFileByUpstream(ctx context.Context, identity NativeIdent
 }
 
 func (s *Store) GetByUpstreamAsOf(ctx context.Context, identity NativeIdentity, at time.Time) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, upstreamAsOf(at))
+	return s.getByUpstream(ctx, s.pool, identity, upstreamAsOf(at, nil))
+}
+
+func (s *Store) GetReferenceOf(ctx context.Context, owner *Resource, identity NativeIdentity) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, upstreamAsOf(owner.CreatedAt, &owner.UUID))
 }
 
 type upstreamChoice struct {
@@ -259,9 +263,10 @@ func batchUpstream(batchID uuid.UUID) upstreamChoice {
  ORDER BY (parent_id IS NOT DISTINCT FROM $13::uuid) DESC,(state=$14) ASC,updated_at DESC,id DESC LIMIT 1`, []any{batchID, StateDeleted}}
 }
 
-func upstreamAsOf(at time.Time) upstreamChoice {
-	return upstreamChoice{` ORDER BY (created_at<=$13::timestamptz AND (state<>'deleted' OR updated_at>$13::timestamptz)) DESC,
- (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`, []any{at}}
+func upstreamAsOf(at time.Time, owner *uuid.UUID) upstreamChoice {
+	return upstreamChoice{` ORDER BY coalesce(parent_id=$14::uuid,false) DESC,
+ (created_at<=$13::timestamptz AND (state<>'deleted' OR updated_at>$13::timestamptz)) DESC,
+ (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`, []any{at, owner}}
 }
 
 func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, choice upstreamChoice) (*Resource, error) {
