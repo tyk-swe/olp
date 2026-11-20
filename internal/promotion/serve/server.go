@@ -2,10 +2,12 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	signin "github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/oapi-codegen/nullable"
@@ -70,6 +72,8 @@ type notApplicable struct {
 	contract.ConfigurationPlanResponse
 }
 
+func (notApplicable) Error() string { return "configuration_not_applicable" }
+
 func Register(mux *http.ServeMux, deps Deps) {
 	keys := deps.Access.Keys
 	installation := deps.Access.Installation
@@ -130,66 +134,58 @@ func (s server) apply(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return s.mutate(r, d, nil)
-}
-
-func (s server) mutate(r *http.Request, d desired, ready *prepared) (httpkit.Reply, error) {
-	ctx := r.Context()
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err := authorize(ctx, tx, p, d); err != nil {
-		return httpkit.Reply{}, err
-	}
 	requestPrint, err := d.fingerprint()
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	claim, replayed, err := s.access.Replay(r, tx, p, requestPrint)
+	ctx := r.Context()
+	admitted := func(tx pgx.Tx, p authz.Principal) (authz.Principal, error) { return p, authorize(ctx, tx, p, d) }
+	ready, replayed, err := s.ready(r, d, requestPrint, admitted)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
-		return *replayed, tx.Commit(ctx)
+		return *replayed, nil
 	}
-	if ready == nil && d.needsPrepare() {
-		if err := tx.Rollback(ctx); err != nil {
-			return httpkit.Reply{}, err
-		}
-		prepared, err := s.prepare(ctx, p, d)
+	reply, err := access.Mutate(s.access, r, requestPrint, admitted, func(tx pgx.Tx, p authz.Principal, _ authz.Principal) (httpkit.Reply, access.Event, error) {
+		result, err := evaluate(ctx, tx, d)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return s.mutate(r, d, &prepared)
-	}
-	result, err := evaluate(ctx, tx, d)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if len(result.Conflicts) > 0 || len(result.Blockers) > 0 {
-		return httpkit.Reply{Status: http.StatusConflict, Body: notApplicable{
-			Type:                      "https://openllmproxy.dev/problems/configuration_not_applicable",
-			Title:                     http.StatusText(http.StatusConflict),
-			Status:                    http.StatusConflict,
-			Detail:                    "The artifact cannot be applied while conflicts or blockers remain.",
-			ConfigurationPlanResponse: result,
-		}}, nil
-	}
-	for _, step := range s.appliers(d, promotion.ValueOf(ready), r) {
-		if err := step(ctx, tx, p); err != nil {
-			return httpkit.Reply{}, err
+		if len(result.Conflicts) > 0 || len(result.Blockers) > 0 {
+			return httpkit.Reply{}, access.Event{}, notApplicable{
+				Type:                      "https://openllmproxy.dev/problems/configuration_not_applicable",
+				Title:                     http.StatusText(http.StatusConflict),
+				Status:                    http.StatusConflict,
+				Detail:                    "The artifact cannot be applied while conflicts or blockers remain.",
+				ConfigurationPlanResponse: result,
+			}
 		}
+		for _, step := range s.appliers(d, promotion.ValueOf(ready), r) {
+			if err := step(ctx, tx, p); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		return httpkit.OK(result), access.Event{Action: "configuration.apply", Resource: "configuration", ID: result.Digest}, nil
+	})
+	// A refusal changes nothing and is never stored for replay, so the same
+	// Idempotency-Key applies the artifact once its conflicts are resolved.
+	if refused, ok := errors.AsType[notApplicable](err); ok {
+		return httpkit.Reply{Status: http.StatusConflict, Body: refused}, nil
 	}
-	if err := access.Audit(ctx, tx, r, p.Actor(), "configuration.apply", "configuration", result.Digest, "success"); err != nil {
-		return httpkit.Reply{}, err
+	return reply, err
+}
+
+func (s server) ready(r *http.Request, d desired, requestPrint fingerprint, admitted func(pgx.Tx, authz.Principal) (authz.Principal, error)) (*prepared, *httpkit.Reply, error) {
+	if !d.needsPrepare() {
+		return nil, nil, nil
 	}
-	reply := httpkit.OK(result)
-	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
+	p, replayed, err := access.Preflight(s.access, r, requestPrint, admitted)
+	if err != nil || replayed != nil {
+		return nil, replayed, err
 	}
-	return reply, tx.Commit(ctx)
+	ready, err := s.prepare(r.Context(), p, d)
+	return &ready, nil, err
 }
 
 func (s server) decode(r *http.Request) (desired, error) {

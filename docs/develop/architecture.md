@@ -292,6 +292,11 @@ management endpoint, and it shows the whole shape in one file.
    - `access.Remove` is the same for a delete, where the replay has to be
      checked before the row is locked because the row may already be gone.
    - `access.Transact` is for a change guarded only by `If-Match`.
+   - `access.Preflight` comes before `access.Mutate` when the change has to
+     call an upstream first. It authorizes the caller and serves a stored
+     replay, then releases the installation lock so the upstream call never
+     holds it. `internal/providers/credentials.go` rotates a credential this
+     way.
 5. Each helper takes a lock step and an apply step. The lock step loads the
    current row `FOR UPDATE` and authorizes the caller against it, or calls
    `RequireProject` for a create. Use `access.Unlocked` when there is nothing to
@@ -302,9 +307,8 @@ The helper owns the transaction, the replay record, the audit row and the
 commit, so a handler never calls `BeginMutation`, `Replay`, `CompleteReplay` or
 `tx.Commit`. Call `access.Audit` directly only for a second audit row in the same
 change. Lint fails when a new file opens a management transaction by hand. The
-files still listed under `handRolledTransaction` in `.golangci-legacy.json` run
-a provider call between two transactions or re-authorize a read, and they are
-the exception.
+files still listed under `handRolledTransaction` in `.golangci-legacy.json`
+commit a step whose result is not a reply, and they are the exception.
 
 ## Ordinary execution
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
@@ -292,4 +293,40 @@ func validatedAt(t *testing.T, slots map[string]any, id string) any {
 func empty(list any) bool {
 	entries, ok := list.([]any)
 	return ok && len(entries) == 0
+}
+
+func TestAReplayedCredentialRotationIsRefusedOnceTheCallerNoLongerManagesItsProject(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "handed-over"}, harness.Idempotent(), http.StatusCreated)
+	projectID := project["id"].(string)
+	const email = "former-manager@example.com"
+	invited := s.Invite(owner, email, authz.RoleOperator)
+	profile := s.Want(invited, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	userID := profile["id"].(string)
+	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	membership := "/api/v1/projects/" + projectID + "/members/" + userID
+	s.Want(owner, "PUT", membership, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
+	manager := s.Login(email)
+
+	draft := s.Want(manager, "POST", "/api/v1/providers", map[string]any{
+		"name": uniqueName("rotated"), "credential": vendor.Secret, "model": vendor.Model, "project_id": projectID,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": newVendor(t).URL + "/v1"},
+	}, harness.Idempotent(), http.StatusCreated)
+	path := "/api/v1/providers/" + text(draft, "id") + "/credentials"
+	rotate := harness.Idempotent(harness.ETag(draft))
+	rotated := s.Want(manager, "POST", path, map[string]any{"credential": vendor.Secret}, rotate, http.StatusCreated)
+	if replayed := s.Want(manager, "POST", path, map[string]any{"credential": vendor.Secret}, rotate, http.StatusCreated); replayed["credential_id"] != rotated["credential_id"] {
+		t.Fatalf("replayed rotation stored credential %v, want the first rotation's %v", replayed["credential_id"], rotated["credential_id"])
+	}
+	if actions := auditActions(t, s, text(rotated, "credential_id")); !slices.Equal(actions, []string{"provider.credential.rotate"}) {
+		t.Fatalf("audit for one rotation sent twice = %v, want one rotation", actions)
+	}
+
+	managed := s.Want(owner, "GET", "/api/v1/projects/"+projectID, nil, nil, http.StatusOK)
+	s.Want(owner, "PUT", membership, map[string]any{"role": "viewer"}, harness.ETag(managed), http.StatusOK)
+	if status, raw := s.Do(s.Login(email), "POST", path, map[string]any{"credential": vendor.Secret}, rotate); status != http.StatusForbidden {
+		t.Fatalf("replayed rotation after losing the project: %s", describe(status, raw))
+	}
 }
