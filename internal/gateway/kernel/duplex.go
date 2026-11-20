@@ -236,22 +236,25 @@ type WebRTCCallResult struct {
 	Exposure bool
 }
 
-type webrtcCallAttempt struct {
+type webrtcCall struct {
 	server         *Server
 	ctx            context.Context
 	createCtx      context.Context
 	x              *Call
 	p              *Pin
-	fact           events.AttemptFact
-	state          attemptState
-	rejected       bool
-	exposure       bool
+	endpoint       string
+	body           []byte
+	contentType    string
 	closeTimeout   time.Duration
 	maxAnswerBytes int64
 }
 
-func (a *webrtcCallAttempt) result() WebRTCCallResult {
-	return WebRTCCallResult{Rejected: a.rejected, Exposure: a.exposure}
+type webrtcCallSent struct {
+	resp     *http.Response
+	fact     events.AttemptFact
+	state    *attemptState
+	rejected bool
+	exposure bool
 }
 
 func (s *Server) CreateWebRTCCall(ctx context.Context, x *Call, p *Pin, body []byte, contentType string, closeTimeout time.Duration, maxAnswerBytes int64) (WebRTCCallResult, *fault.Error) {
@@ -263,131 +266,133 @@ func (s *Server) CreateWebRTCCall(ctx context.Context, x *Call, p *Pin, body []b
 	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
 		return WebRTCCallResult{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy.")
 	}
-	a := &webrtcCallAttempt{server: s, ctx: ctx, x: x, p: p, closeTimeout: closeTimeout, maxAnswerBytes: maxAnswerBytes}
-	a.fact = s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
-	a.fact.Mode = "webrtc"
+	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
+	fact.Mode = "webrtc"
 	if p.Hold != nil {
-		a.fact.Budgets = p.Hold.budgets
+		fact.Budgets = p.Hold.budgets
 	}
-	a.createCtx = ctx
+	createCtx := ctx
 	cancelCreate := context.CancelFunc(func() {})
 	if p.attempt.Timeout > 0 {
-		a.createCtx, cancelCreate = context.WithTimeout(ctx, p.Timeout())
+		createCtx, cancelCreate = context.WithTimeout(ctx, p.Timeout())
 	}
 	defer cancelCreate()
-	a.state = attemptState{parent: a.createCtx, classifier: upstream.Classifier{Declared: cfg.Classification()}}
-	resp, result, e := a.send(endpoint, body, contentType)
+	state := attemptState{parent: createCtx, classifier: upstream.Classifier{Declared: cfg.Classification()}}
+	call := webrtcCall{server: s, ctx: ctx, createCtx: createCtx, x: x, p: p, endpoint: endpoint, body: body, contentType: contentType, closeTimeout: closeTimeout, maxAnswerBytes: maxAnswerBytes}
+	sent, e := call.send(fact, &state)
 	if e != nil {
-		return result, e
+		return WebRTCCallResult{Rejected: sent.rejected, Exposure: sent.exposure}, e
 	}
-	defer resp.Body.Close()
-	return a.accept(resp)
+	defer sent.resp.Body.Close()
+	return call.accept(sent)
 }
 
-func (a *webrtcCallAttempt) send(endpoint string, body []byte, contentType string) (*http.Response, WebRTCCallResult, *fault.Error) {
-	reqCtx := httptrace.WithClientTrace(a.createCtx, a.state.trace())
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+func (c webrtcCall) send(fact events.AttemptFact, state *attemptState) (webrtcCallSent, *fault.Error) {
+	rejected, exposure := false, false
+	reqCtx := httptrace.WithClientTrace(c.createCtx, state.trace())
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.endpoint, bytes.NewReader(c.body))
 	if err != nil {
-		return nil, a.result(), fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+		return webrtcCallSent{fact: fact, state: state, rejected: rejected, exposure: exposure}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
-	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Content-Type", c.contentType)
 	req.Header.Set("Accept", "application/sdp")
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := a.server.applySlotCredential(reqCtx, a.x, req, a.p.Provider.Connector(), a.p.Slot, body, &a.p.Provider, a.p.Model); err != nil {
-		a.fact.Class = ClassCredential
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.fact.RecordEvidence(false)
-		a.x.facts = append(a.x.facts, a.fact)
-		return nil, a.result(), fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
+	if err := c.server.applySlotCredential(reqCtx, c.x, req, c.p.Provider.Connector(), c.p.Slot, c.body, &c.p.Provider, c.p.Model); err != nil {
+		fact.Class = ClassCredential
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		c.x.facts = append(c.x.facts, fact)
+		return webrtcCallSent{fact: fact, state: state, rejected: rejected, exposure: exposure}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
 	}
-	client, err := a.server.providerClient(a.ctx, a.x.request.release, &a.p.Provider, a.p.Slot)
+	client, err := c.server.providerClient(c.ctx, c.x.request.release, &c.p.Provider, c.p.Slot)
 	if err != nil {
-		a.fact.Class = ClassCredential
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.fact.RecordEvidence(false)
-		a.x.facts = append(a.x.facts, a.fact)
-		return nil, a.result(), fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
+		fact.Class = ClassCredential
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		c.x.facts = append(c.x.facts, fact)
+		return webrtcCallSent{fact: fact, state: state, rejected: rejected, exposure: exposure}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
-	if e := a.server.MarkSessionDispatched(reqCtx, a.x); e != nil {
-		a.fact.Class = ClassConnect
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.fact.RecordEvidence(false)
-		a.x.facts = append(a.x.facts, a.fact)
-		return nil, a.result(), e
+	if e := c.server.MarkSessionDispatched(reqCtx, c.x); e != nil {
+		fact.Class = ClassConnect
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		c.x.facts = append(c.x.facts, fact)
+		return webrtcCallSent{fact: fact, state: state, rejected: rejected, exposure: exposure}, e
 	}
 	resp, err := client.Do(req)
-	a.x.dispatched = a.x.dispatched || a.state.dispatched.Load() || resp != nil
-	if a.x.dispatched && a.p.Hold != nil {
-		a.x.spendCaps(a.p.Hold.budgets, a.p.attempt)
+	c.x.dispatched = c.x.dispatched || state.dispatched.Load() || resp != nil
+	if c.x.dispatched && c.p.Hold != nil {
+		c.x.spendCaps(c.p.Hold.budgets, c.p.attempt)
 	}
 	if err != nil {
-		a.fact.Class = ClassConnect
-		dispatched := a.state.dispatched.Load()
-		a.rejected = a.state.classifier.Classify(a.state.evidence()).Acceptance == upstream.NotSent
-		a.fact.RecordEvidence(dispatched)
+		fact.Class = ClassConnect
+		dispatched := state.dispatched.Load()
+		rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
+		fact.RecordEvidence(dispatched)
 		if dispatched {
-			a.exposure = true
+			exposure = true
 		}
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.x.facts = append(a.x.facts, a.fact)
-		return nil, a.result(), fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		c.x.facts = append(c.x.facts, fact)
+		return webrtcCallSent{fact: fact, state: state, rejected: rejected, exposure: exposure}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 	}
-	return resp, a.result(), nil
+	return webrtcCallSent{resp: resp, fact: fact, state: state, rejected: rejected, exposure: exposure}, nil
 }
 
-func (a *webrtcCallAttempt) accept(resp *http.Response) (WebRTCCallResult, *fault.Error) {
-	a.state.status = resp.StatusCode
-	a.fact.Status = resp.StatusCode
+func (c webrtcCall) accept(sent webrtcCallSent) (WebRTCCallResult, *fault.Error) {
+	resp, fact, state := sent.resp, sent.fact, sent.state
+	result := WebRTCCallResult{Rejected: sent.rejected, Exposure: sent.exposure}
+	state.status = resp.StatusCode
+	fact.Status = resp.StatusCode
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		nativeError := a.x.redacted(upstreamResponseError(resp))
-		evidence := a.state.evidence()
+		nativeError := c.x.redacted(upstreamResponseError(resp))
+		evidence := state.evidence()
 		evidence.Error = nativeError
-		outcome := a.state.classifier.Classify(evidence)
-		a.rejected = outcome.Acceptance == upstream.Terminal
-		a.fact.Class = string(outcome.Class)
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.fact.RecordEvidence(false)
-		a.x.facts = append(a.x.facts, a.fact)
-		return a.result(), UpstreamError(&AttemptFailure{Status: resp.StatusCode, upstream: nativeError})
+		outcome := state.classifier.Classify(evidence)
+		result.Rejected = outcome.Acceptance == upstream.Terminal
+		fact.Class = string(outcome.Class)
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		c.x.facts = append(c.x.facts, fact)
+		return result, UpstreamError(&AttemptFailure{Status: resp.StatusCode, upstream: nativeError})
 	}
 	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
-	answer, err := io.ReadAll(io.LimitReader(resp.Body, a.maxAnswerBytes+1))
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, c.maxAnswerBytes+1))
 	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || len(answer) == 0 || int64(len(answer)) > a.maxAnswerBytes || mediaErr != nil || mediaType != "application/sdp" {
-		a.fact.Class = ClassProtocol
-		a.fact.RecordEvidence(true)
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.x.facts = append(a.x.facts, a.fact)
-		if !ok || a.server.HangupWebRTCCall(a.ctx, a.x, a.p, callID, a.closeTimeout) != nil {
-			a.exposure = true
+	if err != nil || len(answer) == 0 || int64(len(answer)) > c.maxAnswerBytes || mediaErr != nil || mediaType != "application/sdp" {
+		fact.Class = ClassProtocol
+		fact.RecordEvidence(true)
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		c.x.facts = append(c.x.facts, fact)
+		if !ok || c.server.HangupWebRTCCall(c.ctx, c.x, c.p, callID, c.closeTimeout) != nil {
+			result.Exposure = true
 		}
-		return a.result(), fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
+		return result, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
 	}
-	controlEndpoint, controlErr := a.p.Provider.Connector().RealtimeControlURL(a.p.Model, callID)
+	controlEndpoint, controlErr := c.p.Provider.Connector().RealtimeControlURL(c.p.Model, callID)
 	if !ok || controlErr != nil {
-		a.fact.Class = ClassProtocol
-		a.fact.RecordEvidence(true)
-		a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-		a.x.facts = append(a.x.facts, a.fact)
-		a.exposure = true
-		return a.result(), fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
+		fact.Class = ClassProtocol
+		fact.RecordEvidence(true)
+		fact.Duration = c.server.Now().Sub(fact.StartedAt)
+		c.x.facts = append(c.x.facts, fact)
+		result.Exposure = true
+		return result, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
 	}
-	a.fact.Class = "success"
-	a.fact.Committed = true
-	if a.fact.Interaction != nil {
-		a.fact.Interaction.UpstreamState = upstream.Accepted
+	fact.Class = "success"
+	fact.Committed = true
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = upstream.Accepted
 	}
-	a.fact.Duration = a.server.Now().Sub(a.fact.StartedAt)
-	a.fact.RecordEvidence(true)
-	a.x.facts = append(a.x.facts, a.fact)
-	conn, e := a.server.DialWebRTCControl(a.createCtx, a.x, a.p, controlEndpoint)
+	fact.Duration = c.server.Now().Sub(fact.StartedAt)
+	fact.RecordEvidence(true)
+	c.x.facts = append(c.x.facts, fact)
+	conn, e := c.server.DialWebRTCControl(c.createCtx, c.x, c.p, controlEndpoint)
 	if e != nil {
-		if herr := a.server.HangupWebRTCCall(a.ctx, a.x, a.p, callID, a.closeTimeout); herr != nil {
-			a.exposure = true
+		if herr := c.server.HangupWebRTCCall(c.ctx, c.x, c.p, callID, c.closeTimeout); herr != nil {
+			result.Exposure = true
 		}
-		return a.result(), e
+		return result, e
 	}
-	result := a.result()
 	result.Answer, result.Status, result.CallID, result.Conn = answer, resp.StatusCode, callID, conn
 	return result, nil
 }
