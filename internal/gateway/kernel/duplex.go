@@ -287,7 +287,8 @@ func (s *Server) CreateWebRTCCall(ctx context.Context, x *Call, p *Pin, body []b
 	return call.accept(sent)
 }
 
-func (c webrtcCall) send(fact events.AttemptFact, state *attemptState) (webrtcCallSent, *fault.Error) {
+func (c webrtcCall) send(initialFact events.AttemptFact, state *attemptState) (webrtcCallSent, *fault.Error) {
+	fact := initialFact
 	rejected, exposure := false, false
 	reqCtx := httptrace.WithClientTrace(c.createCtx, state.trace())
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.endpoint, bytes.NewReader(c.body))

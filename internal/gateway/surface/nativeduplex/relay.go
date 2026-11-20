@@ -171,12 +171,14 @@ func (st *duplexRelay) watch(done chan relayEnd) (relayEnd, int) {
 		case <-heartbeat.C:
 			pingCtx, pingCancel := context.WithTimeout(st.ctx, ingress.ReauthInterval)
 			err := st.upstream.Ping(pingCtx)
+			clientFailed := false
 			if err == nil {
 				err = st.client.Ping(pingCtx)
+				clientFailed = err != nil
 			}
 			pingCancel()
 			if err != nil {
-				return relayEnd{err: err}, remaining
+				return relayEnd{err: err, client: clientFailed}, remaining
 			}
 		case <-st.ctx.Done():
 			return relayEnd{err: st.ctx.Err()}, remaining
