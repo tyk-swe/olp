@@ -25,6 +25,21 @@ type Limits struct {
 	routing.Supply
 }
 
+func (l Limits) Serving() routing.Limits {
+	return routing.Limits{
+		RequestsPerMinute: l.RequestsPerMinute, TokensPerMinute: l.TokensPerMinute,
+		InputTokensPerMinute: l.InputTokensPerMinute, OutputTokensPerMinute: l.OutputTokensPerMinute,
+		MaxConcurrency: l.MaxConcurrency, Supply: l.Supply,
+	}
+}
+
+func LimitsFromServing(l routing.Limits) Limits {
+	return Limits{
+		MaxConcurrency: l.MaxConcurrency, RequestsPerMinute: l.RequestsPerMinute, TokensPerMinute: l.TokensPerMinute,
+		InputTokensPerMinute: l.InputTokensPerMinute, OutputTokensPerMinute: l.OutputTokensPerMinute, Supply: l.Supply,
+	}
+}
+
 type Options struct {
 	TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
 	DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
@@ -217,7 +232,7 @@ func limitsOf(limits *routing.Limits) *Limits {
 	if limits == nil {
 		return nil
 	}
-	return &Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, InputTokensPerMinute: limits.InputTokensPerMinute, OutputTokensPerMinute: limits.OutputTokensPerMinute, Supply: limits.Supply}
+	return new(LimitsFromServing(*limits))
 }
 
 func optional(value string) *string {

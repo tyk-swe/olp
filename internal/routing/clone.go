@@ -117,25 +117,26 @@ func clonePreferences(p Preferences) Preferences {
 	p.Priority = copyPointer(p.Priority)
 	return p
 }
-func cloneSupply(s Supply) Supply {
-	s.DailyCostLimit = copyPointer(s.DailyCostLimit)
-	s.MonthlyCostLimit = copyPointer(s.MonthlyCostLimit)
-	s.PriorityShares = copyPointer(s.PriorityShares)
-	s.SaturationPercent = copyPointer(s.SaturationPercent)
-	return s
+func (l Limits) clone() Limits {
+	return Limits{
+		RequestsPerMinute:     copyPointer(l.RequestsPerMinute),
+		TokensPerMinute:       copyPointer(l.TokensPerMinute),
+		InputTokensPerMinute:  copyPointer(l.InputTokensPerMinute),
+		OutputTokensPerMinute: copyPointer(l.OutputTokensPerMinute),
+		MaxConcurrency:        copyPointer(l.MaxConcurrency),
+		Supply: Supply{
+			DailyCostLimit:    copyPointer(l.DailyCostLimit),
+			MonthlyCostLimit:  copyPointer(l.MonthlyCostLimit),
+			PriorityShares:    copyPointer(l.PriorityShares),
+			SaturationPercent: copyPointer(l.SaturationPercent),
+		},
+	}
 }
 func cloneLimits(l *Limits) *Limits {
 	if l == nil {
 		return nil
 	}
-	out := *l
-	out.RequestsPerMinute = copyPointer(l.RequestsPerMinute)
-	out.TokensPerMinute = copyPointer(l.TokensPerMinute)
-	out.InputTokensPerMinute = copyPointer(l.InputTokensPerMinute)
-	out.OutputTokensPerMinute = copyPointer(l.OutputTokensPerMinute)
-	out.MaxConcurrency = copyPointer(l.MaxConcurrency)
-	out.Supply = cloneSupply(l.Supply)
-	return &out
+	return new(l.clone())
 }
 func cloneSlot(s Slot) Slot {
 	s.CredentialID = copyPointer(s.CredentialID)
@@ -143,12 +144,7 @@ func cloneSlot(s Slot) Slot {
 	s.AllowedModels = slices.Clone(s.AllowedModels)
 	s.AllowedRoutes = slices.Clone(s.AllowedRoutes)
 	s.AllowedAPIKeys = slices.Clone(s.AllowedAPIKeys)
-	s.RequestsPerMinute = copyPointer(s.RequestsPerMinute)
-	s.TokensPerMinute = copyPointer(s.TokensPerMinute)
-	s.InputTokensPerMinute = copyPointer(s.InputTokensPerMinute)
-	s.OutputTokensPerMinute = copyPointer(s.OutputTokensPerMinute)
-	s.MaxConcurrency = copyPointer(s.MaxConcurrency)
-	s.Supply = cloneSupply(s.Supply)
+	s.Limits = s.Limits.clone()
 	return s
 }
 func cloneProvider(provider Provider) Provider {
