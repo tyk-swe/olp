@@ -165,7 +165,7 @@ func newSessionDebitID() (string, error) {
 	return id.String(), nil
 }
 
-func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *fault.Error) {
+func (s *Server) SessionExposureHeld(ctx context.Context, keyID string) (bool, *fault.Error) {
 	if s.webrtcExposureHeld(keyID) {
 		return true, nil
 	}
@@ -179,7 +179,11 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
+func (s *Server) ReservePinSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, supply []quota.CappedOwner) *fault.Error {
+	return s.ReserveSessionDebit(ctx, x, authority, p.attempt, supply)
+}
+
+func (s *Server) ReserveSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
@@ -282,7 +286,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority key
 	return nil
 }
 
-func (s *Server) markSessionDispatched(ctx context.Context, x *Call) *fault.Error {
+func (s *Server) MarkSessionDispatched(ctx context.Context, x *Call) *fault.Error {
 	if x.sessionDebit == nil || s.Deps.Debits == nil {
 		return nil
 	}
@@ -302,7 +306,7 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *Call) *fault.Erro
 	return nil
 }
 
-func (s *Server) abandonSessionDebit(ctx context.Context, x *Call) {
+func (s *Server) AbandonSessionDebit(ctx context.Context, x *Call) {
 	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Deps.Debits == nil {
 		return
 	}
@@ -333,10 +337,41 @@ func (s *Server) finishSessionDebit(ctx context.Context, x *Call, failed bool) {
 		return
 	}
 	if !x.sessionDebit.dispatched {
-		s.abandonSessionDebit(ctx, x)
+		s.AbandonSessionDebit(ctx, x)
 		return
 	}
 	if failed {
 		s.markSessionUnknown(ctx, x)
 	}
+}
+
+func (s *Server) HoldWebRTCExposure(keyID string, until time.Time) {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	if s.webrtcExposures == nil {
+		s.webrtcExposures = map[string]time.Time{}
+	}
+	now := s.Now()
+	for key, expiry := range s.webrtcExposures {
+		if now.After(expiry) {
+			delete(s.webrtcExposures, key)
+		}
+	}
+	if current, ok := s.webrtcExposures[keyID]; !ok || until.After(current) {
+		s.webrtcExposures[keyID] = until
+	}
+}
+
+func (s *Server) webrtcExposureHeld(keyID string) bool {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	until, ok := s.webrtcExposures[keyID]
+	if !ok {
+		return false
+	}
+	if s.Now().After(until) {
+		delete(s.webrtcExposures, keyID)
+		return false
+	}
+	return true
 }

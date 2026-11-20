@@ -27,12 +27,14 @@ const (
 	SkipWeight      SkipClass = "weight"
 	SkipTree        SkipClass = "tree"
 	SkipUnavailable SkipClass = "unavailable"
+	SkipBusy        SkipClass = "busy"
 )
 
 type Candidate struct {
 	AccountID string
 	Available bool
 	Cooldown  bool
+	Busy      bool
 	Position  int
 	Score     float64
 	Band      Band
@@ -40,7 +42,7 @@ type Candidate struct {
 }
 
 func (c Candidate) Eligible() bool {
-	return c.Available && c.Band != BandExhausted
+	return c.Available && !c.Busy && c.Band != BandExhausted
 }
 
 func candidatePreferred(left, right Candidate) int {
@@ -94,6 +96,8 @@ func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount 
 			}
 			class := func() SkipClass {
 				switch {
+				case candidate.Busy:
+					return SkipBusy
 				case !candidate.Available && candidate.Cooldown:
 					return SkipCooldown
 				case !candidate.Eligible():
@@ -166,7 +170,7 @@ func (d Decision) Validate() error {
 	for index, skipped := range skippedAccounts {
 		if skipped.AccountID == "" || skipped.AccountID == d.ChosenAccountID ||
 			index > 0 && skippedAccounts[index-1].AccountID == skipped.AccountID ||
-			!slices.Contains([]SkipClass{SkipCooldown, SkipBand, SkipWeight, SkipTree, SkipUnavailable}, skipped.Class) {
+			!slices.Contains([]SkipClass{SkipCooldown, SkipBand, SkipWeight, SkipTree, SkipUnavailable, SkipBusy}, skipped.Class) {
 			return fmt.Errorf("invalid code decision skipped account")
 		}
 	}

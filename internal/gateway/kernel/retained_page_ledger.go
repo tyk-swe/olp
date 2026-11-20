@@ -104,7 +104,7 @@ func (g *retainedPageLedger) admitRoute(ctx context.Context, entry retainedListE
 		// Earlier free reads reserved only this route's rates.
 		authority = retainedCostAuthority(authority)
 	}
-	lease, gateErr := g.server.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, quota.CostReservation{}, &g.costChecked)
+	lease, gateErr := g.server.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, ResourceEstimate, overall, quota.CostReservation{}, &g.costChecked)
 	if gateErr != nil {
 		return gateErr
 	}

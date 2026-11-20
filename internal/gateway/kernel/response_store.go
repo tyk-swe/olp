@@ -88,11 +88,11 @@ func (s *Server) storeStrictResponse(ctx context.Context, x *Call, fact *events.
 	if parseErr != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed response object.")
 	}
-	projection := responseProjection{upstreamID: created.upstreamID, localID: res.ID, route: x.Route.Slug}
+	projection := ResponseProjection{UpstreamID: created.upstreamID, LocalID: res.ID, Route: x.Route.Slug}
 	if previous := x.previousResponse(); previous != nil {
-		projection.previousUpstream, projection.previousLocal = previous.UpstreamID, previous.ID
+		projection.PreviousUpstream, projection.PreviousLocal = previous.UpstreamID, previous.ID
 	}
-	mapped, err := projection.project(doc, "")
+	mapped, err := projection.Project(doc, "")
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unbound response identity.")
 	}
@@ -135,7 +135,7 @@ func (s *Server) storeResponse(ctx context.Context, x *Call, authority keyauthor
 	}
 	out, err := RewriteID(created.body, "id", res.ID)
 	if err == nil {
-		out, err = s.mapPreviousResponse(ctx, out, identity, x.pin)
+		out, err = s.MapPreviousResponse(ctx, out, identity, x.pin)
 	}
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")

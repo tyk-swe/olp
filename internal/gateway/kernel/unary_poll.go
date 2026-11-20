@@ -62,7 +62,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 		if e.ctx.Err() != nil {
 			return nil, &unaryFailure{class: e.state.classify(err, false)}
 		}
-		return nil, &unaryFailure{class: classCredential}
+		return nil, &unaryFailure{class: ClassCredential}
 	}
 	if e.x.workflow != nil && e.x.sessionDebit != nil && !e.x.sessionDebit.dispatched {
 		if failure := e.dispatched(e.ctx, e.x); failure != nil {
@@ -81,7 +81,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 }
 
 func (e *unaryExchange) rejected(response *http.Response) *unaryFailure {
-	raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, ErrorBodyLimit))
 	response.Body.Close()
 	e.fact.Status = response.StatusCode
 	failure := &AttemptFailure{Status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
@@ -134,7 +134,7 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 	}
 	e.state.accepted = true
 	location, err := e.plan.PollLocation(submit, response.Header)
-	io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
+	io.Copy(io.Discard, io.LimitReader(response.Body, ErrorBodyLimit))
 	response.Body.Close()
 	if err != nil {
 		return nil, &unaryFailure{class: ClassProtocol, failure: &AttemptFailure{contractCode: "fidelity_protocol_violation"}}
@@ -198,7 +198,7 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 				return nil, &unaryFailure{class: ClassUpstreamServer, failure: &AttemptFailure{Status: http.StatusOK}}
 			}
 		case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500:
-			io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
+			io.Copy(io.Discard, io.LimitReader(response.Body, ErrorBodyLimit))
 			response.Body.Close()
 		default:
 			return nil, e.rejected(response)
@@ -245,6 +245,6 @@ func (e *unaryExchange) cancelPoll(location string) {
 	if err != nil {
 		return
 	}
-	io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
+	io.Copy(io.Discard, io.LimitReader(response.Body, ErrorBodyLimit))
 	response.Body.Close()
 }

@@ -16,7 +16,7 @@ func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *Call, authenti
 	}
 	authority, e := authenticate(r)
 	if e == nil {
-		s.bindAuthority(x, authority)
+		s.BindAuthority(x, authority)
 		e = providerStatePermitted(x.family, authority)
 	}
 	if e == nil {
@@ -38,10 +38,22 @@ func providerStatePermitted(family wire.Format, authority keyauthority.Authority
 	switch family {
 	case wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch:
 		if !authority.Policy.AllowProviderState {
-			return providerStateForbidden()
+			return ProviderStateForbidden()
 		}
 	}
 	return nil
+}
+
+func (x *Call) NoteAttribution(r *http.Request, authority keyauthority.Authority) *fault.Error {
+	var e *fault.Error
+	x.attribution, e = ingress.ParseAttribution(r, authority)
+	return e
+}
+
+func (x *Call) NoteAttributionValues(values []string, authority keyauthority.Authority) *fault.Error {
+	var e *fault.Error
+	x.attribution, e = ingress.ParseAttributionValues(values, authority)
+	return e
 }
 
 func (s *Server) Refuse(x *Call, w http.ResponseWriter, e *fault.Error) {

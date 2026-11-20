@@ -1,4 +1,4 @@
-package kernel
+package openaistate
 
 import (
 	"context"
@@ -13,87 +13,74 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/generationrefs"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use RetainedUse, op func(context.Context, *Call, keyauthority.Authority, *resources.Resource, *Pin, *routing.Route) *fault.Error) {
-	x, authority, done := s.StateBegin(w, r, wire.Responses)
+func (s surface) responseCall(w http.ResponseWriter, r *http.Request, use kernel.RetainedUse, op func(context.Context, *kernel.Call, keyauthority.Authority, *resources.Resource, *kernel.Pin, *routing.Route) *fault.Error) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.Responses)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
+	defer s.kernel.Gate.Release(r.Context())
 	if !authority.Policy.AllowProviderState {
-		s.Refuse(x, w, providerStateForbidden())
+		s.kernel.Refuse(x, w, kernel.ProviderStateForbidden())
 		return
 	}
-	res, contract, err := s.readResponseResource(r.Context(), authority.ID, r.PathValue("id"))
+	res, contract, err := s.kernel.ReadResponseResource(r.Context(), authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.Refuse(x, w, fault.NotFoundError("not_found", "No stored response with this identifier exists for this key."))
+		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No stored response with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."))
+		s.kernel.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."))
 		return
 	}
-	p, route, e := s.admitStoredResponse(r.Context(), x, authority, res, contract, use)
+	p, route, e := s.kernel.AdmitStoredResponse(r.Context(), x, authority, res, contract, use)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
-	if contract != nil {
-		x.generation.responseContract = contract
-	}
+	x.BindResponseContract(contract)
 	x.Route = route
-	ctx, cancel := s.StateDeadline(r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.ResourceSettle(ctx, x, p)
-	if e := s.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
-		s.Refuse(x, w, e)
+	defer s.kernel.ResourceSettle(ctx, x, p)
+	if e := s.kernel.ReserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	if e := op(ctx, x, authority, res, p, route); e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 	}
 }
 
-func (s *Server) storedResponseUpstreamError(ctx context.Context, localID string, failure *AttemptFailure) *fault.Error {
-	if failure.Status != http.StatusNotFound {
-		return UpstreamError(failure)
-	}
-	commitCtx, stopCommit := ResourceCommitContext(ctx)
-	defer stopCommit()
-	if err := s.Deps.Resources.Tombstone(commitCtx, localID); err != nil && !errors.Is(err, resources.ErrNotFound) {
-		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The missing response state could not be recorded.")
-	}
-	return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-}
-
-func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.Resource, p *Pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *fault.Error {
-	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), suffix), query)
+func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *resources.Resource, p *kernel.Pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *fault.Error {
+	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), suffix), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
-	resp, failure := s.PinnedDo(ctx, x, p, method, endpoint, body, "application/json")
+	resp, failure := s.kernel.PinnedDo(ctx, x, p, method, endpoint, body, "application/json")
 	if failure != nil {
-		return s.storedResponseUpstreamError(ctx, res.ID, failure)
+		return s.kernel.StoredResponseUpstreamError(ctx, res.ID, failure)
 	}
 	defer resp.Body.Close()
 
-	result, err := resp.ReadBody(s.Config.MaxResponseBytes)
+	result, err := resp.ReadBody(s.kernel.Config.MaxResponseBytes)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
+	doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.kernel.Config.MaxResponseBytes)})
 	if parseErr != nil {
 		if res.Kind == resources.KindStrictResponse {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
 		}
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
-	var native nativeResponse
+	var native kernel.NativeResponse
 	if res.Kind == resources.KindStrictResponse {
-		native, err = validateNativeResponse(doc, "", res.UpstreamID)
+		native, err = kernel.ValidateNativeResponse(doc, "", res.UpstreamID)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response identity or grammar.")
 		}
@@ -114,26 +101,26 @@ func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.R
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid completed response output.")
 		}
 	}
-	resp.Exchange.Complete(ClassSuccess)
-	commitCtx, stopCommit := ResourceCommitContext(ctx)
+	resp.Exchange.Complete(kernel.ClassSuccess)
+	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
-	if e := s.applyResponseObservation(commitCtx, res.ID, observation); e != nil {
+	if e := s.kernel.ApplyResponseObservation(commitCtx, res.ID, observation); e != nil {
 		return e
 	}
 	nativeStatus := observation.Status
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
-		projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
-		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.generation.responseContract)
+		projection := kernel.ResponseProjection{UpstreamID: res.UpstreamID, LocalID: res.ID, Route: res.RouteSlug}
+		projection.PreviousUpstream, projection.PreviousLocal, err = kernel.ResponseParentProjection(res, x.ResponseContract())
 		if err != nil {
 			return fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
-		strictResultDoc, err := native.project(projection)
+		strictResultDoc, err := native.Project(projection)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider response could not be projected to its local identities.")
 		}
 		if nativeStatus == "failed" {
-			strictResultDoc, err = fault.RedactNativeFailureDocument(strictResultDoc, x.sensitive)
+			strictResultDoc, err = fault.RedactNativeFailureDocument(strictResultDoc, x.Sensitive())
 			if err != nil {
 				return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider failure contained unsafe native fields.")
 			}
@@ -142,113 +129,113 @@ func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.R
 	} else {
 		var projected oif.Document
 		projected, err = oif.Apply(doc, []oif.Change{
-			{Pointer: "/id", Value: quotedResponseID(res.ID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"},
-			{Pointer: "/model", Value: quotedResponseID(res.RouteSlug), Origin: oif.IdentityBinding, Reason: "published response model"},
+			{Pointer: "/id", Value: kernel.QuotedResponseID(res.ID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"},
+			{Pointer: "/model", Value: kernel.QuotedResponseID(res.RouteSlug), Origin: oif.IdentityBinding, Reason: "published response model"},
 		})
 		if err == nil {
-			out, err = s.mapPreviousResponse(commitCtx, projected.Bytes(), res.NativeIdentity(), nil)
+			out, err = s.kernel.MapPreviousResponse(commitCtx, projected.Bytes(), res.NativeIdentity(), nil)
 		}
 	}
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
-	out, err = s.mapGenerationResultReferences(commitCtx, x, storedResult(res), out)
+	out, err = s.kernel.MapStoredGenerationResultReferences(commitCtx, x, res, out)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "resource_affinity", "The retained provider returned an unowned result reference.")
 	}
 	if method == http.MethodPost && res.Kind == resources.KindStrictResponse {
-		current, present := x.request.release.Snapshot().FindRoute(res.RouteSlug)
-		if !present || retainedContract(true, current.Fidelity, RetainedRetrieval) != nil || s.checkRouteFidelity(ctx, &current) != nil {
+		current, present := x.Snapshot().FindRoute(res.RouteSlug)
+		if !present || kernel.RetainedContract(true, current.Fidelity, kernel.RetainedRetrieval) != nil || s.kernel.CheckRouteFidelity(ctx, &current) != nil {
 			// Cancellation remains available for cleanup, but cannot return content
 			// that the same resource's retrieval guard forbids.
 			out, _ = json.Marshal(map[string]string{"id": res.ID, "object": "response", "status": nativeStatus})
 		}
 	}
-	s.WriteStateJSON(w, x, out, resp.Exchange)
+	s.kernel.WriteStateJSON(w, x, out, resp.Exchange)
 	return nil
 }
 
-func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
-		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
+func (s surface) getResponse(w http.ResponseWriter, r *http.Request) {
+	s.responseCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
+		query, stream, e := kernel.ResponseRetrievalQuery(r.URL.RawQuery)
 		if e != nil {
 			return e
 		}
 		if stream {
-			return s.streamStoredResponse(ctx, w, x, res, p, query)
+			return s.kernel.StreamStoredResponse(ctx, w, x, res, p, query)
 		}
 		return s.responseUpstream(ctx, x, res, p, http.MethodGet, "/"+url.PathEscape(res.UpstreamID), nil, w, query)
 	})
 }
 
-func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
+func (s surface) cancelResponse(w http.ResponseWriter, r *http.Request) {
+	s.responseCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
 		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
-func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, RetainedHousekeeping, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
-		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
+func (s surface) deleteResponse(w http.ResponseWriter, r *http.Request) {
+	s.responseCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		resp, failure := s.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
+		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				commitCtx, stopCommit := ResourceCommitContext(ctx)
+				commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 				defer stopCommit()
-				_ = s.Deps.Resources.Tombstone(commitCtx, res.ID)
+				_ = s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID)
 				return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
 			}
-			return UpstreamError(failure)
+			return kernel.UpstreamError(failure)
 		}
 		defer resp.Body.Close()
 
-		result, _ := resp.ReadBody(s.Config.MaxResponseBytes)
-		resp.Exchange.Complete(ClassSuccess)
+		result, _ := resp.ReadBody(s.kernel.Config.MaxResponseBytes)
+		resp.Exchange.Complete(kernel.ClassSuccess)
 		// The provider already deleted the response: the mapping must follow
 		// even when the client has gone.
-		commitCtx, stopCommit := ResourceCommitContext(ctx)
+		commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 		defer stopCommit()
-		if err := s.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
+		if err := s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The response mapping could not be deleted.")
 		}
-		out, err := RewriteID(result, "id", res.ID)
+		out, err := kernel.RewriteID(result, "id", res.ID)
 		if err != nil {
 			encoded, _ := json.Marshal(res.ID)
 			out, _ = json.Marshal(map[string]json.RawMessage{
 				"id": encoded, "object": json.RawMessage(`"response"`), "deleted": json.RawMessage(`true`),
 			})
 		}
-		s.WriteStateJSON(w, x, out, resp.Exchange)
+		s.kernel.WriteStateJSON(w, x, out, resp.Exchange)
 		return nil
 	})
 }
 
-func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, RetainedRetrieval, func(ctx context.Context, x *Call, authority keyauthority.Authority, res *resources.Resource, p *Pin, route *routing.Route) *fault.Error {
+func (s surface) responseInputItems(w http.ResponseWriter, r *http.Request) {
+	s.responseCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
 		query := url.Values{}
 		for _, name := range []string{"limit", "after", "order"} {
 			if value := r.URL.Query().Get(name); value != "" {
 				query.Set(name, value)
 			}
 		}
-		endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
-		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
+		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			return s.storedResponseUpstreamError(ctx, res.ID, failure)
+			return s.kernel.StoredResponseUpstreamError(ctx, res.ID, failure)
 		}
 		defer resp.Body.Close()
 
-		result, err := resp.ReadBody(s.Config.MaxResponseBytes)
+		result, err := resp.ReadBody(s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		document, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
+		document, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.kernel.Config.MaxResponseBytes)})
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
 		}
@@ -256,12 +243,12 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
-		resp.Exchange.Complete(ClassSuccess)
-		projected, err := generationrefs.ProjectInputItems(document, refs, s.generationResultResolver(ctx, x, storedResult(res)))
+		resp.Exchange.Complete(kernel.ClassSuccess)
+		projected, err := generationrefs.ProjectInputItems(document, refs, s.kernel.StoredGenerationResultResolver(ctx, x, res))
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
-		s.WriteStateJSON(w, x, projected.Bytes(), resp.Exchange)
+		s.kernel.WriteStateJSON(w, x, projected.Bytes(), resp.Exchange)
 		return nil
 	})
 }

@@ -281,6 +281,8 @@
             </dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
+            <dt>Maximum simultaneous generations</dt>
+            <dd>{account.max_concurrency ?? 'Not set'}</dd>
             <dt>Eligibility</dt>
             <dd>
               {account.eligible ? 'Eligible' : 'Ineligible'} · {account.enabled

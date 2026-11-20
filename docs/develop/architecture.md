@@ -149,7 +149,8 @@ provider completion.
 ## Gateway packages
 
 `internal/gateway/kernel` is the execution kernel. It owns the `Call`, the route
-leg, the attempt loop, settlement and every surface that has not left it yet.
+leg, the attempt loop, settlement and the retained generic engine, whose routes
+many surfaces share and which has not been extracted into its own package yet.
 A package under `internal/gateway/surface/` owns the routes of one surface and
 calls the kernel through its exported API. `internal/gateway` itself is the
 assembly, whose `Register` mounts the kernel and each surface. The other
@@ -170,9 +171,16 @@ packages hold what the kernel uses and never import it back.
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
 | `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
 | `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
-| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
+| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, the native and generation dispatch, and the retained generic engine, which is the one group of surface-shaped routes that has not moved into its own package yet | every package above |
 | `gateway/healthprobes` | The health probe worker. It picks the opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
+| `gateway/surface/bedrock` | Bedrock Converse and Invoke under `/bedrock/model/{model}` | `fault`, `kernel` |
+| `gateway/surface/geminilive` | Gemini Live sessions under `/gemini/ws/` and `/ws/` | `fault`, `ingress`, `kernel`, `quota` |
+| `gateway/surface/media` | OpenAI images, audio and video jobs under `/v1/images`, `/v1/audio` and `/v1/videos` | `fault`, `kernel` |
+| `gateway/surface/nativeduplex` | Native duplex sessions under `/native/{dialect}/sessions` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/openaistate` | OpenAI files, batches, stored responses and continuations | `fault`, `generationrefs`, `ingress`, `kernel` |
+| `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |
+| `gateway/surface/retrieval` | Cloud retrieval queries under `/v1/retrieval/{binding_id}/query` | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
 | `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |

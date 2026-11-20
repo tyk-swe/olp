@@ -675,6 +675,147 @@ func (j cooldownJourney) admission(model, conversation string) codesessions.Admi
 	return codesessions.Admission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
 }
 
+func secondCodeReplica(t *testing.T, pool *pgxpool.Pool, address string, j cooldownJourney) cooldownJourney {
+	t.Helper()
+	replica, err := pgxpool.New(t.Context(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(replica.Close)
+	route := j.route
+	route.ID, route.RevisionID, route.ETag = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	route.Slug = "replica-" + route.ID
+	document, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := uuid.NewString()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id)
+		SELECT $1,$2,digest,name,created_by,policy,$3,project_id FROM olp.api_keys WHERE id=$4`, []any{key, "replica-" + key, uuid.NewString(), j.key}},
+		{`INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, []any{route.PoolID, key}},
+		{`INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by)
+		SELECT $1,project_id,$2,draft,$3,created_by FROM olp.code_routes WHERE id=$4`, []any{route.ID, route.Slug, route.ETag, j.route.ID}},
+		{`INSERT INTO olp.code_route_revisions(id,route_id,revision,document,connections,created_by)
+		SELECT $1,$2,1,$3,connections,created_by FROM olp.code_route_revisions WHERE id=$4`, []any{route.RevisionID, route.ID, document, j.route.RevisionID}},
+		{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{route.ID, route.RevisionID}},
+	} {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cooldownJourney{store: codesessions.New(replica), route: route, key: key, provider: j.provider, first: j.first, second: j.second}
+}
+
+func TestCodeAccountGenerationCapacityAcrossReplicas(t *testing.T) {
+	t.Parallel()
+	pool, address := harness.Database(t)
+	home := seedCooldownJourney(t, pool)
+	remote := secondCodeReplica(t, pool, address, home)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET max_concurrency=1 WHERE project_id=$1`, home.route.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	assertBusy := func(err error) {
+		t.Helper()
+		refusal, ok := errors.AsType[*codemode.Refusal](err)
+		if !ok || refusal.Code != "code_account_busy" || refusal.Status != 429 || refusal.RetryAfter(time.Now()) != time.Second {
+			t.Fatalf("admission = %v, want retryable local saturation", err)
+		}
+	}
+	type result struct {
+		journey cooldownJourney
+		request codesessions.Admission
+		permit  codesessions.Permit
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 3)
+	for index, journey := range []cooldownJourney{home, remote, home} {
+		go func() {
+			<-start
+			request := journey.admission("model", fmt.Sprintf("concurrent-%d", index))
+			permit, err := journey.store.Admit(t.Context(), request)
+			results <- result{journey: journey, request: request, permit: permit, err: err}
+		}()
+	}
+	close(start)
+	var admitted []result
+	for range 3 {
+		response := <-results
+		if response.err != nil {
+			assertBusy(response.err)
+			continue
+		}
+		admitted = append(admitted, response)
+	}
+	if len(admitted) != 2 || admitted[0].permit.Account.ID == admitted[1].permit.Account.ID {
+		t.Fatalf("admissions = %v, want one generation on each account of the shared connection", admitted)
+	}
+	pinned, sibling := admitted[0], admitted[1]
+	socket := codemode.Identity{Conversation: "waiting-socket"}
+	_, err := home.store.BindConnection(t.Context(), home.route, home.key, socket, "model", pinned.request.Providers)
+	assertBusy(err)
+	if err := sibling.journey.store.MarkDispatched(t.Context(), sibling.permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sibling.journey.store.Settle(t.Context(), sibling.permit.Attempt.ID, codemode.Usage{Total: new(int64(0))}); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := home.store.BindConnection(t.Context(), home.route, home.key, socket, "model", pinned.request.Providers)
+	if err != nil || connection.Account.ID != sibling.permit.Account.ID {
+		t.Fatalf("new WebSocket bind = %s, %v, want the available account %s", connection.Account.ID, err, sibling.permit.Account.ID)
+	}
+	_, err = pinned.journey.store.Admit(t.Context(), pinned.request)
+	assertBusy(err)
+	if err := pinned.journey.store.MarkDispatched(t.Context(), pinned.permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinned.journey.store.Settle(t.Context(), pinned.permit.Attempt.ID, codemode.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := pinned.journey.store.Admit(t.Context(), pinned.request)
+	if err != nil || retried.Pin.AccountID != pinned.permit.Pin.AccountID || retried.Account.Health != pinned.permit.Account.Health {
+		t.Fatalf("retry = pin %s, health %s, error %v, want original pin and unchanged health", retried.Pin.AccountID, retried.Account.Health, err)
+	}
+}
+
+func TestCodeAccountGenerationCapacityIgnoresIdleAndAbandonedWork(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	j := seedCooldownJourney(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET max_concurrency=1 WHERE project_id=$1`, j.route.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	request := j.admission("model", "idle-socket")
+	socket, err := j.store.BindConnection(t.Context(), j.route, j.key, request.Operation.Identity, "model", request.Providers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := j.store.Admit(t.Context(), request)
+	if err != nil || abandoned.Account.ID != socket.Account.ID {
+		t.Fatalf("first generation on idle socket = %s, %v, want admission on %s", abandoned.Account.ID, err, socket.Account.ID)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_attempts SET created_at=now()-interval '1 hour' WHERE id=$1`, abandoned.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	next, err := j.store.Admit(t.Context(), request)
+	if err != nil || next.Account.ID != socket.Account.ID {
+		t.Fatalf("generation after abandoned lease = %s, %v, want admission on %s", next.Account.ID, err, socket.Account.ID)
+	}
+	if err := j.store.MarkDispatched(t.Context(), abandoned.Attempt.ID); err == nil {
+		t.Fatal("an expired reservation could still dispatch")
+	}
+	if err := j.store.Abort(t.Context(), next.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.store.Admit(t.Context(), request); err != nil {
+		t.Fatalf("generation after cancellation before dispatch: %v", err)
+	}
+}
+
 func TestCodeCooldownJourneys(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

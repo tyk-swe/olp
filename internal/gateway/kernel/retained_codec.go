@@ -291,9 +291,9 @@ func (s *Server) referencedResources(ctx context.Context, x *Call, source oif.Do
 		var err error
 		switch kind {
 		case resources.KindResponse:
-			bound, _, err = s.readResponseResource(ctx, x.keyID, id)
+			bound, _, err = s.ReadResponseResource(ctx, x.keyID, id)
 		case resources.KindFile:
-			bound, _, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+			bound, _, err = s.ReadDurable(ctx, DurableKind(kind, id), x.keyID, id)
 		case resources.KindGeminiFile:
 			local, localErr := retainedGeminiFileID(id)
 			if localErr != nil {
@@ -337,10 +337,10 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyautho
 		var bound *resources.Resource
 		var err error
 		if kind == resources.KindResponse {
-			var contract *storedResponseContract
-			bound, contract, err = s.readResponseResource(ctx, x.keyID, id)
+			var contract *StoredResponseContract
+			bound, contract, err = s.ReadResponseResource(ctx, x.keyID, id)
 			if err == nil {
-				_, _, failure := s.admitStoredResponse(ctx, x, a, bound, contract, RetainedNewWork)
+				_, _, failure := s.AdmitStoredResponse(ctx, x, a, bound, contract, RetainedNewWork)
 				if failure != nil {
 					err = resources.ErrNotFound
 				}
@@ -349,12 +349,12 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyautho
 			// A file handle may name either the transformed or the
 			// strict durable kind; resolve it through the durable
 			// contract so strict handles keep their checks.
-			var contract *durableDocument
-			bound, contract, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
+			var contract *DurableDocument
+			bound, contract, err = s.ReadDurable(ctx, DurableKind(kind, id), x.keyID, id)
 			if err == nil {
 				var failure *fault.Error
 				if contract != nil {
-					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), RetainedNewWork)
+					_, _, failure = s.AdmitDurable(ctx, x, a, bound, contract, x.operationName(), RetainedNewWork)
 				} else {
 					_, _, failure = s.ResolveResource(ctx, x, a, bound, x.operationName(), RetainedNewWork)
 				}
@@ -378,7 +378,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyautho
 				}
 			}
 		}
-		if err != nil || !retainedAffinity(bound, p, route) || retainedUnsettled(bound.State) {
+		if err != nil || !retainedAffinity(bound, p, route) || RetainedUnsettled(bound.State) {
 			return "", resources.ErrNotFound
 		}
 		if kind == resources.KindGeminiFile {

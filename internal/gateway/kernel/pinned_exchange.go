@@ -84,7 +84,7 @@ func (e *PinnedExchange) fail(class string, failure *AttemptFailure) *AttemptFai
 func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *PinnedExchange, req *http.Request, decodeError func([]byte) *wire.UpstreamError) (*PinnedResponse, *AttemptFailure) {
 	client, err := exchange.bound.client(ctx)
 	if err != nil {
-		return nil, exchange.fail(classCredential, nil)
+		return nil, exchange.fail(ClassCredential, nil)
 	}
 	resp, err := exchange.bound.do(client, req)
 	x := exchange.request
@@ -108,7 +108,7 @@ func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *PinnedEx
 		exchange.recordEvidence()
 		return &PinnedResponse{Response: resp, Exchange: exchange}, nil
 	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, ErrorBodyLimit))
 	_ = resp.Body.Close()
 	failure := &AttemptFailure{Status: resp.StatusCode, upstream: x.redacted(decodeError(raw))}
 	class := exchange.state.rejected(resp.StatusCode, failure.upstream)

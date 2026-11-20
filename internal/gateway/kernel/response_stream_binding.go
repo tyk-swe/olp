@@ -100,7 +100,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *Call, fact *
 		binding.localID = local
 	}
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
-	settleErr := s.applyResponseObservation(commitCtx, local, observation)
+	settleErr := s.ApplyResponseObservation(commitCtx, local, observation)
 	stopCommit()
 	if settleErr != nil {
 		s.Log.Warn("retained response observation persistence failed", "error", settleErr)
@@ -171,11 +171,11 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *Call, fact *even
 	}
 	var mapped oif.Document
 	if x.Strict() {
-		projection := responseProjection{upstreamID: upstreamID, localID: local, route: x.Route.Slug}
+		projection := ResponseProjection{UpstreamID: upstreamID, LocalID: local, Route: x.Route.Slug}
 		if previous := x.previousResponse(); previous != nil {
-			projection.previousUpstream, projection.previousLocal = previous.UpstreamID, previous.ID
+			projection.PreviousUpstream, projection.PreviousLocal = previous.UpstreamID, previous.ID
 		}
-		mapped, err = projection.project(doc, "/response")
+		mapped, err = projection.Project(doc, "/response")
 	} else {
 		changes := []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
 		if previous, present := response.Lookup("previous_response_id"); present {
@@ -183,7 +183,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *Call, fact *even
 				value := "null"
 				commitCtx, stopCommit := ResourceCommitContext(ctx)
 				if local := s.previousResponseLocal(commitCtx, responseNativeIdentity(x, fact, ""), x.pin, upstream); local != "" {
-					value = quotedResponseID(local)
+					value = QuotedResponseID(local)
 				}
 				stopCommit()
 				changes = append(changes, oif.Change{Pointer: "/response/previous_response_id", Value: value, Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})

@@ -19,7 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-func retainedFileOperation(r *resources.Resource) string {
+func RetainedFileOperation(r *resources.Resource) string {
 	var meta struct {
 		Operation string `json:"file_operation"`
 	}
@@ -45,10 +45,10 @@ func retainedFilePurposeOperation(purpose string) string {
 
 // Native retained-family uploads keep file bytes in the existing bounded spool
 // and persist their at-most-once submission identity before the provider sees it.
-func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
+func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
 	status := http.StatusInternalServerError
 	var p *Pin
-	defer func() { s.Finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
+	defer func() { s.Finish(x, nil, status); s.SettleRetained(r.Context(), x, p) }()
 	fail := func(err *fault.Error) {
 		copy := *err
 		copy.NoRetry = true
@@ -58,7 +58,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	}
 	operation := retainedFilePurposeOperation(purpose)
 	if !a.Policy.AllowProviderState {
-		fail(providerStateForbidden())
+		fail(ProviderStateForbidden())
 		return
 	}
 	if operation == "" || !slices.Contains(route.Operations, operation) {
@@ -111,7 +111,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		fail(err)
 		return
 	}
-	if err := s.admitRetainedRequest(ctx, x, a, p, route, false); err != nil {
+	if err := s.AdmitRetainedRequest(ctx, x, a, p, route, false); err != nil {
 		fail(err)
 		return
 	}

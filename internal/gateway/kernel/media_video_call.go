@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -27,7 +28,7 @@ type videoJobPlan struct {
 	slot     routing.Slot
 }
 
-func (s *Server) videoJobCall(ctx context.Context, x *Call, record *jobs.Record, job media.JobCall) (*transport.Result, *AttemptFailure, events.AttemptFact) {
+func (s *Server) VideoJobCall(ctx context.Context, x *Call, record *jobs.Record, job media.JobCall) (*transport.Result, *AttemptFailure, events.AttemptFact) {
 	plan, fact, refusal := s.planVideoJob(ctx, x, record, job, videoJobFact(record, s.Now()))
 	if refusal != nil {
 		return s.jobRefused(fact, refusal)
@@ -118,7 +119,7 @@ func videoCredentialFact(x *Call, provider routing.Provider, started events.Atte
 func videoJobTarget(x *Call, record *jobs.Record, resolved jobs.Resolved) (jobs.Resolved, *AttemptFailure) {
 	provider := resolved.Provider
 	if e := x.checkCallerTarget(&provider, record.UpstreamModel); e != nil {
-		return jobs.Resolved{}, &AttemptFailure{class: classCredential}
+		return jobs.Resolved{}, &AttemptFailure{class: ClassCredential}
 	}
 	sensitive := &egress.Sensitive{}
 	target := resolved
@@ -128,7 +129,7 @@ func videoJobTarget(x *Call, record *jobs.Record, resolved jobs.Resolved) (jobs.
 	}
 	secret, err := x.bindCallerSecret(provider.ID, record.UpstreamModel)
 	if err != nil {
-		return jobs.Resolved{}, &AttemptFailure{class: classCredential}
+		return jobs.Resolved{}, &AttemptFailure{class: ClassCredential}
 	}
 	sensitive.Add(string(secret))
 	target.Secret, target.CallerCredential = secret, true
@@ -203,7 +204,7 @@ func strictVideoResult(template *mediacontract.Template, job media.JobCall, reco
 			return errors.New("native video identity changed")
 		}
 	case media.VideoContent:
-		artifact := mediaArtifact(result.Payload)
+		artifact := MediaArtifact(result.Payload)
 		if artifact == nil {
 			return errors.New("native video content is unavailable")
 		}
@@ -214,7 +215,7 @@ func strictVideoResult(template *mediacontract.Template, job media.JobCall, reco
 }
 
 func (s *Server) videoJobBroken(timed events.AttemptFact, result *transport.Result, trace *telemetry.AttemptTrace) (*transport.Result, *AttemptFailure, events.AttemptFact) {
-	if artifact := mediaArtifact(result.Payload); artifact != nil {
+	if artifact := MediaArtifact(result.Payload); artifact != nil {
 		if err := s.Deps.Staging.Remove(artifact.Handle); err != nil {
 			s.Log.Warn("staged video content cleanup failed", "error", err)
 		}
@@ -251,12 +252,12 @@ func (s *Server) jobRefused(fact events.AttemptFact, failure *AttemptFailure) (*
 	return nil, failure, fact
 }
 
-func (x *Call) noteJobAttempt(fact events.AttemptFact) {
+func (x *Call) NoteJobAttempt(fact events.AttemptFact) {
 	x.facts = append(x.facts, fact)
 	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
 }
 
-func (x *Call) notePolls() {
+func (x *Call) NotePolls() {
 	x.attemptCount, x.attemptVendor = len(x.facts), ""
 	if len(x.facts) == 0 {
 		return
@@ -268,4 +269,41 @@ func (x *Call) notePolls() {
 			return
 		}
 	}
+}
+
+func (s *Server) RefreshListRecord(ctx context.Context, x *Call, record jobs.Record) (jobs.Record, *fault.Error) {
+	updated, fact, dispatched, e := s.refreshListRecord(ctx, x, record)
+	x.dispatched = x.dispatched || dispatched
+	if fact != nil {
+		x.facts = append(x.facts, *fact)
+	}
+	return updated, e
+}
+
+func (s *Server) refreshListRecord(ctx context.Context, x *Call, record jobs.Record) (jobs.Record, *events.AttemptFact, bool, *fault.Error) {
+	upstream, ok := record.Upstream()
+	if !record.State.Polling() || !ok {
+		return record, nil, false, nil
+	}
+	if record.StrictContract {
+		if _, current, e := s.jobRoute(ctx, record.RouteSlug); e != nil || RetainedContract(true, current, RetainedRetrieval) != nil {
+			return record, nil, false, nil
+		}
+	}
+	result, transportFailure, fact := s.VideoJobCall(ctx, x, &record, media.VideoGet{ID: upstream})
+	if transportFailure != nil {
+		if transportFailure.quota != "" || transportFailure.class == classLimitsUnavailable {
+			return record, &fact, false, transportFailure.Fault()
+		}
+		return record, &fact, transportFailure.dispatched, nil
+	}
+	update, ok := jobs.Observe(MediaVideo(result), s.Now())
+	if !ok {
+		return record, &fact, true, nil
+	}
+	updated, err := s.Deps.Media.Store.Refresh(ctx, record.ID, jobs.Unfenced, update)
+	if err != nil {
+		return record, &fact, true, nil
+	}
+	return updated, &fact, true, nil
 }

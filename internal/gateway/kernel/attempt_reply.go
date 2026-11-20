@@ -190,7 +190,7 @@ func (run attemptRun) refusedLocally(reply attemptReply, f *AttemptFailure) (att
 	refused.LocalRefusal = nativeFailure == nil
 	f.overall, f.noRetry = true, st.dispatched.Load()
 	if nativeFailure == nil {
-		return attemptReply{fact: refused, completion: reply.completion, committed: reply.committed}, ended(classAmbiguous, f)
+		return attemptReply{fact: refused, completion: reply.completion, committed: reply.committed}, ended(ClassAmbiguous, f)
 	}
 	// A known failed stateless generation remains retryable. An
 	// accepted retained create keeps its original resource owner.

@@ -57,7 +57,7 @@ func (q retainedRequest) create() {
 	}
 	ctx, cancel := s.StateDeadline(q.r.Context(), route)
 	defer cancel()
-	if err := s.admitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
+	if err := s.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
 		q.reply.fail(err)
 		return
 	}
