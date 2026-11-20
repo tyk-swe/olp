@@ -29,6 +29,7 @@ type CaptureStream struct {
 	textOrder, callOrder []string
 	groups               map[string]bool
 	terminal             bool
+	anthropicFinished    bool
 	geminiCallSequence   uint64
 	captureReader
 }
@@ -457,12 +458,25 @@ func (s *CaptureStream) anthropic(f map[string]json.RawMessage) {
 		}
 		s.done(id)
 	case "message_delta":
-		d, _ := s.object(f["delta"])
-		reason := s.str(d["stop_reason"])
-		if reason != "end_turn" && reason != "tool_use" && reason != "stop_sequence" {
+		d, err := s.object(f["delta"])
+		if err != nil {
 			s.invalid = true
+			return
 		}
+		reason := d["stop_reason"]
+		if !present(reason) {
+			return
+		}
+		if !captureCompleteReason(wire.Anthropic, s.str(reason)) {
+			s.invalid = true
+			return
+		}
+		s.anthropicFinished = true
 	case "message_stop":
+		if !s.anthropicFinished {
+			s.invalid = true
+			return
+		}
 		s.terminal = true
 	case "message_start", "ping":
 	default:

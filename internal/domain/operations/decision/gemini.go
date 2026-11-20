@@ -120,7 +120,9 @@ func parseGeminiResult(request oif.Request, source oif.Result) (oif.View, error)
 	if root.Kind() != oif.Object || (!operations.Optional(feedback) && feedback.Kind() != oif.Object) {
 		return nil, fail
 	}
-	if reason := member(feedback, "block_reason"); !operations.Optional(reason) {
+	reason := member(feedback, "block_reason")
+	blocked := !operations.Optional(reason)
+	if blocked {
 		if text(reason) == "" || len(answers.Members()) != 0 || (answers.Kind() != oif.Object && answers.Kind() != oif.Absent) {
 			return nil, fail
 		}
@@ -134,7 +136,7 @@ func parseGeminiResult(request oif.Request, source oif.Result) (oif.View, error)
 			}
 		}
 	}
-	usage, err := geminiUsage(member(root, "usage"))
+	usage, err := geminiUsage(member(root, "usage"), blocked)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +183,14 @@ func validGeminiAnswer(question, answer oif.Value) bool {
 	}
 }
 
-func geminiUsage(usage oif.Value) (*operations.Usage, error) {
-	if operations.Optional(usage) {
+func geminiUsage(usage oif.Value, allowMissing bool) (*operations.Usage, error) {
+	if allowMissing && operations.Optional(usage) {
 		return nil, nil
 	}
 	input, inputOK := operations.Int(member(usage, "total_input_tokens"))
 	output, outputOK := operations.Int(member(usage, "total_output_tokens"))
 	total, totalOK := operations.Int(member(usage, "total_tokens"))
-	if !inputOK || input < 0 || !outputOK || output != 0 || !totalOK || total < input {
+	if !inputOK || input < 0 || !outputOK || output != 0 || !totalOK || total != input {
 		return nil, operations.Violation("/usage", "gemini_decision_usage")
 	}
 	return &operations.Usage{InputTokens: &input, OutputTokens: &output, TotalTokens: &total}, nil

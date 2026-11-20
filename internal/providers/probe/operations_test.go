@@ -124,7 +124,8 @@ func TestGeminiDecisionsCertifyThePublicSurface(t *testing.T) {
 		})
 		if err := json.NewEncoder(w).Encode(struct {
 			Answers map[string]json.RawMessage `json:"answers"`
-		}{Answers: answers}); err != nil {
+			Usage   json.RawMessage            `json:"usage"`
+		}{Answers: answers, Usage: json.RawMessage(`{"total_input_tokens":19,"total_output_tokens":0,"total_tokens":19}`)}); err != nil {
 			t.Errorf("encode certification result: %v", err)
 		}
 	}))

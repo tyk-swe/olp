@@ -78,12 +78,25 @@ func (j VideoGet) Upstream() string       { return j.ID }
 func (j VideoContent) Upstream() string   { return j.ID }
 func (j VideoDelete) Upstream() string    { return j.ID }
 
+func (j VideoGet) reply(decode func([]byte) (*VideoJobResult, *Error)) VideoJobReply {
+	return VideoJobReply{Decode: func(body []byte) (*VideoJobResult, *Error) {
+		result, failure := decode(body)
+		if failure != nil {
+			return nil, failure
+		}
+		if result.ID != j.ID {
+			return nil, ProtocolError("The provider returned an unexpected video identity.")
+		}
+		return result, nil
+	}}
+}
+
 func encodeVideoGet(job VideoGet) (*UpstreamCall, *Error) {
 	path, failure := VideoJobPath(job.ID, "")
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: "GET", Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoJobReply{}}, nil
+	return &UpstreamCall{Method: "GET", Endpoint: Path{Path: path}, Accept: "application/json", Response: job.reply(DecodeVideoObject)}, nil
 }
 
 func encodeVideoDelete(job VideoDelete) (*UpstreamCall, *Error) {

@@ -142,7 +142,7 @@ func (run attemptRun) accept(sent attemptSent) (attemptSent, *attemptEnd) {
 	status, rejection := sent.config.Rejection(resp.StatusCode, raw)
 	f := &AttemptFailure{Status: status, upstream: run.x.redacted(openai.ParseErrorBody(rejection))}
 	class := run.state.rejected(status, f.upstream)
-	if class == classRateLimit {
+	if class == classRateLimit || (class == ClassUpstreamServer && resp.StatusCode == http.StatusServiceUnavailable) {
 		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
 	}
 	return answered, ended(class, f)

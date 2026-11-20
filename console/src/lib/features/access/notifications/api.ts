@@ -120,17 +120,15 @@ export async function updateNotificationRule(
   return unwrap(response);
 }
 
-export async function listNotificationDeliveries(
-  ruleId?: string,
+export async function listNotificationDeliveryPage(
+  cursor?: string,
   signal?: AbortSignal
-): Promise<NotificationDelivery[]> {
-  return collectCursorPages(async (cursor) => {
-    const response = await apiClient.GET('/api/v1/notifications/deliveries', {
-      params: { query: { limit: 50, cursor, rule_id: ruleId } },
-      signal
-    });
-    return unwrapPage(response);
+): Promise<CursorPage<NotificationDelivery>> {
+  const response = await apiClient.GET('/api/v1/notifications/deliveries', {
+    params: { query: { limit: 50, cursor } },
+    signal
   });
+  return unwrapPage(response);
 }
 
 export const deleteNotificationDestination = async (

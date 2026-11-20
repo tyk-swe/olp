@@ -242,7 +242,7 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 					return nil, unsupported("non-text tool result")
 				}
 			}
-			response := Object{"functionResponse": raw(map[string]any{"name": names[m.ToolID], "id": m.ToolID, "response": map[string]any{"output": joinText(m.Parts)}})}
+			response := geminiFunctionResponse(names[m.ToolID], m.ToolID, joinText(m.Parts))
 			if len(m.Calls) == 0 && len(turns) > 0 && turns[len(turns)-1].tool {
 				last := &turns[len(turns)-1]
 				last.parts = append(last.parts, response)
@@ -340,6 +340,15 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 		f = Object{"generateContentRequest": raw(f)}
 	}
 	return f, nil
+}
+
+func geminiFunctionResponse(name, id, output string) Object {
+	response := struct {
+		Name     string            `json:"name"`
+		ID       string            `json:"id,omitempty"`
+		Response map[string]string `json:"response"`
+	}{Name: name, ID: id, Response: map[string]string{"output": output}}
+	return Object{"functionResponse": raw(response)}
 }
 
 func geminiArguments(args json.RawMessage) json.RawMessage {

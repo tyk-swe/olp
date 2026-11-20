@@ -121,7 +121,7 @@ func encodeRunwayGet(job VideoGet) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoJobReply{Decode: runwayTaskObject}}, nil
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: job.reply(runwayTaskObject)}, nil
 }
 
 func encodeRunwayContent(job VideoContent) (*UpstreamCall, *Error) {

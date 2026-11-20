@@ -549,6 +549,35 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	}
 }
 
+func TestVideoReadReplyRequiresRequestedIdentity(t *testing.T) {
+	t.Parallel()
+	const requestedID = "job-requested"
+	for _, tc := range []struct {
+		name, vendor, response string
+	}{
+		{name: "compatible", response: `{"id":%q,"object":"video","status":"queued"}`},
+		{name: "runway", vendor: "runway", response: `{"id":%q,"status":"PENDING"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call, failure := media.EncodeJob(media.VideoGet{ID: requestedID}, connectors.Config{VendorID: tc.vendor})
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			reply := call.Response.(media.VideoJobReply)
+			result, failure := reply.Video(fmt.Appendf(nil, tc.response, requestedID))
+			if failure != nil || result == nil || result.ID != requestedID {
+				t.Fatalf("matching reply = %+v, %v", result, failure)
+			}
+			for _, id := range []string{"job-unexpected", ""} {
+				result, failure := reply.Video(fmt.Appendf(nil, tc.response, id))
+				if result != nil || failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "provider_protocol_error" {
+					t.Errorf("expected a protocol error for ID %q, got %+v, %+v", id, result, failure)
+				}
+			}
+		})
+	}
+}
+
 func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -675,8 +704,16 @@ func TestEachKindOfMediaProviderFailureIsClassifiedAndOnlyAStartedStreamIsCommit
 			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous, attemptStatus: http.StatusInternalServerError},
 		{name: "unreadable reply", replies: reply("application/json", "not json"),
 			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+		{name: "transformed reply without data", replies: reply("application/json", `{"created":1}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+		{name: "transformed reply with null data", replies: reply("application/json", `{"data":null}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+		{name: "transformed reply with empty data", replies: reply("application/json", `{"data":[]}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
 		{name: "strict reply without the image", replies: reply("application/json", `{"created":1}`), strict: true,
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous, attemptStatus: http.StatusOK},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
+		{name: "strict reply with empty data", replies: reply("application/json", `{"data":[]}`), strict: true,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: classAmbiguous},
 		{name: "stream that never starts", replies: reply("text/event-stream", ""), streams: true,
 			status: http.StatusBadGateway, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK},
 		{name: "stream cut after its first frame", replies: reply("text/event-stream", delta), streams: true,
@@ -711,6 +748,45 @@ func TestEachKindOfMediaProviderFailureIsClassifiedAndOnlyAStartedStreamIsCommit
 			attempt := got.Attempts[0]
 			if attempt.Class != tc.class || attempt.Status != tc.attemptStatus || attempt.Committed != tc.committed || attempt.Usage != nil {
 				t.Fatalf("attempt = %+v, want class %s status %d committed %v without usage", attempt, tc.class, tc.attemptStatus, tc.committed)
+			}
+		})
+	}
+}
+
+func TestMediaTranscriptRequiresTextButAllowsSilence(t *testing.T) {
+	t.Parallel()
+	wav := mediaFile{"file", "silence.wav", "audio/wav", media.SilentWAV(10)}
+	for _, endpoint := range []struct {
+		operation media.Operation
+		path      string
+	}{
+		{media.OpTranscription, "/v1/audio/transcriptions"},
+		{media.OpTranslation, "/v1/audio/translations"},
+	} {
+		t.Run(string(endpoint.operation), func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name   string
+				body   string
+				status int
+			}{
+				{"missing text", `{}`, http.StatusBadGateway},
+				{"null text", `{"text":null}`, http.StatusBadGateway},
+				{"empty text", `{"text":""}`, http.StatusOK},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					got := runMediaCase(t, mediaCase{
+						operation: endpoint.operation, path: endpoint.path, files: []mediaFile{wav},
+						replies: reply("application/json", tc.body),
+					})
+					if got.Status != tc.status {
+						t.Fatalf("reply = %d %s, want status %d", got.Status, got.Body, tc.status)
+					}
+					if tc.status == http.StatusOK && fmt.Sprintf("%s", got.Body) != tc.body {
+						t.Fatalf("reply = %s, want %s", got.Body, tc.body)
+					}
+				})
 			}
 		})
 	}

@@ -158,8 +158,6 @@ func (row slotRow) validationTime(cfg connection.Configuration, models []storedM
 	return nil
 }
 
-// Certification uses the default credential. It also validates that slot once
-// every allowed enabled capability has been certified with that same credential.
 func (row slotRow) certificationTime(cfg connection.Configuration, models []storedModel) *time.Time {
 	var at *time.Time
 	for _, model := range models {

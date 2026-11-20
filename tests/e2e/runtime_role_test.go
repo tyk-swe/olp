@@ -4,8 +4,10 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -14,11 +16,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-// TestServiceRunsUnderRuntimeRole follows the documented deployment: the owner
-// migrates and grants, and the process connects as the restricted runtime role.
 func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 	t.Parallel()
 	pool, databaseURL := harness.EmptyDatabase(t)
@@ -38,19 +39,13 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 		}
 	})
 	env := harness.NewEnvironment(t, databaseURL, "Service test")
-	harness.RunBinary(t, env, "migrate", "--runtime-role", role)
+	harness.RunBinary(t, env, "migrate")
 
 	parsed, err := url.Parse(databaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parsed.User = url.UserPassword(role, "runtime-test")
-	env.Values["OLP_DATABASE_URL"] = parsed.String()
-	s := harness.StartProcess(t, pool, env)
-	owner := s.Owner()
-	s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, harness.Idempotent(), http.StatusCreated)
-	s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, harness.Idempotent(), http.StatusCreated)
-
 	config, err := pgx.ParseConfig(parsed.String())
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +55,16 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restricted.Close(context.Background())
+	_, err = restricted.Exec(t.Context(), "SELECT version FROM olp.migrations")
+	requireInsufficientPrivilege(t, "read migration history before applying grants", err)
+
+	applyRestoreRunbookGrants(t, env, databaseURL, role)
+	env.Values["OLP_DATABASE_URL"] = parsed.String()
+	s := harness.StartProcess(t, pool, env)
+	owner := s.Owner()
+	s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, harness.Idempotent(), http.StatusCreated)
+	s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, harness.Idempotent(), http.StatusCreated)
+
 	if _, err = restricted.Exec(t.Context(), "SELECT olp.dirty_commitment(date_trunc('day', now()), date_trunc('day', now()) + interval '1 day')"); err != nil {
 		t.Fatalf("the runtime role cannot mark commitment usage for export: %v", err)
 	}
@@ -67,8 +72,43 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 	if err = restricted.QueryRow(t.Context(), "SELECT count(*) FROM olp.focus_dirty_days").Scan(&dirtyDays); err != nil || dirtyDays != 1 {
 		t.Fatalf("commitment export days = %d, want 1: %v", dirtyDays, err)
 	}
-	if _, err = restricted.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
-		t.Fatal("the runtime role can rewrite migration history")
+	_, deleteErr := restricted.Exec(t.Context(), "DELETE FROM olp.migrations")
+	requireInsufficientPrivilege(t, "delete migration history", deleteErr)
+	_, createErr := restricted.Exec(t.Context(), "CREATE TABLE olp.runtime_must_not_create (id integer)")
+	requireInsufficientPrivilege(t, "create a table in olp", createErr)
+}
+
+func applyRestoreRunbookGrants(t *testing.T, env harness.Environment, databaseURL, role string) {
+	t.Helper()
+	doc, err := os.ReadFile("../../docs/operate/operations.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sections, _ := strings.Cut(string(doc), "### Restore a replacement\n")
+	restore, _, _ := strings.Cut(sections, "\n### ")
+	_, block, _ := strings.Cut(restore, "```sh\n")
+	script, _, ok := strings.Cut(block, "\n```")
+	if !ok {
+		t.Fatal("restore runbook has no shell block to apply runtime grants")
+	}
+	command := exec.CommandContext(t.Context(), "sh", "-ec", script)
+	command.Env = env.List(map[string]string{
+		"OLP_DATABASE_URL":         "",
+		"OLP_DATABASE_URL_FILE":    filepath.Join(t.TempDir(), "not-the-replacement"),
+		"OLP_MAINTENANCE_BIN":      harness.Required(t, "OLP_TEST_BINARY"),
+		"OLP_RESTORE_DATABASE_URL": databaseURL,
+		"runtime_role":             role,
+	})
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("apply grants from restore runbook: %v\n%s", err, output)
+	}
+}
+
+func requireInsufficientPrivilege(t *testing.T, operation string, err error) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("runtime role attempting to %s: expected insufficient privilege, got %v", operation, err)
 	}
 }
 

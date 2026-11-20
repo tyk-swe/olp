@@ -307,14 +307,35 @@ Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
 empty Valkey service, and mount the original master and auth key files. Set
 `OLP_MAINTENANCE_BIN` to the qualified binary when using a nondefault path.
 
-The restore role needs CREATEDB. The command restores to a disposable staging
-database, verifies the manifest/checksum/history/identity and included migration
-hashes against local files, applies the binary's migrations, and authenticates
-every encrypted record with `olp doctor`. Only then does one transaction recheck
-and populate the empty destination. Failure removes staging and leaves the
-destination unchanged.
+Use the migration owner for the restore connection. It needs `CREATE` on the
+replacement database and `CREATEDB` for the disposable staging database. The
+migration owner will own the restored objects. The command
+restores to staging, verifies the manifest/checksum/history/identity and
+included migration hashes against local files, applies the binary's migrations,
+and authenticates every encrypted record with `olp doctor`. Only then does one
+transaction recheck and populate the empty destination. Failure removes
+staging and leaves the destination unchanged.
+
+If you use a separate runtime login, keep the replacement stopped after restore.
+The restore omits grants, and verification as the owner in staging does not
+check the runtime login. Ensure the restricted login exists on the destination
+server and can connect to the replacement database. Set the shell variable
+`runtime_role` to its name, for example `olp_runtime`. Using the same
+migration-owner URL for the replacement (not the source or staging), reapply the
+[runtime grants](deployment.md#database-roles):
+
+```sh
+OLP_DATABASE_URL="${OLP_RESTORE_DATABASE_URL:?}" OLP_DATABASE_URL_FILE= \
+  "${OLP_MAINTENANCE_BIN:-olp}" migrate --runtime-role "${runtime_role:?}"
+```
+
+This grants schema usage, data access and read-only migration history. Do not
+grant ownership, CREATE privileges or migration-owner membership to the runtime
+login. Once the grant command succeeds, configure all application processes
+to use the runtime login's connection to the replacement database.
 
 Start the replacement with its original keys and isolated Valkey service.
+Check readiness before reopening traffic.
 Recovery preserves the installation UUID, namespace and historical references;
 never let a rehearsal consume the source's streams or leases. An independently
 writable database clone is unsupported. For independent use, create a fresh
@@ -373,11 +394,12 @@ Run one version across every process mode. To run a new release against an
 existing database, take a [drained backup](#backup-and-restore), stop every
 process, run `olp migrate` once with the new binary, and start all process
 modes on that version. With Helm, scale the gateway, control and worker
-Deployments to zero before `helm upgrade`; its pre-upgrade hook runs the
-migration Job before the new pods start. Verify readiness, generation
-convergence, backlog, usage completeness, provider probes, and latency before
-resuming admission. There is no rollback: a binary refuses a database whose
-schema is newer than its own, and migrations never run in reverse. Never edit
+Deployments to zero before [upgrading the release](deployment.md#upgrade-an-existing-release).
+Helm's pre-upgrade hook runs the migration Job before the new pods start.
+Verify readiness, generation convergence, backlog, usage completeness,
+provider probes, and latency before resuming admission. There is no rollback:
+a binary refuses a database whose schema is newer than its own, and migrations
+never run in reverse. Never edit
 migration history or checksums. The runner checks the recorded checksums and
 rejects gaps except for two upgrade paths from historical merges. It can apply
 the delegation migrations after the parallel code migrations. If Google billing

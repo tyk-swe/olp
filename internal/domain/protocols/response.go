@@ -776,11 +776,17 @@ func renderCompletion(c *wire.Completion, family wire.Format, route string) []by
 }
 func chatUsage(u *wire.Usage) Object {
 	f := Object{"prompt_tokens": raw(u.InputTokens), "completion_tokens": raw(u.OutputTokens), "total_tokens": raw(u.TotalTokens)}
-	if u.CachedInputTokens != nil {
-		f["prompt_tokens_details"] = raw(map[string]any{"cached_tokens": *u.CachedInputTokens})
+	type details struct {
+		Cached     *int64 `json:"cached_tokens,omitempty"`
+		CacheWrite *int64 `json:"cache_write_tokens,omitempty"`
+		Audio      *int64 `json:"audio_tokens,omitempty"`
+		Reasoning  *int64 `json:"reasoning_tokens,omitempty"`
 	}
-	if u.ReasoningTokens != nil {
-		f["completion_tokens_details"] = raw(map[string]any{"reasoning_tokens": *u.ReasoningTokens})
+	if u.CachedInputTokens != nil || u.CacheWriteInputTokens != nil || u.AudioInputTokens != nil {
+		f["prompt_tokens_details"] = raw(details{Cached: u.CachedInputTokens, CacheWrite: u.CacheWriteInputTokens, Audio: u.AudioInputTokens})
+	}
+	if u.ReasoningTokens != nil || u.AudioOutputTokens != nil {
+		f["completion_tokens_details"] = raw(details{Audio: u.AudioOutputTokens, Reasoning: u.ReasoningTokens})
 	}
 	return f
 }

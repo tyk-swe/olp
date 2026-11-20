@@ -206,6 +206,66 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 	}
 }
 
+func TestExactCacheUsesEffectiveChatChoiceCount(t *testing.T) {
+	for _, tc := range []struct {
+		name, defaultN, callerFields string
+		choices, calls               int
+		results                      [2]string
+	}{
+		{"multiple choices", "2", "", 2, 2, [2]string{"bypass", "bypass"}},
+		{"one choice", "1", "", 1, 1, [2]string{"miss", "hit"}},
+		{"caller overrides default", "2", `,"n":1`, 1, 1, [2]string{"miss", "hit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, memory := cacheHarness(t)
+			h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
+				a.ParameterDefaults = map[string]json.RawMessage{"n": json.RawMessage(tc.defaultN)}
+				s.Providers[a.ID] = a
+			})
+			choices := [...]string{
+				`{"index":0,"message":{"role":"assistant","content":"first"},"finish_reason":"stop"}`,
+				`{"index":1,"message":{"role":"assistant","content":"second"},"finish_reason":"stop"}`,
+			}
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					N int `json:"n"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.N != tc.choices {
+					t.Errorf("provider request n = %d, want %d (decode error: %v)", request.N, tc.choices, err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":%q,"choices":[%s],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, modelA, strings.Join(choices[:request.N], ","))
+			})
+			body := []byte(`{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]` + tc.callerFields + `}`)
+			for i, want := range tc.results {
+				response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, nil)
+				var reply struct {
+					Choices []json.RawMessage `json:"choices"`
+				}
+				err := json.NewDecoder(response.Body).Decode(&reply)
+				response.Body.Close()
+				if got := response.Header.Get("X-OLP-Cache"); response.StatusCode != http.StatusOK || got != want || err != nil || len(reply.Choices) != tc.choices {
+					t.Errorf("request %d: status=%d cache=%q choices=%d decode error=%v, want status=200 cache=%q choices=%d", i+1, response.StatusCode, got, len(reply.Choices), err, want, tc.choices)
+				}
+			}
+			if got := h.mock.count("a"); got != tc.calls {
+				t.Errorf("provider calls = %d, want %d", got, tc.calls)
+			}
+			if tc.choices > 1 {
+				memory.mu.Lock()
+				commands := memory.commands
+				memory.mu.Unlock()
+				if commands != 0 {
+					t.Errorf("cache backend received %d commands for a bypassed request", commands)
+				}
+			}
+		})
+	}
+}
+
 func TestResponseCacheClientSurfaces(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, profile, surface, path, body, reply, stream string

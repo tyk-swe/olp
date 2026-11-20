@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -94,12 +95,43 @@ func readTemplates(ctx context.Context, q database.Queryer, directory promotion.
 	}), nil
 }
 
-func planTemplate(t Template, current map[string]Template, known func(string) bool) ([]promotion.Item, error) {
+func planTemplates(ctx context.Context, q database.Queryer, desired []Template, state State, known func(string) bool) ([][]promotion.Item, error) {
+	if len(desired) == 0 {
+		return nil, nil
+	}
+	providerProjects, err := providers.ReadProviderProjects(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	current := promotion.Index(state.Templates, func(t Template) string { return t.Name })
+	return promotion.TryMap(desired, func(t Template) ([]promotion.Item, error) {
+		return planTemplate(t, current, known, templateProviderBlocker(t, providerProjects, state.directory))
+	})
+}
+
+func planTemplate(t Template, current map[string]Template, known func(string) bool, providerBlocker []promotion.Item) ([]promotion.Item, error) {
 	change, err := templateChange(t, current)
 	if err != nil {
 		return nil, err
 	}
-	return slices.Concat(unknownTemplateProject(t, known), []promotion.Item{change}), nil
+	return slices.Concat(unknownTemplateProject(t, known), providerBlocker, []promotion.Item{change}), nil
+}
+
+func templateProviderBlocker(t Template, providerProjects map[string]*string, projects promotion.Directory) []promotion.Item {
+	id, specific := strings.CutPrefix(t.ProviderSelector, "provider:")
+	if !specific {
+		return nil
+	}
+	kind := contract.ConfigurationPlanItemKindRouteTemplate
+	projectID, found := providerProjects[id]
+	if !found {
+		return []promotion.Item{promotion.Blocker(kind, t.Name, "provider_unknown")}
+	}
+	project := projectName(projects, projectID)
+	if !strings.EqualFold(promotion.ValueOf(project), promotion.ValueOf(t.Project)) {
+		return []promotion.Item{promotion.Blocker(kind, t.Name, "provider_project_mismatch")}
+	}
+	return nil
 }
 
 func templateChange(t Template, current map[string]Template) (promotion.Item, error) {
@@ -162,12 +194,16 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			if err != nil {
 				return err
 			}
-			if found && promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
-				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
-			}
 			in := t.input(projectID)
 			if !found {
 				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
+			}
+			if promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
+				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
+			}
+			same, err := sameTemplate(t, templateOf(stored.TemplateInput, nil))
+			if err != nil || same {
+				return err
 			}
 			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
 		})

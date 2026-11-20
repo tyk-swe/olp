@@ -109,6 +109,9 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if spec.subject == noSubject && projectID != nil && !spec.projectScoped {
 		return ruleTarget{}, httpkit.Invalid("project_id", "This notification event is installation-wide.")
 	}
+	if spec.projectRequired && projectID == nil {
+		return ruleTarget{}, httpkit.Invalid("project_id", "This notification event requires a project.")
+	}
 	configuration, err := spec.configuration.canonical(input.Configuration)
 	if err != nil {
 		return ruleTarget{}, httpkit.Invalid("configuration", "The rule configuration is invalid for its event.")
