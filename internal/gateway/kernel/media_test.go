@@ -549,6 +549,35 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	}
 }
 
+func TestVideoReadReplyRequiresRequestedIdentity(t *testing.T) {
+	t.Parallel()
+	const requestedID = "job-requested"
+	for _, tc := range []struct {
+		name, vendor, response string
+	}{
+		{name: "compatible", response: `{"id":%q,"object":"video","status":"queued"}`},
+		{name: "runway", vendor: "runway", response: `{"id":%q,"status":"PENDING"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call, failure := media.EncodeJob(media.VideoGet{ID: requestedID}, connectors.Config{VendorID: tc.vendor})
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			reply := call.Response.(media.VideoJobReply)
+			result, failure := reply.Video(fmt.Appendf(nil, tc.response, requestedID))
+			if failure != nil || result == nil || result.ID != requestedID {
+				t.Fatalf("matching reply = %+v, %v", result, failure)
+			}
+			for _, id := range []string{"job-unexpected", ""} {
+				result, failure := reply.Video(fmt.Appendf(nil, tc.response, id))
+				if result != nil || failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "provider_protocol_error" {
+					t.Errorf("expected a protocol error for ID %q, got %+v, %+v", id, result, failure)
+				}
+			}
+		})
+	}
+}
+
 func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
