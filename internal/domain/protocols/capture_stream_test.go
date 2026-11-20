@@ -37,7 +37,10 @@ func TestCaptureCompleteNativeStreams(t *testing.T) {
 			`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"a","name":"f","input":{ }}}`,
 			`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"x\":\"sec"}}`,
 			`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ret\"}"}}`,
-			`{"type":"content_block_stop","index":1}`, `{"type":"content_block_stop","index":0}`, `{"type":"message_delta","delta":{"stop_reason":"tool_use"}}`, `{"type":"message_stop"}`,
+			`{"type":"content_block_stop","index":1}`, `{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":null},"usage":{"output_tokens":4}}`,
+			`{"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+			`{"type":"message_delta","delta":{},"usage":{"output_tokens":6}}`, `{"type":"message_stop"}`,
 		}, "secret", 1},
 		{"gemini", wire.GeminiStream, []string{
 			`{"candidates":[{"index":2,"content":{"parts":[{"text":"sec"}]}}]}`,
@@ -303,6 +306,9 @@ func TestCaptureStreamDropsIncompleteMalformedAndBounds(t *testing.T) {
 		{"bound", wire.Chat, []string{`{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"stop"}]}`}, 4},
 		{"unsupported", wire.GeminiInteractions, []string{`{}`}, 65536},
 		{"unfinished-block", wire.Anthropic, []string{`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"sec"}}`, `{"type":"message_stop"}`}, 65536},
+		{"messages missing stop reason", wire.Anthropic, []string{
+			`{"type":"message_delta","delta":{"stop_reason":null}}`, `{"type":"message_stop"}`,
+		}, 65536},
 		{"conflicting-snapshot", wire.Responses, []string{`{"type":"response.output_text.delta","item_id":"m","content_index":0,"delta":"secret"}`, `{"type":"response.output_text.done","item_id":"m","content_index":0,"text":"different"}`}, 65536},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

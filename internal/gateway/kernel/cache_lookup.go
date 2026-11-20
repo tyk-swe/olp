@@ -54,9 +54,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	if subject.generates {
 		x.guard.input = subject.segments
 	}
-	// Defaults and protocol preparation can add retention even when the caller
-	// omitted it. Only the effective upstream request can establish eligibility.
-	if cacheRetentionRequested(subject.document) {
+	if cacheRetentionRequested(subject.document) || cacheNonSingleCandidateRequested(subject.document) {
 		c.result = "bypass"
 		return nil
 	}

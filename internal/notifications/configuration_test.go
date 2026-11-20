@@ -21,7 +21,12 @@ func storedConfiguration(event contract.NotificationEvent, configuration string)
 	case contract.NotificationEventKeyExpiring:
 		input.SubjectKind, input.SubjectID = &keyKind, &keyID
 	}
-	target, err := parseRule(input, nil)
+	var projectID *string
+	if event == contract.NotificationEventSpendSpike {
+		project := "3a5f21c8-7d44-4e91-8b2c-9d0e6f31a507"
+		projectID = &project
+	}
+	target, err := parseRule(input, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,6 +50,7 @@ func TestRuleConfigurationDefaults(t *testing.T) {
 		contract.NotificationEventProviderGrantLapsed:       `{}`,
 		contract.NotificationEventKeyExpiring:               `{"lead_time_seconds":86400}`,
 		contract.NotificationEventReportSpend:               `{"period":"daily"}`,
+		contract.NotificationEventSpendSpike:                `{"baseline_days":14,"minimum_history_days":7,"increase_percent":"50","minimum_increase":"10"}`,
 		contract.NotificationEventBudgetExhausted:           `{"cooldown_seconds":900}`,
 		contract.NotificationEventProviderErrorRate:         `{"window_seconds":300,"minimum_samples":20,"threshold":"0.1","recovery_threshold":"0.05","cooldown_seconds":900}`,
 		contract.NotificationEventProviderCredentialFailing: `{"window_seconds":300,"minimum_samples":3,"threshold":"3","recovery_threshold":"0","cooldown_seconds":900}`,
@@ -81,6 +87,10 @@ func TestRuleConfigurationOverrides(t *testing.T) {
 		{"lead time lower bound", contract.NotificationEventKeyExpiring, `{"lead_time_seconds":60}`, `{"lead_time_seconds":60}`},
 		{"lead time upper bound", contract.NotificationEventKeyExpiring, `{"lead_time_seconds":2678400}`, `{"lead_time_seconds":2678400}`},
 		{"spend period", contract.NotificationEventReportSpend, `{"period":"monthly"}`, `{"period":"monthly"}`},
+		{"spike bounds", contract.NotificationEventSpendSpike, `{"baseline_days":90,"minimum_history_days":90,"increase_percent":"100.50","minimum_increase":"0.25"}`,
+			`{"baseline_days":90,"minimum_history_days":90,"increase_percent":"100.5","minimum_increase":"0.25"}`},
+		{"spike minimum window", contract.NotificationEventSpendSpike, `{"baseline_days":7,"minimum_history_days":3}`,
+			`{"baseline_days":7,"minimum_history_days":3,"increase_percent":"50","minimum_increase":"10"}`},
 		{"cooldown upper bound", contract.NotificationEventBudgetExhausted, `{"cooldown_seconds":86400}`, `{"cooldown_seconds":86400}`},
 		{"retirement bounds", contract.NotificationEventModelRetirement, `{"lead_days":366,"cooldown_seconds":60}`, `{"lead_days":366,"cooldown_seconds":60}`},
 		{"recovery derived from threshold", contract.NotificationEventProviderErrorRate, `{"threshold":"0.5"}`,
@@ -168,6 +178,19 @@ func TestRuleConfigurationRejects(t *testing.T) {
 		{"fractional credential failures", contract.NotificationEventProviderCredentialFailing, `{"threshold":"3.5"}`},
 		{"no credential failures", contract.NotificationEventProviderCredentialFailing, `{"threshold":"0"}`},
 		{"too many credential failures", contract.NotificationEventProviderCredentialFailing, `{"threshold":"10001"}`},
+		{"baseline too short", contract.NotificationEventSpendSpike, `{"baseline_days":6}`},
+		{"baseline too long", contract.NotificationEventSpendSpike, `{"baseline_days":91}`},
+		{"fractional baseline", contract.NotificationEventSpendSpike, `{"baseline_days":14.5}`},
+		{"history too short", contract.NotificationEventSpendSpike, `{"minimum_history_days":2}`},
+		{"history above baseline", contract.NotificationEventSpendSpike, `{"baseline_days":7,"minimum_history_days":8}`},
+		{"null baseline", contract.NotificationEventSpendSpike, `{"baseline_days":null}`},
+		{"null increase percent", contract.NotificationEventSpendSpike, `{"increase_percent":null}`},
+		{"numeric increase percent", contract.NotificationEventSpendSpike, `{"increase_percent":50}`},
+		{"zero increase percent", contract.NotificationEventSpendSpike, `{"increase_percent":"0"}`},
+		{"increase percent above bound", contract.NotificationEventSpendSpike, `{"increase_percent":"1000001"}`},
+		{"zero minimum increase", contract.NotificationEventSpendSpike, `{"minimum_increase":"0"}`},
+		{"negative minimum increase", contract.NotificationEventSpendSpike, `{"minimum_increase":"-1"}`},
+		{"cooldown on spike event", contract.NotificationEventSpendSpike, `{"cooldown_seconds":900}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

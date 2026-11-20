@@ -1339,6 +1339,9 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if first.ID == "" {
 		t.Fatal("stored response returned no identifier")
 	}
+	if first.Model != slug {
+		t.Fatalf("response creation model = %q, want route %q", first.Model, slug)
+	}
 	providerExpiry := time.Unix(4102444800, 0)
 	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 1 || kept[0] != (storedResponse{"response", "completed", model, providerExpiry}) {
 		t.Fatalf("the gateway kept %+v, want the response with the provider's state, model and expiry", kept)
@@ -1347,8 +1350,8 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if len(created) != 1 || created[0].key != "listed-secret" || created[0].authorization != "" || !strings.Contains(created[0].body, `"model":"`+model+`"`) {
 		t.Fatalf("response reached the provider as %+v, want the provider model and credential only", created)
 	}
-	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 200); got.ID != first.ID {
-		t.Fatalf("response read returned %q, want %q", got.ID, first.ID)
+	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 200); got.ID != first.ID || got.Model != first.Model {
+		t.Fatalf("response read returned %q of model %q, want %q of model %q", got.ID, got.Model, first.ID, first.Model)
 	}
 	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID+"/input_items", "", "", 200); len(got.Data) != 1 {
 		t.Fatalf("input items = %+v, want the provider's one item", got)
@@ -1944,6 +1947,16 @@ func (*routeTools) CallApproved(context.Context, keyauthority.Authority, *releas
 	return nil, errors.New("the route tool needs no approval")
 }
 
+type chatWorkflowUsage struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+	CompletionDetail struct {
+		ReasoningTokens          int64 `json:"reasoning_tokens"`
+		AcceptedPredictionTokens int64 `json:"accepted_prediction_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
 func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTurn(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -1979,10 +1992,10 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if first {
-			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"answer\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"answer\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8,"completion_tokens_details":{"reasoning_tokens":1}}}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"It is forty-two."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`)
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"It is forty-two."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13,"completion_tokens_details":{"reasoning_tokens":2,"accepted_prediction_tokens":1}}}`)
 	})
 	price := rates.NewRoutingPrice(rates.RoutingPrice{
 		Price: rates.Price{ProviderKind: "openai_compatible", Model: model, Operation: "generation",
@@ -2006,7 +2019,8 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 	_, raw := g.send(t, "POST", "/v1/chat/completions", headers,
 		`{"model":"tools","messages":[{"role":"user","content":"what is the answer?"}]}`, 200)
 	var reply struct {
-		Model   string `json:"model"`
+		Model   string            `json:"model"`
+		Usage   chatWorkflowUsage `json:"usage"`
 		Choices []struct {
 			Message struct {
 				Content   string            `json:"content"`
@@ -2033,6 +2047,12 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 	}
 
 	const inputTokens, outputTokens = 5 + 9, 3 + 4
+	want := chatWorkflowUsage{PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
+	want.CompletionDetail.ReasoningTokens = 1 + 2
+	want.CompletionDetail.AcceptedPredictionTokens = 1
+	if reply.Usage != want {
+		t.Errorf("response usage = %+v, want %+v for both model turns", reply.Usage, want)
+	}
 	var settled, runCount int
 	var run string
 	var priced bool
@@ -2650,8 +2670,12 @@ func TestGatewayToolLoopStreamsOnlyTheFinalAnswerStopsAtItsRunLimitsAndRefusesCa
 		status           int
 		says             string
 		turns, tools     int
+		usage            *chatWorkflowUsage
 	}{
 		{script: "streamed", settings: `,"stream":true`, status: 200, says: `"content":"forty-two."`, turns: 2, tools: 1},
+		{script: "streamed with usage", settings: `,"stream":true,"stream_options":{"include_usage":true}`, status: 200,
+			says: `"content":"forty-two."`, turns: 2, tools: 1,
+			usage: &chatWorkflowUsage{PromptTokens: 5 * 2, CompletionTokens: 3 * 2, TotalTokens: 8 * 2}},
 		{script: "two at once", status: 200, says: "It is forty-two.", turns: 2, tools: 2},
 		{script: "keep asking until the iteration limit", settings: `,"olp_run_limits":{"max_iterations":3}`,
 			status: 400, says: "tool_iteration_limit", turns: 3, tools: 2},
@@ -2670,6 +2694,9 @@ func TestGatewayToolLoopStreamsOnlyTheFinalAnswerStopsAtItsRunLimitsAndRefusesCa
 		if !strings.Contains(string(raw), tc.says) || strings.Contains(string(raw), "tool_calls") && tc.status == 200 {
 			t.Fatalf("%s: the caller got %s, want %s and no tool call", tc.script, raw, tc.says)
 		}
+		if strings.Contains(tc.settings, `"stream":true`) {
+			assertChatWorkflowStreamUsage(t, raw, tc.usage)
+		}
 		if asked, ran := model.asked(tc.script), len(tools.calls)-called; asked != tc.turns || ran != tc.tools {
 			t.Fatalf("%s: %d model turns and %d tool calls, want %d and %d", tc.script, asked, ran, tc.turns, tc.tools)
 		}
@@ -2682,6 +2709,29 @@ func TestGatewayToolLoopStreamsOnlyTheFinalAnswerStopsAtItsRunLimitsAndRefusesCa
 	}
 	if settled != turns {
 		t.Fatalf("%d model debits settled for %d model turns, including the runs that were refused", settled, turns)
+	}
+}
+
+func assertChatWorkflowStreamUsage(t *testing.T, raw []byte, want *chatWorkflowUsage) {
+	t.Helper()
+	var usage []chatWorkflowUsage
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		data, found := strings.CutPrefix(line, "data:")
+		if !found || strings.TrimSpace(data) == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Usage *chatWorkflowUsage `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatal(err)
+		}
+		if chunk.Usage != nil {
+			usage = append(usage, *chunk.Usage)
+		}
+	}
+	if want == nil && len(usage) != 0 || want != nil && (len(usage) != 1 || usage[0] != *want) {
+		t.Errorf("stream usage chunks = %+v, want %v", usage, want)
 	}
 }
 
@@ -3487,6 +3537,9 @@ func TestAgentResourcesBindTheirBaseAgentPageNewestFirstAndKeepOrForgetWhatEachP
 	provider.answers("POST /agents", http.StatusBadRequest, rejection)
 	header, _ = ask("owner", "POST", agents, helper, "refused", http.StatusBadRequest, "provider_resource_error", "upstream_client")
 	refused := header.Get("X-OLP-Resource-ID")
+	if state := kept(refused); state != "not_accepted" {
+		t.Fatalf("a refused agent creation is kept as %q, want not_accepted", state)
+	}
 	provider.answers("POST /agents", http.StatusInternalServerError, outage)
 	header, _ = ask("owner", "POST", agents, helper, "unknown", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
 	unknown := header.Get("X-OLP-Resource-ID")

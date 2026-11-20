@@ -131,9 +131,13 @@ func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.R
 		}
 		out = strictResultDoc.Bytes()
 	} else {
-		out, err = RewriteID(result, "id", res.ID)
+		var projected oif.Document
+		projected, err = oif.Apply(doc, []oif.Change{
+			{Pointer: "/id", Value: quotedResponseID(res.ID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"},
+			{Pointer: "/model", Value: quotedResponseID(res.RouteSlug), Origin: oif.IdentityBinding, Reason: "published response model"},
+		})
 		if err == nil {
-			out, err = s.mapPreviousResponse(commitCtx, out, res.NativeIdentity(), nil)
+			out, err = s.mapPreviousResponse(commitCtx, projected.Bytes(), res.NativeIdentity(), nil)
 		}
 	}
 	if err != nil {

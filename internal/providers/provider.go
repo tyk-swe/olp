@@ -316,6 +316,28 @@ func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]stri
 	}), nil
 }
 
+func ReadProviderProjects(ctx context.Context, q database.Queryer) (map[string]*string, error) {
+	rows, err := q.Query(ctx, "SELECT id::text,project_id::text FROM olp.providers")
+	if err != nil {
+		return nil, err
+	}
+	type scoped struct {
+		ID      string
+		Project *string
+	}
+	entries, err := pgx.CollectRows(rows, pgx.RowToStructByPos[scoped])
+	if err != nil {
+		return nil, err
+	}
+	return maps.Collect(func(yield func(string, *string) bool) {
+		for _, entry := range entries {
+			if !yield(entry.ID, entry.Project) {
+				return
+			}
+		}
+	}), nil
+}
+
 // Deletion is deliberately separate from disable: it removes an unused draft,
 // while published revisions and retained evidence remain addressable.
 func (s *Server) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

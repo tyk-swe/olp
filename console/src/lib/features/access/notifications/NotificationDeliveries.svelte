@@ -1,14 +1,26 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import {
+    cursorPaginationProps,
+    emptyCursorHistory
+  } from '#lib/listing/pagination.js';
   import { notificationEvents } from './ruleDraft';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listNotificationDeliveries } from './api';
+  import { listNotificationDeliveryPage } from './api';
   import { notificationKeys } from './notificationKeys';
   import { formatDate } from '#lib/format.js';
-  const deliveries = createQuery(() => ({
-    queryKey: notificationKeys.deliveries(),
-    queryFn: ({ signal }) => listNotificationDeliveries(undefined, signal)
-  }));
+  const pagination = $state(emptyCursorHistory());
+  const deliveries = createQuery(() => {
+    const cursor = pagination.cursor;
+    return {
+      queryKey: notificationKeys.deliveries(cursor),
+      queryFn: ({ signal }) => listNotificationDeliveryPage(cursor, signal)
+    };
+  });
+  const nextCursor = $derived(
+    deliveries.isSuccess ? deliveries.data.nextCursor : null
+  );
   function amount(value: string | null, currency: string | null) {
     if (value == null) return '—';
     return currency ? `${value} ${currency}` : value;
@@ -26,8 +38,10 @@
       onclick={() => deliveries.refetch()}>Retry</button
     ></span
   >
-{:else if !(deliveries.data ?? []).length}<p class="section-help">
-    No deliveries recorded yet.
+{:else if !deliveries.data.items.length}<p class="section-help">
+    {pagination.history.length
+      ? 'No deliveries on this page.'
+      : 'No deliveries recorded yet.'}
   </p>
 {:else}
   <ScrollTable label="Notification deliveries">
@@ -44,7 +58,7 @@
         ></thead
       >
       <tbody>
-        {#each deliveries.data ?? [] as delivery (delivery.id)}
+        {#each deliveries.data.items as delivery (delivery.id)}
           <tr
             ><td>{delivery.rule_name}</td><td
               >{notificationEvents[delivery.event]
@@ -83,4 +97,11 @@
       </tbody>
     </table>
   </ScrollTable>
+{/if}
+
+{#if pagination.history.length || nextCursor}
+  <CursorPagination
+    {...cursorPaginationProps(pagination, nextCursor)}
+    label="Notification delivery pages"
+  />
 {/if}

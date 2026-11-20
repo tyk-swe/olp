@@ -118,6 +118,21 @@ func TestModelProbeRefusesAHostThatResolvesToABlockedAddress(t *testing.T) {
 	}
 }
 
+func TestCompatibleModelDiscoveryPreservesExactIDs(t *testing.T) {
+	t.Parallel()
+	upstream := httptest.NewServer(answer(http.StatusOK, `{"data":[{"id":"chat-local"},{"id":"models/chat-local"},{"id":"models/chat-local"}]}`))
+	t.Cleanup(upstream.Close)
+	connection := upstreamConnection(t, connectors.KindOpenAICompatible, upstream.URL)
+	models, err := prober(loopback).ListModelFacts(t.Context(), connection)
+	if err != nil {
+		t.Fatal(Classify(err))
+	}
+	want := []listedModel{{Name: "chat-local", Display: "chat-local"}, {Name: "models/chat-local", Display: "models/chat-local"}}
+	if got := listedModels(models); !slices.Equal(got, want) {
+		t.Fatalf("listed %+v, want %+v", got, want)
+	}
+}
+
 func TestModelDiscoveryFollowsPagesToTheEnd(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {

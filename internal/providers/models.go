@@ -124,14 +124,8 @@ func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record
 		return nil, probe.Target{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := readProvider(r.Context(), tx, id)
+	current, err := readProbeProvider(r, p, tx, id)
 	if err != nil {
-		return nil, probe.Target{}, err
-	}
-	if err = p.Project(current.ProjectID, authz.Change); err != nil {
-		return nil, probe.Target{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
 		return nil, probe.Target{}, err
 	}
 	credential, err := s.credentialFor(r.Context(), tx, current)
@@ -147,6 +141,17 @@ func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record
 		return nil, probe.Target{}, err
 	}
 	return current, current.target(credential, models...), nil
+}
+
+func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, id string) (*record, error) {
+	current, err := readProvider(r.Context(), q, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
+		return nil, err
+	}
+	return current, httpkit.Match(r, current.ETag)
 }
 
 func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -334,7 +339,7 @@ func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	current, target, err := s.prepare(r, p, id)
+	current, err := readProbeProvider(r, p, a.Pool, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -349,18 +354,24 @@ func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, err
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	selected := selectProbeSlot(slots, current.Connection.Document())
-	if selected == nil {
-		return httpkit.Reply{}, httpkit.Fail(422, "credential_required", "Enable a credential slot before certifying.")
+	cfg := current.Connection.Document()
+	slot := selectProbeSlot(slots, cfg, &m)
+	if slot == nil {
+		return httpkit.Reply{}, httpkit.Fail(422, "credential_required", "Enable the model and configure an enabled credential slot that allows it before certifying.")
 	}
-	defaultSlot := *selected
+	credential, err := s.probeCredential(r.Context(), a.Pool, cfg, *slot)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	defer clear(credential)
+	target := current.target(credential)
 
 	at := time.Now().UTC()
 	// The route deadline gives each capability a probe budget; the last one
 	// stays reserved so the results are always recorded.
 	probeCtx, cancel := probe.Budget(r.Context())
 	defer cancel()
-	fingerprint := defaultSlot.credentialFingerprint(current.Connection.Document())
+	fingerprint := slot.credentialFingerprint(cfg)
 	capabilities := make([]storedCapability, len(m.Capabilities))
 	results := make([]certifyResult, len(m.Capabilities))
 	for i, c := range m.Capabilities {
@@ -375,7 +386,7 @@ func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, err
 		status = "partial"
 	}
 	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
-		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), defaultSlot, certified, at)
+		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), *slot, certified, at)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -383,7 +394,7 @@ func (s *Server) certify(r *http.Request, p authz.Principal) (httpkit.Reply, err
 		return httpkit.Detail(certifyReply{ProviderID: id, ModelID: modelID, Status: status, CheckedAt: at, CertifiedCount: certified, AttemptedCount: len(results), Results: results}, etag), event, nil
 	})
 	if err == nil && certified == len(m.Capabilities) {
-		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
+		s.clearValidatedCooldowns(r.Context(), id, *slot)
 	}
 	return reply, err
 }
@@ -495,7 +506,7 @@ func countCertified(results []certifyResult) int {
 	return count
 }
 
-func (s *Server) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
+func (s *Server) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, slot slotRow, certified int, at time.Time) (string, error) {
 	encoded, err := json.Marshal(model.Capabilities)
 	if err != nil {
 		return "", err
@@ -507,9 +518,9 @@ func (s *Server) storeCertification(ctx context.Context, tx pgx.Tx, current *rec
 	if err != nil {
 		return "", err
 	}
-	if validatedAt := defaultSlot.certificationTime(current.Connection.Document(), models); validatedAt != nil {
-		fingerprint := defaultSlot.validationFingerprint(current.Connection.Document(), models)
-		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", defaultSlot.ID, validatedAt, fingerprint); err != nil {
+	if validatedAt := slot.certificationTime(current.Connection.Document(), models); validatedAt != nil {
+		fingerprint := slot.validationFingerprint(current.Connection.Document(), models)
+		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slot.ID, validatedAt, fingerprint); err != nil {
 			return "", err
 		}
 	}
@@ -530,14 +541,19 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	slot := selectProbeSlot(slots, p.Connection.Document())
+	cfg := p.Connection.Document()
+	slot := selectProbeSlot(slots, cfg, nil)
 	if slot == nil {
 		return nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
-	if !p.Connection.Document().CredentialRequired() {
+	return s.probeCredential(ctx, tx, cfg, *slot)
+}
+
+func (s *Server) probeCredential(ctx context.Context, q database.Queryer, cfg connection.Configuration, slot slotRow) ([]byte, error) {
+	if !cfg.CredentialRequired() {
 		return nil, nil
 	}
-	if slot.CredentialID == nil && p.Connection.Document().Grant() {
+	if slot.CredentialID == nil && cfg.Grant() {
 		return nil, httpkit.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
 	}
 	if slot.CredentialID == nil {
@@ -549,13 +565,13 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if slot.CredentialLapsed {
 		return nil, httpkit.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
 	}
-	if err := slot.credentialFits(p.Connection.Document()); err != nil {
+	if err := slot.credentialFits(cfg); err != nil {
 		return nil, err
 	}
-	return s.readCredential(ctx, tx, *slot.CredentialID)
+	return s.readCredential(ctx, q, *slot.CredentialID)
 }
 
-func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {
+func selectProbeSlot(slots []slotRow, cfg connection.Configuration, model *storedModel) *slotRow {
 	var best *slotRow
 	usable := func(s *slotRow) bool {
 		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked && !s.CredentialLapsed
@@ -563,6 +579,9 @@ func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {
 	for i := range slots {
 		row := &slots[i]
 		if !row.Enabled {
+			continue
+		}
+		if model != nil && (!row.allowsModel(*model) || !usable(row) || row.credentialFits(cfg) != nil) {
 			continue
 		}
 		if best == nil || usable(row) && !usable(best) || usable(row) == usable(best) && (row.Default && !best.Default || row.Default == best.Default && (row.Priority < best.Priority || row.Priority == best.Priority && row.Position < best.Position)) {

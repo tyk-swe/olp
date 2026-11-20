@@ -28,12 +28,11 @@ func Planner(desired Desired, names promotion.Names) promotion.Planner {
 			_, ok := state.directory.ID(name)
 			return ok || names.Project(name)
 		}
-		templates := promotion.Index(state.Templates, func(t Template) string { return t.Name })
 		routeItems, err := promotion.TryMap(desired.Routes, func(r Route) ([]promotion.Item, error) { return planRoute(r, state, known) })
 		if err != nil {
 			return nil, err
 		}
-		templateItems, err := promotion.TryMap(desired.Templates, func(t Template) ([]promotion.Item, error) { return planTemplate(t, templates, known) })
+		templateItems, err := planTemplates(ctx, q, desired.Templates, state, known)
 		if err != nil {
 			return nil, err
 		}

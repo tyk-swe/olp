@@ -337,7 +337,7 @@
             <ProjectScopeField
               id="rule-project"
               bind:value={draft.projectId}
-              unassigned={installationWide}
+              unassigned={installationWide && draft.event !== 'spend.spike'}
             />
           {/if}
           {#if draft.event === 'budget.threshold' || draft.event === 'key.expiring'}
@@ -447,9 +447,11 @@
           {#if draft.event === 'budget.threshold'}A delivery is sent when a
             subject's accrued spend crosses the threshold within the window.{:else if watchesKey}Sent
             once when the key expires or reaches its rotation date within the
-            lead time.{:else if genericRule}Metadata-only trigger and recovery
-            deliveries; cooldown repeats share the incident key.{:else}A grant
-            lapses when its provider plugin can no longer refresh it.{/if}
+            lead time.{:else if draft.event === 'spend.spike'}Sent once when a
+            complete UTC day of project spend jumps above its recent baseline by
+            both thresholds.{:else if genericRule}Metadata-only trigger and
+            recovery deliveries; cooldown repeats share the incident key.{:else}A
+            grant lapses when its provider plugin can no longer refresh it.{/if}
         </p>
       </fieldset>
     </form>

@@ -4869,6 +4869,7 @@ const (
 	NotificationEventReportSpend               NotificationEvent = "report.spend"
 	NotificationEventRouteLatency              NotificationEvent = "route.latency"
 	NotificationEventRuntimeInstallFailed      NotificationEvent = "runtime.install_failed"
+	NotificationEventSpendSpike                NotificationEvent = "spend.spike"
 	NotificationEventWorkerStale               NotificationEvent = "worker.stale"
 )
 
@@ -4898,6 +4899,8 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventRouteLatency:
 		return true
 	case NotificationEventRuntimeInstallFailed:
+		return true
+	case NotificationEventSpendSpike:
 		return true
 	case NotificationEventWorkerStale:
 		return true
@@ -10807,7 +10810,7 @@ type CreateNotificationDestinationRequest_Secret struct {
 // CreateNotificationDestinationRequestType Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
 type CreateNotificationDestinationRequestType string
 
-// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, and spend.spike requires a project.
 type CreateNotificationRuleRequest struct {
 	// Configuration Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.
 	Configuration *map[string]interface{} `json:"configuration,omitempty"`
@@ -10816,7 +10819,7 @@ type CreateNotificationRuleRequest struct {
 	// Enabled Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent `json:"event"`
 	Name  string            `json:"name"`
 
@@ -12634,7 +12637,7 @@ type NotificationDelivery struct {
 	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
 	DueAt               nullable.Nullable[time.Time]          `json:"due_at,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event         NotificationEvent            `json:"event"`
 	Id            openapi_types.UUID           `json:"id"`
 	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
@@ -12709,7 +12712,7 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 type NotificationEvent string
 
 // NotificationRule A notification rule subscribes a destination to an event. budget.threshold rules name a subject, window and threshold; key.expiring names an api_key subject and takes lead_time_seconds; generic events carry configuration only. Generic rules are capped at 1000 per installation.
@@ -12724,7 +12727,7 @@ type NotificationRule struct {
 	Enabled         bool                   `json:"enabled"`
 	Etag            openapi_types.UUID     `json:"etag"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent  `json:"event"`
 	Id    openapi_types.UUID `json:"id"`
 	Name  string             `json:"name"`

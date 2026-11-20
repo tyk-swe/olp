@@ -47,6 +47,13 @@ type spendReportConfig struct {
 	Period reportPeriod `json:"period"`
 }
 
+type spendSpikeConfig struct {
+	BaselineDays       int             `json:"baseline_days"`
+	MinimumHistoryDays int             `json:"minimum_history_days"`
+	IncreasePercent    decimal.Decimal `json:"increase_percent"`
+	MinimumIncrease    decimal.Decimal `json:"minimum_increase"`
+}
+
 type band struct {
 	Trigger  decimal.Decimal `json:"threshold"`
 	Recovery decimal.Decimal `json:"recovery_threshold"`
@@ -88,7 +95,10 @@ var (
 	cooldownField = intField{"cooldown_seconds", 900, 60, 86400}
 	leadTimeField = intField{"lead_time_seconds", 86400, 60, 2678400}
 	leadDaysField = intField{"lead_days", 30, 1, 366}
-	measuredKeys  = []string{windowField.key, "minimum_samples", "threshold", "recovery_threshold", cooldownField.key}
+
+	baselineDaysField   = intField{"baseline_days", 14, 7, 90}
+	minimumHistoryField = intField{"minimum_history_days", 7, 3, 90}
+	measuredKeys        = []string{windowField.key, "minimum_samples", "threshold", "recovery_threshold", cooldownField.key}
 )
 
 func (f intField) read(fields map[string]json.RawMessage) (int, error) {
@@ -174,6 +184,34 @@ func resolveSpendReport(raw json.RawMessage) (spendReportConfig, error) {
 	}
 	period, err := choice(fields, "period", dailyReport, weeklyReport, monthlyReport)
 	return spendReportConfig{Period: period}, err
+}
+
+func resolveSpendSpike(raw json.RawMessage) (spendSpikeConfig, error) {
+	fields, err := objectFields(raw, baselineDaysField.key, minimumHistoryField.key, "increase_percent", "minimum_increase")
+	if err != nil {
+		return spendSpikeConfig{}, err
+	}
+	baseline, baselineErr := baselineDaysField.read(fields)
+	minimum, minimumErr := minimumHistoryField.read(fields)
+	percent, percentErr := spikeAmount(fields, "increase_percent", "50", decimal.NewFromInt(1000000))
+	increase, increaseErr := spikeAmount(fields, "minimum_increase", "10", decimal.NewFromInt(1000000000000))
+	err = errors.Join(baselineErr, minimumErr, percentErr, increaseErr)
+	if err == nil && minimum > baseline {
+		err = errors.New("configuration.minimum_history_days must not exceed configuration.baseline_days")
+	}
+	return spendSpikeConfig{BaselineDays: baseline, MinimumHistoryDays: minimum, IncreasePercent: percent, MinimumIncrease: increase}, err
+}
+
+func spikeAmount(fields map[string]json.RawMessage, key, fallback string, ceiling decimal.Decimal) (decimal.Decimal, error) {
+	text, err := stringField(fields, key, fallback)
+	if err != nil {
+		return decimal.Decimal{}, err
+	}
+	value, err := boundedDecimal(text, 32, -12)
+	if err != nil || !value.IsPositive() || value.GreaterThan(ceiling) {
+		return decimal.Decimal{}, fmt.Errorf("configuration.%s must be a positive decimal string up to %s", key, ceiling)
+	}
+	return value, nil
 }
 
 func resolveLatency(raw json.RawMessage) (latencyConfig, error) {

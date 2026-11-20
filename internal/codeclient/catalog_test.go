@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
@@ -120,15 +121,15 @@ func TestOpenCodePaidConfigurationsReachAdvertisedOperations(t *testing.T) {
 			if sdk := document.Provider[provider].Models[model].Provider.NPM; sdk != test.sdk {
 				t.Fatalf("model SDK %q, want %q", sdk, test.sdk)
 			}
-			base, err := url.Parse(document.Provider[provider].Options.BaseURL)
-			if err != nil {
-				t.Fatal(err)
-			}
 			capability, _ := paidCapability(protocol, true)
 			// SDK endpoint composition was captured with @ai-sdk/anthropic 4.0.102 on 2026-11-12.
 			// https://www.npmjs.com/package/@ai-sdk/anthropic/v/4.0.102
 			operation := strings.TrimPrefix(capability.Path, "v1/")
-			requestPath := strings.TrimRight(base.Path, "/") + "/" + operation
+			requestURL, err := url.Parse(strings.TrimRight(document.Provider[provider].Options.BaseURL, "/") + "/" + operation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestPath := requestURL.Path
 			expectedPath := "/prefix" + route.BasePath() + "/" + capability.Path
 			if requestPath != expectedPath {
 				t.Fatalf("generated SDK request path %q, advertised gateway path %q", requestPath, expectedPath)
@@ -136,6 +137,27 @@ func TestOpenCodePaidConfigurationsReachAdvertisedOperations(t *testing.T) {
 			endpoint, ok := codeadapter.ForPath(strings.TrimPrefix(requestPath, "/prefix"+route.BasePath()+"/"))
 			if !ok || endpoint.Protocol != protocol {
 				t.Fatalf("generated request is not recognized for protocol %q", protocol)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsGatewayURLQueries(t *testing.T) {
+	t.Parallel()
+	route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "paid", Models: []string{"paid-model"}, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-model": {}}}
+	offers := Offers{{PaidProtocol: codemode.ProtocolMessages, PaidStreaming: true, Models: []string{"paid-model"}}}
+	for _, test := range []struct {
+		name string
+		url  string
+	}{
+		{"empty query", "https://gateway.example.test/prefix?"},
+		{"nonempty query", "https://gateway.example.test/prefix?debug=true"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Generate(route, offers, Request{GatewayURL: test.url, Client: codeadapter.ClientOpenCode, Model: "paid-model"})
+			problem, ok := httpkit.ProblemFor(err)
+			if !ok || problem.Code != "validation_failed" || problem.Field != "gateway_url" {
+				t.Fatalf("Generate with gateway URL %q returned %v, want gateway_url validation error", test.url, err)
 			}
 		})
 	}
