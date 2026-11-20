@@ -166,11 +166,9 @@ func (runner Runner) codexFragment(ctx context.Context, opts options) (codexPubl
 }
 
 func (doc codexDocument) matchesPublication(pub codexPublication) bool {
-	headers, _ := doc.provider["http_headers"].(map[string]any)
-	_, websockets := doc.provider["supports_websockets"].(bool)
+	provider := doc.provider
 	return doc.journal.end == 0 && doc.model == pub.Model && doc.selected == "olp" &&
-		doc.field(codexOLPProvider) != "" && doc.checkProvider() == nil &&
-		doc.provider["base_url"] == pub.Endpoint && doc.provider["env_key"] == "OLP_API_KEY" &&
-		doc.provider["wire_api"] == "responses" && doc.provider["requires_openai_auth"] == false &&
-		websockets && headers["X-OLP-Code-Model"] == pub.Model
+		doc.providerErr == nil && provider.endpoint == pub.Endpoint && provider.envKey == "OLP_API_KEY" &&
+		provider.wireAPI == "responses" && provider.explicitlyNoOpenAIAuth &&
+		provider.hasWebsockets && provider.modelHeader == pub.Model
 }

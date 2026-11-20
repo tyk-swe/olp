@@ -46,8 +46,8 @@ func (doc codexDocument) setupState() (*codexSetupState, error) {
 			return nil, errors.New("unexpected previous settings in OLP setup record")
 		}
 	}
-	if err := prior.checkProvider(); err != nil {
-		return nil, err
+	if prior.providerErr != nil {
+		return nil, prior.providerErr
 	}
 	return &state, nil
 }
@@ -74,8 +74,8 @@ func (doc codexDocument) planSetup(fragment codexDocument, pub codexPublication,
 		if err := state.checkDrift(doc); err != nil {
 			return nil, err
 		}
-	} else if err := doc.checkProvider(); err != nil {
-		return nil, err
+	} else if doc.providerErr != nil {
+		return nil, doc.providerErr
 	}
 	next := codexSetupState{Version: 1, Publication: pub, Created: !exists}
 	if state != nil {

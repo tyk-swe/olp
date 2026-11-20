@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -23,13 +22,19 @@ type codexSpan struct {
 }
 
 type codexDocument struct {
-	text     []byte
-	fields   [len(codexKeys)]codexSpan
-	provider map[string]any
-	values   [2]codexSpan
-	journal  codexSpan
-	model    string
-	selected string
+	text        []byte
+	fields      [len(codexKeys)]codexSpan
+	provider    codexProvider
+	providerErr error
+	values      [2]codexSpan
+	journal     codexSpan
+	model       string
+	selected    string
+}
+
+type codexProvider struct {
+	endpoint, envKey, wireAPI, modelHeader string
+	explicitlyNoOpenAIAuth, hasWebsockets  bool
 }
 
 func (doc codexDocument) field(index int) string {
@@ -109,7 +114,7 @@ func parseCodexTOML(text []byte) (codexDocument, error) {
 			if !ok || doc.field(codexOLPProvider) == "" {
 				return codexDocument{}, errors.New("unsupported Codex config shape for model_providers.olp; expected a dedicated table")
 			}
-			doc.provider = settings
+			doc.provider, doc.providerErr = decodeCodexProvider(settings)
 		}
 	}
 	doc.model, _ = decoded["model"].(string)
@@ -141,9 +146,8 @@ func codexLineEnd(text []byte, offset int) int {
 	return end
 }
 
-func (doc codexDocument) checkProvider() error {
-	for _, key := range slices.Sorted(maps.Keys(doc.provider)) {
-		value := doc.provider[key]
+func decodeCodexProvider(settings map[string]any) (codexProvider, error) {
+	for key, value := range settings {
 		switch key {
 		case "name", "env_key", "wire_api":
 			if _, ok := value.(string); ok {
@@ -164,9 +168,19 @@ func (doc codexDocument) checkProvider() error {
 				}
 			}
 		}
-		return errors.New("unsupported settings in model_providers.olp; move the custom provider to another name before applying")
+		return codexProvider{}, errors.New("unsupported settings in model_providers.olp; move the custom provider to another name before applying")
 	}
-	return nil
+	endpoint, _ := settings["base_url"].(string)
+	envKey, _ := settings["env_key"].(string)
+	wireAPI, _ := settings["wire_api"].(string)
+	headers, _ := settings["http_headers"].(map[string]any)
+	modelHeader, _ := headers["X-OLP-Code-Model"].(string)
+	openAIAuth, hasOpenAIAuth := settings["requires_openai_auth"].(bool)
+	_, hasWebsockets := settings["supports_websockets"].(bool)
+	return codexProvider{
+		endpoint: endpoint, envKey: envKey, wireAPI: wireAPI, modelHeader: modelHeader,
+		explicitlyNoOpenAIAuth: hasOpenAIAuth && !openAIAuth, hasWebsockets: hasWebsockets,
+	}, nil
 }
 
 func safeCodexEndpoint(endpoint string) bool {
