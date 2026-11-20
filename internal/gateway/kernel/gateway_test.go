@@ -1565,6 +1565,46 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	}
 }
 
+func TestCompactionRejectsUnavailableProviderUsage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, usage string
+	}{
+		{name: "missing"},
+		{name: "null", usage: `,"usage":null`},
+		{name: "malformed", usage: `,"usage":{"input_tokens":-1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{}, Dependencies{Resources: resources.New(nil)})
+			h.reissue(func(provider *routing.Provider) { provider.Kind = "openai" }, nil)
+			h.rt.inputs = &routinginputs.Inputs{RefreshedAt: time.Now()}
+			authority := h.rt.keys[fullKey]
+			authority.Policy.AllowProviderState = true
+			h.rt.keys[fullKey] = authority
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{"object":"response.compaction","id":"cmp-native","output":[{"type":"compaction","encrypted_content":"abc"}]`+tc.usage+`}`)
+			})
+			response := h.do(t.Context(), http.MethodPost, "/v1/responses/compact", fullKey, []byte(`{"input":"compact this"}`), map[string]string{StateRouteHeader: routeSlug})
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := h.sink.last(t)
+			if response.StatusCode != http.StatusBadGateway || env.ErrorClass != "provider_protocol_error" || env.Outcome != "failure" {
+				t.Fatalf("compaction = %d %s, outcome = %s (%s)", response.StatusCode, body, env.Outcome, env.ErrorClass)
+			}
+			if len(env.Attempts) != 1 {
+				t.Fatalf("attempts = %+v", env.Attempts)
+			}
+			attempt := env.Attempts[0]
+			if attempt.Class != ClassProtocol || attempt.Committed || attempt.UsageObserved || attempt.UsageComplete || !attempt.BillingUncertain {
+				t.Fatalf("compaction accounting = %+v", attempt)
+			}
+		})
+	}
+}
+
 func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 	t.Parallel()
 	pool, err := pgxpool.New(t.Context(), "postgres://unused:unused@localhost/unused")
