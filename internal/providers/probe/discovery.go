@@ -36,8 +36,8 @@ type DiscoveredModel struct {
 // continues while a page holds the next cursor and, when it names a more
 // field, while that field reports another page.
 type modelListing struct {
-	path, models, id, display string
-	cursor, more, parameter   string
+	path, models, id, display, trimIDPrefix string
+	cursor, more, parameter                 string
 }
 
 func listingFor(t Target) (modelListing, bool, error) {
@@ -73,6 +73,7 @@ func listingFor(t Target) (modelListing, bool, error) {
 	case connectors.KindGemini:
 		listing.models, listing.id, listing.display = "models", "name", "displayName"
 		listing.cursor, listing.parameter = "nextPageToken", "pageToken"
+		listing.trimIDPrefix = "models/"
 	case connectors.KindWatsonx:
 		// The chat-capable foundation models, in one page of the most the
 		// listing returns.
@@ -155,10 +156,10 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 			return nil, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response is missing its model array."}
 		}
 		for _, item := range items {
-			var name, display string
-			_ = json.Unmarshal(item[listing.id], &name)
+			var id, display string
+			_ = json.Unmarshal(item[listing.id], &id)
 			_ = json.Unmarshal(item[listing.display], &display)
-			name = strings.TrimPrefix(name, "models/")
+			name := strings.TrimPrefix(id, listing.trimIDPrefix)
 			if connection.ValidModelName("model", name) != nil || seen[name] {
 				continue
 			}
