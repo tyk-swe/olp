@@ -46,6 +46,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller
 	if planned["digest"] != exported["digest"] {
 		t.Errorf("plan digest %v differs from export digest %v", planned["digest"], exported["digest"])
 	}
+	testPromotionRejectsUnusableTemplateProviders(t, s, operator, document)
 
 	s.Want(operator, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusOK)
 
@@ -87,6 +88,36 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller
 		"scope": "installation", "scope_id": "installation", "policy_revision_id": installed["revision_id"], "order": 1,
 	}, harness.Idempotent(), http.StatusCreated)
 	testPromotionEmptyAttributionPolicyConverges(t, s, operator)
+}
+
+func testPromotionRejectsUnusableTemplateProviders(t *testing.T, s *service, operator *harness.Caller, exported map[string]any) {
+	t.Helper()
+	template := items(exported["templates"])[0]
+	stale := maps.Clone(template)
+	stale["name"] = "stale-provider"
+	stale["provider_selector"] = "provider:" + uuid.NewString()
+	wrongProject := maps.Clone(template)
+	wrongProject["name"] = "wrong-provider-project"
+	wrongProject["project"] = "Promotion-Second"
+	document := maps.Clone(exported)
+	document["templates"] = []map[string]any{stale, wrongProject}
+	request := map[string]any{"document": document}
+	want := []map[string]any{
+		{"kind": "route_template", "key": "stale-provider", "action": "blocker", "detail": "provider_unknown"},
+		{"kind": "route_template", "key": "wrong-provider-project", "action": "blocker", "detail": "provider_project_mismatch"},
+	}
+	plan := s.Want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
+	if got := items(plan["blockers"]); !reflect.DeepEqual(got, want) {
+		t.Errorf("template plan blockers = %v, want %v", got, want)
+	}
+	refused := s.Want(operator, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusConflict)
+	if got := items(refused["blockers"]); !reflect.DeepEqual(got, want) {
+		t.Errorf("template apply blockers = %v, want %v", got, want)
+	}
+	after := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)["document"].(map[string]any)
+	if !reflect.DeepEqual(after["templates"], exported["templates"]) {
+		t.Fatalf("refused promotion changed the templates: %v", after["templates"])
+	}
 }
 
 func installationPolicyDocument(exported map[string]any) map[string]any {
