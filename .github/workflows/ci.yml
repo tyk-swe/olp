@@ -28,6 +28,7 @@ jobs:
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       scripts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.scripts == 'true' }}
+      restore_runbook: ${{ steps.filter.outputs.restore_runbook }}
       workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
@@ -126,6 +127,8 @@ jobs:
               - 'docs/**'
               - '**/*.md'
               - '.github/workflows/ci.yml'
+            restore_runbook:
+              - 'docs/operate/operations.md'
             workflows:
               - '.github/**'
   check-go:
@@ -226,7 +229,7 @@ jobs:
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-e2e-api:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.restore_runbook == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
