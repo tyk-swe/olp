@@ -628,6 +628,34 @@ Windows or macOS, or live subscription qualification on any platform.
 
 ### Codex
 
+Use the OLP CLI to set up one published route in the user configuration
+without merging TOML by hand. Set `OLP_MANAGEMENT_URL` and
+`OLP_MANAGEMENT_TOKEN_FILE` as for other management commands. Use the route
+ID from the console and pass the public gateway URL:
+
+```sh
+olp code-setup preview --route "$ROUTE_ID" --gateway-url "$GATEWAY_URL"
+olp code-setup apply --route "$ROUTE_ID" --gateway-url "$GATEWAY_URL" --revision "$REVISION_ID"
+olp code-setup status
+olp code-setup detach
+```
+
+Preview shows the destination, endpoint, model, and published revision without
+writing. Copy the revision ID from preview to make apply refuse a newer
+publication. Add `--model MODEL` to both commands to select a model rather than
+using the route's default. Apply only manages the top-level `model` and
+`model_provider` settings and the `[model_providers.olp]` table. It saves the
+previous settings in a comment in the same file. Keep that comment for
+detach. Apply and detach leave other settings alone. MCP servers and tool
+permissions are never changed by the CLI. Merge optional MCP configuration
+separately if you need it.
+
+Status and detach work offline. If a managed setting was edited, both name the
+conflicting setting and detach leaves the entire file untouched. Restore the
+installed setting before retrying detach, or remove the setup comment and manage
+the file by hand. Unsupported shapes, including inline OLP provider tables and
+custom keys in the OLP provider, are refused without writing.
+
 The controlled suite resolves the unmodified official Codex CLI from npm **latest** on each run. This
 example demonstrates its tested provider configuration, not a real-account
 qualification or a substitute for OLP's generated configuration:
