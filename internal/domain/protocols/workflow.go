@@ -3,7 +3,9 @@ package protocols
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -65,16 +67,16 @@ func ProjectChatWorkflowUsage(body []byte, usage *wire.Usage, maxBytes int) ([]b
 	if !present(fields["usage"]) {
 		return body, nil
 	}
-	return replaceChatWorkflowUsage(fields, chatWorkflowUsageJSON(usage), maxBytes)
+	return replaceChatWorkflowUsage(fields, chatWorkflowUsageFields(usage), maxBytes)
 }
 
 func ProjectChatWorkflowStreamUsage(frames []byte, usage *wire.Usage, maxEvent, maxBytes int) ([]byte, error) {
-	replacement := chatWorkflowUsageJSON(usage)
+	replacement := chatWorkflowUsageFields(usage)
 	decoder := sse.NewRawDecoder(bytes.NewReader(frames), maxEvent)
 	var out bytes.Buffer
 	for {
 		frame, err := decoder.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return out.Bytes(), nil
 		}
 		if err != nil {
@@ -91,7 +93,7 @@ func ProjectChatWorkflowStreamUsage(frames []byte, usage *wire.Usage, maxEvent, 
 	}
 }
 
-func projectChatWorkflowFrame(frame sse.RawFrame, usage json.RawMessage, maxEvent int) ([]byte, error) {
+func projectChatWorkflowFrame(frame sse.RawFrame, usage Object, maxEvent int) ([]byte, error) {
 	if !frame.HasData || bytes.Equal(frame.Data, []byte("[DONE]")) {
 		return frame.Bytes, nil
 	}
@@ -102,7 +104,7 @@ func projectChatWorkflowFrame(frame sse.RawFrame, usage json.RawMessage, maxEven
 	if !present(fields["usage"]) {
 		return frame.Bytes, nil
 	}
-	if !present(usage) && len(arr(fields["choices"])) == 0 {
+	if usage == nil && len(arr(fields["choices"])) == 0 {
 		return nil, nil
 	}
 	body, err := replaceChatWorkflowUsage(fields, usage, maxEvent)
@@ -116,20 +118,53 @@ func projectChatWorkflowFrame(frame sse.RawFrame, usage json.RawMessage, maxEven
 	return projected, err
 }
 
-func replaceChatWorkflowUsage(fields Object, usage json.RawMessage, maxBytes int) ([]byte, error) {
-	fields["usage"] = usage
-	body, err := json.Marshal(fields)
+func replaceChatWorkflowUsage(fields, usage Object, maxBytes int) ([]byte, error) {
+	replacement, err := mergeChatWorkflowUsage(fields["usage"], usage)
+	if err != nil {
+		return nil, err
+	}
+	updated := maps.Clone(fields)
+	updated["usage"] = raw(replacement)
+	body, err := json.Marshal(updated)
 	if len(body) > maxBytes {
 		return nil, wire.ErrAggregateTooLarge
 	}
 	return body, err
 }
 
-func chatWorkflowUsageJSON(usage *wire.Usage) json.RawMessage {
+func mergeChatWorkflowUsage(final json.RawMessage, usage Object) (Object, error) {
 	if usage == nil {
-		return json.RawMessage("null")
+		return nil, nil
 	}
-	return raw(chatUsage(usage))
+	fields, err := object(final)
+	if err != nil {
+		return nil, err
+	}
+	overlaid := maps.Clone(usage)
+	for _, key := range []string{"prompt_tokens_details", "completion_tokens_details"} {
+		if !present(fields[key]) || !present(usage[key]) {
+			continue
+		}
+		details, err := object(fields[key])
+		if err != nil {
+			return nil, err
+		}
+		counters, err := object(usage[key])
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(details, counters)
+		overlaid[key] = raw(details)
+	}
+	maps.Copy(fields, overlaid)
+	return fields, nil
+}
+
+func chatWorkflowUsageFields(usage *wire.Usage) Object {
+	if usage == nil {
+		return nil
+	}
+	return chatUsage(usage)
 }
 
 func WorkflowSingleCandidate(body []byte) bool {

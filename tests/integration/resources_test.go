@@ -1718,7 +1718,8 @@ type chatWorkflowUsage struct {
 	CompletionTokens int64 `json:"completion_tokens"`
 	TotalTokens      int64 `json:"total_tokens"`
 	CompletionDetail struct {
-		ReasoningTokens int64 `json:"reasoning_tokens"`
+		ReasoningTokens          int64 `json:"reasoning_tokens"`
+		AcceptedPredictionTokens int64 `json:"accepted_prediction_tokens"`
 	} `json:"completion_tokens_details"`
 }
 
@@ -1760,7 +1761,7 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 			_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"answer\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8,"completion_tokens_details":{"reasoning_tokens":1}}}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"It is forty-two."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13,"completion_tokens_details":{"reasoning_tokens":2}}}`)
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"`+model+`","choices":[{"index":0,"message":{"role":"assistant","content":"It is forty-two."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13,"completion_tokens_details":{"reasoning_tokens":2,"accepted_prediction_tokens":1}}}`)
 	})
 	price := rates.NewRoutingPrice(rates.RoutingPrice{
 		Price: rates.Price{ProviderKind: "openai_compatible", Model: model, Operation: "generation",
@@ -1814,6 +1815,7 @@ func TestGatewayToolLoopRunsTheRouteToolFeedsItsResultBackAndSettlesEveryModelTu
 	const inputTokens, outputTokens = 5 + 9, 3 + 4
 	want := chatWorkflowUsage{PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
 	want.CompletionDetail.ReasoningTokens = 1 + 2
+	want.CompletionDetail.AcceptedPredictionTokens = 1
 	if reply.Usage != want {
 		t.Errorf("response usage = %+v, want %+v for both model turns", reply.Usage, want)
 	}
