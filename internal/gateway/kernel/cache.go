@@ -100,13 +100,8 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 			return nil
 		}
 	}
-	if cacheRetentionRequested(doc) {
+	if cacheRetentionRequested(doc) || cacheNonSingleCandidateRequested(doc) {
 		return nil
-	}
-	for _, field := range []string{"n", "candidate_count"} {
-		if v, ok := doc.Root().Lookup(field); ok && v.Raw() != "1" {
-			return nil
-		}
 	}
 	// Retained Responses defaults to store=true. Require explicit stateless
 	// semantics even when the key is permitted to retain provider resources.
@@ -126,6 +121,15 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 func cacheRetentionRequested(doc oif.Document) bool {
 	for _, field := range []string{"store", "background"} {
 		if v, ok := doc.Root().Lookup(field); ok && v.Raw() != "false" && v.Kind() != oif.Null {
+			return true
+		}
+	}
+	return false
+}
+
+func cacheNonSingleCandidateRequested(doc oif.Document) bool {
+	for _, field := range []string{"/n", "/candidate_count", "/candidateCount", "/generationConfig/candidateCount"} {
+		if v, ok := doc.Lookup(field); ok && v.Raw() != "1" {
 			return true
 		}
 	}
