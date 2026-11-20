@@ -13,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -260,8 +260,25 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	return r, nil
 }
 
-func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.ListKinds(ctx, []string{kind}, apiKeyID, limit, afterID)
+type ListCursor struct {
+	ID        string
+	CreatedAt *time.Time
+}
+
+func (c ListCursor) localUUID(kinds []string) (uuid.UUID, error) {
+	if c.ID == "" {
+		return uuid.Nil, nil
+	}
+	id, err := parseLocal(c.ID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	for _, kind := range kinds {
+		if LocalID(kind, id) == c.ID {
+			return id, nil
+		}
+	}
+	return uuid.Nil, ErrNotFound
 }
 
 // ListKinds joins transformed and strict resource identities without changing
@@ -269,40 +286,32 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 // requested kinds; an unrelated local ID cannot move the page boundary.
 // Native upload intents without confirmed identities are not SDK file entries.
 func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.listKinds(ctx, kinds, apiKeyID, limit, afterID, false)
+	return s.ListKindsPage(ctx, kinds, apiKeyID, limit, ListCursor{ID: afterID}, false)
+}
+
+func (s *Store) ListKindsPage(ctx context.Context, kinds []string, apiKeyID string, limit int, cursor ListCursor, ascending bool) ([]*Resource, error) {
+	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, cursor, false, ascending)
 }
 
 // ListLifecycle keeps owner-scoped cursors usable when reconciliation deletes
 // the last row in the previous page. It never returns deleted resources.
 func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.listKinds(ctx, []string{kind}, apiKeyID, limit, afterID, true)
+	return s.ListLifecycleOrdered(ctx, kind, apiKeyID, limit, afterID, false)
 }
 
 // ListLifecycleOrdered optionally scopes rows and cursor membership to one route.
 func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool, route ...string) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, after, true, ascending, route...)
+	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, ListCursor{ID: after}, true, ascending, route...)
 }
 
-func (s *Store) listKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor bool) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, afterID, deletedCursor, false)
-}
-
-func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string, deletedCursor, ascending bool, route ...string) ([]*Resource, error) {
+func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, cursor ListCursor, deletedCursor, ascending bool, route ...string) ([]*Resource, error) {
 	var routeSlug string
 	if len(route) > 0 {
 		routeSlug = route[0]
 	}
-	var after uuid.UUID
-	if afterID != "" {
-		parsed, err := parseLocal(afterID)
-		valid := false
-		for _, kind := range kinds {
-			valid = valid || LocalID(kind, parsed) == afterID
-		}
-		if err != nil || !valid {
-			return nil, ErrNotFound
-		}
-		after = parsed
+	anchor, err := cursor.localUUID(kinds)
+	if err != nil {
+		return nil, err
 	}
 	comparison, direction := "<", "DESC"
 	if ascending {
@@ -313,13 +322,13 @@ func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID s
 		AND ($8='' OR route_slug=$8)
 		AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
 		 AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=r.id))
-		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(SELECT created_at,id FROM olp.provider_resources
+		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(COALESCE($9::timestamptz, (SELECT created_at FROM olp.provider_resources
 		 anchor WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())
 		 AND ($8='' OR route_slug=$8)
 		 AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
-		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id))))
+		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id)))), $4))
 		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(after), limit, deletedCursor, KindFile, routeSlug)
+		kinds, apiKeyID, StateDeleted, nilUUID(anchor), limit, deletedCursor, KindFile, routeSlug, cursor.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}
@@ -335,23 +344,19 @@ func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID s
 	return out, rows.Err()
 }
 
-func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, limit int, afterID string) ([]*Resource, error) {
-	var after uuid.UUID
-	if afterID != "" {
-		parsed, err := parseLocal(afterID)
-		if err != nil || LocalID(KindCloudBatch, parsed) != afterID {
-			return nil, ErrNotFound
-		}
-		after = parsed
+func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, limit int, cursor ListCursor) ([]*Resource, error) {
+	anchor, err := cursor.localUUID([]string{KindCloudBatch})
+	if err != nil {
+		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=$1 AND api_key_id=$2 AND metadata->>'dialect'=$3 AND state<>$4
 		AND (expires_at IS NULL OR expires_at>now())
-		AND ($5::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
+		AND ($5::uuid IS NULL OR (created_at,id)<(COALESCE($7::timestamptz, (SELECT created_at FROM olp.provider_resources
 			WHERE id=$5 AND api_key_id=$2 AND kind=$1 AND metadata->>'dialect'=$3 AND state<>$4
-			AND (expires_at IS NULL OR expires_at>now())))
+			AND (expires_at IS NULL OR expires_at>now()))), $5))
 		ORDER BY created_at DESC,id DESC LIMIT $6`,
-		KindCloudBatch, apiKeyID, dialect, StateDeleted, nilUUID(after), limit)
+		KindCloudBatch, apiKeyID, dialect, StateDeleted, nilUUID(anchor), limit, cursor.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("cloud batch list: %w", err)
 	}
@@ -365,39 +370,6 @@ func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, 
 		out = append(out, resource)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) ListKindsBefore(ctx context.Context, kinds []string, apiKeyID string, limit int, beforeID string) ([]*Resource, error) {
-	id, err := parseLocal(beforeID)
-	valid := false
-	for _, kind := range kinds {
-		valid = valid || LocalID(kind, id) == beforeID
-	}
-	if err != nil || !valid {
-		return nil, ErrNotFound
-	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
-		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
-		AND (created_at,id)>(SELECT created_at,id FROM olp.provider_resources
-		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now()))
-		ORDER BY created_at ASC,id ASC LIMIT $5`, kinds, apiKeyID, StateDeleted, id, limit)
-	if err != nil {
-		return nil, fmt.Errorf("provider resource list before: %w", err)
-	}
-	defer rows.Close()
-	out := []*Resource{}
-	for rows.Next() {
-		resource, scanErr := scan(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("provider resource list before scan: %w", scanErr)
-		}
-		out = append(out, resource)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	slices.Reverse(out)
-	return out, nil
 }
 
 func (s *Store) Update(ctx context.Context, localID, state string, metadata json.RawMessage, expiresAt *time.Time) error {

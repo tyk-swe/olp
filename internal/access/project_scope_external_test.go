@@ -5,32 +5,33 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func TestProjectAuthorityForInvestigations(t *testing.T) {
 	project := "project"
 	other := "other"
-	viewer := access.Principal{Projects: map[string]string{project: "viewer"}}
-	manager := access.Principal{Projects: map[string]string{project: "manager"}}
-	revoked := access.Principal{Projects: map[string]string{other: "viewer"}}
-	global := access.Principal{AllProjects: true}
+	viewer := authz.Principal{Projects: map[string]string{project: "viewer"}}
+	manager := authz.Principal{Projects: map[string]string{project: "manager"}}
+	revoked := authz.Principal{Projects: map[string]string{other: "viewer"}}
+	global := authz.Principal{AllProjects: true}
 
 	for _, tc := range []struct {
 		name      string
-		principal access.Principal
+		principal authz.Principal
 		project   *string
-		need      access.Need
+		need      authz.Need
 		status    int
 	}{
-		{"viewer reads assigned project", viewer, &project, access.View, 0},
-		{"viewer cannot save", viewer, &project, access.Change, http.StatusForbidden},
-		{"manager reads assigned project", manager, &project, access.View, 0},
-		{"manager can save", manager, &project, access.Change, 0},
-		{"foreign project is hidden", manager, &other, access.View, http.StatusNotFound},
-		{"revoked project is hidden", revoked, &project, access.View, http.StatusNotFound},
-		{"unassigned resource is hidden", viewer, nil, access.View, http.StatusNotFound},
-		{"global principal can save", global, &other, access.Change, 0},
+		{"viewer reads assigned project", viewer, &project, authz.View, 0},
+		{"viewer cannot save", viewer, &project, authz.Change, http.StatusForbidden},
+		{"manager reads assigned project", manager, &project, authz.View, 0},
+		{"manager can save", manager, &project, authz.Change, 0},
+		{"foreign project is hidden", manager, &other, authz.View, http.StatusNotFound},
+		{"revoked project is hidden", revoked, &project, authz.View, http.StatusNotFound},
+		{"unassigned resource is hidden", viewer, nil, authz.View, http.StatusNotFound},
+		{"global principal can save", global, &other, authz.Change, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.principal.Project(tc.project, tc.need)
@@ -40,7 +41,7 @@ func TestProjectAuthorityForInvestigations(t *testing.T) {
 				}
 				return
 			}
-			var problem *access.Problem
+			var problem *httpkit.Problem
 			if !errors.As(err, &problem) || problem.Status != tc.status {
 				t.Fatalf("project authority returned %v, want status %d", err, tc.status)
 			}

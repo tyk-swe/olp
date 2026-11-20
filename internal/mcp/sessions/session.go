@@ -110,8 +110,6 @@ type Record struct {
 	ToolsetRevisionID string
 	ReleaseID         string
 	Certifications    map[string]Certification
-	CreatedAt         time.Time
-	LastActiveAt      time.Time
 	Initialized       bool
 }
 

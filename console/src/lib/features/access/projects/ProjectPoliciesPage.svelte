@@ -1,10 +1,11 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { resolve } from '$app/paths';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
-  import PublicationPanel from '#lib/features/model-catalog/PublicationPanel.svelte';
+  import { PublicationPanel } from '#lib/features/model-catalog/index.js';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
   import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
@@ -16,8 +17,9 @@
   import Menu from '#lib/components/Menu.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import { useRole } from '../session/useRole.svelte';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     deleteProject,
     getProject,
@@ -38,6 +40,7 @@
     projects.data?.find((project) => project.id === projectId)
   );
   const queryClient = useQueryClient();
+  const deleteIntent = useMutationIntent();
   const canManage = $derived(
     access.allows('GET /api/v1/projects/{project_id}')
   );
@@ -86,7 +89,9 @@
     if (!confirmed) return;
     actionProblem = '';
     try {
-      await deleteProject(project, crypto.randomUUID());
+      await deleteIntent.submit(project, (input, requestId) =>
+        deleteProject(input, requestId)
+      );
       await queryClient.invalidateQueries({ queryKey: projectKeys.root });
       notify(`Deleted ${project.name}`);
       await goto(resolve('projects'));
@@ -101,9 +106,7 @@
   );
 </script>
 
-<svelte:head
-  ><title>{selected?.name ?? 'Project'} · OpenLLMProxy</title></svelte:head
->
+<PageTitle title={selected?.name ?? 'Project'} />
 
 {#if projects.isPending}
   <div class="loading-state" role="status">Loading project…</div>

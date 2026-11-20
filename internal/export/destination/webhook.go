@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type JSONWebhook struct{}
@@ -22,11 +22,6 @@ type JSONWebhook struct{}
 type CloudEvents struct {
 	Source string `json:"source,omitempty"`
 }
-
-func (JSONWebhook) Type() Type     { return contract.CreateExportSinkRequestTypeHttps }
-func (JSONWebhook) Format() Format { return contract.CreateExportSinkRequestFormatJson }
-func (CloudEvents) Type() Type     { return contract.CreateExportSinkRequestTypeHttps }
-func (CloudEvents) Format() Format { return contract.CreateExportSinkRequestFormatCloudevents }
 
 func parseJSONWebhook(_ Type, settings json.RawMessage) (Spec, error) {
 	return JSONWebhook{}, decodeSettings(contract.CreateExportSinkRequestFormatJson, settings, &struct{}{})
@@ -45,7 +40,7 @@ func parseCloudEvents(_ Type, settings json.RawMessage) (Spec, error) {
 	source := *input.Source
 	_, parseErr := url.Parse(source)
 	if len(source) < 1 || len(source) > 256 || parseErr != nil || strings.IndexFunc(source, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) >= 0 {
-		return nil, access.Invalid("settings.source", "source must be a URI reference of 1 to 256 characters without whitespace")
+		return nil, httpkit.Invalid("settings.source", "source must be a URI reference of 1 to 256 characters without whitespace")
 	}
 	return CloudEvents{Source: source}, nil
 }

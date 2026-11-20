@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/geminilifecycle"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
@@ -234,13 +234,12 @@ func vertexUsage(u *geminilifecycle.LiveUsage) *wire.Usage {
 
 func modalityShares(details []geminilifecycle.LiveUsageDetail) (audio, image *int64) {
 	for _, detail := range details {
+		v := detail.TokenCount
 		switch detail.Modality {
 		case "AUDIO":
-			v := detail.TokenCount
-			audio = &v
-		case "IMAGE":
-			v := detail.TokenCount
-			image = &v
+			mergeShare(&audio, &v)
+		case "IMAGE", "VIDEO":
+			mergeShare(&image, &v)
 		}
 	}
 	return audio, image

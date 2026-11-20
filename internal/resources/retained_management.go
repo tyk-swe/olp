@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -15,60 +17,56 @@ func (m *Management) registerRetainedManagement(mux *http.ServeMux) {
 	m.Access.Route(mux, "POST /api/v1/provider-resources/{id}/reconcile", m.reconcileRetained)
 	m.Access.Route(mux, "POST /api/v1/provider-resources/{id}/usage-evidence", m.retainedEvidence)
 }
-func (m *Management) retainedManagementResource(r *http.Request, tx pgx.Tx, p access.Principal) (*Resource, error) {
+func (m *Management) retainedManagementResource(r *http.Request, tx pgx.Tx, p authz.Principal) (*Resource, error) {
 	id, err := parseLocal(r.PathValue("id"))
 	if err != nil {
-		return nil, access.Fail(404, "not_found", "No resource exists in this scope.")
+		return nil, httpkit.Fail(404, "not_found", "No resource exists in this scope.")
 	}
 	resource, err := scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, access.Fail(404, "not_found", "No resource exists in this scope.")
+		return nil, httpkit.Fail(404, "not_found", "No resource exists in this scope.")
 	}
 	if err != nil {
 		return nil, err
 	}
 	if resource.ID != r.PathValue("id") {
-		return nil, access.Fail(404, "not_found", "No resource exists in this scope.")
+		return nil, httpkit.Fail(404, "not_found", "No resource exists in this scope.")
 	}
 	var project *string
 	err = tx.QueryRow(r.Context(), `SELECT COALESCE(k.project_id,p.project_id,rt.project_id)::text FROM olp.provider_resources r JOIN olp.api_keys k ON k.id=r.api_key_id JOIN olp.providers p ON p.id=r.provider_id LEFT JOIN olp.routes rt ON rt.slug=r.route_slug WHERE r.id=$1`, id).Scan(&project)
 	if err != nil {
 		return nil, err
 	}
-	if err = p.Project(project, access.Change); err != nil {
+	if err = p.Project(project, authz.Change); err != nil {
 		return nil, err
 	}
 	return resource, nil
 }
-func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (m *Management) reconcileRetained(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		UpstreamID string `json:"upstream_id"`
 	}
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
-	tx, p, err := m.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Authorize(access.Configure); err != nil {
-		return access.Reply{}, err
-	}
-	resource, err := m.retainedManagementResource(r, tx, p)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	store := New(m.Pool)
-	if err = store.RequestRetainedReconciliationTx(r.Context(), tx, resource.UUID, input.UpstreamID); errors.Is(err, ErrNotFound) {
-		return access.Reply{}, access.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
-	} else if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider_resource.reconcile", "provider_resource", resource.UUID.String(), "success"); err != nil {
-		return access.Reply{}, err
-	}
-	return access.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}), tx.Commit(r.Context())
+	return access.Transact(m.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := p.Authorize(authz.Configure); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		resource, err := m.retainedManagementResource(r, tx, p)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		store := New(m.Pool)
+		if err = store.RequestRetainedReconciliationTx(r.Context(), tx, resource.UUID, input.UpstreamID); errors.Is(err, ErrNotFound) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
+		} else if errors.Is(err, ErrSettlementClosed) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "settlement_closed", "This resource's retained settlement is already closed.")
+		} else if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}), access.Event{Action: "provider_resource.reconcile", Resource: "provider_resource", ID: resource.UUID.String()}, nil
+	})
 }
 
 type retainedEvidenceInput struct {
@@ -88,33 +86,33 @@ type retainedEvidenceInput struct {
 	Terminal           bool             `json:"terminal"`
 }
 
-func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (m *Management) retainedEvidence(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input retainedEvidenceInput
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Authorize(access.Settings); err != nil {
-		return access.Reply{}, err
+	if err = p.Authorize(authz.Settings); err != nil {
+		return httpkit.Reply{}, err
 	}
 	resource, err := m.retainedManagementResource(r, tx, p)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var raw []byte
 	var operation string
 	if err = tx.QueryRow(r.Context(), `SELECT templates,operation FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, resource.UUID).Scan(&raw, &operation); errors.Is(err, pgx.ErrNoRows) {
-		return access.Reply{}, access.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
+		return httpkit.Reply{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
 	} else if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var templates map[string]*usage.Event
 	if err = json.Unmarshal(raw, &templates); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	model := input.Model
 	if model == "" && len(templates) == 1 {
@@ -123,7 +121,7 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 		}
 	}
 	if templates[model] == nil {
-		return access.Reply{}, access.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
+		return httpkit.Reply{}, httpkit.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
 	}
 	u := usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{InvocationCount: input.InvocationCount, TrainingTokens: input.TrainingTokens, StorageByteSeconds: input.StorageByteSeconds, CacheTokenSeconds: input.CacheTokenSeconds, ContainerSessions: input.ContainerSessions, InputTokens: input.InputTokens, OutputTokens: input.OutputTokens, CachedInputTokens: input.CachedInputTokens}}
 	var lines []RetainedEvidenceLine
@@ -147,12 +145,12 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 		}
 	}
 	if len(lines) == 0 {
-		return access.Reply{}, access.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
+		return httpkit.Reply{}, httpkit.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
 	}
 	store := New(m.Pool)
 	verified, terminatedAt, err := store.RetainedEvidenceTerminationTx(r.Context(), tx, resource.UUID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	observed := time.Now().UTC()
 	if verified && terminatedAt != nil {
@@ -162,21 +160,21 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 	observation := RetainedObservation{Lines: lines, ObservedAt: observed, RemoteTerminated: verified, CoverageComplete: input.Terminal}
 	_, err = store.ApplyRetainedEvidenceTx(r.Context(), tx, resource.UUID, input.IdempotencyKey, input.EvidenceDigest, "operator_verified", p.Kind+":"+p.ID, observation, nil)
 	if errors.Is(err, ErrEvidenceConflict) {
-		return access.Reply{}, access.Fail(409, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
+		return httpkit.Reply{}, httpkit.Fail(409, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
 	}
 	if errors.Is(err, ErrContract) {
-		return access.Reply{}, access.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
+		return httpkit.Reply{}, httpkit.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
 	}
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider_resource.usage_evidence", "provider_resource", resource.UUID.String(), "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var status string
 	err = tx.QueryRow(r.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, resource.UUID).Scan(&status)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}), tx.Commit(r.Context())
+	return httpkit.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}), tx.Commit(r.Context())
 }

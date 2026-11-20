@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/batches"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 type Count int64

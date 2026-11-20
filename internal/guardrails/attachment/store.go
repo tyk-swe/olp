@@ -6,8 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 	ownerColumns = "o.project_id::text,o.found IS NOT NULL"
 )
 
-func Authorize(ctx context.Context, q access.Queryer, p access.Principal, a guardrails.Attachment, need access.Need) error {
+func Authorize(ctx context.Context, q database.Queryer, p authz.Principal, a guardrails.Attachment, need authz.Need) error {
 	t, err := locate(ctx, q, a)
 	if err != nil {
 		return err
@@ -27,7 +29,7 @@ func Authorize(ctx context.Context, q access.Queryer, p access.Principal, a guar
 	return authorize(p, t, need)
 }
 
-func locate(ctx context.Context, q access.Queryer, a guardrails.Attachment) (target, error) {
+func locate(ctx context.Context, q database.Queryer, a guardrails.Attachment) (target, error) {
 	t := target{Attachment: a}
 	if !t.owned() {
 		return t, nil
@@ -53,7 +55,7 @@ type listed struct {
 	found            bool
 }
 
-func list(ctx context.Context, q access.Queryer) ([]listed, error) {
+func list(ctx context.Context, q database.Queryer) ([]listed, error) {
 	rows, err := q.Query(ctx, "SELECT "+columns+",a.etag::text,v.policy_id::text,p.active_revision_id::text,"+ownerColumns+` FROM olp.guardrail_attachments a
  JOIN olp.guardrail_policy_revisions v ON v.id=a.policy_revision_id JOIN olp.guardrail_policies p ON p.id=v.policy_id`+owner+" ORDER BY a.position,a.id LIMIT 10001")
 	if err != nil {
@@ -70,18 +72,18 @@ func (l listed) target() target {
 	return target{Attachment: l.Attachment, owner: l.owner, found: l.found}
 }
 
-func requirePolicy(ctx context.Context, tx pgx.Tx, p access.Principal, t target) error {
+func requirePolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, t target) error {
 	var project *string
 	if err := tx.QueryRow(ctx, "SELECT p.project_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id WHERE v.id=$1 AND p.retired_at IS NULL", t.PolicyRevisionID).Scan(&project); err != nil {
-		return access.Invalid("policy_revision_id", "Choose an existing policy revision.")
+		return httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	ownedBy := func(id *string) bool { return project != nil && id != nil && *project == *id }
 	switch {
 	case t.Scope == guardrails.ProjectScope && !ownedBy(&t.ScopeID), t.owned() && !ownedBy(t.owner):
-		return access.Invalid("scope_id", "The policy must belong to this project.")
+		return httpkit.Invalid("scope_id", "The policy must belong to this project.")
 	case t.Scope == guardrails.RouteScope && t.Order == 0:
 		return refuseMigratedPosition(ctx, tx, t.ScopeID)
 	}
@@ -94,19 +96,19 @@ func refuseMigratedPosition(ctx context.Context, tx pgx.Tx, route string) error 
 		return err
 	}
 	if migrated {
-		return access.Invalid("order", "Position zero preserves this route's migrated content policy; choose a later position.")
+		return httpkit.Invalid("order", "Position zero preserves this route's migrated content policy; choose a later position.")
 	}
 	return nil
 }
 
 func create(ctx context.Context, tx pgx.Tx, actor string, a guardrails.Attachment) (guardrails.Attachment, error) {
-	created := guardrails.Attachment{ID: access.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
-	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, guardrails.ProjectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, access.NewID(), actor)
+	created := guardrails.Attachment{ID: httpkit.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
+	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, guardrails.ProjectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, httpkit.NewID(), actor)
 	return created, err
 }
 
 func repoint(ctx context.Context, tx pgx.Tx, id, policyRevisionID string) (string, error) {
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_attachments SET policy_revision_id=$2,etag=$3 WHERE id=$1", id, policyRevisionID, etag)
 	return etag, err
 }
@@ -139,7 +141,7 @@ func requireSamePolicy(ctx context.Context, tx pgx.Tx, current, next, refusal st
 		return err
 	}
 	if !same {
-		return access.Invalid("guardrail_attachments", refusal)
+		return httpkit.Invalid("guardrail_attachments", refusal)
 	}
 	return nil
 }

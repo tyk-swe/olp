@@ -54,7 +54,7 @@ dispatch and continuation ownership, both A2A wire versions, publication
 isolation, guardrail detection, MCP registration validation, tool pricing and
 resolution, grant binding, a gateway slice for credential redaction, cost
 reservation, cache replay and guardrail wiring, and the business metric
-exposition in `internal/telemetry`. They also cover the provider egress policy
+exposition in `internal/platform/telemetry`. They also cover the provider egress policy
 that keeps requests off private addresses, SCIM document, patch and filter
 parsing, SAML response verification against a test identity provider, the
 admission pool and its weighted queue, response cache keys and policy
@@ -77,7 +77,9 @@ executed by PostgreSQL.
 migrated template database, so a test pays for a copy instead of every
 migration, and `harness.EmptyDatabase` hands migration tests a blank one.
 `harness.Valkey` opens a client, and each test works under its own key
-namespace.
+namespace. `harness.StartProcess` runs the built binary on free ports and
+`harness.Service` drives it over HTTP, which `tests/e2e` and
+`tests/qualification` share.
 
 ## End-to-end tier
 
@@ -189,7 +191,7 @@ Use `make check-go`, `make check-console`, or `make check-contracts` for focused
 static validation. Helm, dependency and release checks run separately in CI.
 
 Run one package, file or test directly while iterating. Unit tests run with
-`go test -count=1 ./internal/gateway` or
+`go test -count=1 ./internal/gateway/...` or
 `pnpm --dir console test --project unit src/lib/features/usage/priceEntry.test.ts`.
 The service-backed scripts pass extra arguments to their runner, as in
 `./scripts/test-integration.sh -run TestSCIM -v`,
@@ -203,18 +205,18 @@ callers every management route admits, derived from the contract and the
 policy, and is maintained by hand. Review such a diff as a security change.
 Secret-purpose changes surface in the generated tables in the security
 architecture documentation. Regenerate those tables deliberately with
-`go test ./internal/secrets -run TestPurposeDocumentation -update` after
+`go test ./internal/platform/secrets -run TestPurposeDocumentation -update` after
 reviewing the purpose change.
 
 ## Retained fixtures
 
-The language-neutral corpus under `tests/fixtures` stays as conformance
-evidence for the protocol, routing, and token tests. The
+The language-neutral corpus under `tests/fixtures` stays as reference data for
+the routing, stream, batch reader, and token tests. The
 comparator in `tests/fidelity` stays because the protocol tests use it.
 Neither is a test suite on its own.
 
 `tests/fixtures/tokens` holds the ground truth for the token estimator in
-`internal/operations/tokenization/estimate`. `generate.py` is the only
+`internal/domain/operations/tokenization/estimate`. `generate.py` is the only
 thing that writes those fixtures. It runs offline and is deterministic, so
 a clean rerun leaves no diff.
 

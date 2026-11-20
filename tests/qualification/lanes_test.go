@@ -23,14 +23,15 @@ import (
 
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/tests/harness"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -212,17 +213,17 @@ func lanes() []lane {
 	}
 	return []lane{
 		{
-			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
+			client:   laneClient{name: "codex", binary: "codex"},
 			seed:     laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires},
 			protocol: "responses",
 		},
 		{
-			client:   laneClient{name: "claude-code", binary: "claude", userAgent: "claude-cli (qualification fixture)"},
+			client:   laneClient{name: "claude-code", binary: "claude"},
 			seed:     laneSeed{adapter: "zai_coding", profile: codeplans.ZAIProfile, manifest: codeplans.ZAIManifest, token: zaiKey, principal: codeplans.Principal(codeplans.ZAIProfile, zaiKey), facts: map[string]string{}},
 			protocol: "messages",
 		},
 		{
-			client:   laneClient{name: "opencode", binary: "opencode", userAgent: "opencode (qualification fixture)"},
+			client:   laneClient{name: "opencode", binary: "opencode"},
 			seed:     laneSeed{adapter: "opencode_go", profile: codeplans.OpenCodeGoProfile, manifest: codeplans.OpenCodeGoManifest, token: openCodeGoKey, principal: codeplans.Principal(codeplans.OpenCodeGoProfile, openCodeGoKey), facts: map[string]string{}},
 			protocol: "chat",
 		},
@@ -230,10 +231,10 @@ func lanes() []lane {
 }
 
 func (s *service) seedSubscription(project, ownerID string, spec laneSeed, proxy vendorProxy) (providerID, credentialID string) {
-	s.t.Helper()
+	s.T.Helper()
 	providerID, credentialID, err := s.seedSubscriptionE(project, ownerID, spec, &egress.ConnectionOptions{ProxyURL: proxy.url, TrustRootsPEM: proxy.roots})
 	if err != nil {
-		s.t.Fatal(err)
+		s.T.Fatal(err)
 	}
 	return providerID, credentialID
 }
@@ -275,38 +276,38 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 	if err != nil {
 		return "", "", err
 	}
-	ring, err := secrets.ParseRing([]byte(s.env.master))
+	ring, err := secrets.ParseRingWithUnwrapper(s.T.Context(), []byte(s.Env.Master), nil)
 	if err != nil {
 		return "", "", err
 	}
 	providerID, credentialID = uuid.NewString(), uuid.NewString()
-	tx, err := s.pool.Begin(s.t.Context())
+	tx, err := s.Pool.Begin(s.T.Context())
 	if err != nil {
 		return "", "", err
 	}
-	defer tx.Rollback(s.t.Context())
+	defer tx.Rollback(s.T.Context())
 	var installation string
-	if err := tx.QueryRow(s.t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+	if err := tx.QueryRow(s.T.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
 		return "", "", err
 	}
 	steps := []func() error{
 		func() error {
-			_, err := tx.Exec(s.t.Context(), `INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now()) ON CONFLICT(digest) DO NOTHING`, digest, manifest, uuid.NewString(), ownerID)
+			_, err := tx.Exec(s.T.Context(), `INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now()) ON CONFLICT(digest) DO NOTHING`, digest, manifest, uuid.NewString(), ownerID)
 			return err
 		},
 		func() error {
-			_, err := tx.Exec(s.t.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','active',$3,$4,$5,$6,$7)`, providerID, uniqueName("qualify-"+spec.adapter), configuration, uuid.NewString(), uuid.NewString(), ownerID, project)
+			_, err := tx.Exec(s.T.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','active',$3,$4,$5,$6,$7)`, providerID, uniqueName("qualify-"+spec.adapter), configuration, uuid.NewString(), uuid.NewString(), ownerID, project)
 			return err
 		},
 		func() error {
-			_, err := tx.Exec(s.t.Context(), `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts,profile_id) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3,$4,$5,$6)`, credentialID, providerID, digest, spec.principal, facts, spec.profile)
+			_, err := tx.Exec(s.T.Context(), `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts,profile_id) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3,$4,$5,$6)`, credentialID, providerID, digest, spec.principal, facts, spec.profile)
 			return err
 		},
 		func() error {
-			return ring.Store(s.t.Context(), tx, installation, credentialID, secrets.ProviderCredential, served, nil)
+			return ring.Store(s.T.Context(), tx, installation, credentialID, secrets.ProviderCredential, served, nil)
 		},
 		func() error {
-			_, err := tx.Exec(s.t.Context(), `INSERT INTO olp.provider_grants(credential_id,refresh_token_id,expires_at,refresh_at) VALUES($1,NULL,$2,NULL)`, credentialID, spec.expiresAt)
+			_, err := tx.Exec(s.T.Context(), `INSERT INTO olp.provider_grants(credential_id,refresh_token_id,expires_at,refresh_at) VALUES($1,NULL,$2,NULL)`, credentialID, spec.expiresAt)
 			return err
 		},
 	}
@@ -315,7 +316,7 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 			return "", "", err
 		}
 	}
-	if err := tx.Commit(s.t.Context()); err != nil {
+	if err := tx.Commit(s.T.Context()); err != nil {
 		return "", "", err
 	}
 	return providerID, credentialID, nil
@@ -433,14 +434,14 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key string) (s
 	}
 }
 
-func waitForFixtureRoute(s *service, consumer *caller, slug, protocol string) error {
+func waitForFixtureRoute(s *service, consumer *harness.Caller, slug, protocol string) error {
 	path, body, err := fixtureRouteRequest(protocol)
 	if err != nil {
 		return err
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		status, raw := s.do(consumer, "POST", "/code/"+slug+"/"+path, body, nil)
+		status, raw := s.Do(consumer, "POST", "/code/"+slug+"/"+path, body, nil)
 		if status == http.StatusOK && strings.Contains(string(raw), vendorAnswer) {
 			return nil
 		}
@@ -506,36 +507,36 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 	report := newLaneReport(newReportWriter(t), specs)
 	defer report.flush(t)
 
-	s := startService(t)
-	owner := s.owner()
+	s := startService(t, nil)
+	owner := s.Owner()
 	var ownerID string
-	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users LIMIT 1`).Scan(&ownerID); err != nil {
+	if err := s.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users LIMIT 1`).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token))
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
-	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
-	bridge := fixtureBridge(t, s.origin)
+	key := s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, harness.Idempotent(), http.StatusCreated)
+	consumer := &harness.Caller{Name: "qualification key", Token: key["secret"].(string)}
+	bridge := fixtureBridge(t, s.Origin)
 
 	for _, spec := range specs {
 		providerID, credentialID := s.seedSubscription(project, ownerID, spec.seed, proxy)
-		account := s.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
+		account := s.Want(owner, "POST", "/api/v1/code/accounts", map[string]any{
 			"project_id": project, "provider_id": providerID, "credential_id": credentialID,
 			"name": "qualify-" + spec.client.name, "enabled": true, "models": []string{vendorModel},
-		}, idempotent(), http.StatusCreated)
+		}, harness.Idempotent(), http.StatusCreated)
 		if account["adapter"] != spec.seed.adapter {
 			t.Errorf("lane %s: account adapter %v, want %s", spec.client.name, account["adapter"], spec.seed.adapter)
 		}
-		pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{
+		pool := s.Want(owner, "POST", "/api/v1/code/pools", map[string]any{
 			"project_id": project, "name": "qualify-" + spec.client.name, "kind": "shared", "owner_user_id": nil,
 			"account_ids": []any{account["id"]}, "account_weights": map[string]any{}, "api_key_ids": []any{key["id"]},
-		}, idempotent(), http.StatusCreated)
+		}, harness.Idempotent(), http.StatusCreated)
 		slug := uniqueName("qualify-" + spec.client.name)
-		route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
+		route := s.Want(owner, "POST", "/api/v1/code/routes", map[string]any{
 			"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true,
-		}, idempotent(), http.StatusCreated)
-		s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+		}, harness.Idempotent(), http.StatusCreated)
+		s.Want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, harness.Idempotent(harness.ETag(route)), http.StatusOK)
 
 		lane := spec
 		record := runLane(t, lane, bridge, func(binary string) (string, bool, error) {

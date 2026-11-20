@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, ifMatch } from '#lib/management/http.js';
 
 export type Setting = components['schemas']['SettingResponse'];
 
@@ -18,7 +18,7 @@ export async function updateSetting(
     {
       params: {
         path: { key: setting.key },
-        header: { 'If-Match': setting.etag }
+        header: ifMatch(setting.etag)
       },
       body: { value }
     }

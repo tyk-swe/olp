@@ -1,5 +1,5 @@
 import { PersonalGrantEnrollment } from './grantEnrollment.svelte';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { SvelteMap } from 'svelte/reactivity';
 import MCPServersPage from './MCPServersPage.svelte';
@@ -907,4 +907,37 @@ it('shows the latest personal grant result after saving authorization settings',
   expect(target.textContent).not.toContain(
     'Personal authorization configuration saved'
   );
+});
+
+it('retains the callback while starting and clearing a separate invitation', async () => {
+  const writes = vi.fn();
+  serve(
+    async (request) => {
+      writes(new URL(request.url).pathname, await request.json());
+      return new URL(request.url).pathname.endsWith('/complete')
+        ? json({ state: 'active' })
+        : json({
+            enrollment_url: 'https://console.example.test/grants#next.token'
+          });
+    },
+    ['read', 'configure']
+  );
+  const state = personalEnrollment();
+  state.consumeLocation(
+    new URL(
+      'https://console.example.test/grants?code=secret-code&state=grant.signature'
+    )
+  );
+  await state.begin({ kind: 'server', id: 'server', keyId: 'key' });
+  expect(state.view.callbackCode).toBe('secret-code');
+  expect(state.view.enrollmentURL).toContain('#next.token');
+  state.clearInvitation();
+  expect(state.view.enrollmentURL).toBe('');
+  await state.completeCallback();
+  expect(writes).toHaveBeenCalledWith(
+    '/api/v1/mcp-grant-enrollments/grant/complete',
+    { code: 'secret-code', state: 'grant.signature' }
+  );
+  expect(state.view.callbackCode).toBe('');
+  expect(state.view.authorization?.state).toBe('active');
 });

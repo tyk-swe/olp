@@ -16,13 +16,13 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 var loopback = egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 
 func prober(policy egress.Policy) *Prober {
-	return New(&policy, func(string) string { return "" }, nil, nil, nil)
+	return New(&policy, func(string) string { return "" }, nil, nil)
 }
 
 func upstreamConnection(t *testing.T, kind connectors.Kind, endpoint string) Target {
@@ -73,7 +73,7 @@ func TestModelProbeRecordsUpstreamFailuresAsProbeCodes(t *testing.T) {
 		"unavailable":                   {loopback, answer(http.StatusServiceUnavailable, ""), "upstream_unavailable"},
 		"other rejection":               {loopback, answer(http.StatusBadRequest, ""), "upstream_rejected"},
 		"listing without models":        {loopback, answer(http.StatusOK, `{}`), "provider_protocol_error"},
-		"oversized body":                {loopback, answer(http.StatusOK, string(bytes.Repeat([]byte(" "), BodyLimit+1))), "upstream_response_too_large"},
+		"oversized body":                {loopback, answer(http.StatusOK, string(bytes.Repeat([]byte(" "), bodyLimit+1))), "upstream_response_too_large"},
 		"redirect":                      {loopback, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/v2/models", http.StatusFound) }, "upstream_redirect"},
 		"plain http outside the policy": {egress.Policy{}, answer(http.StatusOK, `{"data":[]}`), "invalid_endpoint"},
 	}

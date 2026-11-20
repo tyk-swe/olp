@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -6,9 +7,11 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import {
+    listProjectMemberships,
+    projectKeys
+  } from '#lib/features/access/index.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { listInvestigations } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -32,7 +35,7 @@
   }));
 </script>
 
-<svelte:head><title>Investigations · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Investigations" />
 <PageHeader
   title="Investigations"
   description="Saved filters, evidence references and operator summaries for your projects."

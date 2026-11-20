@@ -39,8 +39,11 @@ func (c *versionCache) record(owner string, version int64) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.seen) >= versionCacheSize {
-		clear(c.seen)
+	if _, ok := c.seen[owner]; !ok && len(c.seen) >= versionCacheSize {
+		for evicted := range c.seen {
+			delete(c.seen, evicted)
+			break
+		}
 	}
 	c.seen[owner] = version
 }
@@ -200,7 +203,7 @@ func (y *Syncer) admitTx(ctx context.Context, tx pgx.Tx, owner limits.Owner, bud
 	if err := y.syncFreshTx(ctx, tx, owner); err != nil {
 		return err
 	}
-	return y.scripts.VerifyCost(ctx, budget.Caps(true))
+	return y.scripts.VerifyCost(ctx, budget.Caps())
 }
 
 func (y *Syncer) syncFreshTx(ctx context.Context, tx pgx.Tx, owner limits.Owner) error {

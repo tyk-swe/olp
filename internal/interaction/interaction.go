@@ -9,11 +9,11 @@ import (
 	"net/url"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 const (

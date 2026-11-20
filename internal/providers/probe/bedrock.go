@@ -10,12 +10,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-func (p *Prober) certifyBedrockIngress(ctx context.Context, t Target, model string, tuple connection.Capability, maxEventBytes int) error {
+func (p *Prober) certifyBedrockIngress(ctx context.Context, t Target, model string, tuple connection.Capability) error {
 	upstream := t.Connection.Transport().Model(model)
 	if upstream == "" {
 		upstream = model
@@ -31,7 +31,7 @@ func (p *Prober) certifyBedrockIngress(ctx context.Context, t Target, model stri
 				return &Failure{Reason: CapabilityUnavailable, Detail: "InvokeModelWithResponseStream ingress supports only qualified Anthropic Claude models."}
 			}
 			return p.bedrockProbe(ctx, t, base+"invoke-with-response-stream", true, body, func(data []byte) error {
-				return readBedrockProbeStream(data, maxEventBytes)
+				return readBedrockProbeStream(data, bodyLimit)
 			})
 		}
 		return p.bedrockProbe(ctx, t, base+"invoke", false, body, func(data []byte) error {
@@ -50,7 +50,7 @@ func (p *Prober) certifyBedrockIngress(ctx context.Context, t Target, model stri
 	})
 	if tuple.Mode == "streaming" {
 		return p.bedrockProbe(ctx, t, base+"converse-stream", true, body, func(data []byte) error {
-			return readBedrockProbeStream(data, maxEventBytes)
+			return readBedrockProbeStream(data, bodyLimit)
 		})
 	}
 	return p.bedrockProbe(ctx, t, base+"converse", false, body, func(data []byte) error {

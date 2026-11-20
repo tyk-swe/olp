@@ -8,9 +8,10 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -57,7 +58,7 @@ func WritePolicies(ctx context.Context, tx pgx.Tx, id string, desired Policies) 
 	if err := EnsureAttributionBudgetAccounts(ctx, tx, id, desired.AttributionBudgets); err != nil {
 		return "", err
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	_, writeErr := tx.Exec(ctx, `UPDATE olp.projects SET end_user_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now(),attribution_policy=NULLIF($4::jsonb,'null'::jsonb),route_groups=$5::jsonb,budget_policy=NULLIF($6::jsonb,'null'::jsonb),limit_templates=$7::jsonb,attribution_budgets=$8::jsonb WHERE id=$1`, id, endUser, etag, labels, desired.RouteGroups.JSON(), budget, desired.Templates.JSON(), desired.AttributionBudgets.JSON())
 	return etag, writeErr
 }
@@ -103,7 +104,7 @@ func (current Policies) equal(desired Policies) bool {
 	return current.AttributionBudgets.Equal(desired.AttributionBudgets) && reflect.DeepEqual(current.Templates, desired.Templates) && reflect.DeepEqual(current.EndUser, desired.EndUser) && equalAttributionPolicy(current.Attribution, desired.Attribution) && current.RouteGroups.Equal(desired.RouteGroups) && reflect.DeepEqual(current.Budget, desired.Budget)
 }
 
-func ApplyPolicies(ctx context.Context, tx pgx.Tx, principal access.Principal, changes []PolicyImport) (bool, error) {
+func ApplyPolicies(ctx context.Context, tx pgx.Tx, principal authz.Principal, changes []PolicyImport) (bool, error) {
 	if len(changes) == 0 {
 		return false, nil
 	}
@@ -114,7 +115,7 @@ func ApplyPolicies(ctx context.Context, tx pgx.Tx, principal access.Principal, c
 	desired := changes[0].policies(current)
 	changed := !current.equal(desired)
 	if changed {
-		if err := principal.Authorize(access.Keys); err != nil {
+		if err := principal.Authorize(authz.Keys); err != nil {
 			return false, err
 		}
 		if _, err := WritePolicies(ctx, tx, changes[0].ProjectID, desired); err != nil {

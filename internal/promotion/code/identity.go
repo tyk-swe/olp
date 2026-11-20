@@ -7,7 +7,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
@@ -52,20 +56,20 @@ func lookup(absent string, ids []string) (destination, error) {
 	return destination{}, ambiguous()
 }
 
-func mapped(ref, project, derived string, unique bool, candidates []access.CodeCandidate) (destination, error) {
-	if direct := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
+func mapped(ref, project, derived string, unique bool, candidates []codeadmin.Candidate) (destination, error) {
+	if direct := slices.IndexFunc(candidates, func(c codeadmin.Candidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
 		if !candidates[direct].ScopeMatches {
-			return destination{}, access.Invalid("code", "A destination artifact reference cannot change its immutable resource scope.")
+			return destination{}, httpkit.Invalid("code", "A destination artifact reference cannot change its immutable resource scope.")
 		}
 		return destination{id: ref, existing: true}, nil
 	}
-	if stable := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == derived }); stable >= 0 {
+	if stable := slices.IndexFunc(candidates, func(c codeadmin.Candidate) bool { return c.ID == derived }); stable >= 0 {
 		if candidates[stable].ProjectID != project || !candidates[stable].ScopeMatches {
-			return destination{}, access.Invalid("code", "A mapped destination resource cannot change its immutable scope.")
+			return destination{}, httpkit.Invalid("code", "A mapped destination resource cannot change its immutable scope.")
 		}
 		return destination{id: derived, existing: true}, nil
 	}
-	natural := func(c access.CodeCandidate) bool { return c.ProjectID == project && c.NaturalMatches }
+	natural := func(c codeadmin.Candidate) bool { return c.ProjectID == project && c.NaturalMatches }
 	first := slices.IndexFunc(candidates, natural)
 	if first < 0 {
 		return destination{id: derived}, nil
@@ -77,7 +81,7 @@ func mapped(ref, project, derived string, unique bool, candidates []access.CodeC
 }
 
 func ambiguous() error {
-	return access.Invalid("code", "The destination has ambiguous code resource identities.")
+	return httpkit.Invalid("code", "The destination has ambiguous code resource identities.")
 }
 
 func distinct[T any](items []resolved[T]) error {
@@ -85,7 +89,7 @@ func distinct[T any](items []resolved[T]) error {
 		if slices.ContainsFunc(items[:i], func(other resolved[T]) bool {
 			return other.to.id == item.to.id || item.identity != "" && other.identity == item.identity
 		}) {
-			return access.Invalid("code", "Multiple artifact resources resolve to the same destination identity.")
+			return httpkit.Invalid("code", "Multiple artifact resources resolve to the same destination identity.")
 		}
 	}
 	return nil
@@ -98,7 +102,7 @@ func destinations[T any](items []resolved[T]) map[string]string {
 func projectOf(directory promotion.Directory, name string) (string, error) {
 	id, ok := directory.ID(name)
 	if !ok {
-		return "", access.Invalid("code.project", "Create the destination project and enroll its credentials before promoting code configuration.")
+		return "", httpkit.Invalid("code.project", "Create the destination project and enroll its credentials before promoting code configuration.")
 	}
 	return id, nil
 }
@@ -106,7 +110,7 @@ func projectOf(directory promotion.Directory, name string) (string, error) {
 func bound(ref string, values map[string]string) (string, error) {
 	value, ok := values[ref]
 	if !ok {
-		return "", access.Invalid("code_bindings", "Bind every referenced destination credential, owner and API key explicitly.")
+		return "", httpkit.Invalid("code_bindings", "Bind every referenced destination credential, owner and API key explicitly.")
 	}
 	return value, nil
 }
@@ -118,7 +122,7 @@ func boundOr(ref *string, values map[string]string) string {
 	return values[*ref]
 }
 
-func owner(ctx context.Context, q access.Queryer, ref *string, project string, users map[string]string) (*string, error) {
+func owner(ctx context.Context, q database.Queryer, ref *string, project string, users map[string]string) (*string, error) {
 	if ref == nil {
 		return nil, nil
 	}
@@ -131,31 +135,31 @@ func owner(ctx context.Context, q access.Queryer, ref *string, project string, u
 		return nil, err
 	}
 	if !member {
-		return nil, access.Invalid("code_bindings.users", "The personal pool owner must be an active destination project member.")
+		return nil, httpkit.Invalid("code_bindings.users", "The personal pool owner must be an active destination project member.")
 	}
 	return &id, nil
 }
 
-func key(ctx context.Context, q access.Queryer, ref, project string, owner *string, keys map[string]string) (string, error) {
+func key(ctx context.Context, q database.Queryer, ref, project string, owner *string, keys map[string]string) (string, error) {
 	id, err := bound(ref, keys)
 	if err != nil {
 		return "", err
 	}
-	allowed, err := access.ProjectKeyUsable(ctx, q, id, project, owner)
+	allowed, err := apikeys.ProjectKeyUsable(ctx, q, id, project, owner)
 	if err != nil {
 		return "", err
 	}
 	if !allowed {
-		return "", access.Invalid("code_bindings.api_keys", "The destination key must belong to the project and personal pool owner.")
+		return "", httpkit.Invalid("code_bindings.api_keys", "The destination key must belong to the project and personal pool owner.")
 	}
 	return id, nil
 }
 
-func keysOf(ctx context.Context, q access.Queryer, refs []string, project string, owner *string, keys map[string]string) ([]string, error) {
+func keysOf(ctx context.Context, q database.Queryer, refs []string, project string, owner *string, keys map[string]string) ([]string, error) {
 	return promotion.TryMapIndex(refs, func(_ int, ref string) (string, error) { return key(ctx, q, ref, project, owner, keys) })
 }
 
-func compared[T any](ctx context.Context, q access.Queryer, r resolved[T], read func(context.Context, access.Queryer, string) (T, error)) (contract.ConfigurationPlanItemAction, error) {
+func compared[T any](ctx context.Context, q database.Queryer, r resolved[T], read func(context.Context, database.Queryer, string) (T, error)) (contract.ConfigurationPlanItemAction, error) {
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, nil
 	}

@@ -5,7 +5,8 @@ import {
   type CursorPage,
   pageResult,
   unwrap,
-  unwrapPage
+  unwrapPage,
+  ifMatch
 } from '#lib/management/http.js';
 import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
@@ -118,7 +119,7 @@ export async function discoverProviderModels(
     {
       params: {
         path: { provider_id: provider.id },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       },
       body: { models: [] }
     },
@@ -137,7 +138,7 @@ export async function declareProviderModels(
     {
       params: {
         path: { provider_id: provider.id },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       },
       body: {
         models: modelNames.map(
@@ -166,7 +167,7 @@ export async function setProviderModel(
     {
       params: {
         path: { provider_id: provider.id, model_id: modelId },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       },
       body: { enabled, capabilities }
     },
@@ -185,7 +186,7 @@ export async function certifyProviderModel(
       signal,
       params: {
         path: { provider_id: provider.id, model_id: modelId },
-        header: { 'If-Match': provider.etag }
+        header: ifMatch(provider.etag)
       }
     }
   );

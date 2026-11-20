@@ -11,7 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -94,27 +95,27 @@ type ruleTarget struct {
 }
 
 func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
-	if err := access.ValidText("name", input.Name, nameLimit); err != nil {
+	if err := httpkit.ValidText("name", input.Name, nameLimit); err != nil {
 		return ruleTarget{}, err
 	}
 	spec, ok := events[input.Event]
 	if !ok {
-		return ruleTarget{}, access.Invalid("event", "Use a supported notification event.")
+		return ruleTarget{}, httpkit.Invalid("event", "Use a supported notification event.")
 	}
 	subject, err := parseSubject(spec.subject, input)
 	if err != nil {
 		return ruleTarget{}, err
 	}
 	if spec.subject == noSubject && projectID != nil && !spec.projectScoped {
-		return ruleTarget{}, access.Invalid("project_id", "This notification event is installation-wide.")
+		return ruleTarget{}, httpkit.Invalid("project_id", "This notification event is installation-wide.")
 	}
 	configuration, err := spec.configuration.canonical(input.Configuration)
 	if err != nil {
-		return ruleTarget{}, access.Invalid("configuration", "The rule configuration is invalid for its event.")
+		return ruleTarget{}, httpkit.Invalid("configuration", "The rule configuration is invalid for its event.")
 	}
-	destinationID, err := access.ParseUUID(input.DestinationID)
+	destinationID, err := httpkit.ParseUUID(input.DestinationID)
 	if err != nil {
-		return ruleTarget{}, access.Invalid("destination_id", "Use a valid destination identifier.")
+		return ruleTarget{}, httpkit.Invalid("destination_id", "Use a valid destination identifier.")
 	}
 	return ruleTarget{
 		name: strings.TrimSpace(input.Name), projectID: projectID, event: input.Event, subject: subject,
@@ -129,7 +130,7 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 	case keySubject:
 		if input.SubjectKind == nil || *input.SubjectKind != contract.BudgetSubjectKindApiKey ||
 			input.SubjectID == nil || input.WindowKind != nil || input.ThresholdPercent != nil {
-			return nil, access.Invalid("subject_id", "Key reminders require an API key and no budget window or threshold.")
+			return nil, httpkit.Invalid("subject_id", "Key reminders require an API key and no budget window or threshold.")
 		}
 		subject, err := parseWatched(contract.BudgetSubjectKindApiKey, *input.SubjectID)
 		if err != nil {
@@ -145,7 +146,7 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 		{"window_kind", input.WindowKind != nil}, {"threshold_percent", input.ThresholdPercent != nil},
 	} {
 		if field.set {
-			return nil, access.Invalid(field.name, "This notification event has no subject, window or threshold.")
+			return nil, httpkit.Invalid(field.name, "This notification event has no subject, window or threshold.")
 		}
 	}
 	return unwatched{}, nil
@@ -153,16 +154,16 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 
 func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
 	if input.SubjectKind == nil || !input.SubjectKind.Valid() {
-		return nil, access.Invalid("subject_kind", "Use api_key or budget_group.")
+		return nil, httpkit.Invalid("subject_kind", "Use api_key or budget_group.")
 	}
 	if input.WindowKind == nil || !input.WindowKind.Valid() {
-		return nil, access.Invalid("window_kind", "Use day, week or month.")
+		return nil, httpkit.Invalid("window_kind", "Use day, week or month.")
 	}
 	if input.ThresholdPercent == nil || *input.ThresholdPercent < 1 || *input.ThresholdPercent > 100 {
-		return nil, access.Invalid("threshold_percent", "Use a threshold from 1 to 100.")
+		return nil, httpkit.Invalid("threshold_percent", "Use a threshold from 1 to 100.")
 	}
 	if input.SubjectID == nil {
-		return nil, access.Invalid("subject_id", "Use a valid subject identifier.")
+		return nil, httpkit.Invalid("subject_id", "Use a valid subject identifier.")
 	}
 	subject, err := parseWatched(*input.SubjectKind, *input.SubjectID)
 	if err != nil {
@@ -172,9 +173,9 @@ func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
 }
 
 func parseWatched(kind contract.BudgetSubjectKind, raw string) (watchedSubject, error) {
-	id, err := access.ParseUUID(raw)
+	id, err := httpkit.ParseUUID(raw)
 	if err != nil {
-		return watchedSubject{}, access.Invalid("subject_id", "Use a valid subject identifier.")
+		return watchedSubject{}, httpkit.Invalid("subject_id", "Use a valid subject identifier.")
 	}
 	return watchedSubject{kind: kind, id: id}, nil
 }
@@ -196,10 +197,10 @@ func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 			return err
 		}
 		if !found {
-			return access.Invalid("subject_id", "The alert subject does not exist.")
+			return httpkit.Invalid("subject_id", "The alert subject does not exist.")
 		}
 		if !sameProject(project, t.projectID) {
-			return access.Invalid("subject_id", "The alert subject must belong to the rule's project.")
+			return httpkit.Invalid("subject_id", "The alert subject must belong to the rule's project.")
 		}
 	}
 	project, found, err := referenceProject(ctx, tx, destinationProjectSQL, t.destinationID)
@@ -207,10 +208,10 @@ func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 		return err
 	}
 	if !found {
-		return access.Invalid("destination_id", "The notification destination does not exist.")
+		return httpkit.Invalid("destination_id", "The notification destination does not exist.")
 	}
 	if !sameProject(project, t.projectID) {
-		return access.Invalid("destination_id", "The notification destination must belong to the rule's project.")
+		return httpkit.Invalid("destination_id", "The notification destination must belong to the rule's project.")
 	}
 	return nil
 }
@@ -227,19 +228,19 @@ func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationE
 		return err
 	}
 	if count >= evaluatedRuleLimit {
-		return access.Invalid("event", fmt.Sprintf("The installation already has %d generic notification rules.", evaluatedRuleLimit))
+		return httpkit.Invalid("event", fmt.Sprintf("The installation already has %d generic notification rules.", evaluatedRuleLimit))
 	}
 	return nil
 }
 
-func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) createNotificationRule(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input ruleInput
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	return create(s, r, rules, creation[ruleTarget]{projectID: input.ProjectID, fingerprint: input,
 		parse: func(projectID *string) (ruleTarget, error) { return parseRule(input, projectID) },
-		insert: func(tx pgx.Tx, p access.Principal, _ *string, target ruleTarget, id, etag string) error {
+		insert: func(tx pgx.Tx, p authz.Principal, _ *string, target ruleTarget, id, etag string) error {
 			if err := checkReferences(r.Context(), tx, target); err != nil {
 				return err
 			}
@@ -253,10 +254,10 @@ func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (ac
 		}})
 }
 
-func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) updateNotificationRule(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	patch, err := decodePatch(r, "rule", "Unknown notification rule field.", rulePatchFields)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.update(r, rules, func(tx pgx.Tx, row document, etag string) error {
 		input, err := patchRule(row.body, patch)
@@ -285,7 +286,7 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 		return ruleInput{}, err
 	}
 	if string(patch["enabled"]) == "null" {
-		return ruleInput{}, access.Invalid("enabled", rulePatchFields["enabled"])
+		return ruleInput{}, httpkit.Invalid("enabled", rulePatchFields["enabled"])
 	}
 	overlay, err := json.Marshal(patch)
 	if err != nil {
@@ -294,7 +295,7 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 	if err := json.Unmarshal(overlay, &next); err != nil {
 		var mismatch *json.UnmarshalTypeError
 		if errors.As(err, &mismatch) {
-			return ruleInput{}, access.Invalid(mismatch.Field, rulePatchFields[mismatch.Field])
+			return ruleInput{}, httpkit.Invalid(mismatch.Field, rulePatchFields[mismatch.Field])
 		}
 		return ruleInput{}, err
 	}

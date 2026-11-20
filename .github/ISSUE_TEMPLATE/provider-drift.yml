@@ -53,7 +53,7 @@ body:
     attributes:
       label: Affected fixture, SDK, or evidence
       description: >-
-        Name the conformance fixture (tests/fixtures/...), SDK, or link the
+        Name the affected test fixture, SDK, or link the
         provider changelog entry.
     validations:
       required: false

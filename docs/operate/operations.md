@@ -378,10 +378,12 @@ migration Job before the new pods start. Verify readiness, generation
 convergence, backlog, usage completeness, provider probes, and latency before
 resuming admission. There is no rollback: a binary refuses a database whose
 schema is newer than its own, and migrations never run in reverse. Never edit
-migration history or checksums. The runner requires a sequential history prefix
-with matching checksums and rolls back failed migration transactions;
-Former integration tests interrupted DDL to verify recovery. Nothing
-checks that automatically today.
+migration history or checksums. The runner checks the recorded checksums and
+rejects gaps except for two upgrade paths from historical merges. It can apply
+the delegation migrations after the parallel code migrations. If Google billing
+is already applied, it records the AWS billing migration because the Google
+migration already includes its constraint change. Failed migrations roll back
+in the same transaction as their history updates.
 
 ## Database deadlines and privileges
 

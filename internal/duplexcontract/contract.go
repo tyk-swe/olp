@@ -10,8 +10,8 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 const (
@@ -32,18 +32,15 @@ type Profile struct {
 	ProfileID         string
 	Kind              connectors.Kind
 	Hosting           string
-	Vendor            string
 	TranscriptionOnly bool
 	Transport         Transport
 }
 
 var profiles = []Profile{
-	{Dialect: XAIRealtime, ProfileID: "xai-realtime", Kind: "openai_compatible", Hosting: "xai-realtime", Vendor: "xai", Transport: TransportWebSocket},
-	{Dialect: VertexRealtime, ProfileID: "vertex-realtime", Kind: "vertex_ai", Hosting: "vertex-live", Vendor: "google-vertex", Transport: TransportWebSocket},
-	{Dialect: BedrockRealtime, ProfileID: "bedrock-realtime", Kind: "bedrock", Hosting: "bedrock-nova-sonic", Vendor: "amazon-bedrock", Transport: TransportBedrockBidi},
+	{Dialect: XAIRealtime, ProfileID: "xai-realtime", Kind: "openai_compatible", Hosting: "xai-realtime", Transport: TransportWebSocket},
+	{Dialect: VertexRealtime, ProfileID: "vertex-realtime", Kind: "vertex_ai", Hosting: "vertex-live", Transport: TransportWebSocket},
+	{Dialect: BedrockRealtime, ProfileID: "bedrock-realtime", Kind: "bedrock", Hosting: "bedrock-nova-sonic", Transport: TransportBedrockBidi},
 }
-
-func Profiles() []Profile { return slices.Clone(profiles) }
 
 func Lookup(dialect string) (Profile, bool) {
 	for _, p := range profiles {
@@ -70,9 +67,8 @@ type Config struct {
 }
 
 type Template struct {
-	profile         Profile
-	model           string
-	profileRevision string
+	profile Profile
+	model   string
 }
 
 func refuse(code, field, requirement, message string) error {
@@ -119,27 +115,17 @@ func Compile(c Config) (*Template, error) {
 			return nil, refuse("target_capability", "/bindings/realtime", "native_duplex_defaults", "Realtime model defaults cannot be applied to opaque duplex events.")
 		}
 	}
-	return &Template{profile: descriptor, model: provider.Model(c.Model), profileRevision: p.Revision}, nil
+	return &Template{profile: descriptor, model: provider.Model(c.Model)}, nil
 }
 
-func (t *Template) Dialect() string         { return t.profile.Dialect }
-func (t *Template) ProfileID() string       { return t.profile.ProfileID }
-func (t *Template) ProfileRevision() string { return t.profileRevision }
-func (t *Template) Model() string           { return t.model }
-func (t *Template) TranscriptionOnly() bool { return t.profile.TranscriptionOnly }
-func (t *Template) Transport() Transport    { return t.profile.Transport }
-func (t *Template) Vendor() string          { return t.profile.Vendor }
-func (t *Template) SetupAck() bool          { return t.profile.Dialect == VertexRealtime }
+func (t *Template) Dialect() string      { return t.profile.Dialect }
+func (t *Template) Model() string        { return t.model }
+func (t *Template) Transport() Transport { return t.profile.Transport }
+func (t *Template) SetupAck() bool       { return t.profile.Dialect == VertexRealtime }
 
 type Setup struct {
 	Model             string
 	TranscriptionOnly bool
-}
-
-func (t *Template) AdmitSetup(setup Setup) error { return AdmitProfileSetup(t.profile, setup) }
-
-func (t *Template) InspectSetup(frame []byte, maxBytes int) (Setup, error) {
-	return InspectProfileSetup(t.profile, frame, maxBytes)
 }
 
 func InspectProfileSetup(profile Profile, frame []byte, maxBytes int) (Setup, error) {

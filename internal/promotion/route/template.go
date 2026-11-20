@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -55,6 +57,15 @@ func normalized(t Template) (Template, error) {
 }
 
 func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template, error) {
+	if entries != nil {
+		for _, entry := range *entries {
+			if policy, ok := promotion.Present(entry.RoutingPolicy); ok {
+				if err := validatePolicyMembers(policy); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	declared, err := promotion.Convert[[]Template](entries)
 	if err != nil {
 		return nil, err
@@ -63,7 +74,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	return promotion.TryMapIndex(declared, func(i int, t Template) (Template, error) {
 		field := "templates." + strconv.Itoa(i)
 		if first[t.Name] != i {
-			return Template{}, access.Invalid(field+".name", "Template names must be unique.")
+			return Template{}, httpkit.Invalid(field+".name", "Template names must be unique.")
 		}
 		parsed, err := normalized(t)
 		if err != nil {
@@ -73,7 +84,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	})
 }
 
-func readTemplates(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]Template, error) {
+func readTemplates(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]Template, error) {
 	stored, err := routes.ReadTemplateInputs(ctx, q)
 	if err != nil {
 		return nil, err
@@ -137,7 +148,7 @@ func sameTemplate(desired, current Template) (bool, error) {
 }
 
 func TemplateApplier(desired Desired) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -152,13 +163,13 @@ func TemplateApplier(desired Desired) promotion.Applier {
 				return err
 			}
 			if found && promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
-				return access.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
+				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
 			}
 			in := t.input(projectID)
 			if !found {
-				return routes.WriteTemplate(ctx, tx, access.NewID(), access.NewID(), p.UserID(), &in, false)
+				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
 			}
-			return routes.WriteTemplate(ctx, tx, stored.ID, access.NewID(), p.UserID(), &in, true)
+			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
 		})
 	}
 }

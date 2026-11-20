@@ -10,8 +10,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
 func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) error {

@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Policy struct {
@@ -43,7 +44,7 @@ func scan(row pgx.Row) (Policy, error) {
 	return p, err
 }
 
-func load(ctx context.Context, q access.Queryer, id string) (Policy, error) {
+func load(ctx context.Context, q database.Queryer, id string) (Policy, error) {
 	return scan(q.QueryRow(ctx, selected+" WHERE p.id=$1", id))
 }
 
@@ -51,7 +52,7 @@ func lock(ctx context.Context, tx pgx.Tx, id string) (Policy, error) {
 	return scan(tx.QueryRow(ctx, selected+" WHERE p.id=$1 FOR UPDATE OF p", id))
 }
 
-func FindLatest(ctx context.Context, q access.Queryer, projectID *string, name string) (*Policy, error) {
+func FindLatest(ctx context.Context, q database.Queryer, projectID *string, name string) (*Policy, error) {
 	p, err := scan(q.QueryRow(ctx, selected+" WHERE p.project_id IS NOT DISTINCT FROM $1::uuid AND lower(p.name)=lower($2) AND p.retired_at IS NULL", projectID, name))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -77,17 +78,17 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Policy, d Draft
 
 func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Policy, d Draft) (Saved, int64, error) {
 	if current == nil {
-		saved := Saved{ID: access.NewID(), RevisionID: access.NewID()}
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.ID, guardrails.ProjectPointer(d.project), d.name, saved.RevisionID, access.NewID(), actor)
+		saved := Saved{ID: httpkit.NewID(), RevisionID: httpkit.NewID()}
+		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.ID, guardrails.ProjectPointer(d.project), d.name, saved.RevisionID, httpkit.NewID(), actor)
 		return saved, 1, err
 	}
-	saved := Saved{ID: current.ID, RevisionID: access.NewID()}
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, access.NewID())
+	saved := Saved{ID: current.ID, RevisionID: httpkit.NewID()}
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, httpkit.NewID())
 	return saved, current.Revision + 1, err
 }
 
 func Activate(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string) error {
-	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, access.NewID())
+	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, httpkit.NewID())
 	if err != nil {
 		return err
 	}
@@ -99,18 +100,18 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string
 }
 
 func retire(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET retired_at=now(),etag=$2 WHERE id=$1", id, access.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
 	return err
 }
 
-func revisionOf(ctx context.Context, q access.Queryer, revisionID string) (guardrails.PolicyRevision, error) {
+func revisionOf(ctx context.Context, q database.Queryer, revisionID string) (guardrails.PolicyRevision, error) {
 	var r guardrails.PolicyRevision
 	err := q.QueryRow(ctx, "SELECT v.id::text,p.id::text,COALESCE(p.project_id::text,'installation'),p.name,v.revision,v.entries FROM olp.guardrail_policy_revisions v JOIN olp.guardrail_policies p ON p.id=v.policy_id WHERE v.id=$1", revisionID).
 		Scan(&r.ID, &r.PolicyID, &r.ProjectID, &r.Name, &r.Revision, &r.Entries)
 	return r, err
 }
 
-func anyRetired(ctx context.Context, q access.Queryer, revisionIDs []string) (bool, error) {
+func anyRetired(ctx context.Context, q database.Queryer, revisionIDs []string) (bool, error) {
 	var retired bool
 	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_revisions v JOIN olp.guardrails g ON g.id=v.guardrail_id WHERE v.id=ANY($1::uuid[]) AND g.retired_at IS NOT NULL)", revisionIDs).Scan(&retired)
 	return retired, err

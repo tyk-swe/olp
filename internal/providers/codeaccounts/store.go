@@ -6,11 +6,13 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Settings struct {
@@ -41,30 +43,30 @@ type Granted struct {
 }
 
 func (s Settings) Validate() error {
-	if err := access.ValidText("name", s.Name, 100); err != nil {
+	if err := httpkit.ValidText("name", s.Name, 100); err != nil {
 		return err
 	}
 	if err := codemode.ValidateModels(s.Models); err != nil {
-		return access.Invalid("models", err.Error())
+		return httpkit.Invalid("models", err.Error())
 	}
 	if s.CycleAnchor == nil {
 		return nil
 	}
 	if _, ok := codemode.ParseCycleAnchor(*s.CycleAnchor); !ok {
-		return access.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
+		return httpkit.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
 	}
 	return nil
 }
 
 func (in Input) validated() (Input, error) {
-	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
+	ids, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
 	if err != nil {
 		return Input{}, err
 	}
 	return Input{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Settings: in.Settings}, in.Settings.Validate()
 }
 
-func ReadAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
+func ReadAccounts(ctx context.Context, q database.Queryer) ([]Account, error) {
 	rows, err := q.Query(ctx, `SELECT a.id::text,p.name,v.name,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
 	if err != nil {
 		return nil, err
@@ -72,7 +74,7 @@ func ReadAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[Account])
 }
 
-func AccountIDs(ctx context.Context, q access.Queryer, projectID, providerID, principal string) ([]string, error) {
+func AccountIDs(ctx context.Context, q database.Queryer, projectID, providerID, principal string) ([]string, error) {
 	rows, err := q.Query(ctx, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, projectID, providerID, principal)
 	if err != nil {
 		return nil, err
@@ -80,14 +82,14 @@ func AccountIDs(ctx context.Context, q access.Queryer, projectID, providerID, pr
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-func ReadInput(ctx context.Context, q access.Queryer, id string) (Input, error) {
+func ReadInput(ctx context.Context, q database.Queryer, id string) (Input, error) {
 	var in Input
 	err := q.QueryRow(ctx, `SELECT project_id::text,provider_id::text,credential_id::text,name,enabled,models,extra_usage_enabled,cycle_anchor::text FROM olp.code_accounts WHERE id=$1`, id).
 		Scan(&in.ProjectID, &in.ProviderID, &in.CredentialID, &in.Name, &in.Enabled, &in.Models, &in.ExtraUsageEnabled, &in.CycleAnchor)
 	return in, err
 }
 
-func ReadGranted(ctx context.Context, q access.Queryer, providerName, projectID, credentialID string) (Granted, bool, error) {
+func ReadGranted(ctx context.Context, q database.Queryer, providerName, projectID, credentialID string) (Granted, bool, error) {
 	var granted Granted
 	err := q.QueryRow(ctx, `SELECT p.id::text,c.principal FROM olp.providers p JOIN olp.provider_credentials c ON c.provider_id=p.id JOIN olp.provider_grants g ON g.credential_id=c.id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND c.id=$3 AND c.principal<>'' AND c.revoked_at IS NULL AND `+grants.LiveCondition+``, providerName, projectID, credentialID).Scan(&granted.ProviderID, &granted.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -111,7 +113,7 @@ var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id
 	'grant_state',CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' WHEN g.lapsed_at IS NOT NULL THEN 'lapsed' WHEN g.expires_at<=now() THEN 'expired' ELSE 'current' END)
 	FROM olp.code_accounts x JOIN olp.providers p ON p.id=x.provider_id JOIN olp.provider_credentials c ON c.id=x.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id`
 
-func Save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, input Input, existing bool) (json.RawMessage, error) {
+func Save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, input Input, existing bool) (json.RawMessage, error) {
 	in, err := input.validated()
 	if err != nil {
 		return nil, err
@@ -119,8 +121,8 @@ func Save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 	return save(ctx, tx, p, id, etag, in, existing)
 }
 
-func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, in Input, existing bool) (json.RawMessage, error) {
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+func save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, in Input, existing bool) (json.RawMessage, error) {
+	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
 	var principal string
@@ -132,13 +134,13 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 		return nil, err
 	}
 	if principal == "" {
-		return nil, access.Invalid("credential_id", "Enrollment must establish an upstream principal.")
+		return nil, httpkit.Invalid("credential_id", "Enrollment must establish an upstream principal.")
 	}
 	if in.ExtraUsageEnabled != nil && (adapter == nil || *adapter != string(codemode.AdapterKimiCode)) {
-		return nil, access.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
+		return nil, httpkit.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
 	}
 	if in.CycleAnchor != nil && (profileID == nil || *profileID != codeplans.QwenTokenPlanProfile && *profileID != codeplans.QwenTokenPlanCNProfile) {
-		return nil, access.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
+		return nil, httpkit.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
 	}
 	if existing {
 		var oldPrincipal, oldProvider string
@@ -146,7 +148,7 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 			return nil, err
 		}
 		if oldPrincipal != principal || oldProvider != in.ProviderID {
-			return nil, access.Invalid("credential_id", "Account identity cannot change during credential rotation.")
+			return nil, httpkit.Invalid("credential_id", "Account identity cannot change during credential rotation.")
 		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,extra_usage_enabled,etag,created_by,cycle_anchor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

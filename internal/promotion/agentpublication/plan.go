@@ -6,10 +6,11 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 )
@@ -35,7 +36,7 @@ func Planner(desired []Publication, names promotion.Names, bindings promotion.Bi
 				}
 			}
 		}),
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			directory, err := project.ReadDirectory(ctx, q)
 			if err != nil {
 				return nil, err
@@ -48,7 +49,7 @@ func Planner(desired []Publication, names promotion.Names, bindings promotion.Bi
 	}
 }
 
-func planPublication(ctx context.Context, q access.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, publication Publication) ([]promotion.Item, error) {
+func planPublication(ctx context.Context, q database.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, publication Publication) ([]promotion.Item, error) {
 	key := publication.key()
 	projectID, present := directory.ID(publication.Project)
 	if !present && !names.Project(publication.Project) {
@@ -79,7 +80,7 @@ func planPublication(ctx context.Context, q access.Queryer, names promotion.Name
 	}), nil
 }
 
-func referencesBlocked(ctx context.Context, q access.Queryer, publication Publication, current *agentcontract.Publication, projectID string) (bool, error) {
+func referencesBlocked(ctx context.Context, q database.Queryer, publication Publication, current *agentcontract.Publication, projectID string) (bool, error) {
 	retained, err := retainedDigests(ctx, q, current)
 	if err != nil {
 		return false, err
@@ -90,7 +91,7 @@ func referencesBlocked(ctx context.Context, q access.Queryer, publication Public
 			continue
 		}
 		err := publications.ValidateReferences(ctx, q, publication.Kind.name(), placed(definition, projectID))
-		if _, expected := errors.AsType[*access.Problem](err); expected {
+		if _, expected := errors.AsType[*httpkit.Problem](err); expected {
 			return true, nil
 		}
 		if err != nil {
@@ -123,14 +124,14 @@ func reusableCredential(prior, next *agentcontract.Draft) bool {
 	return !priorEntra || (before.ClientID == after.ClientID && before.TokenEndpoint == after.TokenEndpoint && before.EntraOBO.Issuer == after.EntraOBO.Issuer)
 }
 
-func findPresent(ctx context.Context, q access.Queryer, projectID string, present bool, publication Publication) (*agentcontract.Publication, error) {
+func findPresent(ctx context.Context, q database.Queryer, projectID string, present bool, publication Publication) (*agentcontract.Publication, error) {
 	if !present {
 		return nil, nil
 	}
 	return find(ctx, q, projectID, publication, false)
 }
 
-func find(ctx context.Context, q access.Queryer, projectID string, publication Publication, lock bool) (*agentcontract.Publication, error) {
+func find(ctx context.Context, q database.Queryer, projectID string, publication Publication, lock bool) (*agentcontract.Publication, error) {
 	id, found, err := publications.ActiveID(ctx, q, projectID, publication.Kind.name(), publication.Draft.Name)
 	if err != nil || !found {
 		return nil, err
@@ -138,7 +139,7 @@ func find(ctx context.Context, q access.Queryer, projectID string, publication P
 	return publications.Load(ctx, q, id, publication.Kind.name(), lock)
 }
 
-func publishedDefinition(ctx context.Context, q access.Queryer, current *agentcontract.Publication) (*agentcontract.Draft, error) {
+func publishedDefinition(ctx context.Context, q database.Queryer, current *agentcontract.Publication) (*agentcontract.Draft, error) {
 	if current == nil || current.RevisionID == nil {
 		return nil, nil
 	}
@@ -149,7 +150,7 @@ func publishedDefinition(ctx context.Context, q access.Queryer, current *agentco
 	return &revision.Definition, nil
 }
 
-func retainedDigests(ctx context.Context, q access.Queryer, current *agentcontract.Publication) ([]string, error) {
+func retainedDigests(ctx context.Context, q database.Queryer, current *agentcontract.Publication) ([]string, error) {
 	if current == nil {
 		return nil, nil
 	}

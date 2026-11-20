@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/panics"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -59,7 +59,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 		return err
 	}
 	parent := ctx
-	ctx, cancel := context.WithTimeout(ctx, e.tier.limits.Time)
+	ctx, cancel := context.WithTimeout(ctx, defaultLimits.Time)
 	defer cancel()
 	out := call.output(e.tier.log, e.Digest)
 	p, err := e.process(ctx)
@@ -75,7 +75,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	case parent.Err() != nil:
 		return parent.Err()
 	case ctx.Err() != nil:
-		return refuseTimedOut(e.tier.limits.Time)
+		return refuseTimedOut(defaultLimits.Time)
 	}
 	return refuseStopped(err.Error())
 }
@@ -89,7 +89,7 @@ func (e *Executable) stream(ctx context.Context, call Call) (*streamed, error) {
 	if err != nil {
 		return nil, err
 	}
-	start, cancel := context.WithTimeout(ctx, e.tier.limits.Time)
+	start, cancel := context.WithTimeout(ctx, defaultLimits.Time)
 	defer cancel()
 	p, err := e.process(start)
 	switch {
@@ -99,7 +99,7 @@ func (e *Executable) stream(ctx context.Context, call Call) (*streamed, error) {
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
 	case start.Err() != nil:
-		return nil, refuseStartTimeout(e.tier.limits.Time)
+		return nil, refuseStartTimeout(defaultLimits.Time)
 	default:
 		return nil, refuseStopped(err.Error())
 	}
@@ -155,11 +155,11 @@ var errClosed = errors.New("OLP closed it")
 // launch starts a process for the calls waiting for l, within the time limit
 // whether or not any still waits.
 func (e *Executable) launch(l *launch) {
-	ctx, cancel := context.WithTimeout(context.Background(), e.tier.limits.Time)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultLimits.Time)
 	defer cancel()
 	p, err := e.tier.start(ctx, e.name, e.Digest)
 	if err != nil && ctx.Err() != nil {
-		err = refuseStartTimeout(e.tier.limits.Time)
+		err = refuseStartTimeout(defaultLimits.Time)
 	}
 	e.mu.Lock()
 	e.starting = nil
@@ -198,6 +198,7 @@ type process struct {
 	// reason says why the process stopped; done is closed once it is set.
 	reason string
 	done   chan struct{}
+	caps   chan struct{}
 	// exited is set once the process exited, after which its ID no longer
 	// names its process group.
 	exited bool
@@ -260,7 +261,7 @@ func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, 
 		stderr.Close()
 		return nil, refuse(CodeExecutableInvalid, "OLP could not start the executable: "+err.Error())
 	}
-	p := &process{cmd: cmd, stdin: stdin, log: u.log.With("plugin_digest", digest), limit: u.limits.Time,
+	p := &process{cmd: cmd, stdin: stdin, log: u.log.With("plugin_digest", digest), limit: defaultLimits.Time,
 		calls: map[uint64]*pending{}, ended: map[string]time.Time{}, done: make(chan struct{})}
 	p.reading.Add(2)
 	go p.logStderr(stderr)
@@ -499,6 +500,21 @@ func (p *process) reap(stdout, stderr *os.File) {
 	p.stop(reason)
 }
 
+func (p *process) acquireCapability() (chan struct{}, bool) {
+	p.mu.Lock()
+	if p.caps == nil {
+		p.caps = make(chan struct{}, defaultLimits.Instances)
+	}
+	caps := p.caps
+	p.mu.Unlock()
+	select {
+	case caps <- struct{}{}:
+		return caps, true
+	default:
+		return nil, false
+	}
+}
+
 // receive serves the plugin's frames until it closes standard output, or
 // until one breaks the protocol, which it describes.
 func (p *process) receive(frames *bufio.Reader) string {
@@ -518,8 +534,14 @@ func (p *process) receive(frames *bufio.Reader) string {
 				return violation
 			}
 		case frame.Request != nil:
+			sem, ok := p.acquireCapability()
+			if !ok {
+				_ = p.send(abi.Frame{ID: frame.ID, Response: &abi.Response{Error: &abi.Error{Code: abi.CodeInternal, Message: "OLP could not serve the request."}}})
+				continue
+			}
 			ctx := p.grants(frame.Call)
 			go func() {
+				defer func() { <-sem }()
 				defer panics.Recover(p.log, "plugin capability", func(error) {
 					_ = p.send(abi.Frame{ID: frame.ID, Response: &abi.Response{Error: &abi.Error{Code: abi.CodeInternal, Message: "OLP could not serve the request."}}})
 				})

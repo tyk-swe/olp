@@ -121,7 +121,7 @@ func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template 
 		return &Failure{Reason: InvalidEndpoint, Detail: "The selected profile cannot address this realtime model."}
 	}
 	setup, _ := json.Marshal(map[string]map[string]string{"setup": {"model": boundModel}})
-	conn.SetReadLimit(BodyLimit)
+	conn.SetReadLimit(bodyLimit)
 	if err := conn.Write(ctx, websocket.MessageText, setup); err != nil {
 		return Classify(err)
 	}
@@ -132,7 +132,7 @@ func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template 
 	if kind != websocket.MessageText {
 		return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not acknowledge the model setup."}
 	}
-	frame, err := template.Observer(BodyLimit).ServerFrame(raw)
+	frame, err := template.Observer(bodyLimit).ServerFrame(raw)
 	if err != nil || !frame.SetupComplete {
 		return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not acknowledge the model setup."}
 	}
@@ -231,7 +231,7 @@ func (p *Prober) certifyWebRTC(ctx context.Context, t Target, model string) erro
 	if err != nil {
 		return Classify(err)
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, BodyLimit))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, bodyLimit))
 	resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return statusError(t, resp.StatusCode, nil)
@@ -288,7 +288,7 @@ func (p *Prober) hangupWebRTCProbe(ctx context.Context, t Target, model, callID 
 	if err != nil {
 		return Classify(err)
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(hangupResp.Body, BodyLimit))
+	_, _ = io.Copy(io.Discard, io.LimitReader(hangupResp.Body, bodyLimit))
 	hangupResp.Body.Close()
 	if hangupResp.StatusCode < 200 || hangupResp.StatusCode > 299 {
 		return statusError(t, hangupResp.StatusCode, nil)

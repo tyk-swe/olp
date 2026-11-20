@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 const (

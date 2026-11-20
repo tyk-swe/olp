@@ -1,15 +1,16 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
-  import { authenticationCapabilities } from '#lib/features/access/session/api.js';
-  import { acceptInvitation } from '#lib/features/access/session/authentication.js';
+  import { authenticationCapabilities } from '#lib/session/api.js';
+  import { acceptInvitation } from '#lib/session/authentication.js';
   import {
     ApiProblem,
     applyServerFieldErrors,
     errorMessage
   } from '#lib/management/http.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
   import {
     PASSWORD_MAX_LENGTH,
@@ -130,8 +131,9 @@
   }
 </script>
 
+<PageTitle title="Accept invitation" />
+
 <svelte:head>
-  <title>Accept invitation · OpenLLMProxy</title>
   <meta name="referrer" content="no-referrer" />
 </svelte:head>
 

@@ -1,0 +1,3 @@
+Create the first owner by opening {{ .Values.config.publicOrigin | trimSuffix "/" }}/setup with the one-time setup token from
+
+  kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "olp.componentFullname" (dict "root" . "component" "control") }} -- olp setup-token

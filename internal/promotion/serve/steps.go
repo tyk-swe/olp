@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublication"
 	"github.com/tyk-swe/olp/internal/promotion/code"
@@ -75,7 +75,7 @@ func (s server) appliers(d desired, ready prepared, r *http.Request) []promotion
 	}
 }
 
-func evaluate(ctx context.Context, q access.Queryer, d desired) (contract.ConfigurationPlanResponse, error) {
+func evaluate(ctx context.Context, q database.Queryer, d desired) (contract.ConfigurationPlanResponse, error) {
 	items, err := planned(ctx, q, d.planners)
 	if err != nil {
 		return contract.ConfigurationPlanResponse{}, err
@@ -87,7 +87,7 @@ func evaluate(ctx context.Context, q access.Queryer, d desired) (contract.Config
 	return promotion.Result(d.digest, slices.Concat(items, drift)), nil
 }
 
-func planned(ctx context.Context, q access.Queryer, planners []promotion.Planner) ([]promotion.Item, error) {
+func planned(ctx context.Context, q database.Queryer, planners []promotion.Planner) ([]promotion.Item, error) {
 	batches, err := promotion.TryMap(planners, func(planner promotion.Planner) ([]promotion.Item, error) {
 		if planner.Plan == nil {
 			return nil, nil
@@ -100,7 +100,7 @@ func planned(ctx context.Context, q access.Queryer, planners []promotion.Planner
 	return slices.Concat(batches...), nil
 }
 
-func drifted(ctx context.Context, q access.Queryer, expected *string) ([]promotion.Item, error) {
+func drifted(ctx context.Context, q database.Queryer, expected *string) ([]promotion.Item, error) {
 	if expected == nil {
 		return nil, nil
 	}

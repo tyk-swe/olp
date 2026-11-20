@@ -187,11 +187,22 @@ export function errorMessage(
   return error instanceof Error ? error.message : fallback;
 }
 
-const BARE_UUID_ETAG =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export function serializeIfMatch(value: string): string {
-  return BARE_UUID_ETAG.test(value) ? `"${value}"` : value;
+  if (value === '*' || value.startsWith('"') || value.startsWith('W/"'))
+    return value;
+  return `"${value}"`;
+}
+
+export function ifMatch(etag: string) {
+  return { 'If-Match': serializeIfMatch(etag) };
+}
+
+export function mutationHeaders(etag: string, requestId: string) {
+  return { ...ifMatch(etag), 'Idempotency-Key': requestId };
+}
+
+export function createHeaders(requestId: string) {
+  return { 'Idempotency-Key': requestId };
 }
 
 export function abortError(error: unknown): boolean {

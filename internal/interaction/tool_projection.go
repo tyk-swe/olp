@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // Delivery is already projected client data. The gateway commits it with the
@@ -136,7 +136,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 	var frame []byte
 	var err error
 	switch kind {
-	case "ping":
+	case "ping", "error":
 		return nil, nil
 	case "message_start":
 		message := member(root, "message")

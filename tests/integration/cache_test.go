@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -19,7 +20,7 @@ var cachePolicy = cache.Policy{Mode: "exact", TTLSeconds: 60}
 
 func keyRing(t *testing.T, key string) *secrets.KeyRing {
 	t.Helper()
-	ring, err := secrets.ParseRing(fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat(key, 32)))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), fmt.Appendf(nil, `{"active_version":1,"keys":[{"version":1,"key":%q}]}`, strings.Repeat(key, 32)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,12 +144,25 @@ func TestPurgeMakesStoredEntriesUnreachable(t *testing.T) {
 	t.Parallel()
 	store := newCache(t)
 	space := newSpace()
+	assertGenerationLifetimes := func(ticket cache.Ticket) {
+		t.Helper()
+		if len(ticket.GenerationKeys) == 0 {
+			t.Fatal("the ticket carries no generation keys")
+		}
+		for _, key := range ticket.GenerationKeys {
+			lifetime, err := store.Client.Do(t.Context(), "TTL", key)
+			if seconds, ok := lifetime.(int64); err != nil || !ok || seconds < 1 || seconds > 604800 {
+				t.Errorf("got a generation lifetime of %v (%v) in Valkey, want between 1 and 604800 seconds", lifetime, err)
+			}
+		}
+	}
 	for name, purge := range map[string]struct{ kind, id string }{
 		"the project":     {"project", space.Project},
 		"the route":       {"route", space.Route},
 		"the named route": {"route", space.NamedRoute},
 	} {
-		remember(t, store, space, "request", "answer")
+		ticket := remember(t, store, space, "request", "answer")
+		assertGenerationLifetimes(ticket)
 		if err := store.Purge(t.Context(), "project", uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
@@ -158,6 +172,7 @@ func TestPurgeMakesStoredEntriesUnreachable(t *testing.T) {
 		if err := store.Purge(t.Context(), purge.kind, purge.id); err != nil {
 			t.Fatal(err)
 		}
+		assertGenerationLifetimes(ticket)
 		if got := recall(t, store, space, "request", cache.Controls{}); got != "" {
 			t.Errorf("purging %s left the entry answering %q", name, got)
 		}

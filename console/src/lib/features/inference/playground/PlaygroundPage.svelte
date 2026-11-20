@@ -1,8 +1,11 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
-  import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
-  import { decisionRows } from '#lib/features/routes/routingExplanation.js';
+  import {
+    RoutingPreferencesForm,
+    RoutingDecisions,
+    decisionRows
+  } from '#lib/features/routes/index.js';
   import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { formatInteger } from '#lib/format.js';
@@ -15,6 +18,18 @@
   import { PlaygroundState } from './playgroundState.svelte';
 
   const playground = new PlaygroundState();
+  const surfaceLocked = $derived(
+    playground.composer === 'advanced' &&
+      playground.operation !== 'generation' &&
+      playground.operation !== 'token_count'
+  );
+  const inspectionSurface = $derived(playground.plan.inspection.surface);
+  const clientSurface = $derived(
+    playground.activeOperation === 'decision' &&
+      (inspectionSurface === 'openai' || inspectionSurface === 'gemini')
+      ? inspectionSurface
+      : playground.surface
+  );
   const operations = [
     { value: 'generation', label: 'Generation' },
     { value: 'decision', label: 'Decisions' },
@@ -42,7 +57,7 @@
   ];
 </script>
 
-<svelte:head><title>Playground · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Playground" />
 
 <PageHeader
   title="Playground"
@@ -183,20 +198,20 @@
       <div class="form-field">
         <label for="playground-surface">Client surface</label><select
           id="playground-surface"
-          bind:value={playground.surface}
-          disabled={playground.composer === 'advanced' &&
-            playground.operation !== 'generation' &&
-            playground.operation !== 'token_count'}
+          bind:value={
+            () => clientSurface,
+            (surface: PlaygroundState['surface']) => {
+              playground.surface = surface;
+            }
+          }
+          disabled={surfaceLocked}
           ><option value="openai">OpenAI</option><option value="anthropic"
             >Anthropic</option
           ><option value="gemini">Gemini</option></select
-        ><small
-          >{playground.composer === 'advanced' &&
-          playground.operation !== 'generation' &&
-          playground.operation !== 'token_count'
-            ? 'This operation is served on the OpenAI surface.'
-            : 'Capability filtering uses this originating protocol.'}</small
         >
+        {#if !surfaceLocked}
+          <small>Capability filtering uses this originating protocol.</small>
+        {/if}
       </div>
     </div>
     {#if playground.composer === 'basic'}
@@ -219,7 +234,7 @@
             autocomplete="off"
             placeholder="Provider default"
             aria-describedby="max-output-help"
-          /><small id="max-output-help">1 through 1000000.</small>
+          /><small id="max-output-help">1 through 1048576.</small>
         </div>
       </div>
       <div class="form-field">
@@ -669,10 +684,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.8rem;
   }
-  .field-error {
-    margin: 0;
-    color: var(--danger);
-  }
   .run-actions {
     display: flex;
     gap: 0.5rem;
@@ -717,7 +728,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

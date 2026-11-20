@@ -9,12 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 var ErrDelegationBounds = errors.New("invalid delegation bounds")
@@ -35,7 +36,7 @@ type DelegationGrant struct {
 
 func (m *Manager) CreateDelegation(ctx context.Context, agent, key keyauthority.Authority, bounds DelegationBounds) (DelegationGrant, error) {
 	if !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || key.WorkloadIssuerID != nil || agent.ProjectID == nil || key.ProjectID == nil || *agent.ProjectID != *key.ProjectID || !slices.Contains(key.Policy.Scopes, "delegate") {
-		return DelegationGrant{}, access.Forbidden()
+		return DelegationGrant{}, httpkit.Forbidden()
 	}
 	if agent.SnapshotID == "" || agent.SnapshotID != key.SnapshotID {
 		return DelegationGrant{}, ErrStaleAuthority
@@ -45,7 +46,7 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key keyauthority.
 	}
 	now := time.Now()
 	if !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, now) {
-		return DelegationGrant{}, access.Forbidden()
+		return DelegationGrant{}, httpkit.Forbidden()
 	}
 	expiry := boundDelegationExpiry(boundDelegationExpiry(now.Add(delegationTTL(bounds.TTLSeconds)), agent.ExpiresAt), key.ExpiresAt)
 	token := "olpd_" + secrets.Token()
@@ -131,22 +132,22 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent keyauthority.
 	}
 	for _, route := range bounds.AllowedRoutes {
 		if !slices.Contains(approved, route) {
-			return DelegationGrant{}, access.Forbidden()
+			return DelegationGrant{}, httpkit.Forbidden()
 		}
 	}
 	for _, scope := range bounds.Scopes {
 		if !slices.Contains(approvedScopes, scope) {
-			return DelegationGrant{}, access.Forbidden()
+			return DelegationGrant{}, httpkit.Forbidden()
 		}
 	}
 	for _, toolset := range bounds.AllowedToolsets {
 		if !slices.Contains(approvedToolsets, toolset) {
-			return DelegationGrant{}, access.Forbidden()
+			return DelegationGrant{}, httpkit.Forbidden()
 		}
 	}
 	for _, allowed := range bounds.AllowedAgents {
 		if !slices.Contains(approvedAgents, allowed) {
-			return DelegationGrant{}, access.Forbidden()
+			return DelegationGrant{}, httpkit.Forbidden()
 		}
 	}
 	m.mu.RLock()
@@ -304,8 +305,8 @@ func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, p
 	if err != nil {
 		return ErrStaleAuthority
 	}
-	principal := access.Principal{User: access.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
-	if principal.Authorize(access.Keys) != nil || principal.Project(&project, access.Change) != nil {
+	principal := authz.Principal{User: authz.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
+	if principal.Authorize(authz.Keys) != nil || principal.Project(&project, authz.Change) != nil {
 		return ErrInvalidKey
 	}
 	return nil

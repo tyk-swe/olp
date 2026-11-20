@@ -5,10 +5,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 )
 
 func (c Config) OperationURL(d operations.Dialect, model string) (string, error) {
@@ -44,7 +44,7 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 		base.Path = strings.TrimRight(base.Path, "/") + "/" + path
 		return base.String(), nil
 	}
-	paths := map[string]wire.Format{"decisions": wire.Decisions, "systemone": wire.SystemOne, "embeddings": wire.Embeddings, "moderation": wire.Moderation, "input_tokens": wire.InputTokens, "anthropic_count": wire.AnthropicCount, "gemini_count": wire.GeminiCount, "bedrock_count": wire.Format("bedrock_count"), "gemini_embeddings": wire.GeminiEmbeddings, "gemini_embeddings_batch": wire.GeminiEmbeddingsBatch, "vertex_embeddings": wire.VertexEmbeddings, "bedrock_embeddings": wire.BedrockEmbeddings, "rerank": wire.Rerank, "documentai_process": wire.DocumentAIProcess}
+	paths := map[string]wire.Format{"decisions": wire.Decisions, "gemini_decisions": wire.GeminiDecisions, "systemone": wire.SystemOne, "embeddings": wire.Embeddings, "moderation": wire.Moderation, "input_tokens": wire.InputTokens, "anthropic_count": wire.AnthropicCount, "gemini_count": wire.GeminiCount, "bedrock_count": wire.BedrockCount, "gemini_embeddings": wire.GeminiEmbeddings, "gemini_embeddings_batch": wire.GeminiEmbeddingsBatch, "vertex_embeddings": wire.VertexEmbeddings, "bedrock_embeddings": wire.BedrockEmbeddings, "rerank": wire.Rerank, "documentai_process": wire.DocumentAIProcess}
 	encodedWire, ok := paths[d.Address.FamilyPath]
 	if !ok {
 		return "", errors.New("operation path adapter is not registered")

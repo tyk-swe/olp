@@ -15,8 +15,8 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 	collector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -70,7 +70,7 @@ func traceIngester(t *testing.T, pool *pgxpool.Pool, authority keyauthority.Auth
 	t.Helper()
 	store := &traceingest.Store{
 		Pool:    pool,
-		Limiter: admission.New(newRunner(t)),
+		Limiter: admission.NewDurable(newRunner(t), nil),
 		Auth:    secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), uuid.NewString()),
 	}
 	return traceingest.New(traceKeys{traceSecret: authority}, nil, store)

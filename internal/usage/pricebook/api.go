@@ -4,8 +4,10 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -46,7 +48,7 @@ func (s *API) Register(mux *http.ServeMux) {
 }
 
 func (s *API) route(mux *http.ServeMux, pattern string, handler access.Handler, options ...access.RouteOption) {
-	s.Access.Route(mux, pattern, func(r *http.Request, principal access.Principal) (access.Reply, error) {
+	s.Access.Route(mux, pattern, func(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 		reply, err := handler(r, principal)
 		return reply, Problem(err)
 	}, options...)

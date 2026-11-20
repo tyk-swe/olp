@@ -11,9 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/grants"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type Flow string
@@ -61,7 +62,7 @@ type flowRecord struct {
 	Outcome   enrollmentOutcome
 }
 
-func readFlow(ctx context.Context, q access.Queryer, id, member string) (flowRecord, error) {
+func readFlow(ctx context.Context, q database.Queryer, id, member string) (flowRecord, error) {
 	var item flowRecord
 	err := q.QueryRow(ctx, `SELECT id::text,binding,expires_at,claimed_by::text,coalesce(flow,''),session_secret_id::text,exchange_attempt_id::text,coalesce(poll_interval,0),coalesce(outcome,'') FROM olp.mcp_grant_enrollments WHERE id=$1 AND claimed_by=$2 AND expires_at>now()`, id, member).Scan(&item.ID, &item.Binding, &item.ExpiresAt, &item.ClaimedBy, &item.Flow, &item.SessionID, &item.AttemptID, &item.Interval, &item.Outcome)
 	return item, err
@@ -81,7 +82,7 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 		return Authorization{}, ErrRequired
 	}
 	if item.Flow != "" || item.Outcome != "" {
-		return Authorization{}, access.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
+		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
 	}
 	if _, bindingErr := liveBinding(ctx, tx, item.Binding); bindingErr != nil {
 		return Authorization{}, bindingErr
@@ -92,10 +93,10 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 	}
 	defer client.client.CloseIdleConnections()
 	if flow != AuthorizationCode && flow != DeviceCode {
-		return Authorization{}, access.Invalid("flow", "Use authorization_code or device_code.")
+		return Authorization{}, httpkit.Invalid("flow", "Use authorization_code or device_code.")
 	}
 	if flow == DeviceCode && item.Binding.OAuth.DeviceAuthorizationEndpoint == "" {
-		return Authorization{}, access.Invalid("flow", "This server has no declared device authorization endpoint.")
+		return Authorization{}, httpkit.Invalid("flow", "This server has no declared device authorization endpoint.")
 	}
 	session := flowSession{Verifier: oauth2.GenerateVerifier(), State: id + "." + oauth2.GenerateVerifier(), Redirect: redirect}
 	secretID, sealErr := s.sealFlow(ctx, tx, item, flow, session)
@@ -107,7 +108,7 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 		return Authorization{}, updateErr
 	}
 	if changed.RowsAffected() != 1 {
-		return Authorization{}, access.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
+		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
@@ -154,7 +155,7 @@ func (s *Store) saveDevice(ctx context.Context, item flowRecord, deviceCode stri
 		return encodeErr
 	}
 	defer clear(session)
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := s.keys.Store(ctx, tx, s.installation, id, secrets.MCPGrantEnrollment, session, &expires); err != nil {
 		return err
 	}
@@ -168,7 +169,7 @@ func (s *Store) saveDevice(ctx context.Context, item flowRecord, deviceCode stri
 	return tx.Commit(ctx)
 }
 
-func (s *Store) loadSession(ctx context.Context, q access.Queryer, item flowRecord) (flowSession, error) {
+func (s *Store) loadSession(ctx context.Context, q database.Queryer, item flowRecord) (flowSession, error) {
 	if item.SessionID == nil {
 		return flowSession{}, errOAuth
 	}
@@ -193,22 +194,22 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 		return Authorization{}, readErr
 	}
 	if item.Flow != AuthorizationCode || item.AttemptID != nil || item.Outcome != "" {
-		return Authorization{}, access.Fail(409, "grant_enrollment_used", "This enrollment cannot exchange another code.")
+		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment cannot exchange another code.")
 	}
 	session, sessionErr := s.loadSession(ctx, tx, item)
 	if sessionErr != nil {
 		return Authorization{}, sessionErr
 	}
 	if subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
-		return Authorization{}, access.Invalid("state", "This callback belongs to another authorization.")
+		return Authorization{}, httpkit.Invalid("state", "This callback belongs to another authorization.")
 	}
-	attempt := access.NewID()
+	attempt := httpkit.NewID()
 	tag, claimErr := tx.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET exchange_attempt_id=$2 WHERE id=$1 AND exchange_attempt_id IS NULL AND outcome IS NULL`, id, attempt)
 	if claimErr != nil {
 		return Authorization{}, claimErr
 	}
 	if tag.RowsAffected() != 1 {
-		return Authorization{}, access.Fail(409, "grant_enrollment_used", "This authorization code was already exchanged.")
+		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This authorization code was already exchanged.")
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
@@ -256,7 +257,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	if tag.RowsAffected() != 1 {
 		return ErrRequired
 	}
-	accessID := access.NewID()
+	accessID := httpkit.NewID()
 	if err := s.keys.Store(record, tx, s.installation, accessID, item.Binding.accessPurpose(), []byte(token.AccessToken), nil); err != nil {
 		return err
 	}
@@ -264,7 +265,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	if refreshErr != nil {
 		return refreshErr
 	}
-	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,agent_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, access.NewID(), item.ID, item.Binding.ServerID, item.Binding.AgentID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
+	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,agent_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, httpkit.NewID(), item.ID, item.Binding.ServerID, item.Binding.AgentID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
 	if insertErr != nil {
 		return insertErr
 	}
@@ -283,7 +284,7 @@ func (s *Store) storeRefresh(ctx context.Context, tx pgx.Tx, binding Binding, to
 	if token == "" {
 		return nil, nil
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := s.keys.Store(ctx, tx, s.installation, id, binding.refreshPurpose(), []byte(token), nil); err != nil {
 		return nil, err
 	}
@@ -299,7 +300,7 @@ func (s *Store) sealFlow(ctx context.Context, tx pgx.Tx, item flowRecord, flow F
 		return nil, err
 	}
 	defer clear(encoded)
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := s.keys.Store(ctx, tx, s.installation, id, secrets.MCPGrantEnrollment, encoded, &item.ExpiresAt); err != nil {
 		return nil, err
 	}

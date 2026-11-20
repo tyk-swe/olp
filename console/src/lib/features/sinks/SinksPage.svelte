@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -7,9 +8,8 @@
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
-  import { agentKeys } from '#lib/features/agents/agentKeys.js';
-  import { listProjects } from '#lib/features/agents/api.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { agentKeys, listProjects } from '#lib/features/agents/index.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import SinkEditor from './SinkEditor.svelte';
@@ -56,7 +56,7 @@
   }
 </script>
 
-<svelte:head><title>Signed fact exports · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Signed fact exports" />
 <div class="toolbar">
   <p class="section-help">
     Sends signed usage and audit records to an HTTPS endpoint so another system

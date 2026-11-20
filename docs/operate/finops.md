@@ -61,6 +61,13 @@ credential's custom headers when set, and `X-OLP-Signature` when the credential
 provides `signing_secret`. A redelivery resends byte-identical payloads, so a
 consumer deduplicates on `id`. OpenMeter is the reference consumer.
 
+The first claim that prepares an event for delivery freezes its payload
+settings before sending it. Settings edits apply until that point. Destination and
+credential changes still apply to retries so operators can repair transport
+configuration. After an upgrade, the first claim of a legacy pending event
+freezes the current settings. It cannot reconstruct settings used by earlier
+attempts. Older workers continue to read live settings until upgraded.
+
 ### Stripe meter sinks
 
 A `stripe_meter` sink with format `stripe` carries `metering` only and posts
@@ -81,7 +88,10 @@ server validates the key prefix and rejects `signing_secret`, `region`,
 Each event sends the deterministic identifier `olp-<sink id>-<attempt id>` and
 repeats it as the `Idempotency-Key`, so a
 redelivery is the same event to Stripe. A `duplicate_meter_event` response
-counts as delivered. Stripe enforces identifier uniqueness for at least 24
+counts as delivered. The first claim that prepares a reportable meter event
+with a mapped customer fixes its meter settings for all retries. Destination
+and credential edits apply to retries.
+Stripe enforces identifier uniqueness for at least 24
 hours while OLP retries within minutes, and accepts event timestamps up to
 35 days old; the default 30-day request retention stays inside that window.
 No `Stripe-Version` header is sent.
@@ -90,6 +100,8 @@ An attempt with no mapped project, or a null or non-positive value, never
 queues for the sink. Adding a project to `customers` does not backfill
 attempts that were already priced; the mapping must exist when the attempt
 settles.
+If a settings edit makes a queued event unmapped before delivery, it can
+resume on retry after the mapping or reportable value is restored.
 
 ## FOCUS 1.4 datasets
 
@@ -140,7 +152,8 @@ revision's part keys.
   "completeness": {
     "included_attempts": 0, "fallback_line_attempts": 0, "unpriced_attempts": 0,
     "incomplete_attempts": 0, "uncharged_attempts": 0,
-    "caller_paid_excluded_attempts": 0, "ingestion_gap": false
+    "caller_paid_excluded_attempts": 0, "ingestion_gap": false,
+    "raw_detail_unavailable": false
   },
   "metadata": {
     "DataGenerator": "…", "DatasetInstance": { "…" },
@@ -154,7 +167,18 @@ the exact sum of `estimated_cost` of the facts a cost-basis day included,
 `accounting_totals.charge` the exact `charge` sum on a charge basis; either is
 null on the other basis. `completeness` counts the day's billable facts in
 scope by category; `ingestion_gap` records whether a request-metadata
-ingestion gap overlaps the day. `metadata` follows FOCUS 1.4 §5:
+ingestion gap overlaps the day. `raw_detail_unavailable` records whether retained
+hourly history in scope cannot supply the attempt detail needed by this cost
+basis. Such datasets have `DatasetInstanceComplete=false`, without fabricating
+rows or changing retained ledger totals. Increasing usage retention does not
+restore expired detail. New rollups track this separately for cost and charge.
+Complete cost-basis attempts preserved in the commitment ledger remain available,
+while charge-basis exports require raw facts. For hourly rows created before
+this tracking was introduced, detail availability is conservatively unknown.
+`commitment_totals.complete` continues to describe commitment reconciliation
+independently. This provenance applies when generating or restating a dataset.
+Existing exported artifacts are not rebuilt solely because raw detail expired.
+`metadata` follows FOCUS 1.4 §5:
 `DataGenerator`, `DatasetInstance` (`DatasetInstanceId`,
 `DatasetInstanceName`, `FocusDatasetId`), `Recency` (`DatasetInstanceId`,
 `RecencyLastUpdateDate`, `DatasetInstanceLastUpdated`,
@@ -523,7 +547,7 @@ end-exclusive and at most 93 days.
 | Field | Meaning |
 | --- | --- |
 | `attributed_cost` | `estimated_cost` plus allocated commitment for the day's billable attempts |
-| `invoiced_cost` | imported line-item total for a covered day, else null. A covered day with no costs has value `0` |
+| `invoiced_cost` | imported line-item total for a covered day with one invoice currency, or null when the day has mixed currencies or no coverage. A covered day with no costs has value `0` |
 | `capture_rate` | `attributed / invoiced` to six decimals, or null with `capture_rate_unavailable_reason` (`not_imported`, `zero_invoice`, `currency_mismatch`) |
 | `priced_attempts`, `unpriced_attempts`, `incomplete_attempts` | billable attempt counts; `unpriced_share` is `unpriced/(priced+unpriced)` |
 | `excluded_caller_attempts` | billable attempts excluded for caller-paid or budget-exempt status |
@@ -537,7 +561,9 @@ and a `capture_rate_unavailable_reason` of `not_imported`.
 
 Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`
-uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. Caller-paid and
+uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. The invoice total
+is null when the range has no coverage or includes a currency other than the
+report currency. Caller-paid and
 budget-exempt attempts are excluded from attributed cost; hourly rollup rows
 only approximate priced/incomplete counts and cannot distinguish caller-paid
 usage, so their `budget_exempt` request count is counted as excluded. That

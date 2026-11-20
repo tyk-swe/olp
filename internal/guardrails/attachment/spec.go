@@ -5,22 +5,23 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-var invalidScope = access.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
+var invalidScope = httpkit.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 
 func parsePlacement(in guardrails.Attachment) (guardrails.Attachment, error) {
 	if in.ID != "" || in.Order < 0 {
-		return guardrails.Attachment{}, access.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
+		return guardrails.Attachment{}, httpkit.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
 	}
 	if !in.Scope.Valid() {
 		return guardrails.Attachment{}, invalidScope
 	}
-	revision, err := access.ParseUUID(in.PolicyRevisionID)
+	revision, err := httpkit.ParseUUID(in.PolicyRevisionID)
 	if err != nil {
-		return guardrails.Attachment{}, access.Invalid("policy_revision_id", "Choose an existing policy revision.")
+		return guardrails.Attachment{}, httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
 	scopeID, err := scopeIdentity(in.Scope, in.ScopeID)
 	if err != nil {
@@ -33,9 +34,9 @@ func scopeIdentity(scope guardrails.Scope, id string) (string, error) {
 	if scope == guardrails.InstallationScope {
 		return guardrails.InstallationProject, nil
 	}
-	parsed, err := access.ParseUUID(id)
+	parsed, err := httpkit.ParseUUID(id)
 	if err != nil {
-		return "", access.Invalid("scope_id", "Choose an existing scope.")
+		return "", httpkit.Invalid("scope_id", "Choose an existing scope.")
 	}
 	return parsed, nil
 }
@@ -50,21 +51,21 @@ func (t target) owned() bool {
 	return t.Scope == guardrails.RouteScope || t.Scope == guardrails.KeyScope || t.Scope == guardrails.ToolsetScope
 }
 
-var changeOperation = map[guardrails.Scope]access.Operation{
-	guardrails.InstallationScope: access.Settings,
-	guardrails.OrganizationScope: access.ManageOrganization,
-	guardrails.KeyScope:          access.Keys,
+var changeOperation = map[guardrails.Scope]authz.Operation{
+	guardrails.InstallationScope: authz.Settings,
+	guardrails.OrganizationScope: authz.ManageOrganization,
+	guardrails.KeyScope:          authz.Keys,
 }
 
-func authorize(p access.Principal, t target, need access.Need) error {
-	if need == access.Change {
-		if err := p.Authorize(cmp.Or(changeOperation[t.Scope], access.Configure)); err != nil {
+func authorize(p authz.Principal, t target, need authz.Need) error {
+	if need == authz.Change {
+		if err := p.Authorize(cmp.Or(changeOperation[t.Scope], authz.Configure)); err != nil {
 			return err
 		}
 	}
 	switch {
 	case t.Scope == guardrails.InstallationScope && !p.AllProjects:
-		return access.Forbidden()
+		return httpkit.Forbidden()
 	case t.Scope == guardrails.InstallationScope:
 		return p.Project(nil, need)
 	case t.Scope == guardrails.OrganizationScope:

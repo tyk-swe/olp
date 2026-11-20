@@ -3,7 +3,7 @@ package management
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	client "github.com/tyk-swe/olp/management"
 )
 
@@ -18,5 +18,5 @@ func Register(mux *http.ServeMux) {
 
 func notFound(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	access.WriteProblem(w, access.Fail(404, "operation_not_found", "The requested management operation does not exist."))
+	httpkit.WriteProblem(w, httpkit.Fail(404, "operation_not_found", "The requested management operation does not exist."))
 }

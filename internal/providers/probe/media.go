@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Media certifies without billed work wherever the upstream allows it. Custom

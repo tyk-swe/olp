@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -8,8 +9,8 @@
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import {
     retireBudgetGroup,
@@ -60,7 +61,6 @@
   let createBusy = $state(false);
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
 
   let editingId = $state('');
   let editingGroup = $state.raw<BudgetGroup | null>(null);
@@ -99,7 +99,7 @@
     for (const field of rateFields) createRates[field] = editRates[field] = '';
     createBusy = editBusy = false;
     editingGroup = null;
-    error = notice = '';
+    error = '';
   });
 
   function startEdit(group: BudgetGroup) {
@@ -147,7 +147,7 @@
     }
     createBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const submission = createIntent.prepare<
@@ -228,7 +228,7 @@
     }
     editBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       await updateBudgetGroup(current, {
@@ -252,7 +252,7 @@
       if (!isCurrent()) return;
       editingId = '';
       editingGroup = null;
-      notice = 'Budget group updated.';
+      notify('Budget group updated.');
       await queryClient.invalidateQueries(
         { queryKey: budgetGroupKeys.root },
         { throwOnError: true }
@@ -288,7 +288,6 @@
   </div>
 
   {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-  {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 
   {#if creating}
     <Dialog
@@ -388,7 +387,7 @@
       >Create a group, then add API keys to it from each key's settings.</EmptyState
     >
   {:else}
-    <div class="table-scroll">
+    <ScrollTable label="Budget groups">
       <table class="data-table">
         <thead
           ><tr
@@ -533,7 +532,7 @@
           {/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
     {#if items.some((group) => !group.budget.enforcement_active)}
       <p class="section-help">
         Limits are stored policy only; accrued amounts are not live accounting
@@ -552,14 +551,9 @@
   }
   .groups-panel h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
-  }
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
   }
   .submission-fields {
     display: grid;
@@ -579,9 +573,6 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-  }
-  .table-scroll {
-    overflow-x: auto;
   }
   td small {
     color: var(--foreground-muted);

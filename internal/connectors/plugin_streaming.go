@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 

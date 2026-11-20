@@ -4,10 +4,12 @@ import (
 	"context"
 	"maps"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -39,7 +41,7 @@ func (reused) outcome()      {}
 func (limited) outcome()     {}
 func (recertified) outcome() {}
 
-func Prepare(ctx context.Context, pool access.Queryer, p access.Principal, servers []Server, bindings promotion.Bindings, deps Deps) (Prepared, error) {
+func Prepare(ctx context.Context, pool database.Queryer, p authz.Principal, servers []Server, bindings promotion.Bindings, deps Deps) (Prepared, error) {
 	if len(servers) == 0 {
 		return Prepared{}, nil
 	}
@@ -66,15 +68,15 @@ func Prepare(ctx context.Context, pool access.Queryer, p access.Principal, serve
 	})}, nil
 }
 
-func prepare(ctx context.Context, pool access.Queryer, p access.Principal, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (certification, error) {
+func prepare(ctx context.Context, pool database.Queryer, p authz.Principal, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (certification, error) {
 	if existing != nil {
 		projectID := existing.ProjectID
-		if err := p.Project(&projectID, access.Change); err != nil {
+		if err := p.Project(&projectID, authz.Change); err != nil {
 			return certification{}, err
 		}
 	}
 	if unretainedEntra(flatten(server.Transport), existing) {
-		return certification{}, access.Invalid("mcp_servers", entraDetail)
+		return certification{}, httpkit.Invalid("mcp_servers", entraDetail)
 	}
 	if existing == nil {
 		catalog, err := certify(ctx, pool, bindings, deps, existing, server)
@@ -95,7 +97,7 @@ func prepare(ctx context.Context, pool access.Queryer, p access.Principal, bindi
 	return certification{observed: existing.ETag, outcome: recertified{catalog: catalog}}, err
 }
 
-func certify(ctx context.Context, pool access.Queryer, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (*upstream.Catalog, error) {
+func certify(ctx context.Context, pool database.Queryer, bindings promotion.Bindings, deps Deps, existing *registration.Definition, server Server) (*upstream.Catalog, error) {
 	flat := flatten(server.Transport)
 	material, err := materialOf(ctx, pool, bindings, deps.Keys, flat, existing)
 	if err != nil {
@@ -106,12 +108,12 @@ func certify(ctx context.Context, pool access.Queryer, bindings promotion.Bindin
 		Transport: flat.transport, Stdio: flat.stdio, Executables: registration.NewExecutables(deps.Unconfined, pool),
 	})
 	if err != nil || catalog.Digest != server.CatalogDigest {
-		return nil, access.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
+		return nil, httpkit.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
 	}
 	return catalog, nil
 }
 
-func materialOf(ctx context.Context, pool access.Queryer, bindings promotion.Bindings, keys Keys, flat wire, existing *registration.Definition) ([]byte, error) {
+func materialOf(ctx context.Context, pool database.Queryer, bindings promotion.Bindings, keys Keys, flat wire, existing *registration.Definition) ([]byte, error) {
 	if flat.bearer == nil {
 		return nil, nil
 	}
@@ -119,10 +121,10 @@ func materialOf(ctx context.Context, pool access.Queryer, bindings promotion.Bin
 		return []byte(sealed.Secret), nil
 	}
 	if existing == nil || existing.CredentialID == nil {
-		return nil, access.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
+		return nil, httpkit.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 	}
 	if flat.endpoint != existing.Endpoint {
-		return nil, access.Invalid("secret_bindings", "Supply a new MCP bearer binding or remove credential_ref when changing the endpoint.")
+		return nil, httpkit.Invalid("secret_bindings", "Supply a new MCP bearer binding or remove credential_ref when changing the endpoint.")
 	}
 	return keys.read(ctx, pool, *existing.CredentialID)
 }

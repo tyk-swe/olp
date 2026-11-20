@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -15,7 +16,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listCredentials,
     retireDefinition,
@@ -133,6 +134,10 @@
   let credentialID = $state('');
   let creatingCredential = $state(false);
   const definitionIntent = useMutationIntent();
+  const definitionActivationIntent = useMutationIntent();
+  const policyIntent = useMutationIntent();
+  const policyActivationIntent = useMutationIntent();
+  const attachIntent = useMutationIntent();
   const capture = usePrincipalLifetime(() => {
     edit(null);
     editPolicy(null);
@@ -296,10 +301,15 @@
     event.preventDefault();
     const editor = policyEditor;
     await run(async (current) => {
-      const saved = await savePolicyAPI(selectedPolicy, project, {
-        name: policyName,
-        entries
-      });
+      const saved = await policyIntent.submit(
+        {
+          selected: selectedPolicy,
+          project,
+          body: { name: policyName, entries }
+        },
+        (input, requestId) =>
+          savePolicyAPI(input.selected, input.project, input.body, requestId)
+      );
       if (!current()) return;
       if (editor !== policyEditor) return;
       selectedPolicy = saved;
@@ -318,12 +328,15 @@
   async function attach(event: SubmitEvent) {
     event.preventDefault();
     await run(async (current) => {
-      await attachPolicyAPI({
-        scope,
-        scope_id: scope === 'installation' ? 'installation' : scopeID,
-        policy_revision_id: attachPolicy,
-        order
-      });
+      await attachIntent.submit(
+        {
+          scope,
+          scope_id: scope === 'installation' ? 'installation' : scopeID,
+          policy_revision_id: attachPolicy,
+          order
+        },
+        (input, requestId) => attachPolicyAPI(input, requestId)
+      );
       if (!current()) return;
       notify('Policy attached');
     });
@@ -349,7 +362,7 @@
   }
 </script>
 
-<svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Guardrails" />
 {#if error && !definitionOpen && !policyOpen}<Callout tone="danger"
     >{error}</Callout
   >{/if}
@@ -508,7 +521,10 @@
             onclick={() =>
               run(async (current) => {
                 if (!selected) return;
-                await activateDefinition(selected);
+                await definitionActivationIntent.submit(
+                  selected,
+                  (input, requestId) => activateDefinition(input, requestId)
+                );
                 if (!current()) return;
                 notify('Check activated');
                 closeDefinition();
@@ -674,7 +690,10 @@
             onclick={() =>
               run(async (current) => {
                 if (!selectedPolicy) return;
-                await activatePolicy(selectedPolicy);
+                await policyActivationIntent.submit(
+                  selectedPolicy,
+                  (input, requestId) => activatePolicy(input, requestId)
+                );
                 if (!current()) return;
                 notify(
                   'Policy activated. Existing attachments keep their pinned revision'

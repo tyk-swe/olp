@@ -7,12 +7,13 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -83,7 +84,7 @@ func (s *Store) AdmitPaid(ctx context.Context, in PaidAdmission) (PaidPermit, er
 	if err != nil {
 		return PaidPermit{}, err
 	}
-	attempt := codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
+	attempt := codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,route_revision_id,api_key_id,paid_binding_id,paid_provider_id,paid_slot_id,requested_model,operation,model,state,reserved_tokens,end_user_digest,attribution,paid_cost_owners,recovery_from)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'prepared',0,$12,$13,$14,$15)`, attempt.ID, in.Route.ProjectID, in.Route.ID, in.Route.RevisionID, in.APIKeyID, binding.ID, target.ProviderID, target.SlotID, in.Operation.PublicModel(), in.Operation.Name, in.Operation.Model, in.EndUserDigest, attribution.JSON(in.Attribution), paidCodeOwners(authority, in), codeRecoveryFrom(in.Recovery)); err != nil {
 		return PaidPermit{}, err
@@ -245,7 +246,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidAdmission, current code
 			return binding, codemode.Refuse(409, "code_paid_target_conflict")
 		}
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	root := func() string {
 		if parent.ID != "" {
 			return parent.RootID
@@ -280,7 +281,7 @@ func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidAdmission, conv
 	return binding, err
 }
 
-func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidAdmission, lock bool) error {
+func paidCodeTarget(ctx context.Context, db database.Queryer, in PaidAdmission, lock bool) error {
 	locking := func() string {
 		if lock {
 			return " FOR SHARE OF p,s,c"

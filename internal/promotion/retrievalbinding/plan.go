@@ -6,8 +6,9 @@ import (
 	"reflect"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
@@ -22,7 +23,7 @@ func Planner(desired Desired) promotion.Planner {
 	if len(desired.Bindings) == 0 {
 		return promotion.Planner{}
 	}
-	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+	return promotion.Planner{Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 		lookup, err := readInstalled(ctx, q)
 		if err != nil {
 			return nil, err
@@ -33,7 +34,7 @@ func Planner(desired Desired) promotion.Planner {
 	}}
 }
 
-func planBinding(ctx context.Context, q access.Queryer, lookup installed, routeStage stage, binding Binding) (promotion.Item, error) {
+func planBinding(ctx context.Context, q database.Queryer, lookup installed, routeStage stage, binding Binding) (promotion.Item, error) {
 	switch routeStage := routeStage.(type) {
 	case misstaged:
 		return promotion.Blocker(kind, binding.Name, routeStage.detail), nil
@@ -44,7 +45,7 @@ func planBinding(ctx context.Context, q access.Queryer, lookup installed, routeS
 	}
 }
 
-func planStaged(ctx context.Context, q access.Queryer, directory promotion.Directory, routeStage staged, binding Binding) (promotion.Item, error) {
+func planStaged(ctx context.Context, q database.Queryer, directory promotion.Directory, routeStage staged, binding Binding) (promotion.Item, error) {
 	projectID, exists := directory.ID(binding.Project)
 	if !exists && (!routeStage.projectDeclared || len(binding.KeyGrants) > 0) {
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before promoting access."), nil
@@ -61,12 +62,12 @@ func planStaged(ctx context.Context, q access.Queryer, directory promotion.Direc
 	return promotion.Item{Kind: kind, Key: binding.Name, Action: contract.ConfigurationPlanItemActionStage, Detail: stagedDetail}, nil
 }
 
-func planStored(ctx context.Context, q access.Queryer, lookup installed, binding Binding) (promotion.Item, error) {
+func planStored(ctx context.Context, q database.Queryer, lookup installed, binding Binding) (promotion.Item, error) {
 	in, err := resolve(ctx, q, lookup, binding)
 	if errors.Is(err, errProjectAbsent) {
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before applying this binding."), nil
 	}
-	if problem, ok := errors.AsType[*access.Problem](err); ok {
+	if problem, ok := errors.AsType[*httpkit.Problem](err); ok {
 		return promotion.Blocker(kind, binding.Name, problem.Detail), nil
 	}
 	if err != nil {
@@ -89,7 +90,7 @@ func storedAction(current *retrieval.Binding, in retrieval.Input) contract.Confi
 	return contract.ConfigurationPlanItemActionReplace
 }
 
-func find(ctx context.Context, q access.Queryer, in retrieval.Input) (*retrieval.Binding, error) {
+func find(ctx context.Context, q database.Queryer, in retrieval.Input) (*retrieval.Binding, error) {
 	current, err := retrieval.Find(ctx, q, in.ProjectID, in.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

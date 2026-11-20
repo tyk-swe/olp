@@ -1,6 +1,9 @@
 import { confirmAction } from '#lib/components/confirm.js';
-import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
-import { providerKeys } from '#lib/features/providers/providerKeys.js';
+import { overviewKeys } from '#lib/features/overview/index.js';
+import {
+  providerKeys,
+  listProviderModelInventory
+} from '#lib/features/providers/index.js';
 import { routeKeys } from '#lib/features/routes/routeKeys.js';
 import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
@@ -34,16 +37,14 @@ import {
   type RouteDraft,
   type RouteSimulation
 } from '#lib/features/routes/api.js';
-import { listProviderModelInventory } from '#lib/features/providers/models.js';
-import { listPublications } from '#lib/features/agents/api.js';
-import { agentKeys } from '#lib/features/agents/agentKeys.js';
+import { listPublications, agentKeys } from '#lib/features/agents/index.js';
 import {
   discoveredOperations,
   discoveredSurfaces,
   inspectionDialects
 } from '#lib/features/routes/inspectionDialects.js';
-import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { useRole } from '#lib/session/useRole.svelte.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
@@ -324,10 +325,16 @@ export class RouteDraftEditorState {
     this.touch();
   };
   addPolicyRule = () => {
+    const usedIds = this.policyRules.map((rule) => rule.id);
+    const id =
+      this.policyRules
+        .map((_, index) => `rule-${index + 1}`)
+        .find((candidate) => !usedIds.includes(candidate)) ??
+      `rule-${this.policyRules.length + 1}`;
     this.policyRules = [
       ...this.policyRules,
       {
-        id: `rule-${this.policyRules.length + 1}`,
+        id,
         phase: 'input',
         action: this.fidelity.mode === 'strict' ? 'block' : 'redact',
         pattern: '',

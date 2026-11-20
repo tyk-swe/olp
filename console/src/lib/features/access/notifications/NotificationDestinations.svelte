@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -19,7 +20,12 @@
     updateNotificationDestination,
     type NotificationDestination
   } from './api';
-  import { destinationTypes, isChat, secretRequired } from './presentation';
+  import {
+    canChangeNotification,
+    destinationTypes,
+    isChat,
+    secretRequired
+  } from './presentation';
   import {
     createDestinationInput,
     editDestinationDraft,
@@ -35,9 +41,13 @@
     canDelete
   }: { canManage: boolean; installationWide: boolean; canDelete: boolean } =
     $props();
+  const canChange = (destination: NotificationDestination) =>
+    canChangeNotification(destination.project_id, {
+      project: canManage,
+      installation: installationWide
+    });
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const destinationIntent = useMutationIntent();
   const destinations = createQuery(() => ({
     queryKey: notificationKeys.destinations(),
@@ -60,7 +70,7 @@
       return;
     destBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const submission = destinationIntent.prepare<
@@ -100,7 +110,7 @@
   let editDestBusy = $state(false);
 
   function startDestEdit(destination: NotificationDestination) {
-    if (editDestBusy) return;
+    if (editDestBusy || !canChange(destination)) return;
     editDestination = destination;
     editDestId = destination.id;
     editDraft = editDestinationDraft(destination);
@@ -111,7 +121,7 @@
 
   async function saveDestination(destination: NotificationDestination) {
     if (
-      !canManage ||
+      !canChange(destination) ||
       editDestBusy ||
       !editDraft.name.trim() ||
       !editDraft.url.trim()
@@ -121,7 +131,7 @@
     if (!current || current.id !== destination.id) return;
     editDestBusy = true;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const parsed = parseDestinationSecret(
@@ -142,7 +152,7 @@
       editDestId = '';
       editDestination = null;
       editDestSecret = '';
-      notice = 'Destination updated.';
+      notify('Destination updated.');
       await queryClient.invalidateQueries(
         {
           queryKey: notificationKeys.root
@@ -160,9 +170,9 @@
   }
 
   async function toggleDestination(destination: NotificationDestination) {
-    if (!canManage) return;
+    if (!canChange(destination)) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateNotificationDestination(destination, {
         enabled: !destination.enabled
@@ -183,12 +193,12 @@
     editDraft = newDestinationDraft('webhook');
     editDestination = null;
     destBusy = editDestBusy = false;
-    error = notice = '';
+    error = '';
   });
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 {#if canManage}<div class="toolbar">
     <p class="section-help">
       Where alerts are sent, such as a webhook or an email address.
@@ -379,7 +389,7 @@
     >Add a webhook or email destination, then point rules at it.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification destinations">
     <table class="data-table">
       <thead
         ><tr
@@ -387,7 +397,7 @@
             >URL</th
           ><th scope="col">Project</th><th scope="col">Secret</th><th
             scope="col">Enabled</th
-          >{#if canManage}<th scope="col"
+          >{#if canManage || installationWide}<th scope="col"
               ><span class="sr-only">Actions</span></th
             >{/if}</tr
         ></thead
@@ -481,36 +491,36 @@
                 >{destination.project_name ?? 'Installation-wide'}</td
               ><td>{destination.secret_configured ? 'Configured' : '—'}</td><td
                 >{destination.enabled ? 'Yes' : 'No'}</td
-              >{#if canManage}<td
-                  ><button
-                    class="text-button"
-                    type="button"
-                    disabled={editDestBusy}
-                    onclick={() => startDestEdit(destination)}>Edit</button
-                  ><button
-                    class="text-button"
-                    type="button"
-                    onclick={() => toggleDestination(destination)}
-                    >{destination.enabled ? 'Disable' : 'Enable'}</button
-                  >
-                  {#if canDelete}<ConfirmAction
-                      danger
-                      label="Delete destination"
-                      description={`Delete ${destination.name}. Referenced resources cannot be deleted`}
-                      identity={`${destination.id}:${destination.etag}`}
-                      run={(requestId) =>
-                        deleteNotificationDestination(destination, requestId)}
-                      done={async () => {
-                        await queryClient.invalidateQueries({
-                          queryKey: notificationKeys.root
-                        });
-                      }}
-                    />{/if}</td
+              >{#if canManage || installationWide}<td
+                  >{#if canChange(destination)}<button
+                      class="text-button"
+                      type="button"
+                      disabled={editDestBusy}
+                      onclick={() => startDestEdit(destination)}>Edit</button
+                    ><button
+                      class="text-button"
+                      type="button"
+                      onclick={() => toggleDestination(destination)}
+                      >{destination.enabled ? 'Disable' : 'Enable'}</button
+                    >
+                    {#if canDelete}<ConfirmAction
+                        danger
+                        label="Delete destination"
+                        description={`Delete ${destination.name}. Referenced resources cannot be deleted`}
+                        identity={`${destination.id}:${destination.etag}`}
+                        run={(requestId) =>
+                          deleteNotificationDestination(destination, requestId)}
+                        done={async () => {
+                          await queryClient.invalidateQueries({
+                            queryKey: notificationKeys.root
+                          });
+                        }}
+                      />{/if}{/if}</td
                 >{/if}</tr
             >
           {/if}
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

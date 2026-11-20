@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 type Part struct {
@@ -66,8 +66,6 @@ func FormOf(fields []Field, normalized bool) *Form {
 func (f *Form) SourceFields() ([]Field, bool) {
 	return slices.Clone(f.source), f.normalized
 }
-
-func (f *Form) Handles() []Handle { return f.handles }
 
 func (f *Form) Disarm() {
 	f.armed = false

@@ -630,7 +630,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -702,7 +702,7 @@
   .attempt-heading .mono {
     margin-top: 0.15rem;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .provider-link {
     text-decoration: underline;

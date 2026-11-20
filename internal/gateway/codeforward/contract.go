@@ -30,6 +30,9 @@ type Ledger interface {
 	ObserveHealth(context.Context, string, codemode.HealthObservation) error
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
 	ObserveAllowanceCharge(context.Context, string, json.RawMessage) error
+	ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error)
+	ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error)
+	AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error)
 	ObserveReference(context.Context, string, string) error
 	ObserveOutcome(context.Context, string, codemode.Outcome) error
 	RecordRefusal(context.Context, codemode.Route, string, string, string) error
@@ -53,10 +56,4 @@ type ResearchLedger interface {
 	ResearchSession(context.Context, string, codemode.ResearchSessionBinding) (string, error)
 	CreateResearchSession(context.Context, codemode.ResearchSessionBinding, string) (string, error)
 	DeleteResearchSession(context.Context, string, string) error
-}
-
-type PaidLedger interface {
-	ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error)
-	ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error)
-	AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error)
 }

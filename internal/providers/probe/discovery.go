@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (p *Prober) ListModels(ctx context.Context, t Target) ([]string, error) {
@@ -121,10 +121,10 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 			}
 			previous = name
 			tuple := DefaultTuple(t.Connection.Transport())
-			err := p.Certify(ctx, t, name, tuple, BodyLimit)
+			err := p.Certify(ctx, t, name, tuple)
 			if err != nil && t.Connection.Document().Kind == connectors.KindAzureOpenAI {
 				tuple.Operation = "embeddings"
-				err = p.Certify(ctx, t, name, tuple, BodyLimit)
+				err = p.Certify(ctx, t, name, tuple)
 			}
 			if err != nil {
 				return nil, err

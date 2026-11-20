@@ -116,10 +116,11 @@ type wireAttempt struct {
 }
 
 func (usage AttemptUsage) MarshalJSON() ([]byte, error) {
-	return json.Marshal(usage.WireWith(usage.Evidence.Observed(), usage.Evidence.Complete(), usage.Evidence.Uncertain()))
+	return json.Marshal(usage.WireWith(usage.Evidence.Complete()))
 }
 
-func (usage AttemptUsage) WireWith(observed, complete, uncertain bool) wireUsage {
+func (usage AttemptUsage) WireWith(complete bool) wireUsage {
+	observed, uncertain := usage.Evidence.Observed(), usage.Evidence.Uncertain()
 	return wireUsage{
 		InvocationCount:         usage.InvocationCount,
 		TrainingTokens:          usage.TrainingTokens,

@@ -12,8 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -56,13 +58,13 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 }
 
 // loadRevision accepts a revision id or number scoped to the provider.
-func loadRevision(ctx context.Context, q access.Queryer, providerID, ref string) (*revisionRow, error) {
+func loadRevision(ctx context.Context, q database.Queryer, providerID, ref string) (*revisionRow, error) {
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
 	}
-	id, err := access.ParseUUID(ref)
+	id, err := httpkit.ParseUUID(ref)
 	if err != nil {
-		return nil, access.Fail(404, "not_found", "Unknown revision.")
+		return nil, httpkit.Fail(404, "not_found", "Unknown revision.")
 	}
 	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id=$2", providerID, id))
 }
@@ -111,21 +113,21 @@ func (v *revisionRow) summary() revisionSummary {
 	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
-func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (revisionListItem, error) {
 		v, err := scanRevision(row)
@@ -135,41 +137,41 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 		return revisionListItem{revisionSummary: v.summary(), Kind: v.Configuration.Kind}, nil
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
+	return httpkit.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
-func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	page, err := access.Page(r)
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items := []modelReply{}
 	for _, m := range v.Models {
@@ -178,28 +180,28 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 		}
 	}
 	slices.SortFunc(items, func(a, b modelReply) int { return strings.Compare(b.ID, a.ID) })
-	return access.ListReplyBy(items, page, modelID), nil
+	return httpkit.ListReplyBy(items, page, modelID), nil
 }
 
 func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	to, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("to"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	a, b := from.Configuration, to.Configuration
 	fromModels := map[string]routing.RevisionModel{}
@@ -248,7 +250,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	for _, list := range []*[]string{&added, &removed, &changed, &capsAdded, &capsRemoved} {
 		slices.Sort(*list)
 	}
-	return access.OK(map[string]any{
+	return httpkit.OK(map[string]any{
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
 		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
@@ -311,7 +313,7 @@ type SlotSnapshot struct {
 	ProfileID    string
 }
 
-func ReadProviderSnapshots(ctx context.Context, q access.Queryer) ([]ProviderSnapshot, error) {
+func ReadProviderSnapshots(ctx context.Context, q database.Queryer) ([]ProviderSnapshot, error) {
 	rows, err := q.Query(ctx, `SELECT p.id::text,p.name,pr.name,p.kind,p.configuration,
 	(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL),
 	r.configuration,r.models,r.slots
@@ -323,7 +325,7 @@ func ReadProviderSnapshots(ctx context.Context, q access.Queryer) ([]ProviderSna
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[ProviderSnapshot])
 }
 
-func ReadModelSnapshots(ctx context.Context, q access.Queryer) ([]ModelSnapshot, error) {
+func ReadModelSnapshots(ctx context.Context, q database.Queryer) ([]ModelSnapshot, error) {
 	rows, err := q.Query(ctx, `SELECT provider_id::text,upstream_model,display_name,enabled,capabilities FROM olp.provider_models ORDER BY provider_id,upstream_model`)
 	if err != nil {
 		return nil, err
@@ -331,7 +333,7 @@ func ReadModelSnapshots(ctx context.Context, q access.Queryer) ([]ModelSnapshot,
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[ModelSnapshot])
 }
 
-func ReadSlotSnapshots(ctx context.Context, q access.Queryer) ([]SlotSnapshot, error) {
+func ReadSlotSnapshots(ctx context.Context, q database.Queryer) ([]SlotSnapshot, error) {
 	rows, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,s.is_default,s.position,s.enabled,s.priority,s.weight,s.credential_id::text,s.restrictions,s.limits,
 	c.id::text,coalesce(c.plugin_digest,''),coalesce(c.profile_id,'')
 	FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL
@@ -354,7 +356,7 @@ type RevisionLabels struct {
 	Models   []routing.RevisionModel
 }
 
-func ReadProjectProvider(ctx context.Context, q access.Queryer, name, projectID string) (ProjectProvider, bool, error) {
+func ReadProjectProvider(ctx context.Context, q database.Queryer, name, projectID string) (ProjectProvider, bool, error) {
 	var provider ProjectProvider
 	err := q.QueryRow(ctx, `SELECT id::text,configuration FROM olp.providers WHERE lower(name)=lower($1) AND project_id=$2`, name, projectID).Scan(&provider.ID, &provider.Configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -363,7 +365,7 @@ func ReadProjectProvider(ctx context.Context, q access.Queryer, name, projectID 
 	return provider, err == nil, err
 }
 
-func ReadActiveRevision(ctx context.Context, q access.Queryer, name, projectID string) (routing.ProviderRevision, bool, error) {
+func ReadActiveRevision(ctx context.Context, q database.Queryer, name, projectID string) (routing.ProviderRevision, bool, error) {
 	var current routing.ProviderRevision
 	err := q.QueryRow(ctx, `SELECT p.id::text,v.id::text,p.name,p.state,p.project_id::text,v.configuration,v.models,v.slots FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND p.state='active'`, name, projectID).Scan(&current.ID, &current.RevisionID, &current.Name, &current.State, &current.ProjectID, &current.Configuration, &current.Models, &current.Slots)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -372,7 +374,7 @@ func ReadActiveRevision(ctx context.Context, q access.Queryer, name, projectID s
 	return current, err == nil, err
 }
 
-func ReadRevisionLabels(ctx context.Context, q access.Queryer, revisionID, providerID string) (RevisionLabels, error) {
+func ReadRevisionLabels(ctx context.Context, q database.Queryer, revisionID, providerID string) (RevisionLabels, error) {
 	var revision RevisionLabels
 	err := q.QueryRow(ctx, `SELECT p.name,j.name,v.models FROM olp.provider_revisions v JOIN olp.providers p ON p.id=v.provider_id JOIN olp.projects j ON j.id=p.project_id WHERE v.id=$1 AND p.id=$2`, revisionID, providerID).Scan(&revision.Provider, &revision.Project, &revision.Models)
 	return revision, err

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 )
 
 // rateSet is the per-million rates of a price, or of one of its tiers: a tier

@@ -9,38 +9,39 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/settings"
 )
 
-func (s *Server) projectBudget(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) projectBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.readAggregateBudget(r, p, true)
 }
 
-func (s *Server) installationBudget(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) installationBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.readAggregateBudget(r, p, false)
 }
 
-func (s *Server) putProjectBudget(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) putProjectBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeAggregateBudget(r, p, true)
 }
 
-func (s *Server) putInstallationBudget(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) putInstallationBudget(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writeAggregateBudget(r, p, false)
 }
 
 // Table names are selected internally, never supplied by the request.
-func (s *Server) budgetBoundary(r *http.Request, p access.Principal, project, change bool) (id, table, etagColumn, level string, err error) {
+func (s *Server) budgetBoundary(r *http.Request, p authz.Principal, project, change bool) (id, table, etagColumn, level string, err error) {
 	id, table, etagColumn, level = s.access.Installation, "olp.installation", "budget_etag", "installation"
 	if r.PathValue("organization_id") != "" {
 		table, etagColumn, level = "olp.organizations", "etag", "organization"
-		id, err = access.IDParam(r, "organization_id")
+		id, err = httpkit.IDParam(r, "organization_id")
 		if err != nil {
 			return
 		}
-		need := access.View
+		need := authz.View
 		if change {
-			need = access.Change
+			need = authz.Change
 		}
 		err = p.Organization(id, need)
 		return
@@ -49,94 +50,88 @@ func (s *Server) budgetBoundary(r *http.Request, p access.Principal, project, ch
 		return
 	}
 	table, etagColumn, level = "olp.projects", "etag", "project"
-	id, err = access.IDParam(r, "project_id")
+	id, err = httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return
 	}
-	need := access.View
+	need := authz.View
 	if change {
-		need = access.Change
+		need = authz.Change
 	}
 	err = p.Project(&id, need)
 	return
 }
 
-func (s *Server) readAggregateBudget(r *http.Request, p access.Principal, project bool) (access.Reply, error) {
+func (s *Server) readAggregateBudget(r *http.Request, p authz.Principal, project bool) (httpkit.Reply, error) {
 	id, table, column, level, err := s.budgetBoundary(r, p, project, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var policy, usage json.RawMessage
 	var etag string
 	err = s.access.Pool.QueryRow(r.Context(), "SELECT COALESCE(budget_policy,'null'::jsonb),"+column+"::text,"+aggregateReportSQL(level)+" FROM "+table+" p WHERE id=$1", id).Scan(&policy, &etag, &usage)
-	return access.Detail(map[string]any{"policy": policy, "etag": etag, "usage": usage}, etag), err
+	return httpkit.Detail(map[string]any{"policy": policy, "etag": etag, "usage": usage}, etag), err
 }
 
-func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, project bool) (access.Reply, error) {
+func (s *Server) writeAggregateBudget(r *http.Request, _ authz.Principal, project bool) (httpkit.Reply, error) {
 	var body struct {
 		Policy json.RawMessage `json:"policy"`
 	}
-	if err := access.Decode(r, &body); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &body); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if len(body.Policy) == 0 {
-		return access.Reply{}, access.Invalid("policy", "A policy or explicit null is required.")
+		return httpkit.Reply{}, httpkit.Invalid("policy", "A policy or explicit null is required.")
 	}
 	var policy *authority.BudgetPolicy
 	d := json.NewDecoder(bytes.NewReader(body.Policy))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&policy); err != nil {
-		return access.Reply{}, access.Invalid("policy", "The budget policy is invalid.")
+		return httpkit.Reply{}, httpkit.Invalid("policy", "The budget policy is invalid.")
 	}
 	if err := policy.ValidateAndNormalize(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if !policy.Limited() {
 		policy = nil
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	id, table, column, level, err := s.budgetBoundary(r, p, project, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	var etag string
-	if err = tx.QueryRow(r.Context(), "SELECT "+column+"::text FROM "+table+" WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Match(r, etag); err != nil {
-		return access.Reply{}, err
-	}
-	if level == "project" {
-		current, _, readErr := ReadPolicies(r.Context(), tx, id)
-		if readErr != nil {
-			return access.Reply{}, readErr
-		}
-		etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: policy, Templates: current.Templates, AttributionBudgets: current.AttributionBudgets})
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		id, table, column, level, err := s.budgetBoundary(r, p, project, true)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	} else if level == "organization" {
-		if etag, err = SetOrganizationBudget(r.Context(), tx, id, policy); err != nil {
-			return access.Reply{}, err
+		var etag string
+		if err = tx.QueryRow(r.Context(), "SELECT "+column+"::text FROM "+table+" WHERE id=$1 FOR UPDATE", id).Scan(&etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	} else if etag, err = settings.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), level+".budget.update", level, id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	var usage json.RawMessage
-	if err = tx.QueryRow(r.Context(), "SELECT "+aggregateReportSQL(level)+" FROM "+table+" p WHERE id=$1", id).Scan(&usage); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Detail(map[string]any{"policy": policy, "etag": etag, "usage": usage}, etag), tx.Commit(r.Context())
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if level == "project" {
+			current, _, readErr := ReadPolicies(r.Context(), tx, id)
+			if readErr != nil {
+				return httpkit.Reply{}, access.Event{}, readErr
+			}
+			etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: policy, Templates: current.Templates, AttributionBudgets: current.AttributionBudgets})
+			if err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		} else if level == "organization" {
+			if etag, err = SetOrganizationBudget(r.Context(), tx, id, policy); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		} else if etag, err = access.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var usage json.RawMessage
+		if err = tx.QueryRow(r.Context(), "SELECT "+aggregateReportSQL(level)+" FROM "+table+" p WHERE id=$1", id).Scan(&usage); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(map[string]any{"policy": policy, "etag": etag, "usage": usage}, etag), access.Event{Action: level + ".budget.update", Resource: level, ID: id}, nil
+	})
 }
 
 func aggregateReportSQL(level string) string {
@@ -160,7 +155,7 @@ func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *au
 	if err != nil {
 		return "", err
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err := tx.Exec(ctx, "UPDATE olp.organizations SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now() WHERE id=$1", id, encoded, etag); err != nil {
 		return "", err
 	}

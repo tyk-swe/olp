@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routes"
 )
@@ -92,7 +92,7 @@ func portablePolicy(route codemode.Route, slots map[string]PaidTarget) (Policy, 
 	return stored(route, targets, fallback), err
 }
 
-func (p Policy) resolve(ctx context.Context, q access.Queryer, slug, projectID string, in scope) (routes.CodeRouteInput, error) {
+func (p Policy) resolve(ctx context.Context, q database.Queryer, slug, projectID string, in scope) (routes.CodeRouteInput, error) {
 	targets, err := resolveTargets(ctx, q, p.PaidTargets, projectID, in.bindings.credentials)
 	if err != nil {
 		return routes.CodeRouteInput{}, err

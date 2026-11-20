@@ -7,12 +7,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type Deps struct {
@@ -30,7 +32,7 @@ type binder struct {
 }
 
 func Applier(desired []Publication, bindings promotion.Bindings, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(desired) == 0 {
 			return nil
 		}
@@ -64,12 +66,12 @@ func toolsetsFirst(a, b Publication) int {
 	return byKey(a, b)
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
+func apply(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
 	projectID, ok := directory.ID(publication.Project)
 	if !ok {
 		return promotion.UnknownProject(publication.Project)
 	}
-	if err := p.Project(&projectID, access.Change); err != nil {
+	if err := p.Project(&projectID, authz.Change); err != nil {
 		return err
 	}
 	current, err := find(ctx, tx, projectID, publication, true)
@@ -106,7 +108,7 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promoti
 	return err
 }
 
-func publishDeclared(ctx context.Context, tx pgx.Tx, p access.Principal, b binder, publication Publication, next agentcontract.Publication, current *agentcontract.Publication, previous *agentcontract.Draft, draft agentcontract.Draft) (*string, error) {
+func publishDeclared(ctx context.Context, tx pgx.Tx, p authz.Principal, b binder, publication Publication, next agentcontract.Publication, current *agentcontract.Publication, previous *agentcontract.Draft, draft agentcontract.Draft) (*string, error) {
 	if publication.Published == nil {
 		return nil, nil
 	}
@@ -121,7 +123,7 @@ func publishDeclared(ctx context.Context, tx pgx.Tx, p access.Principal, b binde
 	return revision.RevisionID, err
 }
 
-func applyLabels(ctx context.Context, tx pgx.Tx, p access.Principal, next agentcontract.Publication, publication Publication, projectID string) error {
+func applyLabels(ctx context.Context, tx pgx.Tx, p authz.Principal, next agentcontract.Publication, publication Publication, projectID string) error {
 	prompt, ok := publication.Kind.(Prompt)
 	if !ok {
 		return nil
@@ -166,7 +168,7 @@ func (b binder) bind(ctx context.Context, definition agentcontract.Draft, ref *p
 	reusable := reusableCredential(prior, &base)
 	sealed, bound := b.bindings[*ref].(promotion.Sealed)
 	if !bound && !reusable {
-		return base, access.Invalid("agent_publications.credential_ref", "Supply the required destination credential; endpoint changes cannot inherit it.")
+		return base, httpkit.Invalid("agent_publications.credential_ref", "Supply the required destination credential; endpoint changes cannot inherit it.")
 	}
 	if !bound {
 		return publications.WithCredential(base, prior.Agent.CredentialID), nil

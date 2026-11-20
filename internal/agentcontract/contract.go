@@ -3,12 +3,10 @@
 package agentcontract
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
 	"net/url"
 	"regexp"
@@ -16,10 +14,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/prompts"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/prompts"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type Tool struct {
@@ -160,16 +158,6 @@ func (d Draft) Validate(kind string) error {
 		return invalid("kind", "Unknown publication kind.")
 	}
 	return nil
-}
-
-func DecodeDraft(data []byte) (Draft, error) {
-	var d Draft
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if dec.Decode(&d) != nil || dec.Decode(new(any)) != io.EOF {
-		return d, invalid("draft", "Use a known publication definition.")
-	}
-	return d, nil
 }
 
 func DraftDigest(d Draft) string {

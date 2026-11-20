@@ -7,12 +7,12 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
@@ -51,13 +51,13 @@ func Planner(servers []Server, names promotion.Names, bindings promotion.Binding
 				}
 			}
 		}),
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			return plan(ctx, q, servers, names, bindings, keys)
 		},
 	}
 }
 
-func plan(ctx context.Context, q access.Queryer, servers []Server, names promotion.Names, bindings promotion.Bindings, keys Keys) ([]promotion.Item, error) {
+func plan(ctx context.Context, q database.Queryer, servers []Server, names promotion.Names, bindings promotion.Bindings, keys Keys) ([]promotion.Item, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func plan(ctx context.Context, q access.Queryer, servers []Server, names promoti
 	}), overflow), nil
 }
 
-func planServer(ctx context.Context, q access.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (planned, error) {
+func planServer(ctx context.Context, q database.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (planned, error) {
 	if absent(names, directory, server.Project) {
 		return planned{items: []promotion.Item{promotion.Conflict(kind, server.Name, "The owning project is not declared or present.")}}, nil
 	}
@@ -128,7 +128,7 @@ func unretainedEntra(flat wire, existing *registration.Definition) bool {
 	return flat.oauth != nil && flat.oauth.EntraOBO != nil && !registration.CanRetainEntraClientSecret(existing, flat.oauth)
 }
 
-func actionOf(ctx context.Context, q access.Queryer, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (contract.ConfigurationPlanItemAction, error) {
+func actionOf(ctx context.Context, q database.Queryer, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (contract.ConfigurationPlanItemAction, error) {
 	if existing == nil {
 		return contract.ConfigurationPlanItemActionCreate, nil
 	}
@@ -139,7 +139,7 @@ func actionOf(ctx context.Context, q access.Queryer, bindings promotion.Bindings
 	return contract.ConfigurationPlanItemActionReuse, nil
 }
 
-func matches(ctx context.Context, q access.Queryer, bindings promotion.Bindings, keys Keys, existing registration.Definition, server Server) (bool, error) {
+func matches(ctx context.Context, q database.Queryer, bindings promotion.Bindings, keys Keys, existing registration.Definition, server Server) (bool, error) {
 	if !reflect.DeepEqual(fromDefinition(existing, server.Project), server) {
 		return false, nil
 	}

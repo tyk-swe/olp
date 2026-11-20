@@ -358,6 +358,68 @@ the `Retry-After` the gateway relays.
 See [compatibility](compatibility.md) for supported/refused mappings and
 [profiles](provider-profiles.md) for native/default rules.
 
+## Negotiated tool continuation
+
+The public `chat-anthropic-tools-v1` carrier lets an explicit strict OpenAI
+Chat route reach a qualified direct Anthropic Messages profile with native
+reasoning and tool defaults. Native Anthropic SDK requests send complete
+history through the native API and need no carrier.
+
+Each request carries one timestamp/UUID submission identity. A streaming
+response contains ordinary Chat chunks plus ordered `olp.observation`
+extensions, and the standard assistant message and opaque handle are usable
+only after a terminal `olp.ready:true` delivery. The terminal extension also
+returns validated provider-native usage categories in `olp.native_usage`.
+Cache-read tokens appear in standard Chat `prompt_tokens_details`, while
+cache-write and TTL details stay in that versioned extension. An unknown
+native category makes the delivery incomplete. The next turn sends the
+complete assistant message plus one ordered result per tool call, with the
+previous handle and a fresh submission identity. Keep the submission identity
+unchanged when retrying the same request after a client or network failure.
+A retry of a committed result returns the exact recorded delivery and
+performs no inference.
+
+Each Chat Completions request in the workflow carries the contract in headers.
+The submission identity is the Unix time in milliseconds, a dot and a random
+UUID, and the gateway refuses one older than fifteen minutes or more than five
+minutes ahead of its clock with `invalid_submission_identity`. The first turn
+sends no handle, and every later turn sends the `olp.handle` value from the
+previous ready delivery.
+
+```http
+X-OLP-Continuation: chat-anthropic-tools-v1
+X-OLP-Submission-ID: <unix-milliseconds>.<uuid>
+X-OLP-Continuation-Handle: <olp.handle from the previous ready delivery>
+```
+
+The route's API key needs `inference`, route access and
+`allow_provider_state:true`. The handle references encrypted native reasoning
+and complete provider dependencies in the existing resource authority for up
+to 24 hours. It is scoped to that key, route, provider revision, serving
+identity, parent branch and live credential permission. Recovery requires the
+same key and contract header.
+
+```http
+GET /v1/continuation-submissions/{timestamp.UUID}
+GET /v1/continuations/{continuation_<uuid>}
+X-OLP-Continuation: chat-anthropic-tools-v1
+Authorization: Bearer <api-key>
+```
+
+These read-only endpoints are for recovering after a lost response. A ready
+recovery contains the standard assistant message and the original recorded
+unary body or streaming chunks. It contains no opaque native signature. An
+accepted request that never committed a ready delivery returns
+`continuation_outcome_unknown` and must not be resent under a new submission
+identity as if it were known unused, because the provider may have accepted
+work before the gateway saw a terminal result. OLP does not promise exactly
+once provider work or tool execution. A changed history, missing tool result,
+changed control, expired or tampered handle, or revoked key or credential
+fails closed. Ordinary text observations may arrive before the encrypted
+ready commit, and ordinary actionable tool chunks arrive only after it. A bare
+official SDK without the explicit carrier gets a pre-dispatch `state_carrier`
+error on this translated workflow.
+
 ## Open items
 
 - Coding agents were qualified against their own dialects, not cross-vendor routes.

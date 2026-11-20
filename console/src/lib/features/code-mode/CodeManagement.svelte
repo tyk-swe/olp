@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -8,9 +9,7 @@
     listCodeRoutes,
     listCodeBudgets,
     publishCodeRoute,
-    type CodeRoute,
-    type CodeClientConfiguration,
-    type CodeClientSelection
+    type CodeRoute
   } from '#lib/features/code-mode/api.js';
   import { collectCursorPages } from '#lib/management/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -36,8 +35,10 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { listCredentialSlots } from '#lib/features/providers/credentials.js';
+  import {
+    listProviders,
+    listCredentialSlots
+  } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -50,7 +51,6 @@
     kind,
     allowed,
     gatewayURL,
-    loadClientConfiguration,
     onDraftChange
   }: {
     projectId: string;
@@ -58,11 +58,6 @@
     allowed: boolean;
     gatewayURL: string;
     onDraftChange: (dirty: boolean) => void;
-    loadClientConfiguration?: (
-      route: CodeRoute,
-      selection: CodeClientSelection,
-      signal?: AbortSignal
-    ) => Promise<CodeClientConfiguration>;
   } = $props();
   const section = $derived(managementSections[kind]);
   let editing = $state<CodeEditing | null>(null);
@@ -216,7 +211,7 @@
       global authority.
     </ReadOnlyNote>{/if}
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if editing}
     {#if inventory.isError}<LoadError
         error={inventory.error}
@@ -490,18 +485,9 @@
           </dl>
           {#if detail === route.id}
             <RouteRevisions id={route.id} />
-            {#if loadClientConfiguration && route.published_at}<ClientConfiguration
-                {route}
-                {gatewayURL}
-                load={loadClientConfiguration}
-              />
-            {:else if !route.published_at}<p>
-                Publish this route before generating client configuration.
-              </p>
+            {#if route.published_at}<ClientConfiguration {route} {gatewayURL} />
             {:else}<p>
-                Client configuration requires the integrated qualified adapter.
-                No client release or local workflow is claimed by this
-                management view.
+                Publish this route before generating client configuration.
               </p>{/if}
           {/if}
         </article>
@@ -603,9 +589,6 @@
   .empty {
     padding: 2rem;
     border: 1px dashed var(--border);
-  }
-  .field-error {
-    color: var(--danger);
   }
   @media (max-width: 40rem) {
     dl {

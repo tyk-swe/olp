@@ -9,7 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -67,128 +69,128 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.access.Route(mux, "DELETE /api/v1/mcp-user-grants/{grant_id}", s.revoke)
 }
 
-func (s *Server) startAgent(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
-	id, err := access.IDParam(r, "agent_id")
+	id, err := httpkit.IDParam(r, "agent_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input startRequest
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	keyUUID, err := uuid.Parse(input.KeyID)
 	if err != nil {
-		return access.Reply{}, access.Invalid("api_key_id", "Use an API key UUID.")
+		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key UUID.")
 	}
 	var project string
 	var draft agentcontract.Draft
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, id).Scan(&project, &draft); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&project, access.Change); err != nil {
-		return access.Reply{}, err
+	if err := p.Project(&project, authz.Change); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var keyProject string
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL`, keyUUID.String()).Scan(&keyProject); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if keyProject != project || draft.Agent == nil {
-		return access.Reply{}, access.Fail(404, "not_found", "The API key was not found.")
+		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The API key was not found.")
 	}
 	bound, err := BindAgent(keyauthority.Authority{ID: keyUUID.String(), ProjectID: &project}, id, *draft.Agent)
 	if err != nil {
-		return access.Reply{}, access.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
+		return httpkit.Reply{}, httpkit.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
 	}
 	member := p.UserID()
 	handoff, err := s.grants.Start(r.Context(), bound, &member)
 	if err != nil {
-		return access.Reply{}, grantProblem(err)
+		return httpkit.Reply{}, grantProblem(err)
 	}
-	return access.Detail(handoff, ""), nil
+	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) start(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
-	id, err := access.IDParam(r, "server_id")
+	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var input startRequest
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	keyUUID, err := uuid.Parse(input.KeyID)
 	if err != nil {
-		return access.Reply{}, access.Invalid("api_key_id", "Use an API key UUID.")
+		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key UUID.")
 	}
 	keyID := keyUUID.String()
 	server, err := registration.Load(r.Context(), s.access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&server.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+	if err := p.Project(&server.ProjectID, authz.Change); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var project string
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL`, keyID).Scan(&project); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if project != server.ProjectID {
-		return access.Reply{}, access.Fail(404, "not_found", "The API key was not found.")
+		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The API key was not found.")
 	}
 	bound, err := Bind(keyauthority.Authority{ID: keyID, ProjectID: &project}, routing.MCPToolsetTool{ServerID: id, Endpoint: server.Endpoint, OAuth: server.OAuth})
 	if err != nil {
-		return access.Reply{}, access.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
+		return httpkit.Reply{}, httpkit.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
 	}
 	member := p.UserID()
 	handoff, err := s.grants.Start(r.Context(), bound, &member)
 	if err != nil {
-		return access.Reply{}, grantProblem(err)
+		return httpkit.Reply{}, grantProblem(err)
 	}
-	return access.Detail(handoff, ""), nil
+	return httpkit.Detail(handoff, ""), nil
 }
 
-func (s *Server) claim(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
 	var input claimRequest
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	enrollmentID, err := uuid.Parse(input.EnrollmentID)
 	if err != nil {
-		return access.Reply{}, access.Invalid("enrollment_id", "Use an enrollment UUID.")
+		return httpkit.Reply{}, httpkit.Invalid("enrollment_id", "Use an enrollment UUID.")
 	}
 	if len(input.HandoffToken) < 20 || len(input.HandoffToken) > 128 {
-		return access.Reply{}, access.Invalid("handoff_token", "Use the one-use browser enrollment link.")
+		return httpkit.Reply{}, httpkit.Invalid("handoff_token", "Use the one-use browser enrollment link.")
 	}
 	enrollment, err := s.grants.Claim(r.Context(), enrollmentID.String(), input.HandoffToken, p.UserID())
 	if err != nil {
-		return access.Reply{}, grantProblem(err)
+		return httpkit.Reply{}, grantProblem(err)
 	}
-	return access.Detail(claimResponse{Enrollment: enrollment, State: Pending}, ""), nil
+	return httpkit.Detail(claimResponse{Enrollment: enrollment, State: Pending}, ""), nil
 }
 
 func grantProblem(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return access.Fail(404, "not_found", "The personal grant enrollment was not found.")
+		return httpkit.Fail(404, "not_found", "The personal grant enrollment was not found.")
 	}
 	if errors.Is(err, ErrRequired) {
-		return access.Fail(409, "grant_binding_changed", "Start a new enrollment for the server's current OAuth configuration.")
+		return httpkit.Fail(409, "grant_binding_changed", "Start a new enrollment for the server's current OAuth configuration.")
 	}
 	return err
 }
 
-func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT e.id::text,g.id::text,e.binding,
  CASE WHEN g.revoked_at IS NOT NULL THEN 'revoked' WHEN g.id IS NOT NULL AND (g.expires_at<=now() OR g.failure_code IS NOT NULL) THEN 'expired' WHEN g.id IS NOT NULL THEN 'active' WHEN e.outcome IS NOT NULL AND e.outcome<>'completed' THEN e.outcome WHEN e.expires_at<=now() THEN 'expired' ELSE 'pending' END,
@@ -196,7 +198,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
  FROM olp.mcp_grant_enrollments e LEFT JOIN olp.mcp_user_grants g ON g.enrollment_id=e.id
  WHERE (e.claimed_by=$1 OR e.started_by=$1 OR $2 OR e.project_id=ANY($3::uuid[])) AND e.id<$4::uuid ORDER BY e.id DESC LIMIT $5`, p.UserID(), p.AllProjects, p.ProjectIDs(), page.Before, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Standing, error) {
@@ -205,38 +207,32 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 		return item, err
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item Standing) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item Standing) string { return item.ID }), nil
 }
 
-func (s *Server) revoke(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) revoke(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
-	id, err := access.IDParam(r, "grant_id")
+	id, err := httpkit.IDParam(r, "grant_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var project, member string
-	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,COALESCE(member_id::text,'') FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
-		return access.Reply{}, err
-	}
-	if member != p.UserID() {
-		if err := p.Project(&project, access.Change); err != nil {
-			return access.Reply{}, err
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		var project, member string
+		if err := tx.QueryRow(r.Context(), `SELECT project_id::text,COALESCE(member_id::text,'') FROM olp.mcp_user_grants WHERE id=$1 FOR UPDATE`, id).Scan(&project, &member); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-	}
-	if _, err := tx.Exec(r.Context(), `UPDATE olp.mcp_user_grants SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1`, id); err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "mcp_grant_revoke", "mcp_user_grant", id, "success", &project); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
+		if member != p.UserID() {
+			if err := p.Project(&project, authz.Change); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE olp.mcp_user_grants SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1`, id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "mcp_grant_revoke", Resource: "mcp_user_grant", ID: id, Project: &project}, nil
+	})
 }

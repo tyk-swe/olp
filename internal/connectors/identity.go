@@ -3,7 +3,7 @@ package connectors
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func IsServingIdentityHeader(name string) bool {

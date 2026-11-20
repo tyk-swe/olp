@@ -15,6 +15,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -30,7 +32,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "GET /api/v1/provider-resource-contracts", m.contracts)
 }
 
-func (m *Management) contracts(r *http.Request, p access.Principal) (access.Reply, error) {
+func (m *Management) contracts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	items := make([]map[string]any, 0)
 	for _, family := range retainedapi.Families() {
 		implemented := false
@@ -43,7 +45,7 @@ func (m *Management) contracts(r *http.Request, p access.Principal) (access.Repl
 	for _, e := range retainedapi.Endpoints() {
 		endpoints = append(endpoints, map[string]any{"operation": e.Operation, "surface": e.Surface, "kind": e.Kind, "action": e.Action, "method": e.Method, "pattern": e.Pattern, "ancestors": append([]string{}, e.Ancestors...), "metered": e.Metered})
 	}
-	return access.OK(map[string]any{"revision": retainedapi.Revision, "items": items, "endpoints": endpoints}), nil
+	return httpkit.OK(map[string]any{"revision": retainedapi.Revision, "items": items, "endpoints": endpoints}), nil
 }
 
 type manageFilters struct {
@@ -118,25 +120,25 @@ type providerResourceSettlement = struct {
 	UncertainResults int64                        `json:"uncertain_results"`
 }
 
-func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {
+func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	query := r.URL.Query()
 	filters := manageFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {
 		if !contract.ListProviderResourcesParamsKind(raw).Valid() {
-			return access.Reply{}, access.Invalid("kind",
+			return httpkit.Reply{}, httpkit.Invalid("kind",
 				"Use a resource kind from the provider resource contract catalogue.")
 		}
 		filters.kind = &raw
 	}
 	if raw := query.Get("api_key_id"); raw != "" {
 		if _, err := uuid.Parse(raw); err != nil {
-			return access.Reply{}, access.Invalid("api_key_id", "Use an API key identifier.")
+			return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key identifier.")
 		}
 		filters.apiKeyID = &raw
 	}
 	if raw := query.Get("provider_id"); raw != "" {
 		if _, err := uuid.Parse(raw); err != nil {
-			return access.Reply{}, access.Invalid("provider_id", "Use a provider identifier.")
+			return httpkit.Reply{}, httpkit.Invalid("provider_id", "Use a provider identifier.")
 		}
 		filters.providerID = &raw
 	}
@@ -150,7 +152,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	if raw := query.Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 200 {
-			return access.Reply{}, access.Invalid("limit", "Page size must be between 1 and 200.")
+			return httpkit.Reply{}, httpkit.Invalid("limit", "Page size must be between 1 and 200.")
 		}
 		limit = parsed
 	}
@@ -158,13 +160,13 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	if raw := query.Get("cursor"); raw != "" {
 		decoded, err := decodeManageCursor(raw)
 		if err != nil {
-			return access.Reply{}, access.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
+			return httpkit.Reply{}, httpkit.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
 		}
 		cursor = decoded
 	}
 	records, next, err := m.page(r.Context(), filters, cursor, limit)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items := make([]contract.ProviderResourceItem, len(records))
 	for i, record := range records {
@@ -211,7 +213,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	if next != nil {
 		response.NextCursor = nullable.NewNullableWithValue(*next)
 	}
-	return access.OK(response), nil
+	return httpkit.OK(response), nil
 }
 
 func (m *Management) page(ctx context.Context, filters manageFilters, cursor *manageCursor, limit int) ([]manageRecord, *string, error) {

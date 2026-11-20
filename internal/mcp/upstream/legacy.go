@@ -13,8 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 

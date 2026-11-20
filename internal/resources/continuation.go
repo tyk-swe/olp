@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const (
@@ -19,7 +19,6 @@ const (
 	// The database separately caps ciphertext, including encryption overhead.
 	MaxContinuationBytes = 4 << 20
 	ContinuationLifetime = 24 * time.Hour
-	StatePending         = "pending"
 	StateDispatching     = "dispatching"
 	StateReady           = "ready"
 	StateUnknown         = "outcome_unknown"
@@ -74,22 +73,10 @@ func (s *Store) validateContract(r *Resource, payload []byte) error {
 	return nil
 }
 
-// ClaimContinuation atomically persists the initial encrypted dependencies and
-// reserves an owner-wide submission identity. Only the creator may dispatch;
-// all other callers receive the existing resource for authorized delivery replay.
-// A pending/unknown claim is never permission to repeat provider inference.
-func (s *Store) ClaimContinuation(ctx context.Context, r *Resource, payload []byte) (*Resource, bool, error) {
-	return s.claimContinuation(ctx, r, payload, StatePending)
-}
-
 // ClaimForDispatch commits the encrypted initial dependency and the durable
 // dispatch journal together immediately before the Attempt owner calls the
 // provider. A crash after this commit is conservatively outcome-unknown.
 func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byte) (*Resource, bool, error) {
-	return s.claimContinuation(ctx, r, payload, StateDispatching)
-}
-
-func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []byte, state string) (*Resource, bool, error) {
 	if err := s.validateContract(r, payload); err != nil {
 		return nil, false, err
 	}
@@ -104,7 +91,7 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 	}
 	copy := *r
 	copy.UUID = uuid.Must(uuid.NewV7())
-	copy.State = state
+	copy.State = StateDispatching
 	// A continuation has no provider resource ID; use its own internal identity.
 	copy.UpstreamID = copy.UUID.String()
 	if len(copy.Metadata) == 0 {
@@ -184,11 +171,6 @@ func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, bool
 	return out, false, err
 }
 
-// StartDispatch records the accepted-work boundary before the existing Attempt
-// owner calls the provider. Process loss afterward cannot authorize fresh work.
-func (s *Store) StartDispatch(ctx context.Context, r *Resource) error {
-	return s.transition(ctx, r, StatePending, StateDispatching)
-}
 func (s *Store) MarkUnknown(ctx context.Context, r *Resource) error {
 	return s.transition(ctx, r, StateDispatching, StateUnknown)
 }

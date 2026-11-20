@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import type { components } from '#lib/management/schema.js';
   import { stateLabel } from '#lib/format.js';
 
@@ -141,11 +142,7 @@
         {/if}
         {#if effective?.fields?.length}
           <h4>Effective native fields</h4>
-          <div
-            class="table-shell"
-            role="region"
-            aria-label="Effective native fields"
-          >
+          <ScrollTable label="Effective native fields">
             <table class="data-table">
               <thead
                 ><tr
@@ -169,7 +166,7 @@
                 {/each}
               </tbody>
             </table>
-          </div>
+          </ScrollTable>
           {#if effective.redacted_native_fields}<p class="scope-note">
               {effective.redacted_native_fields} unknown native fields hidden with
               their names.

@@ -82,8 +82,8 @@ export function parseMaxOutputTokens(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const tokens = Number(trimmed);
-  if (!Number.isInteger(tokens) || tokens < 1 || tokens > 1_000_000) {
-    throw new Error('Maximum output tokens must be from 1 through 1000000.');
+  if (!Number.isInteger(tokens) || tokens < 1 || tokens > 1_048_576) {
+    throw new Error('Maximum output tokens must be from 1 through 1048576.');
   }
   return tokens;
 }

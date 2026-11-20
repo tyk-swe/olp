@@ -11,87 +11,87 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
-func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) validateSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	a := s.access
-	id, err := access.IDParam(r, "provider_id")
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	slotID, err := access.IDParam(r, "slot_id")
+	slotID, err := httpkit.IDParam(r, "slot_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, err := a.Pool.Begin(r.Context())
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := readProvider(r.Context(), tx, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+	if err := p.Project(current.ProjectID, authz.Change); err != nil {
+		return httpkit.Reply{}, err
 	}
 	slots, err := loadSlots(r.Context(), tx, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	slot := findSlot(slots, slotID)
 	if slot == nil {
-		return access.Reply{}, pgx.ErrNoRows
+		return httpkit.Reply{}, pgx.ErrNoRows
 	}
 	models, err := enabledModels(r.Context(), tx, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var credential []byte
 	if current.Connection.Document().CredentialRequired() {
 		if slot.CredentialID == nil {
-			return access.Reply{}, access.Fail(422, "credential_required", "This slot has no credential to validate.")
+			return httpkit.Reply{}, httpkit.Fail(422, "credential_required", "This slot has no credential to validate.")
 		}
 		if slot.CredentialRevoked {
-			return access.Reply{}, access.Fail(422, "credential_revoked", "This slot references a revoked credential.")
+			return httpkit.Reply{}, httpkit.Fail(422, "credential_revoked", "This slot references a revoked credential.")
 		}
 		if slot.CredentialLapsed {
-			return access.Reply{}, access.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
+			return httpkit.Reply{}, httpkit.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
 		}
 		if err = slot.credentialFits(current.Connection.Document()); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err = tx.Rollback(r.Context()); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if current.Connection.Document().CredentialRequired() {
 		credential, err = s.readCredential(r.Context(), a.Pool, *slot.CredentialID)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		defer clear(credential)
 	}
 	probeErr := s.validateModelAccess(r.Context(), current.target(credential), *slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
-			return access.Reply{}, err
-		}
-		return s.slotList(r.Context(), tx, locked)
+		reply, err := s.slotList(r.Context(), tx, locked)
+		return reply, access.Event{Action: "provider.slot.validate", Resource: "provider_slot", ID: slotID, Failed: probeErr != nil}, err
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if probeErr != nil {
-		return result, access.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
+		return result, httpkit.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
 	}
 	s.clearValidatedCooldowns(r.Context(), id, *slot)
 	return result, nil
@@ -193,7 +193,7 @@ func (s *Server) validateModelAccess(ctx context.Context, target probe.Target, r
 			return &probe.Failure{Reason: probe.NoCapabilities, Detail: "Declare capabilities for the slot's enabled models before validating."}
 		}
 		for _, capability := range model.Capabilities {
-			if err := s.prober.Certify(ctx, target, model.UpstreamModel, capability.Capability, probe.BodyLimit); err != nil {
+			if err := s.prober.Certify(ctx, target, model.UpstreamModel, capability.Capability); err != nil {
 				return err
 			}
 			checked++

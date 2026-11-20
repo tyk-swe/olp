@@ -6,25 +6,26 @@ under capability-named top-level folders such as `plugin/`, `management/`,
 `inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
 named for the module that owns the behavior, never for a layer. The console
 mirrors the same feature boundaries under `console/src/lib/features/`.
-PostgreSQL migrations live under `internal/database/migrations/`.
+PostgreSQL migrations live under `internal/platform/database/migrations/`.
 
 | Area | Backend and console owner |
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
-| Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
+| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
+| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
+| Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/` and `delegation/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
-| Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
-| Protocol and lifecycle contracts | `internal/protocols/`, `internal/geminilifecycle/` |
+| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
+| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
+| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
+| Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/domain/contentpolicy/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
-| Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
-| Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
+| Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/platform/database/` |
+| Egress, secrets and telemetry | `internal/platform/egress/`, `internal/platform/secrets/`, `internal/observability/`, `internal/platform/telemetry/` |
 
 ## Contracts and feature ownership
 
@@ -147,9 +148,12 @@ provider completion.
 
 ## Gateway packages
 
-`internal/gateway` is the execution kernel. It owns the `call`, the route leg,
-the attempt loop, settlement and every inference surface that runs through them.
-The packages beneath it hold what the kernel uses and never import it back.
+`internal/gateway/kernel` is the execution kernel. It owns the `Call`, the route
+leg, the attempt loop, settlement and every surface that has not left it yet.
+A package under `internal/gateway/surface/` owns the routes of one surface and
+calls the kernel through its exported API. `internal/gateway` itself is the
+assembly, whose `Register` mounts the kernel and each surface. The other
+packages hold what the kernel uses and never import it back.
 
 | Package | Owns | May import |
 | --- | --- | --- |
@@ -161,17 +165,146 @@ The packages beneath it hold what the kernel uses and never import it back.
 | `gateway/codeforward` | `/code/{slug}` forwarding and the research proxy | `events`, `fault`, `ingress`, `quota` |
 | `gateway/traceingest` | OTLP trace ingest on `POST /v1/traces` | none |
 | `gateway/delegation` | delegation grant creation on `POST /v1/delegations` | `fault`, `ingress` |
+| `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
+| `gateway/guardstream` | streamed output guardrails, with the tool call and text framing of each wire family in its own file | none |
+| `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
+| `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
+| `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
+| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
+| `gateway/healthprobes` | The health probe worker. It picks the opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
+| `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
+| `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
+| `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
+| `gateway/surface/playground` | The console playground, which runs a route for a signed-in member through `kernel.MemberGeneration`. The composition root registers its two handlers on the management API | `fault`, `kernel`, `publishedprompt` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
-Put new code in the kernel only when it needs a `call`. A handler that can be
+A surface package follows `surface/anthropicstate`. It exports one
+`Register(k *kernel.Server, mux *http.ServeMux)`, keeps its handlers on an
+unexported `surface` type that holds the kernel, and is added to `Register` in
+`internal/gateway/gateway.go`. The kernel never names a surface or a vendor
+flag for one. A surface that needs something from a shared step sets a general
+field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
+kernel's tests register the same assembly, so the refusal matrix in
+`kernel/surfaces_test.go` covers a surface's routes after it moves.
+
+The kernel owns the `/gemini/{version}/models/{model}:{action}` route because
+generation lives there. A surface that serves one of those actions returns it
+from an `Actions` function, as `surface/geministate` does for
+`batchGenerateContent`, and the assembly passes the map to `RegisterKernel`.
+
+A handler in a surface reads as a list of steps. `surface/geminiinteractions`
+is the example for a request that admits, pins, sends and answers. Its handler
+calls one named kernel step per stage, such as `ReserveGeneration`,
+`GatePinnedGeneration` and `SettleGeneration` in `kernel/pinned_generation.go`,
+and a surface calls kernel steps and never reads or writes the `Call`'s
+admission or settlement fields. When a surface needs a stage the kernel does
+not name yet, add the step to the kernel and call it.
+
+A step takes what it needs as arguments and returns what it found, so its
+dependencies are in its signature. The request value is built once and is not
+written again. `kernel/retained_request.go` is the example. The only state a
+handler writes is what its deferred settlement must still read when a step
+panics, such as the pin and the status, and that state lives in one small type
+that says so, like `retainedEnd`.
+
+Put new code in the kernel only when every surface needs it. Code that reads a
+few values from the `Call` takes them as a config struct and moves beneath the
+kernel, as `guardstream.Config` does. A handler that can be
 built from its own collaborators belongs in its own package, as
-`codeforward.Forwarder`, `traceingest.Ingester` and `delegation.Handler` are. The
+`codeforward.Forwarder`, `traceingest.Ingester`, `delegation.Handler` and
+`models.Handler` are. The
 delegation handler takes the ingress gate, the key authority and the kernel
 header preamble through its constructor, so it tests without a `Server` while
 its responses keep the request identity and CORS headers every inference
 response carries. Session reauthentication for delegated calls stays in the
-kernel, because it reads the `call` it reauthenticates.
+kernel, because it reads the `Call` it reauthenticates.
+
+## Where new code goes
+
+Start from the owner in the table at the top of this guide. Feature behavior
+lives in the feature package with its SQL, transactions, validation and audit
+provenance, and the console screen for it lives in the matching feature under
+`console/src/lib/features/`. A new gateway surface is a package under
+`internal/gateway/surface/`, work every surface shares belongs in the kernel,
+and a gateway handler that can be built from its own collaborators belongs in
+its own package under `internal/gateway/`. Each declares its allowed imports in
+`scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`,
+where each plane is assembled by one constructor and `Run` owns mode
+selection, listeners and shutdown ordering. A new small package is justified
+only when it owns behavior of its own or breaks an import cycle with stable
+vocabulary, as `internal/domain/routeidentity` and `internal/access/authority` do. A
+wrapper whose only job is forwarding to another package belongs in that
+package instead.
+
+## Structure rules
+
+`make lint` enforces the structure through `.golangci.yml` and
+`scripts/check-lint.sh`. Read the failure message and fix the code.
+
+- Nothing under `internal/gateway` imports `internal/access`, and nothing under
+  `internal/access` imports the gateway. The gateway serves inference and the
+  management kit serves the control plane. `cmd/olp` is the only place that
+  knows both, so pass a collaborator in there instead of importing across.
+- Nothing under `internal` imports `cmd`.
+- `internal/domain` is vocabulary and logic that does no I/O. It imports only
+  `internal/domain` and the signed reference catalog, and never `net/http`, a
+  database driver or the Valkey client. Take the value in as an argument and
+  do the I/O in the caller.
+- `internal/platform` is the infrastructure every feature builds on, such as
+  the database pool, egress, secrets and telemetry. It imports only
+  `internal/platform` and `internal/domain`, never a feature.
+- Every other directory under `internal` is named for the module that owns a
+  behavior, including its SQL, validation and routes. A new package goes in
+  `internal/domain` when it does no I/O, in `internal/platform` when it is
+  infrastructure no single module owns, and next to its module otherwise.
+- `internal/access` is the management kit and holds no feature. It
+  authenticates callers, registers routes, runs write transactions and records
+  audit rows. A new resource gets its own package that imports the kit.
+- A function holds at most 100 lines and a file at most 500 lines of code.
+  Tests and generated files are exempt. Split by behavior, not by line count.
+- A management write returns `access.Mutate`, `access.Remove` or
+  `access.Transact`.
+
+Code that broke a rule before it existed is listed in `.golangci-legacy.json`.
+Never add an entry there. The gate fails on a violation that is not listed and
+on a listed entry that no longer violates, so remove an entry in the change
+that fixes it.
+
+## Adding a management endpoint
+
+Copy `internal/guardrails/credential/api.go`. It is the reference for every
+management endpoint, and it shows the whole shape in one file.
+
+1. Describe the operation in `management/management.json` and run `make api`.
+   `Route` refuses to start when a registered pattern is missing from the
+   contract, and it reads the permission the route needs from there.
+2. Register the handler in the feature's `Register(mux)` with
+   `server.Route(mux, "METHOD /api/v1/...", handler)`.
+3. A read handler queries the pool, checks the caller's scope with
+   `p.Project(&projectID, authz.View)` and returns `httpkit.OK`,
+   `httpkit.Detail` or a list reply.
+4. A write handler decodes and validates the body, then returns one of the
+   three helpers in `internal/access/mutation.go`.
+   - `access.Mutate` is for a change that carries an `Idempotency-Key`. It
+     replays the stored reply when the same key and input arrive again.
+   - `access.Remove` is the same for a delete, where the replay has to be
+     checked before the row is locked because the row may already be gone.
+   - `access.Transact` is for a change guarded only by `If-Match`.
+5. Each helper takes a lock step and an apply step. The lock step loads the
+   current row `FOR UPDATE` and authorizes the caller against it, or calls
+   `RequireProject` for a create. Use `access.Unlocked` when there is nothing to
+   load. The apply step checks `httpkit.Match`, writes, and returns the reply
+   together with the `access.Event` to audit.
+
+The helper owns the transaction, the replay record, the audit row and the
+commit, so a handler never calls `BeginMutation`, `Replay`, `CompleteReplay` or
+`tx.Commit`. Call `access.Audit` directly only for a second audit row in the same
+change. Lint fails when a new file opens a management transaction by hand. The
+files still listed under `handRolledTransaction` in `.golangci-legacy.json` run
+a provider call between two transactions or re-authorize a read, and they are
+the exception.
 
 ## Ordinary execution
 
@@ -483,8 +616,8 @@ model family, not ingress dialect; equivalent families are counted once.
 | `anthropic`, `gemini`, `other` | Remaining recognized/unknown models | Four characters/token, with catalog calibration when measured |
 
 Opaque deployment names are not guessed as OpenAI. OpenAI counts documented
-message framing; fixtures match tiktoken, with possible Unicode-version splitting
-differences. The walker retains only the first 36 KiB of text and tail size.
+message framing. Text token fixtures match tiktoken, with possible
+Unicode-version splitting differences. The walker retains only the first 36 KiB of text and tail size.
 
 - `tokenizer`: exact supported text/framing only.
 - `calibrated`: media/tool/schema/encrypted/unknown fields or long-tail ratio.

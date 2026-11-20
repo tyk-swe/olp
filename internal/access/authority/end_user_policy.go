@@ -1,11 +1,12 @@
 package authority
 
 import (
-	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // AdmissionLimits is a complete limit set. Nil dimensions are unlimited.
@@ -42,6 +43,14 @@ var endUserDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // ValidEndUserDigest accepts only a derived identity, never a raw identifier.
 func ValidEndUserDigest(value string) bool { return endUserDigest.MatchString(value) }
+
+var endUserIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+// ValidEndUserIdentifier bounds identifiers before hashing or forwarding.
+// Whitespace, email addresses and arbitrary text are not machine tokens.
+func ValidEndUserIdentifier(identifier string) bool {
+	return endUserIdentifier.MatchString(identifier)
+}
 
 func (p *EndUserPolicy) Limits(digest string) AdmissionLimits {
 	if p == nil {

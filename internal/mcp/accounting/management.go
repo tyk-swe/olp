@@ -10,10 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Management struct {
@@ -71,16 +75,16 @@ func scanToolCall(row toolCallRow) (ToolCall, error) {
 	return call, err
 }
 
-func loadToolCall(ctx context.Context, q access.Queryer, id string) (ToolCall, error) {
+func loadToolCall(ctx context.Context, q database.Queryer, id string) (ToolCall, error) {
 	return scanToolCall(q.QueryRow(ctx, "SELECT "+toolCallColumns+toolCallFrom+" WHERE c.id=$1", id))
 }
 
 func validateToolCallFilters(apiKeyID, toolsetID string) error {
 	if apiKeyID != "" && !canonicalUUID(apiKeyID) {
-		return access.Invalid("api_key_id", "Use a canonical UUID.")
+		return httpkit.Invalid("api_key_id", "Use a canonical UUID.")
 	}
 	if toolsetID != "" && !canonicalUUID(toolsetID) {
-		return access.Invalid("toolset_id", "Use a canonical UUID.")
+		return httpkit.Invalid("toolset_id", "Use a canonical UUID.")
 	}
 	return nil
 }
@@ -114,7 +118,7 @@ func resolveAmount(raw *string, field string) (string, error) {
 		return "0", nil
 	}
 	if !resolveAmountPattern.MatchString(*raw) {
-		return "", access.Invalid(field, "Use a non-negative decimal amount.")
+		return "", httpkit.Invalid(field, "Use a non-negative decimal amount.")
 	}
 	return *raw, nil
 }
@@ -125,25 +129,25 @@ func resolveAmountIsZero(amount string) bool {
 
 func checkResolveBounds(call ToolCall, observedCost, observedCharge string) error {
 	if !limits.WithinBound(call.CostBound, call.ObservedCost, observedCost) {
-		return access.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
+		return httpkit.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
 	}
 	if !limits.WithinBound(call.ChargeBound, call.ObservedCharge, observedCharge) {
-		return access.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
+		return httpkit.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
 	}
 	return nil
 }
 
 func validateResolveInput(outcome ResolveOutcome, evidenceDigest string) error {
 	if outcome != ResolveSettled && outcome != ResolveNotAccepted {
-		return access.Invalid("outcome", "Use settled or not_accepted.")
+		return httpkit.Invalid("outcome", "Use settled or not_accepted.")
 	}
 	if _, ok := parseEvidenceDigest(evidenceDigest); !ok {
-		return access.Invalid("evidence_digest", "Use a lowercase SHA-256 hex digest of the reviewed evidence.")
+		return httpkit.Invalid("evidence_digest", "Use a lowercase SHA-256 hex digest of the reviewed evidence.")
 	}
 	return nil
 }
 
-func storedResolutionEvidence(ctx context.Context, q access.Queryer, call ToolCall) ([]byte, bool, error) {
+func storedResolutionEvidence(ctx context.Context, q database.Queryer, call ToolCall) ([]byte, bool, error) {
 	var evidence []byte
 	var err error
 	switch call.Status {
@@ -160,159 +164,142 @@ func storedResolutionEvidence(ctx context.Context, q access.Queryer, call ToolCa
 	return evidence, true, nil
 }
 
-func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "call_id")
+func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "call_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var request resolveRequest
-	if err = access.Decode(r, &request); err != nil {
-		return access.Reply{}, err
+	if err = httpkit.Decode(r, &request); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if err = validateResolveInput(request.Outcome, request.EvidenceDigest); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	observedCost, err := resolveAmount(request.ObservedCost, "observed_cost")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	observedCharge, err := resolveAmount(request.ObservedCharge, "observed_charge")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if request.Outcome == ResolveNotAccepted && (!resolveAmountIsZero(observedCost) || !resolveAmountIsZero(observedCharge)) {
-		return access.Reply{}, access.Invalid("observed_cost", "A not accepted finding requires zero observed amounts.")
+		return httpkit.Reply{}, httpkit.Invalid("observed_cost", "A not accepted finding requires zero observed amounts.")
 	}
 	evidence, _ := parseEvidenceDigest(request.EvidenceDigest)
 	call, err := loadToolCall(r.Context(), m.access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&call.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
+	if err = p.Project(&call.ProjectID, authz.Change); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if call.Status == request.Outcome.status() {
 		stored, found, storedErr := storedResolutionEvidence(r.Context(), m.access.Pool, call)
 		if storedErr != nil {
-			return access.Reply{}, storedErr
+			return httpkit.Reply{}, storedErr
 		}
 		if found && bytes.Equal(stored, evidence) && limits.AmountEqual(call.ObservedCost, observedCost) && limits.AmountEqual(call.ObservedCharge, observedCharge) {
-			return access.Detail(call, call.ID), nil
+			return httpkit.Detail(call, call.ID), nil
 		}
-		return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+		return httpkit.Reply{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 	}
 	if call.Status != StatusOutcomeUnknown {
-		return access.Reply{}, access.Fail(409, "tool_call_not_unknown", "Only a tool call with an unknown outcome can be resolved.")
+		return httpkit.Reply{}, httpkit.Fail(409, "tool_call_not_unknown", "Only a tool call with an unknown outcome can be resolved.")
 	}
 	if request.Outcome == ResolveSettled {
 		if err = checkResolveBounds(call, observedCost, observedCharge); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
-	tx, p, err := m.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := p.Project(&call.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replay, err := m.access.Replay(r, tx, p, request)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	switch request.Outcome {
-	case ResolveSettled:
-		resultDigest := sha256.Sum256([]byte("olp:mcp-tool-resolution:" + call.DispatchID + ":" + request.EvidenceDigest))
-		err = debits.SettleToolTx(r.Context(), tx, debits.Result{
-			DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
-			EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
-			Unpriced: call.UnitPrice == nil,
-		})
-	case ResolveNotAccepted:
-		err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{
-			DispatchID: call.DispatchID, ActorID: p.UserID(), EvidenceDigest: evidence,
-		})
-	}
-	if err != nil {
-		if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
-			return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+	return access.Mutate(m.access, r, request, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		return struct{}{}, p.Project(&call.ProjectID, authz.Change)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		switch request.Outcome {
+		case ResolveSettled:
+			resultDigest := sha256.Sum256([]byte("olp:mcp-tool-resolution:" + call.DispatchID + ":" + request.EvidenceDigest))
+			err = debits.SettleToolTx(r.Context(), tx, debits.Result{
+				DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
+				EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
+				Unpriced: call.UnitPrice == nil,
+			})
+		case ResolveNotAccepted:
+			err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{
+				DispatchID: call.DispatchID, ActorID: p.UserID(), EvidenceDigest: evidence,
+			})
 		}
-		return access.Reply{}, err
-	}
-	tag, err := tx.Exec(r.Context(), `UPDATE olp.mcp_tool_calls SET status=$2 WHERE id=$1 AND status='outcome_unknown'`, call.ID, string(request.Outcome.status()))
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if tag.RowsAffected() != 1 {
-		return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
-	}
-	if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), "mcp_tool_call.resolve", "mcp_tool_call", call.ID, "success", &call.ProjectID); err != nil {
-		return access.Reply{}, err
-	}
-	updated, err := loadToolCall(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	reply := access.Detail(updated, updated.ID)
-	if err = m.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+		if err != nil {
+			if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+			}
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		tag, err := tx.Exec(r.Context(), `UPDATE olp.mcp_tool_calls SET status=$2 WHERE id=$1 AND status='outcome_unknown'`, call.ID, string(request.Outcome.status()))
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+		}
+		updated, err := loadToolCall(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply := httpkit.Detail(updated, updated.ID)
+		return reply, access.Event{Action: "mcp_tool_call.resolve", Resource: "mcp_tool_call", ID: call.ID, Project: &call.ProjectID}, nil
+	})
 }
 
-func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	key := r.URL.Query().Get("api_key_id")
 	toolset := r.URL.Query().Get("toolset_id")
 	project := r.URL.Query().Get("project_id")
 	if err := validateToolCallFilters(key, toolset); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if project != "" {
 		if !canonicalUUID(project) {
-			return access.Reply{}, access.Invalid("project_id", "Use a canonical project UUID.")
+			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
-		if err := p.Project(&project, access.View); err != nil {
-			return access.Reply{}, err
+		if err := p.Project(&project, authz.View); err != nil {
+			return httpkit.Reply{}, err
 		}
 	}
 	rows, err := m.access.Pool.Query(r.Context(), "SELECT "+toolCallColumns+toolCallFrom+" WHERE c.id<$1 AND ($2 OR c.project_id=ANY($3::uuid[])) AND ($4='' OR c.api_key_id=$4::uuid) AND ($5='' OR c.toolset_id=$5::uuid) AND ($6='' OR c.project_id=$6::uuid) ORDER BY c.id DESC LIMIT $7", page.Before, p.AllProjects, p.ProjectIDs(), key, toolset, project, page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	items := []ToolCall{}
 	for rows.Next() {
 		call, err := scanToolCall(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		items = append(items, call)
 	}
 	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(call ToolCall) string { return call.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(call ToolCall) string { return call.ID }), nil
 }
 
-func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "call_id")
+func (m *Management) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "call_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	call, err := loadToolCall(r.Context(), m.access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&call.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+	if err = p.Project(&call.ProjectID, authz.View); err != nil {
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(call, call.ID), nil
+	return httpkit.Detail(call, call.ID), nil
 }

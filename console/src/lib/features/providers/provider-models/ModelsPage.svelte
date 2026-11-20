@@ -1,6 +1,9 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { resolve } from '$app/paths';
@@ -23,7 +26,7 @@
   import { formatInteger, stateLabel } from '#lib/format.js';
   import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
   import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
@@ -147,7 +150,7 @@
   }
 </script>
 
-<svelte:head><title>Models · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Models" />
 
 <div class="toolbar">
   <div class="page-actions">
@@ -185,9 +188,7 @@
   <div class="inline-problem" role="alert">{mutationError}</div>
 {/if}
 
-{#if notice}
-  <div class="success-banner" role="status">{notice}</div>
-{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 <div class="toolbar" role="search">
   <label class="search"
@@ -272,7 +273,7 @@
   {#if models.isPlaceholderData}
     <p class="updating" role="status">Updating…</p>
   {/if}
-  <div class="table-shell" aria-busy={models.isPlaceholderData}>
+  <ScrollTable label="Provider models" busy={models.isPlaceholderData}>
     <table class="data-table">
       <thead
         ><tr
@@ -342,7 +343,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
 
 {#if !models.isPending && !models.isError}<CursorPagination

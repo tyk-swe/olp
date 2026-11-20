@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 // Pool is a process-local bounded request pool with the counters the metrics

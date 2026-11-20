@@ -199,9 +199,7 @@ config:
   masterKeySecretKey: key
   authHmacKeySecretName: olp-auth-hmac-key
   authHmacKeySecretKey: key
-  # Required only until the first installation owner is created. Leave empty
-  # for an already initialized installation; new control pods fail closed
-  # without this mounted secret.
+  # Empty generates a bootstrap token Secret and keeps it across upgrades.
   bootstrapTokenSecretName: ""
   bootstrapTokenSecretKey: token
   # Comma-separated CIDRs for the ingress/controller peers allowed to provide

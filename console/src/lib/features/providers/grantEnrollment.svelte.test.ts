@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { GrantEnrollment, GrantEnrollmentCompletion } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
@@ -66,7 +66,7 @@ describe('provider grant enrollment', () => {
         return new Response(null, { status: 204 });
       }
       route(request, 'POST', basePath);
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ slot_id: enrollment.slot_id });
       return json(enrollment);
     });

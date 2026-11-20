@@ -1,6 +1,6 @@
 <script lang="ts">
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
-  import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
+  import { requestKeys, listRequests } from '#lib/features/usage/index.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
@@ -8,15 +8,13 @@
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { copyText } from '#lib/clipboard.js';
   import { getOverview } from '#lib/features/overview/api.js';
-  import { listRequests } from '#lib/features/usage/history/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 
-  let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/v1');
   let copied = $state(false);
   let copyError = $state('');
@@ -31,7 +29,7 @@
   const recentRequests = createQuery(() => ({
     queryKey: requestKeys.overview(),
     queryFn: () => listRequests({ limit: 5 }),
-    enabled: controlConnected && services.retentionEnforced
+    enabled: services.retentionEnforced
   }));
   const activeProviders = $derived(overview.data?.active_providers ?? 0);
   const readyRoutes = $derived(overview.data?.active_routes ?? 0);
@@ -147,19 +145,12 @@
     </div>
   </article>
   <article class="card status-card">
-    <span
-      class:ready={controlConnected}
-      class:neutral={!controlConnected}
-      class="status-icon"
-      aria-hidden="true"><NavIcon name="health" /></span
+    <span class="status-icon ready" aria-hidden="true"
+      ><NavIcon name="health" /></span
     >
     <div>
       <p>Control API</p>
-      <strong
-        >{controlConnected
-          ? 'Console connected'
-          : 'Connection unavailable'}</strong
-      >
+      <strong>Console connected</strong>
     </div>
   </article>
 </section>
@@ -416,7 +407,7 @@
   .status-card strong {
     display: block;
     overflow: hidden;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
     text-overflow: ellipsis;
@@ -452,7 +443,7 @@
 
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

@@ -6,8 +6,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
-	"github.com/tyk-swe/olp/internal/codexwire"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
 )
 
 type codeIngress struct {
@@ -56,14 +56,14 @@ func codeConnectionIdentity(inbound codeIngress, headers http.Header) (codemode.
 	return identity, nil
 }
 
-func codeObserver(endpoint codeadapter.Endpoint) codewire.Observer {
+func codeObserver(endpoint codeadapter.Endpoint, chatChoices int64) codewire.Observer {
 	switch endpoint.Protocol {
 	case codemode.ProtocolResponses:
 		return codeResponses{allowance: endpoint.Observation == codeadapter.ObserveCodex}
 	case codemode.ProtocolMessages:
 		return codewire.NewMessages()
 	case codemode.ProtocolChat:
-		return codewire.NewChat()
+		return codewire.NewChat(chatChoices)
 	}
 	return nil // Declarations reject protocols without a native handler.
 }

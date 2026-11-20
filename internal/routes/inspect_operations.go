@@ -3,20 +3,21 @@ package routes
 import (
 	"encoding/json"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/vendors"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 )
 
-func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
+func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
 	if !strict && !operationregistry.PolicyFor(operation).TransformedUnary || operation == "generation" {
 		request, err := inspectorRequest(raw, operation, surface, mode, dialect, slug, strict)
 		return request, nil, nil, err
@@ -26,7 +27,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	doc, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil {
-		return nil, nil, nil, access.Invalid("request", "Use one bounded unambiguous native request.")
+		return nil, nil, nil, httpkit.Invalid("request", "Use one bounded unambiguous native request.")
 	}
 	tuple := len(doc.Root().Members()) > 0
 	for _, member := range doc.Root().Members() {
@@ -37,7 +38,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	if vendors.IsMediaOperation(operation) {
 		if surface != "openai" || mode != "unary" && mode != "streaming" || media.Operation(operation) != media.OpImageGeneration && media.Operation(operation) != media.OpSpeech {
-			return nil, nil, nil, access.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
+			return nil, nil, nil, httpkit.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
 		}
 		var request *media.Request
 		var failure *media.Error
@@ -47,21 +48,24 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 			request, failure = media.DecodeSpeech(raw)
 		}
 		if failure != nil || request.Route() != slug || request.Mode() != mode {
-			return nil, nil, nil, access.Invalid("request", "Use a native media request naming this route and delivery mode.")
+			return nil, nil, nil, httpkit.Invalid("request", "Use a native media request naming this route and delivery mode.")
 		}
 		return nil, nil, request, nil
 	}
 	if dialect == "" {
-		defaults := map[string]string{"openai/decision": "openai-decisions", "openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "openai/ocr": "mistral-ocr", "openai/search": "perplexity-search", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
+		defaults := map[string]string{"openai/decision": "openai-decisions", "gemini/decision": "gemini-decisions", "openai/embeddings": "openai-embeddings", "openai/rerank": "rerank", "openai/moderation": "openai-moderation", "openai/token_count": "openai-input-tokens", "openai/ocr": "mistral-ocr", "openai/search": "perplexity-search", "anthropic/token_count": "anthropic-count-tokens", "gemini/token_count": "gemini-count-tokens", "gemini/embeddings": "gemini-embeddings", "bedrock/token_count": "bedrock-count-tokens"}
 		dialect = defaults[surface+"/"+operation]
 	}
 	codec, ok := operationregistry.Lookup(dialect)
 	if !ok || codec.Operation.ID != operation || mode != "unary" || surface != "native" && surface != codec.Surface {
-		return nil, nil, nil, access.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
+		return nil, nil, nil, httpkit.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
 	}
 	request, err := operationplan.Parse(dialect, raw, 1<<20)
 	if err != nil {
-		return nil, nil, nil, access.Invalid("request", "Use a valid native operation source.")
+		return nil, nil, nil, httpkit.Invalid("request", "Use a valid native operation source.")
+	}
+	if err := protocols.ValidateOperationInlineMedia(doc, codec.Identity, s.InlineMedia); err != nil {
+		return nil, nil, nil, httpkit.Invalid("request", err.Error())
 	}
 	return nil, &request, nil, nil
 }

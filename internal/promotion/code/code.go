@@ -9,8 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
@@ -38,14 +41,14 @@ type bindings struct {
 
 type change struct {
 	item  promotion.Item
-	write func(context.Context, pgx.Tx, access.Principal) error
+	write func(context.Context, pgx.Tx, authz.Principal) error
 }
 
 type resolution struct {
 	accounts []resolved[codeaccounts.Input]
-	pools    []resolved[access.CodePoolInput]
+	pools    []resolved[codeadmin.PoolInput]
 	routes   []resolved[routeInput]
-	budgets  []resolved[access.CodeBudgetInput]
+	budgets  []resolved[codeadmin.BudgetInput]
 }
 
 func Parse(document *contract.ConfigurationCode, declared *contract.ConfigurationCodeBindings, names promotion.Names, deps provider.Deps) (Desired, error) {
@@ -73,7 +76,7 @@ func parseCode(document contract.ConfigurationCode, names promotion.Names, deps 
 		promotion.Map(budgetEntries, func(e contract.ConfigurationCodeBudget) string { return e.Id.String() }),
 	)
 	if len(slices.Compact(slices.Sorted(slices.Values(ids)))) != len(ids) {
-		return Code{}, access.Invalid("code", "Use distinct artifact resource references.")
+		return Code{}, httpkit.Invalid("code", "Use distinct artifact resource references.")
 	}
 	accounts, err := promotion.TryMapIndex(accountEntries, func(_ int, e contract.ConfigurationCodeAccount) (Account, error) { return parseAccount(e) })
 	if err != nil {
@@ -108,14 +111,14 @@ func onlyDeclared(values bindings, code Code) error {
 	for _, group := range groups {
 		for ref := range group.values {
 			if !slices.Contains(group.refs, ref) {
-				return access.Invalid("code_bindings", "Bind only references declared in code configuration.")
+				return httpkit.Invalid("code_bindings", "Bind only references declared in code configuration.")
 			}
 		}
 	}
 	return nil
 }
 
-func Read(ctx context.Context, q access.Queryer) (Code, error) {
+func Read(ctx context.Context, q database.Queryer) (Code, error) {
 	accounts, err := readAccounts(ctx, q)
 	if err != nil {
 		return Code{}, err
@@ -160,10 +163,10 @@ func Render(code Code) (*contract.ConfigurationCode, error) {
 
 func Planner(desired Desired, deps provider.Deps) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(ctx context.Context, q access.Queryer, p access.Principal) error {
+		Authorize: func(ctx context.Context, q database.Queryer, p authz.Principal) error {
 			return authorize(ctx, q, p, desired.Code)
 		},
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			changes, err := plan(ctx, q, desired, deps)
 			if err != nil {
 				return nil, err
@@ -174,7 +177,7 @@ func Planner(desired Desired, deps provider.Deps) promotion.Planner {
 }
 
 func Applier(desired Desired, deps provider.Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		changes, err := plan(ctx, tx, desired, deps)
 		if err != nil {
 			return err
@@ -199,7 +202,7 @@ func Applier(desired Desired, deps provider.Deps) promotion.Applier {
 	}
 }
 
-func authorize(ctx context.Context, q access.Queryer, p access.Principal, code Code) error {
+func authorize(ctx context.Context, q database.Queryer, p authz.Principal, code Code) error {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return err
@@ -215,14 +218,14 @@ func authorize(ctx context.Context, q access.Queryer, p access.Principal, code C
 		if err != nil {
 			return err
 		}
-		if err := p.Project(&id, access.Change); err != nil {
+		if err := p.Project(&id, authz.Change); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.Deps) ([]change, error) {
+func plan(ctx context.Context, q database.Queryer, desired Desired, deps provider.Deps) ([]change, error) {
 	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err
@@ -235,7 +238,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	if err != nil {
 		return nil, err
 	}
-	pools, err := promotion.TryMapIndex(r.pools, func(_ int, p resolved[access.CodePoolInput]) (change, error) { return poolChange(ctx, q, p) })
+	pools, err := promotion.TryMapIndex(r.pools, func(_ int, p resolved[codeadmin.PoolInput]) (change, error) { return poolChange(ctx, q, p) })
 	if err != nil {
 		return nil, err
 	}
@@ -243,21 +246,21 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	if err != nil {
 		return nil, err
 	}
-	budgets, err := promotion.TryMapIndex(r.budgets, func(_ int, b resolved[access.CodeBudgetInput]) (change, error) { return budgetChange(ctx, q, b) })
+	budgets, err := promotion.TryMapIndex(r.budgets, func(_ int, b resolved[codeadmin.BudgetInput]) (change, error) { return budgetChange(ctx, q, b) })
 	if err != nil {
 		return nil, err
 	}
 	return slices.Concat(accounts, pools, routes, budgets), nil
 }
 
-func resolve(ctx context.Context, q access.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
+func resolve(ctx context.Context, q database.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
 	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[codeaccounts.Input], error) {
 		return resolveAccount(ctx, q, a, directory, desired.bindings.credentials)
 	})
 	if err != nil {
 		return resolution{}, err
 	}
-	pools, err := promotion.TryMapIndex(desired.Code.Pools, func(_ int, p Pool) (resolved[access.CodePoolInput], error) {
+	pools, err := promotion.TryMapIndex(desired.Code.Pools, func(_ int, p Pool) (resolved[codeadmin.PoolInput], error) {
 		return resolvePool(ctx, q, p, desired, directory, destinations(accounts))
 	})
 	if err != nil {
@@ -268,7 +271,7 @@ func resolve(ctx context.Context, q access.Queryer, desired Desired, directory p
 	if err != nil {
 		return resolution{}, err
 	}
-	budgets, err := promotion.TryMapIndex(desired.Code.Budgets, func(_ int, b Budget) (resolved[access.CodeBudgetInput], error) {
+	budgets, err := promotion.TryMapIndex(desired.Code.Budgets, func(_ int, b Budget) (resolved[codeadmin.BudgetInput], error) {
 		return resolveBudget(ctx, q, b, desired, directory, destinations(routes))
 	})
 	if err != nil {

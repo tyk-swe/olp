@@ -1,0 +1,151 @@
+package apikeys
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/workload"
+)
+
+func TestAllowedAttributionKeysAgreeWithRequestLabels(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		valid bool
+	}{
+		{"team", true}, {"Team_2.name", true}, {strings.Repeat("a", 32), true},
+		{attribution.DelegationPairKey, false}, {"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
+			keyErr := validateAndNormalizeKey(key, false)
+			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
+			if (keyErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
+				t.Errorf("valid %t, key error %v, label error %v", tc.valid, keyErr, labelErr)
+			}
+		})
+	}
+}
+
+func TestWorkloadReferencesAgreeWithProjectNames(t *testing.T) {
+	issuer := func(template, group string) workload.Config {
+		return workload.Config{
+			Name: "workload", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys",
+			Audiences: []string{"gateway"}, Algorithms: []string{"RS256"}, MaxLifetimeSeconds: 600,
+			DisabledKeyIDs: []string{},
+			Mappings: []workload.Mapping{{Name: "mapping", Match: map[string]string{"/sub": "workload"},
+				ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: template,
+				RouteGroups: []string{group}, Scopes: []string{"inference"}}},
+		}
+	}
+	for _, name := range []string{"name", "name-a.b_c", "UPPER", "name/path", "", strings.Repeat("a", 100), strings.Repeat("a", 101)} {
+		t.Run(name, func(t *testing.T) {
+			groupErr := (keyauthority.RouteGroups{name: []string{"route"}}).Validate()
+			templateErr := (keyauthority.LimitTemplates{name: keyauthority.AdmissionLimits{}}).ValidateAndNormalize()
+			workloadGroupErr := issuer("template", name).Validate()
+			workloadTemplateErr := issuer(name, "group").Validate()
+			if (groupErr == nil) != (workloadGroupErr == nil) || (templateErr == nil) != (workloadTemplateErr == nil) {
+				t.Fatalf("group error = %v, workload group error = %v, template error = %v, workload template error = %v", groupErr, workloadGroupErr, templateErr, workloadTemplateErr)
+			}
+		})
+	}
+}
+
+func TestConsumerResourceDenyMatrix(t *testing.T) {
+	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+	resource := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	now := time.Now()
+	a := keyauthority.Authority{ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference", "tools", "agents", "traces_write"}, AllowedRoutes: []string{"*"}, AllowedRouteGroups: []string{"all"}, AllowedToolsets: []string{resource}}}
+	if !a.AllowsResource("tools", resource, project, now) || !a.AllowsResource("traces_write", "", project, now) {
+		t.Fatal("explicit consumer authority refused")
+	}
+	for _, input := range [][3]string{{"agents", resource, project}, {"tools", "different", project}, {"tools", resource, "different"}, {"inference", resource, project}, {"traces_write", resource, project}, {"delegate", "", project}} {
+		if a.AllowsResource(input[0], input[1], input[2], now) {
+			t.Fatalf("unexpected authority for %v", input)
+		}
+	}
+	a.Policy.AllowedToolsets = nil
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("routes or scope granted an empty toolset allowlist")
+	}
+	a.Policy.AllowedToolsets = []string{resource}
+	a.Policy.Scopes = []string{"inference"}
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("allowlist bypassed independent scope")
+	}
+	a.Policy.Scopes = []string{"tools"}
+	a.RevokedAt = &now
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("revoked key accepted")
+	}
+	a.RevokedAt = nil
+	a.ExpiresAt = &now
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("expired key accepted")
+	}
+	a.ExpiresAt = nil
+	a.ProjectID = nil
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("installation key acquired project authority")
+	}
+	copy := ConsumerScopes()
+	copy[0] = "mutated"
+	if ConsumerScopes()[0] != "inference" {
+		t.Fatal("scope registry is mutable")
+	}
+}
+
+func TestConsumerScopesWorkForKeysAndWorkloadMappings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		valid  bool
+	}{
+		{name: "all consumer scopes", scopes: ConsumerScopes(), valid: true},
+		{name: "unknown scope", scopes: []string{"unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{Scopes: tc.scopes, AllowedRoutes: []string{}}}
+			issuer := workload.Config{
+				Name: "workload", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys",
+				Audiences: []string{"gateway"}, Algorithms: []string{"RS256"}, MaxLifetimeSeconds: 600,
+				DisabledKeyIDs: []string{},
+				Mappings: []workload.Mapping{{Name: "mapping", Match: map[string]string{"/sub": "workload"},
+					ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "build",
+					RouteGroups: []string{"generation"}, Scopes: tc.scopes}},
+			}
+			if err := validateAndNormalizeKey(key, false); (err == nil) != tc.valid {
+				t.Fatalf("key validation = %v, valid = %t", err, tc.valid)
+			}
+			if err := issuer.Validate(); (err == nil) != tc.valid {
+				t.Fatalf("workload validation = %v, valid = %t", err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestRequiredAttributionKeysAgreeWithCallerLabels(t *testing.T) {
+	for _, label := range []string{"team", attribution.DelegationPairKey} {
+		t.Run(label, func(t *testing.T) {
+			policy := attribution.Policy{Required: []string{label}}
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{
+				Scopes: []string{"inference"}, AllowedRoutes: []string{}, RequiredAttributionKeys: []string{label},
+			}}
+			valid := attribution.Validate(map[string]string{label: "value"}) == nil
+			if err := access.ValidateAttributionPolicy(&policy); (err == nil) != valid {
+				t.Errorf("project requirement for %q has error %v, caller label valid %t", label, err, valid)
+			}
+			if err := validateAndNormalizeKey(key, false); (err == nil) != valid {
+				t.Errorf("key requirement for %q has error %v, caller label valid %t", label, err, valid)
+			}
+		})
+	}
+	amount := "1"
+	budgets := keyauthority.AttributionBudgets{attribution.DelegationPairKey: {strings.Repeat("a", 64): {DailyCostLimit: &amount}}}
+	if err := budgets.ValidateAndNormalize(); err != nil {
+		t.Fatalf("reserved delegation budget must remain valid: %v", err)
+	}
+}

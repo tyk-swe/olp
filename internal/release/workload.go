@@ -9,10 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -100,7 +99,7 @@ func (m *Manager) loadWorkloadAuthority(ctx context.Context, tx pgx.Tx, state *a
 		issuer.bindings = map[string]keyauthority.Authority{}
 		for _, mapping := range issuer.Config.Mappings {
 			project := mapping.ProjectID
-			a := keyauthority.Authority{Issuer: issuer.Creator, ProjectID: &project, InstallationID: m.installation, InstallationBudget: state.installationBudget, ProjectBudget: state.projectBudgets[project], ProjectAttributionBudgets: state.projectAttributionBudgets[project], BudgetIncreases: state.budgetIncreases, Policy: access.WorkloadKeyPolicy(mapping)}
+			a := keyauthority.Authority{Issuer: issuer.Creator, ProjectID: &project, InstallationID: m.installation, InstallationBudget: state.installationBudget, ProjectBudget: state.projectBudgets[project], ProjectAttributionBudgets: state.projectAttributionBudgets[project], BudgetIncreases: state.budgetIncreases, Policy: keyauthority.WorkloadPolicy(mapping)}
 			a.Policy = a.Policy.InRegion(m.region)
 			if org, ok := state.projectOrganizations[project]; ok {
 				a.OrganizationID = &org
@@ -182,7 +181,7 @@ func (m *Manager) authenticateWorkload(raw string) (*keyauthority.Authority, err
 	base.AgentPrincipal = identity.Mapping.AgentPrincipal
 	base.ExpiresAt = &identity.ExpiresAt
 	if identity.Mapping.EndUserClaim != nil {
-		if !access.ValidEndUserIdentifier(identity.EndUser) {
+		if !keyauthority.ValidEndUserIdentifier(identity.EndUser) {
 			return nil, ErrInvalidKey
 		}
 		base.EndUserDigest = m.EndUserDigest(base.ProjectID, identity.EndUser)
@@ -215,7 +214,7 @@ func (m *Manager) registerWorkload(ctx context.Context, state *authorityState, i
 	}
 	id := uuid.NewSHA1(uuid.MustParse("f6f67f12-d053-5d5a-8073-0b0b95eb61ce"), []byte(digest)).String()
 	lookup := "wi_" + digest[:32]
-	policy, _ := json.Marshal(access.WorkloadKeyPolicy(mapping))
+	policy, _ := json.Marshal(keyauthority.WorkloadPolicy(mapping))
 	_, e = tx.Exec(ctx, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id,workload_issuer_id,workload_digest,workload_mapping)
  VALUES($1,$2,$3,$4,$5,$6,$1,$7,$8,$9,$10) ON CONFLICT(workload_digest) WHERE workload_digest IS NOT NULL DO NOTHING`, id, lookup, make([]byte, 32), "Workload "+digest[:12], issuer.Creator, policy, mapping.ProjectID, issuer.ID, digest, mapping.Name)
 	if e != nil {

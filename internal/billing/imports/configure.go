@@ -6,9 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/billing/source"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 var (
@@ -33,7 +34,7 @@ type Desired struct {
 	Credential *source.Credential
 }
 
-func ReadAll(ctx context.Context, q access.Queryer) (map[string]Config, error) {
+func ReadAll(ctx context.Context, q database.Queryer) (map[string]Config, error) {
 	rows, err := q.Query(ctx, selectRecords)
 	if err != nil {
 		return nil, err
@@ -65,12 +66,12 @@ func (r record) config() (Config, error) {
 	return Config{Enabled: r.Enabled, Scope: scope, CredentialID: r.CredentialID}, nil
 }
 
-func (v Vault) Fits(ctx context.Context, q access.Queryer, src source.Source, credentialID *string) (bool, error) {
+func (v Vault) Fits(ctx context.Context, q database.Queryer, src source.Source, credentialID *string) (bool, error) {
 	_, fits, err := v.open(ctx, q, src, credentialID)
 	return fits, err
 }
 
-func (v Vault) open(ctx context.Context, q access.Queryer, src source.Source, credentialID *string) (source.Credential, bool, error) {
+func (v Vault) open(ctx context.Context, q database.Queryer, src source.Source, credentialID *string) (source.Credential, bool, error) {
 	if credentialID == nil {
 		return source.Credential{}, false, nil
 	}
@@ -96,7 +97,7 @@ func (v Vault) choose(ctx context.Context, tx pgx.Tx, src source.Source, current
 	if err != nil {
 		return "", err
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	return id, v.Keys.Store(ctx, tx, v.Installation, id, secrets.BillingCredential, sealed, nil)
 }
 
@@ -123,7 +124,7 @@ func Save(ctx context.Context, tx pgx.Tx, vault Vault, providerID string, desire
 	if err != nil {
 		return "", err
 	}
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_imports
 		(provider_id,source,credential_id,scope,enabled,etag,created_by,next_import_at)
 		VALUES($1::uuid,$2,$3::uuid,$4::jsonb,$5,$6,$7::uuid,now())

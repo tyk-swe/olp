@@ -1,19 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 || ${1:-} == --help || ${1:-} == -h ]]; then
-  echo "usage: OLP_IMAGE_PLATFORM=linux/amd64 $0 IMAGE" >&2
-  [[ $# -eq 1 ]] && exit 0 || exit 2
-fi
-
-image=$1
-platform=${OLP_IMAGE_PLATFORM:-}
+image=${1:?usage: OLP_IMAGE_PLATFORM=linux/amd64 $0 IMAGE}
+platform=${OLP_IMAGE_PLATFORM:?set the image platform}
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 
-platform_args=()
-if [[ -n $platform ]]; then
-  platform_args=(--platform "$platform")
-fi
+platform_args=(--platform "$platform")
 
 for mode in all gateway control worker migrate doctor; do
   docker run --rm "${platform_args[@]}" "$image" "$mode" --help >/dev/null
@@ -27,14 +19,12 @@ case "$configured_user" in
     exit 1
     ;;
 esac
-if [[ -n $platform ]]; then
-  expected_arch=${platform#*/}
-  actual_arch=$(docker image inspect "$image" --format '{{.Architecture}}')
-  [[ $actual_arch == "$expected_arch" ]] || {
-    echo "image architecture mismatch: expected=$expected_arch actual=$actual_arch" >&2
-    exit 1
-  }
-fi
+expected_arch=${platform#*/}
+actual_arch=$(docker image inspect "$image" --format '{{.Architecture}}')
+[[ $actual_arch == "$expected_arch" ]] || {
+  echo "image architecture mismatch: expected=$expected_arch actual=$actual_arch" >&2
+  exit 1
+}
 
 work=$(mktemp -d)
 container=
@@ -50,4 +40,4 @@ grep -qi '<html\|<!doctype html' "$work/index.html" || {
   exit 1
 }
 
-echo "image smoke passed: image=$image platform=${platform:-native} user=$configured_user modes=6"
+echo "image smoke passed: image=$image platform=$platform user=$configured_user modes=6"

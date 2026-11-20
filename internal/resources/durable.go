@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const (
@@ -205,14 +205,6 @@ func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]
 		return nil, ErrContract
 	}
 	return payload, nil
-}
-
-func (s *Store) DeleteStagedDurableContract(ctx context.Context, id uuid.UUID) error {
-	if !s.Encrypted() || id == uuid.Nil {
-		return ErrContract
-	}
-	_, err := s.pool.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.ProviderContinuation)
-	return err
 }
 
 // ReadDurableContract checks the current owner before decrypting. The gateway

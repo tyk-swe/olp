@@ -148,6 +148,10 @@
     padding: 0 1rem;
     border-bottom: 1px solid var(--border-hairline);
     color: var(--foreground-muted);
+    transition: border-color var(--motion);
+  }
+  .field:focus-within {
+    border-bottom-color: var(--signal);
   }
   input {
     min-height: 3.25rem;

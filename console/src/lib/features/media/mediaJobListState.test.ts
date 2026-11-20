@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { mediaTimeline } from './mediaTimeline';
 import {
   mediaJobFilters,
   mediaJobList,
@@ -91,4 +92,60 @@ describe('media job polling', () => {
       expect(interval).toBe(false);
     }
   });
+});
+
+describe('media job timeline', () => {
+  it.each([
+    [
+      '2026-01-01T12:00:00Z',
+      '2026-01-01T12:00:00.1Z',
+      '2026-01-01T12:00:00.2Z'
+    ],
+    [
+      '2026-01-01T12:00:00.1Z',
+      '2026-01-01T12:00:00.11Z',
+      '2026-01-01T12:00:00.12Z'
+    ],
+    [
+      '2026-01-01T12:00:00.10001Z',
+      '2026-01-01T12:00:00.100011Z',
+      '2026-01-01T12:00:00.100012Z'
+    ],
+    [
+      '2026-01-01T13:00:00+01:00',
+      '2026-01-01T12:00:00.5Z',
+      '2026-01-01T12:00:01Z'
+    ]
+  ])(
+    'orders recorded milestones by instant from %s through %s to %s',
+    (created, completed, checked) => {
+      const job = {
+        id,
+        api_key_id: id,
+        provider_id: id,
+        provider_name: 'Fixture provider',
+        provider_model: 'fixture-model',
+        route: 'fixture-route',
+        surface: 'openai',
+        operation: 'video',
+        state: 'succeeded',
+        lifecycle: 'active',
+        content_available: false,
+        etag: 'fixture-etag',
+        created_at: created,
+        completed_at: completed,
+        last_polled_at: checked,
+        updated_at: checked
+      };
+
+      expect(
+        mediaTimeline(job).recorded.map(({ label, at }) => ({ label, at }))
+      ).toEqual([
+        { label: 'OLP record created', at: created },
+        { label: 'Terminal state recorded', at: completed },
+        { label: 'Last provider status check', at: checked },
+        { label: 'Last metadata update', at: checked }
+      ]);
+    }
+  );
 });

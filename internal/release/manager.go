@@ -21,9 +21,9 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -51,7 +51,6 @@ type Release struct {
 	Sequence    int64
 	Digest      string
 	snapshot    *routing.View
-	InstalledAt time.Time
 	credentials map[string][]byte
 	references  map[string]secretstore.Reference
 }
@@ -80,7 +79,7 @@ func NewRelease(id string, sequence int64, snapshot *routing.Snapshot, credentia
 	for id, secret := range credentials {
 		owned[id] = append([]byte(nil), secret...)
 	}
-	return &Release{ID: id, Sequence: sequence, Digest: digest, snapshot: frozen, InstalledAt: time.Now(), credentials: owned}, nil
+	return &Release{ID: id, Sequence: sequence, Digest: digest, snapshot: frozen, credentials: owned}, nil
 }
 
 func (r *Release) Snapshot() *routing.View {
@@ -221,15 +220,14 @@ func NewManager(config ManagerConfig) *Manager {
 	}
 }
 
-func (m *Manager) InstanceID() string { return m.instanceID }
-func (m *Manager) Region() string     { return m.region }
+func (m *Manager) Region() string { return m.region }
 
 func emptyRelease() *Release {
-	return &Release{snapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}).ReadOnly(), InstalledAt: time.Now()}
+	return &Release{snapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}).ReadOnly()}
 }
 
 // Start performs one synchronous refresh and then polls until ctx ends or
-// Stop is called. Refresh failures are logged; the gateway keeps serving its
+// StopContext is called. Refresh failures are logged; the gateway keeps serving its
 // last installed state and fails closed once authority goes stale.
 func (m *Manager) Start(ctx context.Context, grantRefreshed func(providerID, credentialID string)) {
 	m.tasksMu.Lock()
@@ -266,11 +264,6 @@ func (m *Manager) Start(ctx context.Context, grantRefreshed func(providerID, cre
 	}) {
 		stopParent()
 	}
-}
-
-// Stop ends polling and waits for the loop to exit.
-func (m *Manager) Stop() {
-	_ = m.StopContext(context.Background())
 }
 
 // StopContext cancels all manager-owned tasks, refuses new tasks, and joins
@@ -312,7 +305,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	err := refreshObligations(ctx, PollInterval, m.refreshAuthority, m.refreshRelease, m.refreshGrants, m.refreshInputs, m.refreshExternalCredentials)
 	status, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(err, m.RecordInstallStatus(status, m.instanceID))
+	return errors.Join(err, m.recordInstallStatus(status))
 }
 
 func refreshObligations(ctx context.Context, budget time.Duration, obligations ...func(context.Context) error) error {
@@ -593,7 +586,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	if !hmac.Equal([]byte(computed), []byte(digest)) {
 		return nil, errors.New("snapshot digest mismatch")
 	}
-	release := &Release{ID: id, Sequence: sequence, Digest: digest, InstalledAt: time.Now(), credentials: map[string][]byte{}}
+	release := &Release{ID: id, Sequence: sequence, Digest: digest, credentials: map[string][]byte{}}
 	m.mu.RLock()
 	candidate := &releaseCandidate{release: release, baseSequence: m.release.Sequence}
 	knownGrants := m.grants
@@ -758,7 +751,7 @@ func (m *Manager) Release() *Release {
 
 // EndUserDigest derives a project-scoped identity without retaining the identifier.
 func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
-	return access.DigestEndUser(m.auth, projectID, identifier)
+	return keyauthority.DigestEndUser(m.auth, projectID, identifier)
 }
 
 func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {

@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type DelegationManagement struct {
@@ -41,66 +43,66 @@ func (s *DelegationManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/delegation-options", s.options)
 }
 
-func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (access.Reply, error) {
-	keyID, err := access.ParseUUID(r.URL.Query().Get("api_key_id"))
+func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	keyID, err := httpkit.ParseUUID(r.URL.Query().Get("api_key_id"))
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var projectID *string
 	if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
 		if err == pgx.ErrNoRows {
-			return access.Reply{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+			return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 		}
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if projectID == nil {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
-	if err := principal.Project(projectID, access.Change); err != nil {
-		return access.Reply{}, err
+	if err := principal.Project(projectID, authz.Change); err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	routes, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	toolsetRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	toolsets, err := pgx.CollectRows(toolsetRows, pgx.RowTo[string])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	agentRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	agents, err := pgx.CollectRows(agentRows, pgx.RowTo[string])
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	var current string
 	if err := tx.QueryRow(r.Context(), "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	s.Manager.mu.RLock()
 	defer s.Manager.mu.RUnlock()
 	state := s.Manager.authority
 	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return access.Reply{}, access.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+		return httpkit.Reply{}, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
-		return access.Reply{}, access.Forbidden()
+		return httpkit.Reply{}, httpkit.Forbidden()
 	}
 	now := time.Now()
 	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
@@ -138,57 +140,51 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 			}
 		}
 	}, func(left, right delegationOption) int { return cmp.Compare(left.ID, right.ID) })
-	return access.Reply{Status: http.StatusOK, Body: struct {
+	return httpkit.Reply{Status: http.StatusOK, Body: struct {
 		Agents []delegationOption `json:"agents"`
 	}{Agents: append([]delegationOption{}, options...)}}, tx.Commit(r.Context())
 
 }
 
-func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input delegationConsentRequest
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
-	keyID, err := access.ParseUUID(input.APIKeyID)
+	keyID, err := httpkit.ParseUUID(input.APIKeyID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	agentID, err := access.ParseUUID(input.AgentID)
+	agentID, err := httpkit.ParseUUID(input.AgentID)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
-		return access.Reply{}, err
-	}
-	bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, AllowedAgents: input.AllowedAgents, TTLSeconds: input.TTLSeconds}
-	if !validDelegationBounds(bounds) {
-		return access.Reply{}, access.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
-	}
-	target, err := s.Manager.memberConsentTarget(r.Context(), tx, agentID, keyID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := principal.Project(target.key.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
-		return access.Reply{}, access.Forbidden()
-	}
-	code := "olpc_" + secrets.Token()
-	expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
-	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires, bounds.AllowedAgents); err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "agent_delegation.consent", "api_key", keyID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
-	return access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}}, tx.Commit(r.Context())
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, AllowedAgents: input.AllowedAgents, TTLSeconds: input.TTLSeconds}
+		if !validDelegationBounds(bounds) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
+		}
+		target, err := s.Manager.memberConsentTarget(r.Context(), tx, agentID, keyID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := principal.Project(target.key.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Forbidden()
+		}
+		code := "olpc_" + secrets.Token()
+		expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
+		if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires, bounds.AllowedAgents); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
+		return httpkit.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}}, access.Event{Action: "agent_delegation.consent", Resource: "api_key", ID: keyID}, nil
+	})
 }
 
 func consentScopes(scopes []string) []string {
@@ -213,11 +209,11 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 	defer m.mu.RUnlock()
 	state := m.authority
 	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return memberConsentTarget{}, access.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+		return memberConsentTarget{}, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil {
-		return memberConsentTarget{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		return memberConsentTarget{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	for _, principal := range state.workloadPrincipals {
 		if principal.ID != agentID {
@@ -228,7 +224,7 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 			return memberConsentTarget{agent: agent, key: key, revision: revision}, nil
 		}
 	}
-	return memberConsentTarget{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+	return memberConsentTarget{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 }
 
 func (state authorityState) memberConsentAgent(principal keyauthority.Authority) (keyauthority.Authority, string, bool) {

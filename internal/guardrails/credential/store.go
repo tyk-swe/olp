@@ -6,8 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type New struct {
@@ -18,7 +19,7 @@ type New struct {
 }
 
 func Create(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation string, in New) (string, error) {
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := keys.Store(ctx, tx, installation, id, secrets.GuardrailCredential, in.Secret, nil); err != nil {
 		return "", err
 	}
@@ -26,7 +27,7 @@ func Create(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation 
 	return id, err
 }
 
-func FindID(ctx context.Context, q access.Queryer, projectID *string, name string) (string, bool, error) {
+func FindID(ctx context.Context, q database.Queryer, projectID *string, name string) (string, bool, error) {
 	var id string
 	err := q.QueryRow(ctx, "SELECT id::text FROM olp.guardrail_credentials WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2", projectID, name).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -35,13 +36,13 @@ func FindID(ctx context.Context, q access.Queryer, projectID *string, name strin
 	return id, err == nil, err
 }
 
-func Name(ctx context.Context, q access.Queryer, id string) (string, error) {
+func Name(ctx context.Context, q database.Queryer, id string) (string, error) {
 	var name string
 	err := q.QueryRow(ctx, "SELECT name FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&name)
 	return name, err
 }
 
-func Load(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, project, id string) ([]byte, error) {
+func Load(ctx context.Context, q database.Queryer, keys *secrets.KeyRing, installation, project, id string) ([]byte, error) {
 	var owner string
 	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&owner); err != nil || owner != project {
 		return nil, errors.New("guardrail credential boundary mismatch")

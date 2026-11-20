@@ -5,7 +5,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
@@ -14,18 +14,19 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		return "", err
 	}
 	operation := source.Operation()
-	if source == wire.Format("bedrock_count") {
-		operation = "token_count"
-	}
 	if !slices.Contains(p.Operations, operation) {
 		return "", errors.New("operation is outside the selected provider profile")
 	}
 	switch operation {
 	case "decision":
-		if p.OperationDialect(operation) == "systemone" {
+		switch p.OperationDialect(operation) {
+		case "systemone":
 			return wire.SystemOne, nil
+		case "gemini-decisions":
+			return wire.GeminiDecisions, nil
+		case "openai-decisions":
+			return wire.Decisions, nil
 		}
-		return wire.Decisions, nil
 	case "generation":
 		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
 			return family, nil
@@ -37,7 +38,7 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		case "gemini-generate-content":
 			return wire.GeminiCount, nil
 		case "bedrock-converse":
-			return wire.Format("bedrock_count"), nil
+			return wire.BedrockCount, nil
 		default:
 			return wire.InputTokens, nil
 		}

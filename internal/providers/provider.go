@@ -11,11 +11,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type providerState string
@@ -63,7 +66,7 @@ func scanRecord(row pgx.Row) (*record, error) {
 
 var recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
 
-func readProvider(ctx context.Context, q access.Queryer, id string) (*record, error) {
+func readProvider(ctx context.Context, q database.Queryer, id string) (*record, error) {
 	return scanRecord(q.QueryRow(ctx, recordQuery, id))
 }
 
@@ -72,26 +75,26 @@ func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
 }
 
 // A provider outside p's scope is reported missing.
-func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
+func visibleProvider(ctx context.Context, q database.Queryer, p authz.Principal, id string) (*record, error) {
 	current, err := readProvider(ctx, q, id)
 	if err != nil {
 		return nil, err
 	}
-	if err = p.Project(current.ProjectID, access.View); err != nil {
+	if err = p.Project(current.ProjectID, authz.View); err != nil {
 		return nil, err
 	}
 	return current, nil
 }
 
 func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := access.NewID()
+	etag := httpkit.NewID()
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
 	return etag, err
 }
 
 func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := access.NewID()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, access.NewID())
+	etag := httpkit.NewID()
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, httpkit.NewID())
 	return etag, err
 }
 
@@ -176,87 +179,87 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	return &d, nil
 }
 
-func (s *Server) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
+func (s *Server) detail(ctx context.Context, q database.Queryer, id string) (*detail, error) {
 	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 
-func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (access.Reply, error) {
+func (s *Server) detailReply(ctx context.Context, q database.Queryer, id string) (httpkit.Reply, error) {
 	d, err := s.detail(ctx, q, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(d, d.ETag), nil
+	return httpkit.Detail(d, d.ETag), nil
 }
 
 func (p *record) target(credential []byte, probeModels ...string) probe.Target {
 	return probe.Target{ProviderID: p.ID, Connection: p.Connection, Credential: credential, ProbeModels: probeModels}
 }
 
-func (s *Server) providers(r *http.Request, principal access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) providers(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	if len(search) > 100 {
-		return access.Reply{}, access.Invalid("search", "Use at most 100 characters.")
+		return httpkit.Reply{}, httpkit.Invalid("search", "Use at most 100 characters.")
 	}
 	rows, err := s.access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') AND ($3 OR p.project_id=ANY($4::uuid[])) ORDER BY p.id DESC LIMIT $5", page.Before, search, principal.AllProjects, principal.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer rows.Close()
 	var items []providerSummary
 	for rows.Next() {
 		d, err := s.scanDetail(rows)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		items = append(items, d.providerSummary)
 	}
 	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
-func (s *Server) provider(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) provider(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.detailReply(r.Context(), s.access.Pool, id)
 }
 
-func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error)) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
-		if err := access.Match(r, current.ETag); err != nil {
-			return access.Reply{}, err
+	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		reply, err := fn(r.Context(), tx, p, current)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return reply, access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success")
+		return reply, access.Event{Action: action, Resource: "provider", ID: id}, nil
 	})
 }
 
 // A stored replay discloses the provider, so the project check also guards
 // replays.
-func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (*record, error) {
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+func changeable(ctx context.Context, id string) func(pgx.Tx, authz.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		current, err := lockProvider(ctx, tx, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := p.Project(current.ProjectID, access.Change); err != nil {
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
 			return nil, err
 		}
 		return current, nil
@@ -265,15 +268,15 @@ func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (
 
 // unchangedSince locks a provider that a probe read without the lock and
 // refuses to store the outcome once the provider has moved on.
-func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, access.Principal) (*record, error) {
+func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, authz.Principal) (*record, error) {
 	lock := changeable(ctx, read.ID)
-	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
 		current, err := lock(tx, p)
 		if err != nil {
 			return nil, err
 		}
 		if current.ETag != read.ETag {
-			return nil, access.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
+			return nil, httpkit.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
 		}
 		return current, nil
 	}
@@ -294,7 +297,7 @@ func deref[T comparable](v *T) T {
 	return *v
 }
 
-func ReadProviderNames(ctx context.Context, q access.Queryer) (map[string]string, error) {
+func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.providers")
 	if err != nil {
 		return nil, err
@@ -315,14 +318,14 @@ func ReadProviderNames(ctx context.Context, q access.Queryer) (map[string]string
 
 // Deletion is deliberately separate from disable: it removes an unused draft,
 // while published revisions and retained evidence remain addressable.
-func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "provider_id")
+func (s *Server) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.Remove(s.access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
-		if err := access.Match(r, current.ETag); err != nil {
-			return access.Reply{}, err
+	return access.Remove(s.access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		var used bool
 		if err := tx.QueryRow(r.Context(), `SELECT
@@ -330,39 +333,36 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
  OR EXISTS(SELECT 1 FROM olp.route_drafts d,jsonb_array_elements(d.targets) t WHERE t->>'provider_id'=$1::text)
  OR EXISTS(SELECT 1 FROM olp.prices WHERE provider_id=$1)
  OR EXISTS(SELECT 1 FROM olp.notification_deliveries d JOIN olp.provider_credentials c ON c.id=d.credential_id WHERE c.provider_id=$1)`, id).Scan(&used); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if current.State != stateDraft || used {
-			return access.Reply{}, access.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
+			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
 		}
 		if err := grants.DiscardProvider(r.Context(), tx, id); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		rows, err := tx.Query(r.Context(), `SELECT id::text FROM olp.provider_credentials WHERE provider_id=$1
  UNION SELECT id::text FROM olp.provider_network_credentials WHERE provider_id=$1`, id)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		secretIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.providers WHERE id=$1", id); err != nil {
 			var constraint *pgconn.PgError
 			if errors.As(err, &constraint) && constraint.Code == "23503" {
-				return access.Reply{}, access.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
 			}
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", secretIDs, secrets.ProviderCredential); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), "provider.delete", "provider", id, "success", current.ProjectID); err != nil {
-			return access.Reply{}, err
-		}
-		return access.Reply{Status: http.StatusNoContent}, nil
+		return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "provider.delete", Resource: "provider", ID: id, Project: current.ProjectID}, nil
 	})
 }

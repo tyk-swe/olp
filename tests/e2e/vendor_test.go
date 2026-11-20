@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -20,21 +21,21 @@ func newVendor(t *testing.T) *httptest.Server {
 
 // activeProvider creates a provider against the fixture vendor and takes it
 // through probe, certification and activation.
-func (s *service) activeProvider(owner *caller, name, endpoint string, projectID string) map[string]any {
-	s.t.Helper()
-	provider := s.want(owner, "POST", "/api/v1/providers", map[string]any{
+func (s *service) activeProvider(owner *harness.Caller, name, endpoint string, projectID string) map[string]any {
+	s.T.Helper()
+	provider := s.Want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          name,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": endpoint + "/v1"},
 		"credential":    vendor.Secret,
 		"model":         vendor.Model,
 		"project_id":    projectID,
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	path := "/api/v1/providers/" + provider["id"].(string)
-	probe := s.want(owner, "POST", path+"/probe", nil, etag(provider), http.StatusOK)
+	probe := s.Want(owner, "POST", path+"/probe", nil, harness.ETag(provider), http.StatusOK)
 	if probe["succeeded"] != true {
-		s.t.Fatalf("probe failed: %v", probe)
+		s.T.Fatalf("probe failed: %v", probe)
 	}
-	models := s.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"].([]any)
+	models := s.Want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"].([]any)
 	modelID := ""
 	for _, item := range models {
 		model := item.(map[string]any)
@@ -43,35 +44,35 @@ func (s *service) activeProvider(owner *caller, name, endpoint string, projectID
 		}
 	}
 	if modelID == "" {
-		s.t.Fatalf("probe did not discover %s: %v", vendor.Model, models)
+		s.T.Fatalf("probe did not discover %s: %v", vendor.Model, models)
 	}
-	detail := s.want(owner, "GET", path, nil, nil, http.StatusOK)
-	detail = s.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{
+	detail := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+	detail = s.Want(owner, "PATCH", path+"/models/"+modelID, map[string]any{
 		"enabled": true,
 		"capabilities": []any{
 			map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"},
 			map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"},
 		},
-	}, etag(detail), http.StatusOK)
-	certified := s.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etag(detail), http.StatusOK)
+	}, harness.ETag(detail), http.StatusOK)
+	certified := s.Want(owner, "POST", path+"/models/"+modelID+"/certify", nil, harness.ETag(detail), http.StatusOK)
 	if certified["status"] != "certified" {
-		s.t.Fatalf("certification failed: %v", certified)
+		s.T.Fatalf("certification failed: %v", certified)
 	}
-	detail = s.want(owner, "GET", path, nil, nil, http.StatusOK)
-	s.want(owner, "POST", path+"/activate", nil, idempotent(etag(detail)), http.StatusOK)
+	detail = s.Want(owner, "GET", path, nil, nil, http.StatusOK)
+	s.Want(owner, "POST", path+"/activate", nil, harness.Idempotent(harness.ETag(detail)), http.StatusOK)
 	return provider
 }
 
 // publishedRoute drafts and activates a route onto provider, returning the
 // activation response.
-func (s *service) publishedRoute(owner *caller, slug string, provider map[string]any, projectID string) (map[string]any, map[string]any) {
-	s.t.Helper()
-	draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+func (s *service) publishedRoute(owner *harness.Caller, slug string, provider map[string]any, projectID string) (map[string]any, map[string]any) {
+	s.T.Helper()
+	draft := s.Want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets":    []any{map[string]any{"provider_id": provider["id"], "provider_model": vendor.Model, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		"project_id": projectID,
-	}, idempotent(), http.StatusCreated)
-	activated := s.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, idempotent(etag(draft)), http.StatusOK)
+	}, harness.Idempotent(), http.StatusCreated)
+	activated := s.Want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, harness.Idempotent(harness.ETag(draft)), http.StatusOK)
 	return draft, activated
 }
 

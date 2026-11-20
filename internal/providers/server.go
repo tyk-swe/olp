@@ -13,9 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -34,7 +33,6 @@ type Deps struct {
 	Access          *access.Server
 	Egress          *egress.Policy
 	Getenv          func(string) string
-	Signer          connectors.Signer
 	ExternalSecrets release.ExternalSecrets
 	Unconfined      *plugins.Unconfined
 	Quotas          QuotaSource
@@ -61,7 +59,7 @@ func New(deps Deps) *Server {
 	return &Server{
 		access: deps.Access, egress: deps.Egress, external: deps.ExternalSecrets, unconfined: deps.Unconfined,
 		quota: deps.Quotas, plugins: deps.Plugins, catalog: deps.Catalog, activated: deps.Activated, log: deps.Log,
-		prober: probe.New(deps.Egress, deps.Getenv, deps.Signer, deps.Plugins, networkSecrets{server: deps.Access}),
+		prober: probe.New(deps.Egress, deps.Getenv, deps.Plugins, networkSecrets{server: deps.Access}),
 	}
 }
 

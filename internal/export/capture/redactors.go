@@ -6,8 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 var errUnbound = errors.New("capture binding unavailable")
@@ -18,7 +19,7 @@ type candidate struct {
 	definition guardrails.Revision
 }
 
-func pin(ctx context.Context, q access.Queryer, project string, names []string) ([]Redactor, error) {
+func pin(ctx context.Context, q database.Queryer, project string, names []string) ([]Redactor, error) {
 	if len(names) == 0 {
 		return []Redactor{}, nil
 	}
@@ -36,7 +37,7 @@ func pin(ctx context.Context, q access.Queryer, project string, names []string) 
 		return nil, err
 	}
 	if !resolvedInOrder(found, len(names)) {
-		return nil, access.Invalid("redact", "each name must resolve to one active, non-retired local regex, PII, secrets or keywords detector in the policy project")
+		return nil, httpkit.Invalid("redact", "each name must resolve to one active, non-retired local regex, PII, secrets or keywords detector in the policy project")
 	}
 	pins := make([]Redactor, len(found))
 	definitions := make(map[string]guardrails.Revision, len(found))
@@ -46,7 +47,7 @@ func pin(ctx context.Context, q access.Queryer, project string, names []string) 
 		definitions[d.ID] = d
 	}
 	if _, err := compile(project, names, pins, definitions); err != nil {
-		return nil, access.Invalid("redact", "capture detector revisions could not be compiled")
+		return nil, httpkit.Invalid("redact", "capture detector revisions could not be compiled")
 	}
 	return pins, nil
 }
@@ -97,7 +98,7 @@ func storePins(ctx context.Context, tx pgx.Tx, policyID string, pins []Redactor)
 	return err
 }
 
-func loadDefinitions(ctx context.Context, q access.Queryer) (map[string]guardrails.Revision, error) {
+func loadDefinitions(ctx context.Context, q database.Queryer) (map[string]guardrails.Revision, error) {
 	rows, err := q.Query(ctx, loadDefinitionsSQL)
 	if err != nil {
 		return nil, err

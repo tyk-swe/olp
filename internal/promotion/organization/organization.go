@@ -6,9 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -25,7 +26,7 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 		return nil, nil
 	}
 	if len(*document.Organizations) > maxOrganizations {
-		return nil, access.Invalid("organizations", "Use at most 1000 organizations.")
+		return nil, httpkit.Invalid("organizations", "Use at most 1000 organizations.")
 	}
 	declared, err := promotion.Convert[[]Organization](*document.Organizations)
 	if err != nil {
@@ -39,7 +40,7 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 	})), byName), nil
 }
 
-func Read(ctx context.Context, q access.Queryer) ([]Organization, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Organization, error) {
 	stored, err := projects.ReadOrganizationBudgets(ctx, q)
 	if err != nil {
 		return nil, err
@@ -67,11 +68,11 @@ func validate(organizations []Organization) error {
 	})
 	for i, organization := range organizations {
 		name := strings.TrimSpace(organization.Name)
-		if err := access.ValidText("organizations", name, 100); err != nil {
+		if err := httpkit.ValidText("organizations", name, 100); err != nil {
 			return err
 		}
 		if first[strings.ToLower(name)] != i {
-			return access.Invalid("organizations", "Organization names must be unique.")
+			return httpkit.Invalid("organizations", "Organization names must be unique.")
 		}
 		if err := organization.Budget.ValidateAndNormalize(); err != nil {
 			return err

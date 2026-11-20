@@ -10,7 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type Server struct {
@@ -40,44 +43,44 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 }
 
-func notificationOperation(projectID *string) access.Operation {
+func notificationOperation(projectID *string) authz.Operation {
 	if projectID == nil {
-		return access.Settings
+		return authz.Settings
 	}
-	return access.Keys
+	return authz.Keys
 }
 
 func (s *Server) list(res resource) access.Handler {
-	return func(r *http.Request, p access.Principal) (access.Reply, error) {
-		page, err := access.Page(r)
+	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+		page, err := httpkit.Page(r)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		rows, err := s.access.Pool.Query(r.Context(),
 			"SELECT document FROM ("+res.documentsSQL+") documents WHERE id<$1::uuid AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4",
 			page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		items, err := access.JSONRows(rows)
-		return access.ListReply(items, page), err
+		items, err := httpkit.JSONRows(rows)
+		return httpkit.ListReply(items, page), err
 	}
 }
 
 func (s *Server) get(res resource) access.Handler {
-	return func(r *http.Request, p access.Principal) (access.Reply, error) {
-		id, err := access.IDParam(r, res.parameter)
+	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+		id, err := httpkit.IDParam(r, res.parameter)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		found, err := res.find(r.Context(), s.access.Pool, id)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		if err := p.Project(found.projectID, access.View); err != nil {
-			return access.Reply{}, err
+		if err := p.Project(found.projectID, authz.View); err != nil {
+			return httpkit.Reply{}, err
 		}
-		return access.Detail(found.body, found.etag), nil
+		return httpkit.Detail(found.body, found.etag), nil
 	}
 }
 
@@ -85,141 +88,97 @@ type creation[T any] struct {
 	projectID   *string
 	fingerprint any
 	parse       func(projectID *string) (T, error)
-	insert      func(tx pgx.Tx, p access.Principal, projectID *string, target T, id, etag string) error
+	insert      func(tx pgx.Tx, p authz.Principal, projectID *string, target T, id, etag string) error
 }
 
-func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (access.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.access.Replay(r, tx, p, c.fingerprint)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		if err := s.access.RequireProject(r.Context(), tx, p, c.projectID); err != nil {
-			return access.Reply{}, err
+func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (httpkit.Reply, error) {
+	return access.Mutate(s.access, r, c.fingerprint, func(tx pgx.Tx, p authz.Principal) (*string, error) {
+		if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
+			return nil, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	projectID, err := access.ParseOptionalUUID(c.projectID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := s.access.RequireProject(r.Context(), tx, p, projectID); err != nil {
-		return access.Reply{}, err
-	}
-	target, err := c.parse(projectID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	id, etag := access.NewID(), access.NewID()
-	if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
-		return access.Reply{}, err
-	}
-	created, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Reply{Status: http.StatusCreated, ETag: created.etag, Location: res.path + id, Body: created.body}
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".create", res.kind, id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		projectID, err := httpkit.ParseOptionalUUID(c.projectID)
+		if err != nil {
+			return nil, err
+		}
+		return projectID, s.access.RequireProject(r.Context(), tx, p, projectID)
+	}, func(tx pgx.Tx, p authz.Principal, projectID *string) (httpkit.Reply, access.Event, error) {
+		target, err := c.parse(projectID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		created, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: http.StatusCreated, ETag: created.etag, Location: res.path + id, Body: created.body},
+			access.Event{Action: res.kind + ".create", Resource: res.kind, ID: id}, nil
+	})
 }
 
-func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, current document, etag string) error) (access.Reply, error) {
-	id, err := access.IDParam(r, res.parameter)
+func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, current document, etag string) error) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, res.parameter)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	locked, err := res.lockForChange(r.Context(), tx, p, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.Match(r, locked.etag); err != nil {
-		return access.Reply{}, err
-	}
-	current, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := apply(tx, current, access.NewID()); err != nil {
-		return access.Reply{}, err
-	}
-	updated, err := res.find(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".update", res.kind, id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Detail(updated.body, updated.etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		locked, err := res.lockForChange(r.Context(), tx, p, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, locked.etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := apply(tx, current, httpkit.NewID()); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		updated, err := res.find(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(updated.body, updated.etag), access.Event{Action: res.kind + ".update", Resource: res.kind, ID: id}, nil
+	})
 }
 
 func (s *Server) delete(res resource) access.Handler {
-	return func(r *http.Request, _ access.Principal) (access.Reply, error) {
-		id, err := access.IDParam(r, res.parameter)
+	return func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+		id, err := httpkit.IDParam(r, res.parameter)
 		if err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
-		tx, p, err := s.access.BeginMutation(r)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		defer tx.Rollback(r.Context())
-		claim, replayed, err := s.access.Replay(r, tx, p, map[string]string{res.parameter: id})
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if replayed != nil {
-			return *replayed, tx.Commit(r.Context())
-		}
-		locked, err := res.lockForChange(r.Context(), tx, p, id)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if err := access.Match(r, locked.etag); err != nil {
-			return access.Reply{}, err
-		}
-		if err := removalError(res.kind, res.remove(r.Context(), tx, id)); err != nil {
-			return access.Reply{}, err
-		}
-		if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), res.kind+".delete", res.kind, id, "success", locked.projectID); err != nil {
-			return access.Reply{}, err
-		}
-		result := access.Reply{Status: http.StatusNoContent}
-		if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
-			return access.Reply{}, err
-		}
-		return result, tx.Commit(r.Context())
+		return access.Remove(s.access, r, map[string]string{res.parameter: id}, func(tx pgx.Tx, p authz.Principal) (revision, error) {
+			return res.lockForChange(r.Context(), tx, p, id)
+		}, func(tx pgx.Tx, _ authz.Principal, locked revision) (httpkit.Reply, access.Event, error) {
+			if err := httpkit.Match(r, locked.etag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if err := removalError(res.kind, res.remove(r.Context(), tx, id)); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			return httpkit.Reply{Status: http.StatusNoContent},
+				access.Event{Action: res.kind + ".delete", Resource: res.kind, ID: id, Project: locked.projectID}, nil
+		})
 	}
 }
 
 func decodePatch[V any](r *http.Request, subject, unknownField string, known map[string]V) (map[string]json.RawMessage, error) {
 	var patch map[string]json.RawMessage
-	if err := access.Decode(r, &patch); err != nil {
+	if err := httpkit.Decode(r, &patch); err != nil {
 		return nil, err
 	}
 	if len(patch) == 0 {
-		return nil, access.Invalid(subject, "Send at least one field to update.")
+		return nil, httpkit.Invalid(subject, "Send at least one field to update.")
 	}
 	for field := range patch {
 		if _, ok := known[field]; !ok {
-			return nil, access.Invalid(field, unknownField)
+			return nil, httpkit.Invalid(field, unknownField)
 		}
 	}
 	return patch, nil
@@ -228,7 +187,7 @@ func decodePatch[V any](r *http.Request, subject, unknownField string, known map
 func removalError(kind string, err error) error {
 	var constraint *pgconn.PgError
 	if errors.As(err, &constraint) && constraint.Code == "23503" {
-		return access.Fail(http.StatusConflict, kind+"_in_use", "The resource still has dependent resources or retained history.")
+		return httpkit.Fail(http.StatusConflict, kind+"_in_use", "The resource still has dependent resources or retained history.")
 	}
 	return err
 }
@@ -252,25 +211,25 @@ type document struct {
 	body json.RawMessage
 }
 
-func (res resource) find(ctx context.Context, q access.Queryer, id string) (document, error) {
+func (res resource) find(ctx context.Context, q database.Queryer, id string) (document, error) {
 	var found document
 	err := q.QueryRow(ctx, "SELECT id::text,document,etag::text,project_id::text FROM ("+res.documentsSQL+") documents WHERE id=$1", id).
 		Scan(&found.id, &found.body, &found.etag, &found.projectID)
 	return found, err
 }
 
-func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p access.Principal, id string) (revision, error) {
+func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p authz.Principal, id string) (revision, error) {
 	var locked revision
 	if err := tx.QueryRow(ctx, res.lockSQL, id).Scan(&locked.etag, &locked.projectID); err != nil {
 		return revision{}, err
 	}
-	if err := p.Project(locked.projectID, access.View); err != nil {
+	if err := p.Project(locked.projectID, authz.View); err != nil {
 		return revision{}, err
 	}
 	if err := p.Authorize(notificationOperation(locked.projectID)); err != nil {
 		return revision{}, err
 	}
-	if err := p.Project(locked.projectID, access.Change); err != nil {
+	if err := p.Project(locked.projectID, authz.Change); err != nil {
 		return revision{}, err
 	}
 	return locked, nil

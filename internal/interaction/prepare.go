@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 )
 
 func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
@@ -76,15 +76,15 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
 		return nil, err
 	}
-	if t.policy != nil && t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == wire.Bedrock) {
+	if t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == wire.Bedrock) {
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
 	}
-	if t.policy != nil && t.policy.HasOutput() {
+	if t.policy.HasOutput() {
 		if err := outputRequestCoverage(t.wire, effective); err != nil {
 			return nil, err
 		}
 	}
-	if t.policy != nil && len(t.policy.Input) > 0 {
+	if t.policy.HasInput() {
 		if err := checkInputCoverage(t.wire, effective); err != nil {
 			return nil, err
 		}

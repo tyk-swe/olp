@@ -7,7 +7,7 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 const webhookURLLimit = 2048

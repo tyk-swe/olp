@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -25,18 +27,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	exportstream "github.com/tyk-swe/olp/internal/export/stream"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/internal/usage/reports"
@@ -64,7 +69,7 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	worker := retainedworker.Worker{Store: store, Resolver: resources.NewResolver(pool), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	worker := retainedworker.Worker{Store: store, Resolver: resources.NewResolver(pool), Connections: egress.NewConnectionClientCache(128), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	go func() {
 		defer close(done)
 		worker.Run(ctx)
@@ -84,6 +89,7 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 			if resourceFailures != 1 || lastError != "credential_or_pin_unavailable" || failures != 1 {
 				t.Fatal("failed retained settlement was reported as a successful worker pass")
 			}
+			testClosedRetainedReconciliation(t, fixture, resource)
 			return
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -92,6 +98,308 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("retained worker did not checkpoint its first pass")
+}
+
+func testClosedRetainedReconciliation(t *testing.T, fixture usageFixture, resource *resources.Resource) {
+	t.Helper()
+	ctx, pool := t.Context(), fixture.pool
+	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed' WHERE resource_id=$1`, resource.UUID); err != nil {
+		t.Fatal(err)
+	}
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	token := "retained-settlement-session"
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), fixture.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+		t.Fatal(err)
+	}
+	const origin = "https://test.example"
+	mux := http.NewServeMux()
+	management := resources.Management{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: origin, Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), Pool: pool}
+	management.Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/v1/provider-resources/"+resource.ID+"/reconcile", strings.NewReader(`{"upstream_id":"test-hint"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", origin)
+	r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+	r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+	response, err := server.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var problem struct{ Type string }
+	if err := json.Unmarshal(body, &problem); err != nil || response.StatusCode != http.StatusConflict || !strings.HasSuffix(problem.Type, "/settlement_closed") {
+		t.Fatalf("reconcile closed settlement = %d %s, want 409 settlement_closed", response.StatusCode, body)
+	}
+}
+
+func TestFocusRetainedHistoryCompleteness(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	oldDay := today.AddDate(0, 0, -2)
+	fixture.observedAt = oldDay.Add(12 * time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, oldDay.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	event := fixture.event(fixture.attempt(1))
+	accepted, err := usage.NewAccountingEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := ingest.PersistEvent(t.Context(), pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+		t.Fatalf("event fixture failed: %+v %v", result, err)
+	}
+	ledger := newUsageFixture(t, pool)
+	ledger.observedAt = fixture.observedAt
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, oldDay.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules
+ (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at,ends_at)
+ VALUES($1,$2,'fixture','openai_compatible',10,'USD','day',$3,$4)`, ledger.providerID, uuid.NewString(), oldDay, oldDay.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	ledgerEvent := ledger.event(ledger.attempt(1))
+	ledgerEvent.RouteSlug = "ledger-fixture"
+	ledgerAccepted, err := usage.NewAccountingEvent(ledgerEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := ingest.PersistEvent(t.Context(), pool, ledgerAccepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+		t.Fatalf("ledger fixture failed: %+v %v", result, err)
+	}
+	partialLedger := newUsageFixture(t, pool)
+	partialLedger.observedAt = fixture.observedAt
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, oldDay.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules
+ (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at,ends_at)
+ VALUES($1,$2,'partial','openai_compatible',10,'USD','day',$3,$4)`, partialLedger.providerID, uuid.NewString(), oldDay, oldDay.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	upsertEvent := partialLedger.event(partialLedger.attempt(1))
+	upsertEvent.RouteSlug = "upsert-fixture"
+	upsertAccepted, err := usage.NewAccountingEvent(upsertEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.PersistEvent(t.Context(), pool, upsertAccepted); err != nil {
+		t.Fatal(err)
+	}
+	for _, incomplete := range []bool{false, true} {
+		attempt := partialLedger.attempt(1)
+		route := "ledger-unpriced"
+		if incomplete {
+			route = "ledger-incomplete"
+			attempt.Usage.Evidence = usage.EvidenceFrom(attempt.Usage.Evidence.Observed(), false, false)
+		} else {
+			attempt.UpstreamModel = "unpriced-fixture-model"
+		}
+		event := partialLedger.event(attempt)
+		event.RouteSlug = route
+		event.UsageComplete = !incomplete
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := ingest.PersistEvent(t.Context(), pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("partial fixture failed: %+v %v", result, err)
+		}
+	}
+	notBillable := fixture.attempt(1)
+	notBillable.Usage = &usage.AttemptUsage{Evidence: usage.EvidenceFrom(false, true, false)}
+	notBillableEvent := fixture.event(notBillable)
+	notBillableEvent.RouteSlug = "not-billable"
+	notBillableAccepted, err := usage.NewAccountingEvent(notBillableEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := ingest.PersistEvent(t.Context(), pool, notBillableAccepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+		t.Fatalf("nonbillable fixture failed: %+v %v", result, err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) VALUES('retention.usage_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	report, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var facts, hourly int
+	if err := pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM olp.attempt_usage_facts),(SELECT count(*) FROM olp.attempt_usage_hourly)`).Scan(&facts, &hourly); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("retention rolled=%d raw facts=%d hourly rows=%d", report.RollupRows, facts, hourly)
+	if facts != 0 || hourly != 6 {
+		t.Fatal("fixture did not roll up real usage")
+	}
+	for _, complete := range []bool{false, true} {
+		attempt := partialLedger.attempt(1)
+		attempt.Usage.Evidence = usage.EvidenceFrom(true, complete, false)
+		event := partialLedger.event(attempt)
+		event.RouteSlug = "upsert-fixture"
+		event.UsageComplete = complete
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := ingest.PersistEvent(t.Context(), pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("late fixture failed: %+v %v", result, err)
+		}
+		if _, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.attempt_usage_hourly
+ (bucket,route_slug,provider_id,upstream_model,operation,surface,api_key_id,
+ request_count,provider_request_count,model_request_count,target_request_count,
+ input_tokens,output_tokens,cached_input_tokens,media_units,estimated_cost,
+ request_unpriced_count,provider_unpriced_count,model_unpriced_count,target_unpriced_count,
+ request_incomplete_count,provider_incomplete_count,model_incomplete_count,target_incomplete_count)
+ SELECT bucket,'legacy-fixture',provider_id,upstream_model,operation,surface,api_key_id,
+ request_count,provider_request_count,model_request_count,target_request_count,
+ input_tokens,output_tokens,cached_input_tokens,media_units,estimated_cost,
+ request_unpriced_count,provider_unpriced_count,model_unpriced_count,target_unpriced_count,
+ request_incomplete_count,provider_incomplete_count,model_incomplete_count,target_incomplete_count
+ FROM olp.attempt_usage_hourly WHERE route_slug='usage-fixture'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.settings SET value='3' WHERE key='retention.usage_days'`); err != nil {
+		t.Fatal(err)
+	}
+	var installation string
+	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("42", 32)+`"}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := uuid.NewString()
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err := ring.Store(t.Context(), tx, installation, credential, secrets.SinkCredential, []byte(`{"region":"fixture-region","auth_mode":"static","secret":{"access_key_id":"synthetic-fixture-key-material","secret_access_key":"synthetic-fixture-key-material"}}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	type uploadedManifest struct {
+		Case       string
+		ChargeDate string `json:"charge_date"`
+		Parts      []struct {
+			Rows int64 `json:"rows"`
+		} `json:"parts"`
+		Completeness struct {
+			Included    int64 `json:"included_attempts"`
+			Gap         bool  `json:"ingestion_gap"`
+			Unavailable bool  `json:"raw_detail_unavailable"`
+		} `json:"completeness"`
+		Metadata struct {
+			Recency struct {
+				Complete bool `json:"DatasetInstanceComplete"`
+			} `json:"Recency"`
+		} `json:"metadata"`
+	}
+	uploads := make(chan uploadedManifest, 64)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
+			var m uploadedManifest
+			if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			m.Case = strings.Split(r.URL.Path, "/")[1]
+			uploads <- m
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+	cases := []struct {
+		name, basis, route, project string
+		unavailable                 bool
+		rows                        bool
+	}{
+		{"ordinary-cost", "cost", "usage-fixture", "", true, false},
+		{"ordinary-charge", "charge", "usage-fixture", "", true, false},
+		{"ledger-cost", "cost", "ledger-fixture", "", false, true},
+		{"ledger-charge", "charge", "ledger-fixture", "", true, false},
+		{"ledger-unpriced", "cost", "ledger-unpriced", "", true, false},
+		{"ledger-incomplete", "cost", "ledger-incomplete", "", true, false},
+		{"mixed", "cost", "", "", true, true},
+		{"nonbillable", "cost", "not-billable", "", false, false},
+		{"legacy", "cost", "legacy-fixture", "", true, false},
+		{"upsert", "cost", "upsert-fixture", "", true, true},
+		{"other-route", "cost", "absent", "", false, false},
+		{"other-project", "cost", "", uuid.NewString(), false, false},
+	}
+	for _, c := range cases {
+		raw, _ := json.Marshal(map[string]string{"cost_basis": c.basis, "start_date": oldDay.Format(time.DateOnly)})
+		filterValues := map[string]string{}
+		if c.route != "" {
+			filterValues["route"] = c.route
+		}
+		if c.project != "" {
+			filterValues["project"] = c.project
+		}
+		filter, _ := json.Marshal(filterValues)
+		id := uuid.NewString()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,filter,credential_id,enabled,etag,created_by,created_at) VALUES($1,$2,'s3',$3,ARRAY['focus'],'csv_gzip',$4,$5,$6,true,$1,$7,$8)`, id, c.name, receiver.URL+"/"+c.name, raw, filter, credential, fixture.ownerID, today); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	worker := focus.Worker{Pool: pool, Keys: ring, Installation: installation, Sender: destination.NewSender(policy, func(string) string { return "" }, installation), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return today.Add(12 * time.Hour) }}
+	if _, err := worker.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	close(uploads)
+	seen := map[string]int{}
+	for m := range uploads {
+		seen[m.Case]++
+		var rows int64
+		for _, part := range m.Parts {
+			rows += part.Rows
+		}
+		for _, c := range cases {
+			if c.name != m.Case {
+				continue
+			}
+			wantUnavailable, wantRows := c.unavailable, c.rows
+			if m.ChargeDate != oldDay.Format(time.DateOnly) {
+				wantUnavailable, wantRows = false, false
+			}
+			t.Logf("case=%s day=%s rows=%d included=%d unavailable=%t complete=%t", c.name, m.ChargeDate, rows, m.Completeness.Included, m.Completeness.Unavailable, m.Metadata.Recency.Complete)
+			if m.Completeness.Unavailable != wantUnavailable || m.Metadata.Recency.Complete == wantUnavailable {
+				t.Errorf("unexpected completeness for %s on %s: %+v", c.name, m.ChargeDate, m)
+			}
+			if (rows > 0) != wantRows {
+				t.Errorf("unexpected exported rows for %s on %s: %d", c.name, m.ChargeDate, rows)
+			}
+		}
+	}
+	for _, c := range cases {
+		if seen[c.name] != 2 {
+			t.Errorf("%s generated %d days, want 2", c.name, seen[c.name])
+		}
+	}
 }
 
 func TestFocusSettlesMultipleAttemptsAndOverlappingCommitmentDays(t *testing.T) {
@@ -333,6 +641,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
+	t.Run("expiring records skip locked rows", func(t *testing.T) { testExpiringRecordsSkipLockedRows(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
 	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
@@ -447,6 +756,70 @@ func testAnchorRetention(t *testing.T, fixture usageFixture) {
 			}
 		})
 	}
+}
+
+func testExpiringRecordsSkipLockedRows(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	now := time.Now().UTC()
+	sessions := []struct {
+		id       string
+		expires  time.Time
+		retained bool
+	}{
+		{uuid.NewString(), now.Add(-time.Hour), false},
+		{uuid.NewString(), now.Add(-time.Hour), false},
+		{uuid.NewString(), now.Add(-time.Hour), true},
+		{uuid.NewString(), now.Add(time.Hour), true},
+	}
+	for _, session := range sessions {
+		digest := sha256.Sum256([]byte(session.id))
+		if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint)
+			VALUES($1,$2,$3,$4,'test')`, session.id, fixture.ownerID, digest[:], session.expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	locked, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locked.Rollback(context.WithoutCancel(t.Context()))
+	if _, err := locked.Exec(t.Context(), `SELECT id FROM olp.sessions WHERE id=$1 FOR UPDATE`, sessions[2].id); err != nil {
+		t.Fatal(err)
+	}
+	retained := func() {
+		t.Helper()
+		for _, session := range sessions {
+			var exists bool
+			if err := fixture.pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.sessions WHERE id=$1)`, session.id).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists != session.retained {
+				t.Errorf("session expiring at %s retained=%v, want %v", session.expires, exists, session.retained)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	report, err := retention.RunMaintenance(ctx, fixture.pool, now)
+	if err != nil || !report.LockAcquired {
+		t.Fatalf("maintenance did not finish while an expired session was locked: lock=%v error=%v", report.LockAcquired, err)
+	}
+	if report.SessionRows != 2 {
+		t.Fatalf("maintenance purged %d expired sessions, want the 2 unlocked ones", report.SessionRows)
+	}
+	retained()
+	if err := locked.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sessions[2].retained = false
+	report, err = retention.RunMaintenance(t.Context(), fixture.pool, now)
+	if err != nil || !report.LockAcquired {
+		t.Fatalf("maintenance after unlock: lock=%v error=%v", report.LockAcquired, err)
+	}
+	if report.SessionRows != 1 {
+		t.Fatalf("maintenance after unlock purged %d expired sessions, want the previously locked one", report.SessionRows)
+	}
+	retained()
 }
 
 func cleanupPublication(t *testing.T, fixture usageFixture, kind string) (string, string) {
@@ -786,7 +1159,7 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	ring, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("42", 32) + `"}]}`))
+	ring, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("42", 32)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -970,7 +1343,7 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 				t.Fatal(err)
 			}
 			auth := secrets.NewAuthKey(make([]byte, 32), installation)
-			keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+			keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1301,6 +1674,271 @@ func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
 	assertDelivery("delivered", 2)
 	if len(requests) != 2 {
 		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
+	}
+}
+
+func TestPersonalDeviceEnrollmentRetriesClientSetup(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	var exchanges atomic.Int32
+	mux := http.NewServeMux()
+	provider := httptest.NewServer(mux)
+	t.Cleanup(provider.Close)
+	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"device_code":"test-device","user_code":"test-user","verification_uri":%q,"expires_in":600,"interval":5}`, provider.URL+"/verify")
+	})
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		exchanges.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"access_token":"test-access-token","token_type":"Bearer","expires_in":600}`)
+	})
+	binding := personal.Binding{
+		ServerID: uuid.NewString(), ProjectID: fixture.projectID, Endpoint: provider.URL + "/mcp",
+		Identity: personal.Identity{Kind: personal.KeyIdentity, ID: fixture.keyID},
+		OAuth: routing.MCPOAuth{
+			ClientID: "test-client", Audience: provider.URL + "/mcp", Scopes: []string{"tools"},
+			AuthorizationEndpoint: provider.URL + "/authorize", TokenEndpoint: provider.URL + "/token", DeviceAuthorizationEndpoint: provider.URL + "/device",
+		},
+	}
+	revision := uuid.NewString()
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES($1,$2,'device-enrollment','streamable_http',$3,true,$4,$4,$5)`, binding.ServerID, binding.ProjectID, binding.Endpoint, revision, fixture.ownerID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,oauth,created_by) VALUES($1,$2,1,$3,'2025-03-26','[]',repeat('0',64),$4,$5)`, revision, binding.ServerID, binding.Endpoint, binding.OAuth, fixture.ownerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	store := personal.NewStore(pool, installation, auth, keys, policy)
+	handoff, err := store.Start(ctx, binding, &fixture.ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, _ := strings.Cut(handoff.EnrollmentURL, ".")
+	if _, err := store.Claim(ctx, handoff.EnrollmentID, token, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := store.Authorize(ctx, handoff.EnrollmentID, fixture.ownerID, personal.DeviceCode, ""); err != nil || result.Device == nil {
+		t.Fatalf("device authorization = %+v, error = %v", result, err)
+	}
+	blocked := personal.NewStore(pool, installation, auth, keys, &egress.Policy{})
+	_, setupErr := blocked.Poll(ctx, handoff.EnrollmentID, fixture.ownerID)
+	problem, known := httpkit.ProblemFor(setupErr)
+	if !known || problem.Status != http.StatusServiceUnavailable || problem.Code != "grant_authorization_unavailable" || exchanges.Load() != 0 {
+		t.Fatalf("failed setup error = %v, token exchanges = %d", setupErr, exchanges.Load())
+	}
+	if result, err := store.Poll(ctx, handoff.EnrollmentID, fixture.ownerID); err != nil || result.State != personal.Active || exchanges.Load() != 1 {
+		t.Fatalf("retry = %+v, error = %v, token exchanges = %d, want an active grant after one exchange", result, err, exchanges.Load())
+	}
+}
+
+func TestExportRetryPreservesSettings(t *testing.T) {
+	t.Parallel()
+	for _, change := range []string{"source", "default_source", "name", "stripe"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			var calls atomic.Int32
+			type delivery struct {
+				body []byte
+				key  string
+			}
+			bodies := make(chan delivery, 4)
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				bodies <- delivery{body, r.Header.Get("Idempotency-Key")}
+				if calls.Add(1) == 1 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer receiver.Close()
+			sink := uuid.NewString()
+			keys, installation := notificationKeys(t, pool)
+			auth := secrets.NewAuthKey(make([]byte, 32), installation)
+			if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
+				t.Fatal(err)
+			}
+			settings, patch, sinkType, format, credential := func() (string, string, string, string, *string) {
+				switch change {
+				case "stripe":
+					id := uuid.NewString()
+					if err := pgx.BeginFunc(t.Context(), pool, func(tx pgx.Tx) error {
+						return keys.Store(t.Context(), tx, installation, id, secrets.SinkCredential, []byte(`{"api_key":"sk_test_fixture"}`), nil)
+					}); err != nil {
+						t.Fatal(err)
+					}
+					return fmt.Sprintf(`{"event_name":"original","value":"requests","customers":{%q:"cus_original"}}`, f.projectID),
+						fmt.Sprintf(`{"settings":{"event_name":"updated","value":"input_tokens","customer_key":"customer","value_key":"amount","customers":{%q:"cus_updated"}}}`, f.projectID),
+						"stripe_meter", "stripe", &id
+				case "name":
+					return `{"source":"/original"}`, `{"name":"renamed"}`, "https", "cloudevents", nil
+				case "default_source":
+					return `{}`, `{"settings":{"source":"/changed"}}`, "https", "cloudevents", nil
+				default:
+					return `{"source":"/original"}`, `{"settings":{"source":"/changed"}}`, "https", "cloudevents", nil
+				}
+			}()
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,etag,created_by,credential_id) VALUES($1,'retry-settings',$5,$2,ARRAY['metering'],$6,$4,$1,$3,$7)`, sink, receiver.URL, f.ownerID, settings, sinkType, format, credential); err != nil {
+				t.Fatal(err)
+			}
+			event, err := usage.NewAccountingEvent(f.event(f.attempt(1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome, err := ingest.PersistEvent(t.Context(), pool, event); err != nil || outcome.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("persist result=%+v error=%v", outcome, err)
+			}
+			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			run := func() {
+				var before int64
+				if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='export_delivery'),0)`).Scan(&before); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				worker := exportstream.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: destination.NewSender(policy, func(string) string { return "" }, installation), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+				go func() { defer close(done); worker.Run(ctx) }()
+				defer func() { cancel(); <-done }()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var finished bool
+					if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='export_delivery' AND successes_total>$1)`, before).Scan(&finished); err != nil {
+						t.Fatal(err)
+					}
+					if finished {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("export worker did not checkpoint")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			armRetry := func() {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sink); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if change == "stripe" {
+				otherProject := uuid.NewString()
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'another project',$1,$2)`, otherProject, f.ownerID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_sinks SET settings=jsonb_set(settings,'{customers}',jsonb_build_object($2::text,'cus_other')) WHERE id=$1`, sink, otherProject); err != nil {
+					t.Fatal(err)
+				}
+				run()
+				var code *string
+				if err := pool.QueryRow(t.Context(), `SELECT last_error_code FROM olp.export_pending WHERE sink_id=$1`, sink).Scan(&code); err != nil {
+					t.Fatal(err)
+				}
+				if len(bodies) != 0 || code == nil || *code != "unmapped" {
+					t.Fatal("the queued event was not deferred while its project was unmapped")
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_sinks SET settings=$2 WHERE id=$1`, sink, settings); err != nil {
+					t.Fatal(err)
+				}
+				armRetry()
+			}
+			run()
+			{
+				token := "export-fixture-session"
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+					t.Fatal(err)
+				}
+				mux := http.NewServeMux()
+				destination.NewAPI(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), policy).Register(mux)
+				api := httptest.NewServer(mux)
+				defer api.Close()
+				req, err := http.NewRequest(http.MethodPatch, api.URL+"/api/v1/observability/sinks/"+sink, strings.NewReader(patch))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Origin", "https://test.example")
+				req.Header.Set("If-Match", `"`+sink+`"`)
+				req.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+				req.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+				response, err := api.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("PATCH status=%d body=%s", response.StatusCode, body)
+				}
+
+				var code *string
+				var delivered bool
+				if err := pool.QueryRow(t.Context(), `SELECT last_error_code,delivered_at IS NOT NULL FROM olp.export_pending WHERE sink_id=$1`, sink).Scan(&code, &delivered); err != nil {
+					t.Fatal(err)
+				}
+				if delivered || code == nil || *code != "status" {
+					t.Fatalf("failed HTTP attempt evidence: delivered=%t code=%v", delivered, code)
+				}
+				armRetry()
+				run()
+			}
+			if len(bodies) != 2 {
+				t.Fatalf("deliveries=%d, want2", len(bodies))
+			}
+			first, second := <-bodies, <-bodies
+			if !bytes.Equal(first.body, second.body) || first.key != second.key {
+				t.Fatalf("retry changed event: first=%s retry=%s", first.body, second.body)
+			}
+			nextAttempt := f.attempt(1)
+			next, err := usage.NewAccountingEvent(f.event(nextAttempt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome, err := ingest.PersistEvent(t.Context(), pool, next); err != nil || outcome.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("next persist=%+v err=%v", outcome, err)
+			}
+			run()
+			if len(bodies) != 1 {
+				t.Fatalf("new deliveries=%d, want1", len(bodies))
+			}
+			third := <-bodies
+			if change == "stripe" {
+				original, beforeErr := url.ParseQuery(string(first.body))
+				updated, afterErr := url.ParseQuery(string(third.body))
+				if beforeErr != nil || afterErr != nil || first.key == "" || third.key == first.key || original.Get("event_name") != "original" || original.Get("payload[stripe_customer_id]") != "cus_original" || updated.Get("event_name") != "updated" || updated.Get("payload[customer]") != "cus_updated" || updated.Get("payload[amount]") == "" {
+					t.Fatalf("new event did not use the edited meter: original=%s updated=%s", first.body, third.body)
+				}
+				return
+			}
+			var body struct {
+				Source string `json:"source"`
+				ID     string `json:"id"`
+			}
+			if err := json.Unmarshal(third.body, &body); err != nil {
+				t.Fatal(err)
+			}
+			want := "/original"
+			if change != "name" {
+				want = "/changed"
+			}
+			if body.Source != want || body.ID != nextAttempt.ID {
+				t.Fatalf("new event uses wrong settings: %s", third.body)
+			}
+			if calls.Load() != 3 {
+				t.Fatalf("calls=%d", calls.Load())
+			}
+		})
 	}
 }
 
@@ -1659,7 +2297,7 @@ func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, strin
 	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+	keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1794,4 +2432,146 @@ func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
 	expect("delete rule", call("DELETE", "/api/v1/notifications/rules/"+decode(rule).ID, rule.etag, ""), http.StatusNoContent)
 	expect("delete destination", call("DELETE", path, renamed.etag, ""), http.StatusNoContent)
 	expect("get deleted destination", call("GET", path, "", ""), http.StatusNotFound)
+}
+
+func TestNotificationRetryPreservesBudgetSubject(t *testing.T) {
+	for _, change := range []string{"subject", "kind", "window", "name"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			nextKey := uuid.NewString()
+			f.addKey(t, nextKey)
+			payloads := make(chan map[string]any, 4)
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				payloads <- body
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer receiver.Close()
+			destination, rule := uuid.NewString(), uuid.NewString()
+			for _, s := range []struct {
+				sql  string
+				args []any
+			}{
+				{`UPDATE olp.api_keys SET policy='{"daily_cost_limit":"100"}' WHERE id=$1`, []any{f.keyID}},
+				{`INSERT INTO olp.api_key_cost_windows(api_key_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) SELECT $1,'day',window_id,80,0,true FROM olp.budget_window('day',now())`, []any{f.keyID}},
+				{`INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by) VALUES($1,'retry',$2,$3,$1,$4)`, []any{destination, receiver.URL, f.projectID, f.ownerID}},
+				{`INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by) VALUES($1,'retry',$2,'budget.threshold','api_key',$3,'day',75,$4,$1,$5)`, []any{rule, f.projectID, f.keyID, destination, f.ownerID}},
+			} {
+				if _, err := pool.Exec(t.Context(), s.sql, s.args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			run := func() {
+				var prior int64
+				if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&prior); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(policy)})
+				}()
+				defer func() { cancel(); <-done }()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var success bool
+					if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='notification_delivery' AND successes_total>$1)`, prior).Scan(&success); err != nil {
+						t.Fatal(err)
+					}
+					if success {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("delivery pass did not finish")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			run()
+			var first map[string]any
+			select {
+			case first = <-payloads:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first delivery absent")
+			}
+			if first["subject_id"] != f.keyID {
+				t.Fatalf("first subject=%v", first)
+			}
+			var installation string
+			if err := pool.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+				t.Fatal(err)
+			}
+			auth := secrets.NewAuthKey(make([]byte, 32), installation)
+			keys, err := secrets.ParseRingWithUnwrapper(context.Background(), []byte(`{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("01", 32)+`"}]}`), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
+				t.Fatal(err)
+			}
+			token := "notification-fixture-session"
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+				t.Fatal(err)
+			}
+			mux := http.NewServeMux()
+			notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), policy).Register(mux)
+			api := httptest.NewServer(mux)
+			defer api.Close()
+			patch := map[string]string{"subject_id": nextKey}
+			switch change {
+			case "kind":
+				group := uuid.NewString()
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.budget_groups(id,name,project_id,etag,created_by,daily_cost_limit) VALUES($1,'new group',$2,$1,$3,100)`, group, f.projectID, f.ownerID); err != nil {
+					t.Fatal(err)
+				}
+				patch = map[string]string{"subject_kind": "budget_group", "subject_id": group}
+			case "window":
+				patch = map[string]string{"window_kind": "month"}
+			case "name":
+				patch = map[string]string{"name": "renamed"}
+			}
+			patchBody, err := json.Marshal(patch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := http.NewRequest(http.MethodPatch, api.URL+"/api/v1/notifications/rules/"+rule, strings.NewReader(string(patchBody)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Origin", "https://test.example")
+			req.Header.Set("If-Match", `"`+rule+`"`)
+			req.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+			req.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+			response, err := api.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("PATCH status=%d body=%s", response.StatusCode, body)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1`, rule); err != nil {
+				t.Fatal(err)
+			}
+			run()
+			select {
+			case second := <-payloads:
+				t.Logf("PATCH returned200, same delivery=%t first subject=%v retry subject=%v accrued=%v", first["delivery_id"] == second["delivery_id"], first["subject_id"], second["subject_id"], second["accrued"])
+				if second["subject_id"] != first["subject_id"] || second["subject_kind"] != first["subject_kind"] || second["window_kind"] != first["window_kind"] || second["window_id"] != first["window_id"] || second["accrued"] != first["accrued"] || second["limit"] != first["limit"] || second["delivery_id"] != first["delivery_id"] {
+					t.Fatalf("retry reassigned original budget evidence to another subject: first=%v retry=%v", first, second)
+				}
+			default:
+				t.Fatal("original failed alert was not retried")
+			}
+		})
+	}
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -46,9 +46,6 @@ type StripeMeter struct {
 	ValueKey    string            `json:"value_key"`
 }
 
-func (StripeMeter) Type() Type     { return contract.CreateExportSinkRequestTypeStripeMeter }
-func (StripeMeter) Format() Format { return contract.CreateExportSinkRequestFormatStripe }
-
 var (
 	stripeEventName  = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,100}$`)
 	stripeCustomerID = regexp.MustCompile(`^cus_[A-Za-z0-9]{1,250}$`)
@@ -67,40 +64,40 @@ func parseStripeMeter(_ Type, settings json.RawMessage) (Spec, error) {
 		return nil, err
 	}
 	if input.EventName == nil || !stripeEventName.MatchString(*input.EventName) {
-		return nil, access.Invalid("settings.event_name", "event_name is required: 1 to 100 of letters, digits, underscore, dot, colon or dash")
+		return nil, httpkit.Invalid("settings.event_name", "event_name is required: 1 to 100 of letters, digits, underscore, dot, colon or dash")
 	}
 	spec := StripeMeter{EventName: *input.EventName, Value: MeterCharge, Customers: input.Customers, CustomerKey: "stripe_customer_id", ValueKey: "value"}
 	if input.Value != nil {
 		if !input.Value.valid() {
-			return nil, access.Invalid("settings.value", "value must be charge, cost, input_tokens, output_tokens, total_tokens or requests")
+			return nil, httpkit.Invalid("settings.value", "value must be charge, cost, input_tokens, output_tokens, total_tokens or requests")
 		}
 		spec.Value = *input.Value
 	}
 	if len(spec.Customers) < 1 || len(spec.Customers) > 1000 {
-		return nil, access.Invalid("settings.customers", "customers must map from 1 to 1000 projects")
+		return nil, httpkit.Invalid("settings.customers", "customers must map from 1 to 1000 projects")
 	}
 	for project, customer := range spec.Customers {
 		if parsed, err := uuid.Parse(project); err != nil || parsed.String() != project {
-			return nil, access.Invalid("settings.customers", "customers keys must be canonical project UUIDs")
+			return nil, httpkit.Invalid("settings.customers", "customers keys must be canonical project UUIDs")
 		}
 		if !stripeCustomerID.MatchString(customer) {
-			return nil, access.Invalid("settings.customers", "customers values must be cus_ identifiers")
+			return nil, httpkit.Invalid("settings.customers", "customers values must be cus_ identifiers")
 		}
 	}
 	if input.CustomerKey != nil {
 		if !stripeFieldKey.MatchString(*input.CustomerKey) {
-			return nil, access.Invalid("settings.customer_key", "customer_key must be 1 to 64 of letters, digits or underscore")
+			return nil, httpkit.Invalid("settings.customer_key", "customer_key must be 1 to 64 of letters, digits or underscore")
 		}
 		spec.CustomerKey = *input.CustomerKey
 	}
 	if input.ValueKey != nil {
 		if !stripeFieldKey.MatchString(*input.ValueKey) {
-			return nil, access.Invalid("settings.value_key", "value_key must be 1 to 64 of letters, digits or underscore")
+			return nil, httpkit.Invalid("settings.value_key", "value_key must be 1 to 64 of letters, digits or underscore")
 		}
 		spec.ValueKey = *input.ValueKey
 	}
 	if spec.CustomerKey == spec.ValueKey {
-		return nil, access.Invalid("settings.value_key", "customer_key and value_key must differ")
+		return nil, httpkit.Invalid("settings.value_key", "customer_key and value_key must differ")
 	}
 	return spec, nil
 }
@@ -134,29 +131,43 @@ func checkStripeKey(key string) error {
 	return nil
 }
 
-func (m stripeMeter) send(ctx context.Context, s *Sender, target Target, endpoint *url.URL, record Record) error {
+type meterReading struct {
+	envelope envelope
+	customer string
+	value    decimal.Decimal
+}
+
+func (m StripeMeter) reading(record Record) (meterReading, error) {
 	envelope, err := readEnvelope(record)
 	if err != nil {
-		return sendError("endpoint", err)
+		return meterReading{}, sendError("endpoint", err)
 	}
 	if envelope.ProjectID == nil {
-		return sendError("unmapped", errors.New("the metering record has no consumer project"))
+		return meterReading{}, sendError("unmapped", errors.New("the metering record has no consumer project"))
 	}
-	customer, mapped := m.spec.Customers[*envelope.ProjectID]
+	customer, mapped := m.Customers[*envelope.ProjectID]
 	if !mapped {
-		return sendError("unmapped", errors.New("the consumer project is not mapped to a Stripe customer"))
+		return meterReading{}, sendError("unmapped", errors.New("the consumer project is not mapped to a Stripe customer"))
 	}
-	value, ok := meteringValue(m.spec.Value, envelope.Data)
+	value, ok := meteringValue(m.Value, envelope.Data)
 	if !ok || !value.IsPositive() {
-		return sendError("unmapped", errors.New("the metering record has no reportable value"))
+		return meterReading{}, sendError("unmapped", errors.New("the metering record has no reportable value"))
 	}
-	identifier := "olp-" + strings.ReplaceAll(target.sinkID, "-", "") + "-" + strings.ReplaceAll(envelope.SourceID, "-", "")
+	return meterReading{envelope, customer, value}, nil
+}
+
+func (m stripeMeter) send(ctx context.Context, s *Sender, target Target, endpoint *url.URL, record Record) error {
+	reading, err := m.spec.reading(record)
+	if err != nil {
+		return err
+	}
+	identifier := "olp-" + strings.ReplaceAll(target.sinkID, "-", "") + "-" + strings.ReplaceAll(reading.envelope.SourceID, "-", "")
 	form := url.Values{
 		"event_name":                          {m.spec.EventName},
 		"identifier":                          {identifier},
-		"timestamp":                           {strconv.FormatInt(envelope.OccurredAt.Unix(), 10)},
-		"payload[" + m.spec.CustomerKey + "]": {customer},
-		"payload[" + m.spec.ValueKey + "]":    {plainDecimal(value)},
+		"timestamp":                           {strconv.FormatInt(reading.envelope.OccurredAt.Unix(), 10)},
+		"payload[" + m.spec.CustomerKey + "]": {reading.customer},
+		"payload[" + m.spec.ValueKey + "]":    {plainDecimal(reading.value)},
 	}
 	meter := *endpoint
 	meter.Path = strings.TrimRight(endpoint.Path, "/") + "/v1/billing/meter_events"

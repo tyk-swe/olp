@@ -6,7 +6,7 @@ set -euo pipefail
 python3 - <<'PYURL'
 import os, sys, urllib.parse
 url = urllib.parse.urlsplit(os.environ['OLP_RESTORE_DATABASE_URL'])
-if any(name == 'dbname' for name, _ in urllib.parse.parse_qsl(url.query, keep_blank_values=True)):
+if any(name.strip(' ') == 'dbname' for name, _ in urllib.parse.parse_qsl(url.query, keep_blank_values=True)):
     sys.exit('Set the restore destination database in the URL path, not a dbname query option.')
 PYURL
 repo_dir=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,7 +22,7 @@ jq -e --arg checksum "$checksum" '
   .migrations == (.migration_history | length)' "$manifest" >/dev/null
 while IFS=$'\t' read -r version checksum; do
   [[ $version =~ ^[0-9]{4}_[a-z0-9_]+\.sql$ && $checksum =~ ^[0-9a-f]{64}$ ]] || exit 1
-  file="$repo_dir/internal/database/migrations/$version"
+  file="$repo_dir/internal/platform/database/migrations/$version"
   [[ -f $file ]] || { echo 'Backup migration is not supported by this checkout.' >&2; exit 1; }
   actual_checksum=$(sha256sum < "$file")
   [[ ${actual_checksum%% *} == "$checksum" ]] || { echo 'Backup migration checksum differs from this checkout.' >&2; exit 1; }
@@ -67,14 +67,7 @@ jq -e --argjson actual "$actual" \
   '.installation == $actual.installation and .migrations == $actual.migrations and .generation == $actual.generation and .migration_history == $actual.migration_history' "$manifest" >/dev/null
 export OLP_DATABASE_URL="$staging_url"
 unset OLP_DATABASE_URL_FILE
-if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
-  source "$repo_dir/scripts/lib/image-container.sh"
-  olp_image_container_args
-  maintenance=(docker run --rm "${olp_image_args[@]}" --env OLP_DATABASE_URL --env OLP_VALKEY_URL
-    --env OLP_MASTER_KEY_FILE --env OLP_AUTH_HMAC_KEY_FILE --env OLP_BOOTSTRAP_TOKEN_FILE "$OLP_CONSOLE_E2E_IMAGE")
-else
-  maintenance=("${OLP_MAINTENANCE_BIN:-$repo_dir/.local/bin/olp}")
-fi
+maintenance=("${OLP_MAINTENANCE_BIN:-$repo_dir/.local/bin/olp}")
 "${maintenance[@]}" migrate >/dev/null
 "${maintenance[@]}" doctor >/dev/null
 pg_dump "$staging_url" --schema=olp --no-owner --no-privileges --file="$scratch/restore.sql"

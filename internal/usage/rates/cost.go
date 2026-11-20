@@ -239,18 +239,36 @@ func (s *rateSet) inputCharge(u usage.AttemptUsage) (*big.Int, bool) {
 		count(u.CacheWrite5MInputTokens), count(u.CacheWrite1HInputTokens)
 	audio, cachedAudio := count(u.AudioInputTokens), count(u.CachedAudioInputTokens)
 	image, cachedImage := count(u.ImageInputTokens), count(u.CachedImageInputTokens)
+	remainder := func(total int64, shares ...int64) (int64, bool) {
+		left := total
+		for _, share := range shares {
+			if share < 0 || share > left {
+				return 0, false
+			}
+			left -= share
+		}
+		return left, true
+	}
+	audioUncached, audioOK := remainder(audio, cachedAudio)
+	imageUncached, imageOK := remainder(image, cachedImage)
+	cachedText, cachedOK := remainder(cached, cachedAudio, cachedImage)
+	writeText, writeOK := remainder(write, write5m, write1h)
+	text, textOK := remainder(*u.InputTokens, cached, write, audioUncached, imageUncached)
+	if !audioOK || !imageOK || !cachedOK || !writeOK || !textOK {
+		return nil, false
+	}
 	var charge *big.Int
 	for _, share := range [...]struct {
 		tokens int64
 		chain  []rateField
 	}{
-		{*u.InputTokens - cached - write - (audio - cachedAudio) - (image - cachedImage), chainText},
-		{cached - cachedAudio - cachedImage, chainCached},
+		{text, chainText},
+		{cachedText, chainCached},
 		{cachedAudio, chainCachedAudio},
 		{cachedImage, chainCachedImage},
-		{audio - cachedAudio, chainAudio},
-		{image - cachedImage, chainImage},
-		{write - write5m - write1h, chainWrite},
+		{audioUncached, chainAudio},
+		{imageUncached, chainImage},
+		{writeText, chainWrite},
 		{write5m, chainWrite5m},
 		{write1h, chainWrite1h},
 	} {
@@ -289,12 +307,19 @@ func (s *rateSet) outputCharge(u usage.AttemptUsage) (*big.Int, bool) {
 		return *tokens
 	}
 	audio, image := count(u.AudioOutputTokens), count(u.ImageOutputTokens)
+	text := *u.OutputTokens
+	for _, share := range [...]int64{audio, image} {
+		if share < 0 || share > text {
+			return nil, false
+		}
+		text -= share
+	}
 	var charge *big.Int
 	for _, share := range [...]struct {
 		tokens int64
 		chain  []rateField
 	}{
-		{*u.OutputTokens - audio - image, chainOutput},
+		{text, chainOutput},
 		{audio, chainAudioOut},
 		{image, chainImageOut},
 	} {
@@ -421,7 +446,7 @@ func ceilPerMillion(tokens int64, rate *big.Int) *big.Int {
 
 func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscount, input, output int64, tiers []PriceTier) (Cost, bool) {
 	if len(tiers) == 0 {
-		return price.MaximumWindowCostBound(input, output, true, discount)
+		return price.maximumWindowCostBound(input, output, discount)
 	}
 	bound, ok := workflowModelCostThroughTiers(price, discount, input, output, tiers[1:])
 	if !ok {
@@ -430,7 +455,7 @@ func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscoun
 	if tiers[0].AboveInputTokens >= input {
 		return bound, true
 	}
-	prior, ok := price.MaximumWindowCostBound(tiers[0].AboveInputTokens, output, true, discount)
+	prior, ok := price.maximumWindowCostBound(tiers[0].AboveInputTokens, output, discount)
 	if !ok {
 		return Cost{}, false
 	}

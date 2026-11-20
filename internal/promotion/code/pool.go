@@ -9,8 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
@@ -24,12 +27,12 @@ type Pool struct {
 }
 
 func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, error) {
-	if access.ValidText("code", e.Project, 100) != nil {
-		return Pool{}, access.Invalid("code.pools.project", "Name the project.")
+	if httpkit.ValidText("code", e.Project, 100) != nil {
+		return Pool{}, httpkit.Invalid("code.pools.project", "Name the project.")
 	}
 	owner := promotion.Pointer(e.OwnerRef)
 	if (e.Kind == contract.ConfigurationCodePoolKindPersonal) != (owner != nil) {
-		return Pool{}, access.Invalid("code.pools.owner_ref", "Personal pools require an explicit owner reference.")
+		return Pool{}, httpkit.Invalid("code.pools.owner_ref", "Personal pools require an explicit owner reference.")
 	}
 	weights, err := poolAccounts(e, accounts)
 	if err != nil {
@@ -37,12 +40,12 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 	}
 	keys := e.ApiKeyRefs.GetOrEmpty()
 	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
-	placeholder := access.CodePoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
+	placeholder := codeadmin.PoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
 	}
-	if slices.ContainsFunc(keys, func(ref string) bool { return access.ValidText("code", ref, 200) != nil }) {
-		return Pool{}, access.Invalid("code.pools.api_key_refs", "Use nonempty destination key references.")
+	if slices.ContainsFunc(keys, func(ref string) bool { return httpkit.ValidText("code", ref, 200) != nil }) {
+		return Pool{}, httpkit.Invalid("code.pools.api_key_refs", "Use nonempty destination key references.")
 	}
 	return pool, nil
 }
@@ -59,13 +62,13 @@ func poolAccounts(e contract.ConfigurationCodePool, accounts []Account) (map[str
 		return !slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == id && strings.EqualFold(a.Project, e.Project) })
 	}
 	if len(weights) != len(e.Accounts) || slices.ContainsFunc(slices.Collect(maps.Keys(weights)), undeclared) {
-		return nil, access.Invalid("code.pools.accounts", "Every account must resolve within the pool project.")
+		return nil, httpkit.Invalid("code.pools.accounts", "Every account must resolve within the pool project.")
 	}
 	return weights, nil
 }
 
 func canonical(ref string) string {
-	id, err := access.ParseUUID(ref)
+	id, err := httpkit.ParseUUID(ref)
 	if err != nil {
 		return ""
 	}
@@ -93,12 +96,12 @@ func (p Pool) ownerRefs() []string {
 	return []string{*p.OwnerRef}
 }
 
-func readPools(ctx context.Context, q access.Queryer) ([]Pool, error) {
-	pools, err := access.ReadCodePools(ctx, q)
+func readPools(ctx context.Context, q database.Queryer) ([]Pool, error) {
+	pools, err := codeadmin.ReadPools(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(pools, func(p access.CodePool) Pool {
+	return promotion.Map(pools, func(p codeadmin.Pool) Pool {
 		keys := promotion.Map(p.APIKeyIDs, func(id string) string { return codeRef("key", id) })
 		return Pool{ID: p.ID, Project: p.Project, Name: p.Name, OwnerRef: optionalRef("user", p.OwnerUserID), Accounts: p.AccountWeights, APIKeyRefs: keys}
 	}), nil
@@ -120,29 +123,29 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
 }
 
-func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
+func resolvePool(ctx context.Context, q database.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[codeadmin.PoolInput], error) {
 	projectID, err := projectOf(directory, p.Project)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codeadmin.PoolInput]{}, err
 	}
 	ownerID, err := owner(ctx, q, p.OwnerRef, projectID, desired.bindings.users)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codeadmin.PoolInput]{}, err
 	}
 	keys, err := keysOf(ctx, q, p.APIKeyRefs, projectID, ownerID, desired.bindings.keys)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codeadmin.PoolInput]{}, err
 	}
 	derived, err := derivedID("pool", projectID, p.ID)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codeadmin.PoolInput]{}, err
 	}
 	unique := !slices.ContainsFunc(desired.Code.Pools, func(other Pool) bool {
 		return other.ID != p.ID && strings.EqualFold(other.Project, p.Project) && other.Name == p.Name && other.kind() == p.kind() && boundOr(other.OwnerRef, desired.bindings.users) == boundOr(p.OwnerRef, desired.bindings.users)
 	})
-	candidates, err := access.CodePoolCandidates(ctx, q, p.ID, derived, access.CodePoolMatch{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID})
+	candidates, err := codeadmin.PoolCandidates(ctx, q, p.ID, derived, codeadmin.PoolMatch{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID})
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codeadmin.PoolInput]{}, err
 	}
 	to, err := mapped(p.ID, projectID, derived, unique, candidates)
 	weights := maps.Collect(func(yield func(string, int64) bool) {
@@ -152,16 +155,16 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 			}
 		}
 	})
-	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
-	return resolved[access.CodePoolInput]{ref: p.ID, to: to, input: input}, err
+	input := codeadmin.PoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
+	return resolved[codeadmin.PoolInput]{ref: p.ID, to: to, input: input}, err
 }
 
-func poolChange(ctx context.Context, q access.Queryer, p resolved[access.CodePoolInput]) (change, error) {
-	action, err := compared(ctx, q, p, access.ReadCodePoolInput)
+func poolChange(ctx context.Context, q database.Queryer, p resolved[codeadmin.PoolInput]) (change, error) {
+	action, err := compared(ctx, q, p, codeadmin.ReadPoolInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
-		write: func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
-			_, err := access.SaveCodePool(ctx, tx, principal, p.to.id, access.NewID(), p.input, p.to.existing)
+		write: func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
+			_, err := codeadmin.SavePool(ctx, tx, principal, p.to.id, httpkit.NewID(), p.input, p.to.existing)
 			return err
 		},
 	}, err

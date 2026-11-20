@@ -75,7 +75,7 @@ function serveEditor(dialects: OperationDialect[] = []) {
   const load = vi.fn(() => json(draft));
   const replace = vi.fn(async (request: Request) => {
     route(request, 'PUT', `/api/v1/route-drafts/${draft.id}`);
-    expect(request.headers.get('If-Match')).toBe(draft.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${draft.etag}"`);
     expect(await request.json()).toMatchObject({
       slug: 'updated',
       operations: ['generation'],
@@ -85,7 +85,7 @@ function serveEditor(dialects: OperationDialect[] = []) {
   });
   const activate = vi.fn((request: Request) => {
     route(request, 'POST', `/api/v1/route-drafts/${draft.id}/activate`);
-    expect(request.headers.get('If-Match')).toBe(draft.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${draft.etag}"`);
     expect(request.headers.get('Idempotency-Key')).toBeTruthy();
     load.mockReturnValue(json({ ...draft, etag: activation.draft_etag }));
     return json(activation);
@@ -181,6 +181,39 @@ describe('route draft editor', () => {
     expect(state.hasUnsavedChanges).toBe(false);
     expect(state.sync.snapshotEtag).toBe('version-2');
     expect(state.notice).toContain('Draft saved');
+  });
+
+  it('saves new content policy rules after removing a middle rule', async () => {
+    const { replace } = serveEditor();
+    const saved = vi.fn<(body: unknown) => void>();
+    replace.mockImplementationOnce(async (request) => {
+      saved(await request.json());
+      return json({ ...draft, etag: 'version-2' });
+    });
+    const state = await editor();
+    const addRule = (pattern: string) => {
+      state.addPolicyRule();
+      state.policyRules = state.policyRules.map((rule) =>
+        rule.pattern ? rule : { ...rule, pattern }
+      );
+    };
+    addRule('first');
+    addRule('removed');
+    addRule('third');
+    state.removePolicyRule(1);
+    addRule('replacement');
+
+    await state.save(draft);
+
+    expect(saved).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        content_policy: {
+          rules: ['first', 'third', 'replacement'].map((pattern) =>
+            expect.objectContaining({ pattern })
+          )
+        }
+      })
+    );
   });
 
   it('preserves edits made while a save is in flight', async () => {

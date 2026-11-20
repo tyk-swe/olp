@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -79,7 +79,7 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 			t.Fatal(err)
 		}
 		err := p.store(t, p.name, `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:10/v1"}`)
-		if problem := (*access.Problem)(nil); !errors.As(err, &problem) || problem.Code != "credential_destination_changed" {
+		if problem := (*httpkit.Problem)(nil); !errors.As(err, &problem) || problem.Code != "credential_destination_changed" {
 			t.Fatalf("moving a stored credential to another endpoint = %v, want credential_destination_changed", err)
 		}
 	})

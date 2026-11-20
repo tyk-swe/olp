@@ -130,7 +130,7 @@ Completions, Responses, Anthropic and Gemini, including bounds, target
 certification, approval, authority changes, `typesafe` pruning and compression
 recovery. The caller-filtered discovery fixture is
 `TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
-`internal/gateway/tool_loop_test.go`.
+`internal/gateway/kernel/tool_loop_test.go`.
 A former process test checked same-key simulation authorization and request bounds for draft and
 published routes, a run and its durable settlement, and rollback with local
 services.
@@ -241,7 +241,7 @@ counting is unary, video creation is asynchronous, and realtime uses WebSockets.
 `refused` means no mode of that operation can be certified for the provider.
 
 Endpoint registration lives in
-[`internal/gateway/server.go`](../../internal/gateway/server.go); certification
+[`internal/gateway/kernel/server.go`](../../internal/gateway/kernel/server.go); certification
 policy lives in [`internal/providers/probe/operations.go`](../../internal/providers/probe/operations.go).
 The conformance corpus and SDK suites exercise these behaviors.
 
@@ -336,11 +336,12 @@ uses its largest prompt. When a connector's generation target is a native text
 completion profile, [active health probes](provider-routing.md#credential-pools-and-limits)
 send a short text completion instead of a chat request.
 
-`decision` is a separate operation with native `openai-decisions` and `systemone`
-profiles. The text-only contracts accept predicate/noul, choice and score
-questions, preserving names, order, typed choice values, native probabilities,
-score scales and OpenAI refusals. Images, box questions, streaming and unmodeled
-fields are excluded. The OpenAI shape is pinned to `openai-go/v3` 3.78.0;
+`decision` is a separate operation. On the OpenAI surface, the native
+`openai-decisions` and `systemone` profiles accept text input with
+predicate/noul, choice and score questions, preserving names, order, typed
+choice values, native probabilities, score scales and OpenAI refusals.
+Images, box questions, streaming and unmodeled fields are excluded.
+The OpenAI shape is pinned to `openai-go/v3` 3.78.0.
 System One is pinned to TypeSafe OpenAPI 0.2.0. Exact tuple certification is
 required before publishing either profile.
 
@@ -625,8 +626,8 @@ the profile does not declare. See
 
 ### Gemini surface
 
-Gemini endpoints are served under both `/gemini/v1` and `/gemini/v1beta`.
-Replace `{version}` below with `v1` or `v1beta`.
+Replace `{version}` on the Gemini model endpoints with `v1` or `v1beta`.
+Decisions uses `v1beta`.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -637,6 +638,38 @@ Replace `{version}` below with `v1` or `v1beta`.
 | `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | refused |
 | `POST /gemini/{version}/models/{model}:embedContent` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
 | `POST /gemini/{version}/models/{model}:batchEmbedContents` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
+| `POST /gemini/v1beta/decisions` | decision | refused | refused | qualified | refused | refused | refused | refused |
+
+To publish a Decisions route, use the Google Gemini provider with the
+`gemini-decisions` profile and a Gemini API key. Certify `gemini-decision-1`
+for the `decision` operation on the `gemini` surface in `unary` mode. Use the
+published route slug as `model` in the request and authenticate with your
+OLP inference key.
+
+```sh
+curl "$OLP_URL/gemini/v1beta/decisions" \
+  -H "X-Goog-Api-Key: $OLP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "support-decisions",
+    "input": "The customer cannot sign in.",
+    "questions": {
+      "account_access": {
+        "type": "noul",
+        "instructions": "Is the customer reporting a sign-in problem?"
+      }
+    }
+  }'
+```
+
+The profile accepts Gemini's keyed `noul`, `choice`, and `score` questions
+with text, image, audio, video, or PDF input. Inline media is subject to the
+gateway's media limits. Enable `provider_fetched_documents` on the route for
+HTTPS inputs, including Gemini Files API URIs. The native response preserves
+answer keys, probabilities, score legends, safety feedback, and provider usage.
+Gemini Decisions uses its own wire format and follows the same budget
+admission and usage accounting as other `decision` operations.
+[Gemini API reference](https://aistudio.google.com/api-reference/decisions/create-decision).
 
 The two Gemini embedding endpoints are served only on
 [strict routes](provider-routing.md#route-fidelity) whose targets hold the
@@ -685,9 +718,7 @@ The exceptions are noted as drops.
 
 Unknown vendor fields are preserved as source extensions and replayed for native
 providers. Cross-protocol requests carrying unsupported extensions are refused;
-unsupported response and stream extensions are dropped. The Anthropic and Gemini
-request fixtures in `tests/fixtures/protocols/` cover preservation of fields
-such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
+unsupported response and stream extensions are dropped.
 
 A system message between turns, which Claude Code sends, is kept in place where
 the target can place it and refused where it cannot: Anthropic, Gemini, and
@@ -695,9 +726,8 @@ Bedrock Converse have one system field ahead of the conversation, so a request
 translated to them with a late system message fails with `unsupported_parameter`
 instead of moving the message to the front.
 
-`tests/fixtures/protocols/selected-operation-families.json` covers every
-operation family and surface. Keep these tables aligned with the
-[protocol suites](../../internal/protocols/translation_test.go) when semantics
+Keep these tables aligned with the
+[protocol suites](../../internal/domain/protocols/translation_test.go) when semantics
 change.
 
 ### Anthropic providers
@@ -708,7 +738,7 @@ it is set to true. Translation treats `text` as no structured output. `json_obje
 unknown formats are still refused, and whether a given model accepts the
 translated field is provider/model dependent: unsupported combinations fail
 clearly rather than silently degrading. The
-[Anthropic encoder](../../internal/protocols/canonical_anthropic.go) enforces
+[Anthropic encoder](../../internal/domain/protocols/canonical_anthropic.go) enforces
 these rules. Cached-input usage, provider request IDs, media parts, and
 oversized-response bounds remain part of the shared contract.
 
@@ -718,7 +748,7 @@ candidate, a tool-result message without its tool-call ID, an image with an
 explicit detail level, or an input audio, input file, or refusal content part. A
 missing maximum output token count is also refused, because Anthropic requires
 one. These checks live in the
-[Anthropic encoder](../../internal/protocols/canonical_anthropic.go). The
+[Anthropic encoder](../../internal/domain/protocols/canonical_anthropic.go). The
 [connector capability rules](../../internal/connectors/capability.go) keep token
 counting unary and bind the selected transport mode.
 
@@ -730,7 +760,7 @@ appears after the conversation has started, a tool result whose content is not
 text and, as with Anthropic, input audio, input file and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
 rather than guessed. These checks live in the
-[Gemini encoder](../../internal/protocols/canonical_gemini.go); the
+[Gemini encoder](../../internal/domain/protocols/canonical_gemini.go); the
 [connector capability rules](../../internal/connectors/capability.go) enforce
 unary token counting and refuse asynchronous generation. Preserved counting
 requests are validated after model rewriting as well.
@@ -789,11 +819,11 @@ provider error fields, malformed base64, or an image-count mismatch fail the
 attempt. Other Bedrock models, and every edit/variation/audio/video operation,
 remain refused.
 
-The [image-input tests](../../internal/protocols/bedrock_test.go) and
-[stream bounds tests](../../internal/protocols/stream_translation_test.go) cover these
+The [image-input tests](../../internal/domain/protocols/bedrock_test.go) and
+[stream bounds tests](../../internal/domain/protocols/stream_translation_test.go) cover these
 rules.
 
-The [Go Converse encoder](../../internal/protocols/bedrock.go) refuses, with an
+The [Go Converse encoder](../../internal/domain/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets a
 deterministic seed, sets parallel tool-call selection, asks for a structured
 response format other than `text` or a well-formed `json_schema`, puts a name or
@@ -851,6 +881,16 @@ Entra authentication, token caching, and identity egress.
 Native Anthropic and Gemini resource APIs and cloud batch jobs require the key's
 `allow_provider_state` permission. Existing OpenAI-shaped file/batch permissions
 remain unchanged.
+
+Anthropic file lists, Gemini file and batch lists, and cloud batch lists can
+return an empty page with a continuation after checking a limited number of
+resource bindings. Anthropic batch lists scan past empty pages until they find
+a visible batch, reach the end of the list, or return a timeout error.
+
+Use `nextPageToken` as `pageToken` for Gemini. When `has_more` is true, pass
+`last_id` as `after` for cloud batch jobs or as `after_id` for Anthropic. For an
+Anthropic request with `before_id`, pass `first_id` as `before_id` to continue in
+the same direction.
 
 Managed Anthropic, Vertex and Bedrock OpenAI-shaped batches are refused with
 `422 target_capability`; only the listed managed adapters translate through the
@@ -933,7 +973,7 @@ establish live-provider or production-performance qualification.
 | Tier | What it adds | Evidence required |
 | --- | --- | --- |
 | Reviewed preset | A catalog entry over an existing dialect and hosting composition | Vendor contract fixtures in the unit tier, pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
-| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures in the unit tier, pricing coverage, and a recorded manual run against a stub or real provider |
+| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/domain/protocols` or `internal/domain/operations` | Conformance fixtures in the unit tier, pricing coverage, and a recorded manual run against a stub or real provider |
 | Plugin | Authentication and hosting around a built-in dialect, supplied by an operator ([plugins](plugins.md)) | The plugin's own manifest review and origin approval |
 
 No tier certifies a model: certification stays a live, exact-tuple probe run by

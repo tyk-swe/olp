@@ -8,8 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 // OperationsSummary is the bounded metadata-only rollup the metrics endpoint
@@ -26,7 +25,7 @@ type OperationsSummary struct {
 const operationsWindowMinutes = 5
 
 // ReadOperationsSummary rolls up the trailing request window.
-func ReadOperationsSummary(ctx context.Context, q access.Queryer) (OperationsSummary, error) {
+func ReadOperationsSummary(ctx context.Context, q database.Queryer) (OperationsSummary, error) {
 	minutes := operationsWindowMinutes
 	var summary OperationsSummary
 	err := q.QueryRow(ctx, `WITH recent_requests AS MATERIALIZED (
@@ -108,7 +107,7 @@ type ProviderHealthQuery struct {
 }
 
 // ReadProviderHealth pages providers in descending id order for the management API.
-func ReadProviderHealth(ctx context.Context, q access.Queryer, query ProviderHealthQuery) (ProviderHealthPage, error) {
+func ReadProviderHealth(ctx context.Context, q database.Queryer, query ProviderHealthQuery) (ProviderHealthPage, error) {
 	rows, err := q.Query(ctx, providerHealthSelect+`
 		WHERE ($2::uuid IS NULL OR p.id < $2)
 		  AND ($3 OR p.project_id = ANY($4::uuid[]))
@@ -165,7 +164,7 @@ func scanProviderHealth(rows pgx.Rows) (ProviderHealthRecord, error) {
 // ReadProviderHealthMetrics rolls up per-provider attempt health across the
 // trailing fifteen minutes. The bool reports completeness: false means the
 // snapshot was truncated at the page bound.
-func ReadProviderHealthMetrics(ctx context.Context, q access.Queryer) ([]ProviderHealthRecord, bool, error) {
+func ReadProviderHealthMetrics(ctx context.Context, q database.Queryer) ([]ProviderHealthRecord, bool, error) {
 	var records []ProviderHealthRecord
 	query := ProviderHealthQuery{WindowMinutes: 15, Limit: 200, AllProjects: true}
 	for {

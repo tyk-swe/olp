@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
@@ -52,17 +54,17 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 	field := "discounts." + strconv.Itoa(i)
 	switch {
 	case discount.Provider == nil && discount.ProviderKind == string(contract.ProviderKindPlugin):
-		return access.Invalid(field+".provider", "Scope a plugin provider's discount to that provider.")
+		return httpkit.Invalid(field+".provider", "Scope a plugin provider's discount to that provider.")
 	case duplicate:
-		return access.Invalid(field, "The document scopes this discount twice.")
+		return httpkit.Invalid(field, "The document scopes this discount twice.")
 	case !nonNegative(discount.Multiplier):
-		return access.Invalid(field+".multiplier", "Use a non-negative decimal.")
+		return httpkit.Invalid(field+".multiplier", "Use a non-negative decimal.")
 	default:
 		return nil
 	}
 }
 
-func readDiscounts(ctx context.Context, q access.Queryer, providers promotion.Directory) ([]Discount, error) {
+func readDiscounts(ctx context.Context, q database.Queryer, providers promotion.Directory) ([]Discount, error) {
 	stored, err := pricebook.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
@@ -98,7 +100,7 @@ func discountAction(discount Discount, inForce map[scope]string) contract.Config
 	return contract.ConfigurationPlanItemActionCreate
 }
 
-func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
+func planDiscounts(ctx context.Context, q database.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
 	current, err := readDiscounts(ctx, q, providers)
 	if err != nil {
 		return nil, err
@@ -109,7 +111,7 @@ func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, pr
 	}), nil
 }
 
-func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
+func applyDiscounts(ctx context.Context, tx pgx.Tx, principal authz.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !resolves(providers, discount.Provider) }); i >= 0 {
 		return undeclaredDiscount(i)
 	}
@@ -122,7 +124,7 @@ func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, 
 		if discountAction(discount, inForce) == contract.ConfigurationPlanItemActionNoop {
 			continue
 		}
-		if err := principal.Authorize(access.Settings); err != nil {
+		if err := principal.Authorize(authz.Settings); err != nil {
 			return err
 		}
 		normalized, normalizeErr := pricebook.NormalizeDiscount(ctx, tx, pricebook.DiscountInput{

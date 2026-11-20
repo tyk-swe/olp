@@ -1,14 +1,11 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import type {
-    CodeClientConfiguration,
-    CodeClientSelection,
-    CodeRoute
-  } from '#lib/features/code-mode/api.js';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import {
+    listProjectMemberships,
+    projectKeys
+  } from '#lib/features/access/index.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import {
     confirmDiscardChanges,
     guardUnsavedChanges
@@ -17,7 +14,6 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import { getCodeClientConfiguration } from './api.js';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
   import {
@@ -26,16 +22,6 @@
     type CodeSection
   } from './sections';
 
-  let {
-    loadClientConfiguration = (route, selection, signal) =>
-      getCodeClientConfiguration(route, gatewayURL, selection, signal)
-  }: {
-    loadClientConfiguration?: (
-      route: CodeRoute,
-      selection: CodeClientSelection,
-      signal?: AbortSignal
-    ) => Promise<CodeClientConfiguration>;
-  } = $props();
   let gatewayURL = $state(globalThis.location?.origin ?? '');
   const access = useRole();
   const principal = $derived(
@@ -144,7 +130,6 @@
             kind={tab}
             {allowed}
             {gatewayURL}
-            {loadClientConfiguration}
             onDraftChange={(dirty) => (draftDirty = dirty)}
           />
         {:else}<CodeDiagnostics {projectId} kind={tab} {allowed} />{/if}

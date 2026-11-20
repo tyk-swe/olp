@@ -4,8 +4,6 @@ SHELL := bash
 VERSION = $(shell node -p "require('./package.json').version")
 LDFLAGS = -X main.Version=$(VERSION)
 
-GO_BUILD_OUTPUT ?= .local/bin/olp
-GO_BUILD_TAGS ?=
 AIR_VERSION := v1.67.4
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 GOFMT_PATHS = \
@@ -59,6 +57,7 @@ check-console: ## Prepare console types and check formatting, types, and lint
 	pnpm --dir console api:generate
 	pnpm --dir console format:check
 	pnpm --dir console check
+	./scripts/check-exemptions.sh
 
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh
@@ -114,11 +113,11 @@ dev-reset: ## Delete development containers and data after stopping make dev
 	docker compose -f deploy/compose.dev.yaml down --volumes
 
 build-go: ## Build the native Go binary from generated contracts
-	mkdir -p -- "$$(dirname -- "$(GO_BUILD_OUTPUT)")"
-	CGO_ENABLED=1 go build -mod=readonly -trimpath $(if $(strip $(GO_BUILD_TAGS)),-tags="$(GO_BUILD_TAGS)") -ldflags='$(LDFLAGS)' -o "$(GO_BUILD_OUTPUT)" ./cmd/olp
+	mkdir -p .local/bin
+	CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags='$(LDFLAGS)' -o .local/bin/olp ./cmd/olp
 
 catalog: ## Rewrite the reference catalog and plugin index in canonical form
-	go run ./internal/signing/cmd/olpsign fmt $(SIGNED_DOCUMENTS)
+	go run ./cmd/olpsign fmt $(SIGNED_DOCUMENTS)
 
 catalog-sign: catalog ## Sign the reference catalog and plugin index with the development key
-	go run ./internal/signing/cmd/olpsign sign -key-id dev-2026a -seed-file internal/signing/devkey/dev-2026a.seed $(SIGNED_DOCUMENTS)
+	go run ./cmd/olpsign sign -key-id dev-2026a -seed-file internal/signing/devkey/dev-2026a.seed $(SIGNED_DOCUMENTS)

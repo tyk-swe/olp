@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/management"
 )
 
@@ -27,13 +29,13 @@ type Requirement struct {
 // Installation is set.
 type Alternative struct {
 	Kind         string // "user" (session) or "machine" (management token)
-	Operations   []Operation
+	Operations   []authz.Operation
 	Installation bool
 }
 
 // Admits reports whether p satisfies the requirement.
-func (req Requirement) Admits(p Principal) error {
-	refusal := Forbidden()
+func (req Requirement) Admits(p authz.Principal) error {
+	refusal := httpkit.Forbidden()
 	for _, alternative := range req.Alternatives {
 		if alternative.Kind != p.Kind {
 			continue
@@ -45,7 +47,7 @@ func (req Requirement) Admits(p Principal) error {
 			}
 		}
 		if err == nil && alternative.Installation && !p.AllProjects {
-			err = Forbidden()
+			err = httpkit.Forbidden()
 		}
 		if err == nil {
 			return nil
@@ -150,14 +152,14 @@ func parseRequirement(pattern string, security []map[string][]string) (Requireme
 				parsed.Installation = true
 				continue
 			}
-			op, ok := ParseOperation(scope)
+			op, ok := authz.ParseOperation(scope)
 			if !ok {
 				return req, fmt.Errorf("%s: unknown operation %q", pattern, scope)
 			}
-			if parsed.Kind == "machine" && !policy[op].delegable {
+			if parsed.Kind == "machine" && !op.Delegable() {
 				return req, fmt.Errorf("%s: %s cannot be a management token scope", pattern, scope)
 			}
-			needsInstallation = needsInstallation || policy[op].installation
+			needsInstallation = needsInstallation || op.InstallationWide()
 			parsed.Operations = append(parsed.Operations, op)
 		}
 		if len(parsed.Operations) == 0 {

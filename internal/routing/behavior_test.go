@@ -12,10 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/pluginindex"
-	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -63,7 +63,7 @@ func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
 			routeErr := behavior.Validate("route", nil)
 			indexErr := index.Validate()
-			if (indexErr == nil) != tc.valid || plugins.ValidDigest(tc.digest) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
+			if (indexErr == nil) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
 				t.Errorf("digest %q: valid %t, index %v, guardrail %v, route %v", tc.digest, tc.valid, indexErr, guardrailErr, routeErr)
 			}
 		})
@@ -239,9 +239,11 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 }
 
 func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
-	request, err := wire.FromFields(wire.Gemini, "route", false, map[string]json.RawMessage{
-		"contents": json.RawMessage(`[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]`),
-	})
+	document, err := oif.ParseJSON([]byte(`{"contents":[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := wire.NewRequest(wire.Gemini, "route", false, document)
 	if err != nil {
 		t.Fatal(err)
 	}

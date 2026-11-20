@@ -1,11 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  let {
-    label,
-    text = '',
-    children
-  }: { label: string; text?: string; children: Snippet } = $props();
+  let { label, children }: { label: string; children: Snippet } = $props();
 
   const id = $props.id();
   let trigger: HTMLButtonElement;
@@ -37,14 +33,11 @@
 <button
   bind:this={trigger}
   class="button button-secondary trigger"
-  class:icon-only={!text}
   type="button"
   popovertarget="{id}-menu"
-  aria-label={text ? undefined : label}
+  aria-label={label}
 >
-  {#if text}{text}{/if}<span class="dots" aria-hidden="true"
-    >{text ? '▾' : '⋯'}</span
-  >
+  <span class="dots" aria-hidden="true">⋯</span>
 </button>
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Clicks bubble from the menu's own buttons and links, which handle keyboard activation.) -->
 <div
@@ -60,14 +53,14 @@
 </div>
 
 <style>
-  .trigger.icon-only {
+  .trigger {
     min-width: 2.75rem;
     padding-inline: 0.5rem;
   }
 
   .dots {
     color: var(--foreground-muted);
-    font-size: 1rem;
+    font-size: var(--text-body);
     line-height: 1;
   }
 

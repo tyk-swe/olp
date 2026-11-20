@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -204,7 +204,7 @@ func (s *RequestSummary) normalize() {
 // ListRequests pages the request explorer newest first. The page is keyed by
 // (started_at, id) rather than an offset, so rows arriving during paging cannot
 // shift a reader onto a page it has already seen.
-func ListRequests(ctx context.Context, q access.Queryer, f RequestFilters, cursor *usage.Cursor, limit int) ([]RequestSummary, *string, error) {
+func ListRequests(ctx context.Context, q database.Queryer, f RequestFilters, cursor *usage.Cursor, limit int) ([]RequestSummary, *string, error) {
 	if limit < 1 {
 		limit = 1
 	}
@@ -294,7 +294,7 @@ func (f RequestFilters) push(q *filterQuery) {
 	}
 }
 
-func ReadRequestExport(ctx context.Context, q access.Queryer, filters RequestFilters) ([]RequestSummary, error) {
+func ReadRequestExport(ctx context.Context, q database.Queryer, filters RequestFilters) ([]RequestSummary, error) {
 	var query filterQuery
 	query.push(requestColumns + " WHERE true")
 	filters.push(&query)
@@ -340,7 +340,7 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
 // partitioned by start time, so the newest row for an identifier is the row.
 // A missing request surfaces as pgx.ErrNoRows, which the HTTP layer renders as
 // a 404.
-func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail, error) {
+func GetRequest(ctx context.Context, q database.Queryer, id string) (RequestDetail, error) {
 	var detail RequestDetail
 	err := q.QueryRow(ctx, requestColumns+" WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1", id).
 		Scan(detail.RequestSummary.scanTargets()...)
@@ -415,7 +415,7 @@ func (f RequestFilters) validate() error {
 	return validateAttributionFilter(f.AttributionKey, f.AttributionValue)
 }
 
-func readKeyProject(ctx context.Context, q access.Queryer, apiKeyID string) (*string, error) {
+func readKeyProject(ctx context.Context, q database.Queryer, apiKeyID string) (*string, error) {
 	var project *string
 	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1", apiKeyID).Scan(&project)
 	return project, err

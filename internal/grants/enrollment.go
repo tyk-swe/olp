@@ -11,9 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -74,7 +76,7 @@ func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[st
 	if len(authorization.Session) > maxSession {
 		return e, refused("its session state exceeds 16 KiB")
 	}
-	e.ID, e.ExpiresAt, e.session = access.NewID(), time.Now().Add(SessionTTL), authorization.Session
+	e.ID, e.ExpiresAt, e.session = httpkit.NewID(), time.Now().Add(SessionTTL), authorization.Session
 	for _, profile := range manifest.Profiles {
 		if profile.ID == e.ProfileID && profile.Grant != nil {
 			e.Input = profile.Grant.Input
@@ -190,18 +192,18 @@ DELETE FROM olp.secrets WHERE (purpose=$2 AND id IN (SELECT id FROM olp.grant_en
 // cancelled. Another principal's enrollment is not found, like one purged
 // after it expired, and so is a device authorization still pending, which is
 // polled rather than continued.
-func unavailable(ctx context.Context, q access.Queryer, providerID, id, principal string) error {
+func unavailable(ctx context.Context, q database.Queryer, providerID, id, principal string) error {
 	var continued, polled bool
 	err := q.QueryRow(ctx, "SELECT continued_at IS NOT NULL, poll_interval IS NOT NULL FROM olp.grant_enrollments WHERE id=$1 AND provider_id=$2 AND started_by=$3", id, providerID, principal).Scan(&continued, &polled)
 	switch {
 	case err != nil:
 		return err
 	case continued:
-		return access.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
+		return httpkit.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
 	case polled:
 		return pgx.ErrNoRows
 	}
-	return access.Fail(410, "grant_enrollment_expired", "This grant enrollment expired. Start another, and paste back what the upstream returns within 10 minutes.")
+	return httpkit.Fail(410, "grant_enrollment_expired", "This grant enrollment expired. Start another, and paste back what the upstream returns within 10 minutes.")
 }
 
 // Complete records the credential version an enrollment's grant created, in
@@ -278,17 +280,17 @@ func step(ctx context.Context, host *plugins.Host, e Enrollment, options map[str
 func failure(err error) error {
 	if reported, ok := errors.AsType[*abi.Error](err); ok {
 		if reported.Code == abi.CodeStateMismatch {
-			return access.Fail(422, "grant_state_mismatch", "What was pasted back answers another sign-in than this grant enrollment's: "+reported.Message)
+			return httpkit.Fail(422, "grant_state_mismatch", "What was pasted back answers another sign-in than this grant enrollment's: "+reported.Message)
 		}
-		return access.Fail(422, "grant_enrollment_failed", "The plugin could not enroll a grant ("+reported.Code+"): "+reported.Message)
+		return httpkit.Fail(422, "grant_enrollment_failed", "The plugin could not enroll a grant ("+reported.Code+"): "+reported.Message)
 	}
 	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
-		return access.Fail(422, refusal.Code, refusal.Message)
+		return httpkit.Fail(422, refusal.Code, refusal.Message)
 	}
 	return err
 }
 
 // refused is the problem for a plugin step whose result OLP can't use.
 func refused(reason string) error {
-	return access.Fail(422, "grant_enrollment_failed", "The plugin's grant enrollment returned something OLP can't use: "+reason+".")
+	return httpkit.Fail(422, "grant_enrollment_failed", "The plugin's grant enrollment returned something OLP can't use: "+reason+".")
 }

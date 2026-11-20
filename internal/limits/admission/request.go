@@ -8,7 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-const DefaultCostGrace = 5 * time.Minute
+const costGrace = 5 * time.Minute
 
 type Request struct {
 	Lookup   string
@@ -45,7 +45,6 @@ type CostBudget struct {
 type Estimate struct {
 	Amount    string
 	RequestID string
-	Grace     time.Duration
 }
 
 func Budget(owner limits.Owner, daily, weekly, monthly *string, increases string) *CostBudget {
@@ -66,13 +65,6 @@ func (r RateLimits) reports() bool {
 }
 
 func (r Request) HasHardLimits() bool { return r.Rate.Limited() || r.Cost != nil }
-
-func (e Estimate) grace() time.Duration {
-	if e.Grace == 0 {
-		return DefaultCostGrace
-	}
-	return e.Grace
-}
 
 func (s Share) divides() bool { return s.Class != "" }
 
@@ -156,9 +148,6 @@ func (b CostBudget) Validate() error {
 }
 
 func (e Estimate) validate() error {
-	if e.Grace < 0 {
-		return invalid("cost grace cannot be negative")
-	}
 	if !limits.ValidCostLimit(e.Amount) {
 		return invalid("cost estimate must be a positive decimal with at most 12 integer and 12 fractional digits")
 	}

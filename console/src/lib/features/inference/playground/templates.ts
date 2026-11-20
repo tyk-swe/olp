@@ -292,6 +292,21 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'gemini-decisions',
+    label: 'Decisions · Gemini',
+    operation: 'decision',
+    surface: 'gemini',
+    nativeDialect: 'gemini-decisions',
+    inspectDialect: 'gemini-decisions',
+    request: {
+      model: '',
+      input: 'The customer asks for a refund.',
+      questions: {
+        refund: { type: 'noul', instructions: 'Is a refund requested?' }
+      }
+    }
+  },
+  {
     key: 'mistral-ocr',
     label: 'OCR · Mistral',
     operation: 'ocr',

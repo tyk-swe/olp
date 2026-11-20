@@ -1,19 +1,24 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import BrandingHead from '#lib/shell/branding/BrandingHead.svelte';
+  import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
+  import { productName, useBranding } from '#lib/shell/branding/branding.js';
   import RouteDiagram from '#lib/shell/RouteDiagram.svelte';
 
   let { children }: { children: Snippet } = $props();
+  const branding = useBranding();
+  const name = $derived(branding.data?.name ?? productName);
   const headline = 'One control point for every model route.'.split(' ');
 </script>
 
+<BrandingHead />
 <a class="skip-link" href="#setup-content">Skip to setup</a>
 <main class="setup-shell" id="setup-content" tabindex="-1">
   <div class="setup-header">
-    <a class="brand" href={resolve('')} aria-label="OpenLLMProxy home">
-      <BrandMark size={22} />
-      <span class="wordmark">OpenLLMProxy</span>
+    <a class="brand" href={resolve('')} aria-label="{name} home">
+      <InstallationMark size={22} />
+      <span class="wordmark">{name}</span>
     </a>
   </div>
 
@@ -129,7 +134,7 @@
     max-width: 31rem;
     margin: 1.25rem 0 0;
     color: var(--foreground-muted);
-    font-size: 1rem;
+    font-size: var(--text-body);
     line-height: 1.5;
     animation-delay: 520ms;
   }
@@ -153,7 +158,7 @@
     background:
       radial-gradient(
         closest-side,
-        color-mix(in srgb, var(--color-blue-500) 22%, transparent),
+        color-mix(in srgb, var(--color-accent-500) 22%, transparent),
         transparent
       ),
       radial-gradient(
@@ -173,7 +178,7 @@
     padding: 0;
     color: var(--foreground-subtle);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
     letter-spacing: -0.24px;
     list-style: none;
     text-transform: uppercase;
@@ -218,7 +223,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      var(--color-blue-500) 50%,
+      var(--color-accent-500) 50%,
       transparent
     );
   }

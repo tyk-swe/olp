@@ -14,7 +14,6 @@ export const providerKeys = {
   /** Every provider summary: the full list and each cursor page. */
   summaries,
   all: () => [...summaries, 'all'] as const,
-  page,
   filteredPage: (cursor: string | undefined, applied: string) =>
     [...page(cursor), applied] as const,
   detail: (id: string) => [...root, 'detail', id] as const,
@@ -31,7 +30,6 @@ export const providerKeys = {
     [...revision(id, revisionId), 'models', cursor ?? 'first'] as const,
   /** Model views that change whenever any provider's models change. */
   modelCatalog,
-  modelInventory,
   filteredModelInventory: (
     cursor: string | undefined,
     search: string,

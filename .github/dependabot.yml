@@ -62,7 +62,6 @@ updates:
       default-days: 7
     ignore:
       - dependency-name: ghcr.io/tyk-swe/olp
-      - dependency-name: olp-qualification-minio
       - dependency-name: openllmproxy
     groups:
       minor-and-patch:

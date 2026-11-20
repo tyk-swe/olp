@@ -1,12 +1,15 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import {
+    listProjectMemberships,
+    projectKeys
+  } from '#lib/features/access/index.js';
   import {
     createInvestigation,
     type InvestigationEvidence,
@@ -84,7 +87,7 @@
   }
 </script>
 
-<svelte:head><title>New investigation · OpenLLMProxy</title></svelte:head>
+<PageTitle title="New investigation" />
 
 <a class="text-button" href={resolve('investigations')}>All investigations</a>
 

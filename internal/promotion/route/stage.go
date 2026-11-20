@@ -6,15 +6,17 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 )
 
 func Planner(desired Desired, names promotion.Names) promotion.Planner {
-	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+	return promotion.Planner{Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 		state, err := Read(ctx, q)
 		if err != nil {
 			return nil, err
@@ -77,7 +79,7 @@ func lifecycle(r Route, state State) []promotion.Item {
 }
 
 func Applier(desired Desired) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		state, err := Read(ctx, tx)
 		if err != nil {
 			return err
@@ -91,7 +93,7 @@ func Applier(desired Desired) promotion.Applier {
 	}
 }
 
-func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state State, installed promotion.Directory) error {
+func stage(ctx context.Context, tx pgx.Tx, p authz.Principal, r Route, state State, installed promotion.Directory) error {
 	unchanged, err := state.unchanged(r)
 	if err != nil || unchanged {
 		return err
@@ -120,16 +122,16 @@ func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state St
 		return err
 	}
 	slot, id := draftSlot(state.drafts, r, p, projectID)
-	if err := routes.StageDraft(ctx, tx, slot, access.NewID(), in.Content(targets, &r.ExposeUpstreamModels)); err != nil {
+	if err := routes.StageDraft(ctx, tx, slot, httpkit.NewID(), in.Content(targets, &r.ExposeUpstreamModels)); err != nil {
 		return err
 	}
-	return routes.StageDraftPolicy(ctx, tx, id, access.NewID(), p.UserID(), r.RoutingPolicy)
+	return routes.StageDraftPolicy(ctx, tx, id, httpkit.NewID(), p.UserID(), r.RoutingPolicy)
 }
 
-func draftSlot(drafts map[string]draft, r Route, p access.Principal, projectID *string) (routes.DraftSlot, string) {
+func draftSlot(drafts map[string]draft, r Route, p authz.Principal, projectID *string) (routes.DraftSlot, string) {
 	if staged, ok := drafts[draftKey(r.Slug, r.Project)]; ok {
 		return routes.ExistingDraft{ID: staged.id}, staged.id
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	return routes.NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: projectID}, id
 }

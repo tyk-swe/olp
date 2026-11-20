@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -254,7 +254,7 @@ func (s *sessionReplySource) Do(_ context.Context, args ...string) (any, error) 
 	s.fields = []any{
 		"installation_id", args[8], "project_id", args[9], "principal_digest", args[10],
 		"protocol", args[11], "toolset_id", args[12], "toolset_revision_id", args[13], "release_id", args[14],
-		"created_at_ms", "0", "last_active_at_ms", "0", "initialized", "0",
+		"initialized", "0",
 	}
 	return int64(1), nil
 }

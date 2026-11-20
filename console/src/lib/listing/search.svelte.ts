@@ -1,7 +1,7 @@
 import { onDestroy } from 'svelte';
 
 /// Pause between the last keystroke and applying a list's search filter.
-export const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_MS = 250;
 
 /**
  * Debounces a search input's application. `schedule` waits for a pause in
@@ -10,7 +10,7 @@ export const SEARCH_DEBOUNCE_MS = 250;
  * is cancelled automatically when the owning component unmounts, so a queued
  * search never fires against a stale view.
  */
-export function debouncedSearch(apply: () => void, ms = SEARCH_DEBOUNCE_MS) {
+export function debouncedSearch(apply: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const cancel = () => {
     if (timer === undefined) return;
@@ -24,7 +24,7 @@ export function debouncedSearch(apply: () => void, ms = SEARCH_DEBOUNCE_MS) {
       timer = setTimeout(() => {
         timer = undefined;
         apply();
-      }, ms);
+      }, SEARCH_DEBOUNCE_MS);
     },
     applyNow() {
       cancel();

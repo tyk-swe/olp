@@ -13,7 +13,7 @@ Report suspected vulnerabilities privately through the
 
 | Boundary | What crosses it | How it is protected |
 | --- | --- | --- |
-| Edge to public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
+| Edge to public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/domain/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
 | Private listener | Health probes and metrics | Unauthenticated by design. Bind it to a private interface and restrict it with the chart's NetworkPolicy. |
 | OLP to PostgreSQL | All durable state | Bearer credentials are stored only as digests and other secrets only sealed by the master key ring; see [secrets](#secrets). |
 | OLP to Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
@@ -42,7 +42,7 @@ contract does not declare cannot be mounted. Handlers may demand more with
 less. Mutations call `Reauthorize` inside their transaction, after the
 installation lock, so they commit only under authority that is still current.
 
-`internal/access/policy.go` decides who holds each operation:
+`internal/authz/policy.go` decides who holds each operation:
 
 <!-- operations -->
 | Operation | Owner | Operator | Developer | Viewer | Installation-wide | Management tokens |
@@ -66,8 +66,7 @@ installation lock, so they commit only under authority that is still current.
 
 `internal/access/testdata/authorization.golden.json` records which callers
 every route admits. The authorization sweep calls every route as each of those
-callers against a real process, and the console's authorization is tested
-against the same file, so the console offers exactly what the server admits.
+callers against a real process.
 
 ## Project boundaries
 
@@ -157,14 +156,14 @@ their cache and reports unavailable versions in route plans. Expired values
 and sealed credentials cannot substitute for an unavailable pinned reference.
 See [external secrets](../operate/external-secrets.md) for identity, rotation and recovery.
 
-`internal/secrets/purpose.go` declares every purpose, and only that package can
+`internal/platform/secrets/purpose.go` declares every purpose, and only that package can
 construct one, so no digest or ciphertext names an ad hoc purpose. Purpose
 names are bound into stored data and never change:
 
 <!-- purposes -->
 | Kind | Purposes |
 | --- | --- |
-| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `workload_agent_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation`, `batch_submission`, `batch_line`, `agent_approval`, `agent_principal`, `delegation_token`, `delegation_consent`, `delegation_pair`, `a2a_task_capability`, `retained_submission`, `tool_input`, `tool_call`, `mcp_enrollment` |
+| Digest | `cache_key`, `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `workload_agent_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation`, `batch_submission`, `batch_line`, `agent_approval`, `agent_principal`, `delegation_token`, `delegation_consent`, `delegation_pair`, `a2a_task_capability`, `retained_submission`, `retained_list_cursor`, `tool_input`, `tool_call`, `mcp_enrollment` |
 | Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `mcp_grant_access`, `mcp_grant_refresh`, `mcp_grant_enrollment`, `mcp_entra_client`, `mcp_delegation_signing`, `billing_credential`, `guardrail_credential`, `response_cache`, `provider_upload_session`, `agent_credential`, `workflow_continuation` |
 <!-- /purposes -->
 
@@ -173,7 +172,7 @@ process.
 
 ## Egress
 
-**Provider egress** (`internal/egress`) requires HTTPS unless an operator lists
+**Provider egress** (`internal/platform/egress`) requires HTTPS unless an operator lists
 the host, refuses addresses outside public unicast unless an operator lists the
 network, rejects a host when any DNS answer is unsafe, dials only the validated
 addresses, refuses redirects, and requires TLS 1.2 or newer. Processes log a

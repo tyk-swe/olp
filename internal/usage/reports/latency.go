@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const routeLatencySQL = `SELECT rt.slug,rt.project_id::text,
@@ -27,7 +27,7 @@ type RouteLatencyObservation struct {
 	Milliseconds *string
 }
 
-func ReadRouteLatency(ctx context.Context, q access.Queryer, windowSeconds int, projectID *string, timeToFirstToken bool) ([]RouteLatencyObservation, error) {
+func ReadRouteLatency(ctx context.Context, q database.Queryer, windowSeconds int, projectID *string, timeToFirstToken bool) ([]RouteLatencyObservation, error) {
 	rows, err := q.Query(ctx, routeLatencySQL, windowSeconds, projectID, timeToFirstToken)
 	if err != nil {
 		return nil, err

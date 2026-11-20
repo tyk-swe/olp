@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   import { onDestroy, untrack } from 'svelte';
@@ -200,7 +201,7 @@
     Restrictions apply together with installation, route, and API-key policies.
     Requests can narrow provider access.
   </p>
-  {#if policy.isError}<p role="alert">
+  {#if policy.isError}<p class="inline-problem" role="alert">
       Policy could not be loaded. <button
         type="button"
         onclick={() => policy.refetch()}>Retry</button
@@ -216,7 +217,7 @@
         >Reload policy</button
       >
     </p>{/if}
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if policy.data}
     <form onsubmit={save}>
       <fieldset disabled={!canManage || busy || policy.isFetching}>
@@ -278,7 +279,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

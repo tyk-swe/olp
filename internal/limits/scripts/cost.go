@@ -17,7 +17,6 @@ type CostCaps struct {
 	Weekly    string
 	Monthly   string
 	Increases string
-	Durable   bool
 }
 
 type CostHold struct {
@@ -50,8 +49,8 @@ func (k costKeys) windows(durable bool) []string {
 }
 
 func (r Runner) costCall(c CostCaps, amount, leaseID string, ttl time.Duration) call {
-	return call{script: reserveCost, keys: r.costKeys(c.Owner).windows(c.Durable), args: []string{
-		c.Daily, c.Monthly, "0", amount, leaseID, strconv.FormatInt(ttl.Milliseconds(), 10), c.Weekly, c.Increases,
+	return call{script: reserveCost, keys: r.costKeys(c.Owner).windows(true), args: []string{
+		c.Daily, c.Monthly, amount, leaseID, strconv.FormatInt(ttl.Milliseconds(), 10), c.Weekly, c.Increases,
 	}}
 }
 
@@ -144,22 +143,6 @@ func (r Runner) SettleCost(ctx context.Context, h CostHold, amount string, grace
 	return nil
 }
 
-func (r Runner) PendingCost(ctx context.Context, owner limits.Owner) (string, error) {
-	value, err := r.Do(ctx, "HGET", r.costKeys(owner).pending, "sum")
-	if err != nil {
-		return "", err
-	}
-	switch total := value.(type) {
-	case nil:
-		return "0", nil
-	case string:
-		if limits.ValidDecimal(total) {
-			return total, nil
-		}
-	}
-	return "", limits.ErrMalformedState
-}
-
 func (r Runner) InstallSnapshot(ctx context.Context, s limits.Snapshot, durable *Durable) (limits.Installed, error) {
 	if err := s.Validate(); err != nil {
 		return limits.Installed{}, err
@@ -194,7 +177,7 @@ func snapshotArgs(s limits.Snapshot, durable *Durable) []string {
 	w := s.Windows
 	accrued := []string{
 		strconv.FormatInt(w.DailyID, 10), s.DailyAccrued, strconv.FormatInt(w.MonthlyID, 10), s.MonthlyAccrued,
-		strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID, strconv.FormatInt(w.WeeklyID, 10), s.WeeklyAccrued,
+		strconv.FormatInt(s.UnpricedAttempts, 10), requestID, strconv.FormatInt(w.WeeklyID, 10), s.WeeklyAccrued,
 	}
 	if w.DailyStart.IsZero() {
 		return accrued

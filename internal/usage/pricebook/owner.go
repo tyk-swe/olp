@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type ownerKind string
@@ -47,7 +48,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 		if id == nil {
 			return Owner{}, invalid("owner.id", "Name the "+kind+".")
 		}
-		parsed, err := access.ParseUUID(*id)
+		parsed, err := httpkit.ParseUUID(*id)
 		if err != nil {
 			return Owner{}, invalid("owner.id", "Use a valid identifier.")
 		}
@@ -57,7 +58,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 	}
 }
 
-func ownerExists(ctx context.Context, q access.Queryer, owner Owner) error {
+func ownerExists(ctx context.Context, q database.Queryer, owner Owner) error {
 	query := ""
 	switch owner.kind {
 	case ownerOrganization:

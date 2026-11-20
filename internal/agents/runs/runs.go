@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func PrincipalDigest(key *secrets.AuthKey, a keyauthority.Authority) []byte {

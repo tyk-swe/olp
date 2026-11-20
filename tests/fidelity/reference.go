@@ -16,9 +16,9 @@ import (
 	"unicode/utf8"
 )
 
-// Decode rejects duplicate keys rather than hiding corruption behind the
+// decode rejects duplicate keys rather than hiding corruption behind the
 // standard library's last-value-wins object decoding.
-func Decode(data []byte) (any, error) {
+func decode(data []byte) (any, error) {
 	if err := validStringEncoding(data); err != nil {
 		return nil, err
 	}
@@ -131,14 +131,14 @@ func decodeValue(d *json.Decoder) (any, error) {
 	}
 }
 
-// Compare reports the first differing JSON pointer without exposing values.
+// compareJSON reports the first differing JSON pointer without exposing values.
 // Only insignificant whitespace and object member ordering are ignored.
-func Compare(expected, observed []byte) error {
-	want, err := Decode(expected)
+func compareJSON(expected, observed []byte) error {
+	want, err := decode(expected)
 	if err != nil {
 		return fmt.Errorf("invalid reference: %w", err)
 	}
-	got, err := Decode(observed)
+	got, err := decode(observed)
 	if err != nil {
 		return fmt.Errorf("invalid observation: %w", err)
 	}
@@ -215,7 +215,7 @@ func CompareEvents(expected, observed []byte) error {
 	}
 	w, _ := json.Marshal(want)
 	g, _ := json.Marshal(got)
-	return Compare(w, g)
+	return compareJSON(w, g)
 }
 
 func events(data []byte) ([]event, error) {
@@ -234,7 +234,7 @@ func events(data []byte) ([]event, error) {
 		if joined == "[DONE]" {
 			current.Data = joined
 		} else {
-			value, err := Decode([]byte(joined))
+			value, err := decode([]byte(joined))
 			if err != nil {
 				return err
 			}

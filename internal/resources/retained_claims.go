@@ -2,15 +2,15 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 )
+
+var ErrSettlementClosed = errors.New("retained settlement is closed")
 
 type RetainedClaim struct {
 	ResourceID       uuid.UUID
@@ -61,14 +61,19 @@ func (s *Store) RequestRetainedReconciliationTx(ctx context.Context, tx pgx.Tx, 
 	if len(hint) > 512 {
 		return ErrContract
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.retained_settlements SET poll_after=now(),reconciliation_hint=NULLIF($2,''),updated_at=now() WHERE resource_id=$1`, id, hint)
+	var state string
+	err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, id).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() != 1 {
-		return ErrNotFound
+	if state == "closed" {
+		return ErrSettlementClosed
 	}
-	return nil
+	_, updateErr := tx.Exec(ctx, `UPDATE olp.retained_settlements SET poll_after=now(),reconciliation_hint=NULLIF($2,''),updated_at=now() WHERE resource_id=$1`, id, hint)
+	return updateErr
 }
 func (s *Store) CommitRetainedPoll(ctx context.Context, c RetainedClaim, r *Resource, observation RetainedObservation, adopt bool) error {
 	tx, err := s.pool.Begin(ctx)
@@ -117,19 +122,9 @@ func (s *Store) RetainedEvidenceTerminationTx(ctx context.Context, tx pgx.Tx, id
 	err := tx.QueryRow(ctx, `SELECT remote_terminated,terminal_at FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, id).Scan(&term, &at)
 	return term, at, err
 }
-func (s *Store) RetainedTemplates(ctx context.Context, id uuid.UUID) (map[string]*usage.Event, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx, `SELECT templates FROM olp.retained_settlements WHERE resource_id=$1`, id).Scan(&raw)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]*usage.Event
-	err = json.Unmarshal(raw, &out)
-	return out, err
-}
 
-func (s *Store) CheckpointRetained(ctx context.Context, outcome workerhealth.Outcome, progress bool) error {
-	return workerhealth.New(workerhealth.TaskRetainedSettlement, "").Checkpoint(ctx, s.pool, outcome, progress)
+func (s *Store) CheckpointRetained(ctx context.Context, outcome workerhealth.Outcome) error {
+	return workerhealth.New(workerhealth.TaskRetainedSettlement, "").Checkpoint(ctx, s.pool, outcome, false)
 }
 
 // CloseUndispatchedRetained uses the durable submission fence as proof that no

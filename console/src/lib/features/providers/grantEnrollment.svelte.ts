@@ -1,5 +1,5 @@
 import { onDestroy } from 'svelte';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { ApiProblem, errorMessage } from '#lib/management/http.js';
 import type { Provider } from './providers';
 import {
@@ -73,9 +73,7 @@ export class GrantEnrollmentState {
     this.busy = 'grant-start';
     this.hooks.error('');
     try {
-      const result = slotId
-        ? await startGrantEnrollment(provider, slotId)
-        : await startGrantEnrollment(provider);
+      const result = await startGrantEnrollment(provider, slotId);
       if (this.current(epoch)) this.enrollment = result;
       else
         void Promise.resolve()

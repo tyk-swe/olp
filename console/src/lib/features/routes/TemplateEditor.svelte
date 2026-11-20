@@ -1,10 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { useAction } from '#lib/editing/action.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { parseJsonObject } from '#lib/editing/json.js';
   import type { RoutingPolicy } from './api';
   import { fidelityOptions, type FidelityMode } from './routeFidelity';
@@ -38,10 +37,9 @@
   );
   let publish = $state(initial?.auto_publish ?? false);
   const client = useQueryClient();
-  const action = useAction(() =>
+  const action = useMutation(() =>
     client.invalidateQueries({ queryKey: routeKeys.templates() })
   );
-  const intent = useMutationIntent();
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     const parsed = policy.trim() ? parseJsonObject(policy) : null;
@@ -61,11 +59,9 @@
       routing_policy: parsed as RoutingPolicy | null,
       auto_publish: publish
     };
-    await action.run(
-      () =>
-        intent.submit({ current: baseline, body }, (input, requestId) =>
-          saveTemplate(input.current, input.body, requestId)
-        ),
+    await action.submit(
+      { current: baseline, body },
+      (input, requestId) => saveTemplate(input.current, input.body, requestId),
       async (value) => {
         baseline = value;
         clean = draft();

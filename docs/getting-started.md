@@ -13,24 +13,24 @@ records.
 
 ## Install OLP
 
-Create the local environment file, prepare its file-backed secrets and start the
-Compose installation with the temporary bootstrap overlay.
+Build and start the Compose installation.
 
 ```sh
-cp .env.example .env
-./scripts/prepare-compose-secrets.sh
-docker compose --env-file .env \
-  -f deploy/compose.yaml -f deploy/compose.build.yaml \
-  -f deploy/compose.bootstrap.yaml up --build -d
+docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml up --build -d
 ```
 
-The default public origin is `http://localhost:8080`. If that address or port is
-unavailable, change `OLP_PUBLIC_ORIGIN` and `OLP_HOST_PORT` in `.env` before
-starting the installation, then open the configured origin.
+The first start generates the master-key ring, the authentication HMAC key, the
+database password and a one-time setup token into the `olp-secrets` and
+`olp-database-secret` volumes. Later starts reuse them, so back these volumes up
+with the database. The `olp` container reports unhealthy until the first route
+is published, because its gateway has nothing to serve yet.
 
-To use a published 0.x image instead of building locally, set `OLP_IMAGE` in
-`.env`. Omit `deploy/compose.build.yaml` and `--build` from the command while
-retaining the bootstrap overlay for first-owner setup.
+The default public origin is `http://localhost:8080`. To use another port or
+address, copy `.env.example` to `.env`, set `OLP_HOST_PORT` or
+`OLP_PUBLIC_ORIGIN`, and add `--env-file .env` to every Compose command.
+
+To use a published image instead of building locally, set `OLP_IMAGE` in `.env`
+and omit `deploy/compose.build.yaml` and `--build` from the command.
 
 This local installation is the quickstart path, not the complete production
 topology. [Deployment](operate/deployment.md) covers production TLS, secrets,
@@ -39,25 +39,15 @@ database roles, private observability and separate process modes. The
 
 ## Create the first owner
 
-Open the configured public origin and complete the first-owner form with the
-value stored in `deploy/secrets/olp_bootstrap_token`. If `.env` sets
-`OLP_COMPOSE_SECRETS_DIR`, read the token from that directory instead. Confirm
-that the new owner can sign in before continuing.
-
-Recreate the application without the bootstrap overlay, preserving the build
-overlay if the first command used it.
+Print the setup link and token.
 
 ```sh
-docker compose --env-file .env \
-  -f deploy/compose.yaml -f deploy/compose.build.yaml \
-  up -d --force-recreate olp
-./scripts/retire-compose-bootstrap-secret.sh
+docker compose -f deploy/compose.yaml exec olp olp setup-token
 ```
 
-Retire the bootstrap token as shown. Keep the master-key ring and authentication
-HMAC key for the life of the installation. The
-[Compose secrets guide](../deploy/secrets/README.md#bootstrap-token-lifecycle)
-covers custom secret directories, token retirement and later restarts.
+Open the printed link, paste the token and complete the first-owner form. The
+token stops working once the owner exists, so it can stay mounted. Confirm that
+the new owner can sign in before continuing.
 
 ## Connect and activate a provider
 

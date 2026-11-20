@@ -1,12 +1,15 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { SvelteMap } from 'svelte/reactivity';
   import { formatCost } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { getReconciliation } from '#lib/features/usage/reconciliation.js';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import {
+    listProviders,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import type {
     ReconciliationItem,
     ReconciliationTotals
@@ -42,8 +45,7 @@
 
   const report = createQuery(() => ({
     queryKey: usageKeys.reconciliation(range.first, range.last),
-    queryFn: ({ signal }) =>
-      getReconciliation(range.first, range.last, undefined, signal),
+    queryFn: ({ signal }) => getReconciliation(range.first, range.last, signal),
     enabled: canRead
   }));
 
@@ -92,9 +94,9 @@
   }
 
   function invoice(item: ReconciliationItem, currency?: string): string {
-    if (item.invoiced_cost == null) return '—';
     if (item.invoiced_currency?.includes(','))
       return `Multiple currencies (${item.invoiced_currency.split(',').join(', ')})`;
+    if (item.invoiced_cost == null) return '—';
     return formatCost(item.invoiced_cost, item.invoiced_currency ?? currency);
   }
 
@@ -144,7 +146,7 @@
         or Azure OpenAI connection.
       </p>
     {:else}
-      <div class="table-scroll">
+      <ScrollTable label="Billing reconciliation">
         <table class="data-table">
           <thead
             ><tr
@@ -205,7 +207,7 @@
             </tbody>
           {/each}
         </table>
-      </div>
+      </ScrollTable>
     {/if}
   </section>
 {/if}

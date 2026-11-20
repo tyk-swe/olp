@@ -6,7 +6,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -20,7 +21,7 @@ type portableRevision struct {
 	slots         []byte
 }
 
-func portablePaid(ctx context.Context, q access.Queryer, frozen map[string]routing.Provider) (map[string]PaidConnection, error) {
+func portablePaid(ctx context.Context, q database.Queryer, frozen map[string]routing.Provider) (map[string]PaidConnection, error) {
 	connections, err := promotion.TryMap(slices.Sorted(maps.Keys(frozen)), func(id string) (PaidConnection, error) { return portablePaidConnection(ctx, q, frozen[id]) })
 	if err != nil {
 		return nil, err
@@ -28,9 +29,9 @@ func portablePaid(ctx context.Context, q access.Queryer, frozen map[string]routi
 	return promotion.Index(connections, func(c PaidConnection) string { return c.Provider.Name }), nil
 }
 
-func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routing.Provider) (PaidConnection, error) {
+func portablePaidConnection(ctx context.Context, q database.Queryer, frozen routing.Provider) (PaidConnection, error) {
 	if frozen.PendingCommitment != nil {
-		return PaidConnection{}, access.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
+		return PaidConnection{}, httpkit.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
 	}
 	stored, err := providers.ReadRevisionLabels(ctx, q, frozen.RevisionID, frozen.ID)
 	if err != nil {

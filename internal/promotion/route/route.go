@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -64,7 +64,14 @@ type provider struct {
 
 func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if len(document.Routes) > maxRoutes {
-		return Desired{}, access.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
+		return Desired{}, httpkit.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
+	}
+	for _, entry := range document.Routes {
+		if policy, ok := promotion.Present(entry.RoutingPolicy); ok {
+			if err := validatePolicyMembers(policy); err != nil {
+				return Desired{}, err
+			}
+		}
 	}
 	declared, err := promotion.Convert[[]Route](document.Routes)
 	if err != nil {
@@ -108,25 +115,25 @@ func validate(i int, r Route, first map[string]int, providers map[string]provide
 	prefix := "routes." + strconv.Itoa(i)
 	fidelity, err := routing.DecodeFidelity(r.Fidelity)
 	if err != nil {
-		return access.Invalid(prefix+".fidelity", err.Error())
+		return httpkit.Invalid(prefix+".fidelity", err.Error())
 	}
 	if err := (routing.Route{Fidelity: fidelity, Behavior: r.Behavior}).ValidateCaching(); err != nil {
-		return access.Invalid(prefix+".cache", err.Error())
+		return httpkit.Invalid(prefix+".cache", err.Error())
 	}
 	if err := routes.ValidateFidelityPolicy(r.Fidelity, r.ContentPolicy); err != nil {
 		return err
 	}
 	if first[r.Slug] != i {
-		return access.Invalid(prefix+".slug", "Route slugs must be unique.")
+		return httpkit.Invalid(prefix+".slug", "Route slugs must be unique.")
 	}
 	if !routeidentity.ValidSlug(r.Slug) {
-		return access.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
+		return httpkit.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
 	if len(r.Targets) > maxTargets {
-		return access.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
+		return httpkit.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
 	}
 	if r.Project != nil {
-		if err := access.ValidText(prefix+".project", *r.Project, 100); err != nil {
+		if err := httpkit.ValidText(prefix+".project", *r.Project, 100); err != nil {
 			return err
 		}
 	}
@@ -168,13 +175,13 @@ func validateTarget(prefix string, j int, t Target, project *string, providers m
 	field, index := prefix+".targets."+strconv.Itoa(j), strconv.Itoa(j)
 	declared, ok := providers[strings.ToLower(t.Provider)]
 	if !ok {
-		return access.Invalid(field+".provider", "Target "+index+" names a provider the document does not declare.")
+		return httpkit.Invalid(field+".provider", "Target "+index+" names a provider the document does not declare.")
 	}
 	if !slices.Contains(declared.models, t.ProviderModel) {
-		return access.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
+		return httpkit.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
 	}
 	if !strings.EqualFold(promotion.ValueOf(project), promotion.ValueOf(declared.project)) {
-		return access.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
+		return httpkit.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
 	}
 	return nil
 }
@@ -211,3 +218,11 @@ func withoutContentPolicy(r Route) Route {
 }
 
 func slugOf(r Route) string { return r.Slug }
+
+func validatePolicyMembers(policy contract.RoutingPolicy) error {
+	if _, err := promotion.ConvertUnique[*routing.Preferences](policy.Constraints); err != nil {
+		return err
+	}
+	_, err := promotion.ConvertUnique[*routing.Preferences](policy.Defaults)
+	return err
+}

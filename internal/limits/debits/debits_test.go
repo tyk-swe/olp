@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -147,6 +148,44 @@ func TestIntentIdentityAndOwners(t *testing.T) {
 	}
 }
 
+func TestVersionCacheEvictsOneOwnerWhenFull(t *testing.T) {
+	cache := versionCache{seen: map[string]int64{}}
+	owner := func(i int) string { return fmt.Sprintf("owner-%d", i) }
+	for i := range versionCacheSize {
+		cache.record(owner(i), 1)
+	}
+	cache.record("owner-new", 1)
+	current := 0
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) {
+			current++
+		}
+	}
+	if current != versionCacheSize-1 || !cache.current("owner-new", 1) {
+		t.Fatalf("got %d of the original owners current after recording a new owner at capacity, want %d and the new owner", current, versionCacheSize-1)
+	}
+	existing := ""
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) {
+			existing = owner(i)
+			break
+		}
+	}
+	if existing == "" {
+		t.Fatal("no original owner stayed current at capacity")
+	}
+	cache.record(existing, 2)
+	current = 0
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) || cache.current(owner(i), 2) {
+			current++
+		}
+	}
+	if current != versionCacheSize-1 || !cache.current(existing, 2) || !cache.current("owner-new", 1) {
+		t.Fatalf("got %d original owners current after re-recording %s at capacity, want %d with its new version", current, existing, versionCacheSize-1)
+	}
+}
+
 func TestSettlementRequiresEveryOwnerBasis(t *testing.T) {
 	owners := []limits.Owner{
 		{ID: testID, Kind: limits.OwnerKey, Basis: limits.BasisCost}, {ID: testID, Kind: limits.OwnerKey, Basis: limits.BasisCharge},
@@ -204,6 +243,10 @@ func TestUnreadableLedgerNeverClearsExposure(t *testing.T) {
 type refusing struct{}
 
 func (refusing) Do(context.Context, ...string) (any, error) {
+	return nil, errors.New("connection refused")
+}
+
+func (refusing) Pipeline(context.Context, ...[]string) ([]any, error) {
 	return nil, errors.New("connection refused")
 }
 

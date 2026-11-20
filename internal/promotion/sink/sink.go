@@ -9,9 +9,10 @@ import (
 	"strings"
 
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
@@ -66,7 +67,7 @@ type entry struct {
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Sink, error) {
 	raw := promotion.ValueOf(document.Sinks)
 	if len(raw) > maxSinks {
-		return nil, access.Invalid("sinks", "Declare at most 64 export sinks.")
+		return nil, httpkit.Invalid("sinks", "Declare at most 64 export sinks.")
 	}
 	entries := promotion.Map(raw, trim)
 	first := promotion.FirstIndex(entries, func(e entry) key { return e.sink.key() })
@@ -94,10 +95,10 @@ func trim(raw contract.ConfigurationSink) entry {
 
 func parseSink(e entry, duplicate bool, policy *egress.Policy) (Sink, error) {
 	if project, scoped := e.sink.Owner.(Project); scoped && !promotion.ValidLabel(project.Name) {
-		return Sink{}, access.Invalid("sinks.project", "Use an owning project name.")
+		return Sink{}, httpkit.Invalid("sinks.project", "Use an owning project name.")
 	}
 	if duplicate {
-		return Sink{}, access.Invalid("sinks", "Sink names must be unique inside each scope.")
+		return Sink{}, httpkit.Invalid("sinks", "Sink names must be unique inside each scope.")
 	}
 	spec, err := sinks.NormalizeSpec(sinks.Spec{ProjectID: scope(e.sink.Owner), Name: e.sink.Name, Type: e.kind, Destination: e.sink.Destination, Streams: e.sink.Streams, Enabled: e.sink.Enabled}, policy)
 	if err != nil {
@@ -105,7 +106,7 @@ func parseSink(e entry, duplicate bool, policy *egress.Policy) (Sink, error) {
 	}
 	parsed := Sink{Owner: e.sink.Owner, Name: spec.Name, Destination: spec.Destination, Streams: slices.Sorted(slices.Values(spec.Streams)), Enabled: spec.Enabled, Signed: e.sink.Signed}
 	if e.ref != nil && promotion.Ref(*e.ref) != parsed.ref() {
-		return Sink{}, access.Invalid("sinks.credential_ref", "Use the deterministic exported signing-credential reference.")
+		return Sink{}, httpkit.Invalid("sinks.credential_ref", "Use the deterministic exported signing-credential reference.")
 	}
 	return parsed, nil
 }
@@ -132,7 +133,7 @@ type stored struct {
 	sink       Sink
 }
 
-func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
+func Read(ctx context.Context, q database.Queryer) ([]Sink, error) {
 	current, err := readStored(ctx, q)
 	if err != nil {
 		return nil, err
@@ -140,7 +141,7 @@ func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
 	return promotion.Map(current, func(s stored) Sink { return s.sink }), nil
 }
 
-func readStored(ctx context.Context, q access.Queryer) ([]stored, error) {
+func readStored(ctx context.Context, q database.Queryer) ([]stored, error) {
 	active, err := sinks.ReadActiveSinks(ctx, q)
 	if err != nil {
 		return nil, err

@@ -4,9 +4,11 @@ import (
 	"context"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-func CheckLimitTemplates(ctx context.Context, q Queryer, project *string, names ...*string) error {
+func CheckLimitTemplates(ctx context.Context, q database.Queryer, project *string, names ...*string) error {
 	used := false
 	for _, name := range names {
 		if name != nil {
@@ -17,7 +19,7 @@ func CheckLimitTemplates(ctx context.Context, q Queryer, project *string, names 
 		return nil
 	}
 	if project == nil {
-		return Invalid("limit_template", "Templates require a project.")
+		return httpkit.Invalid("limit_template", "Templates require a project.")
 	}
 	var templates keyauthority.LimitTemplates
 	if err := q.QueryRow(ctx, "SELECT limit_templates FROM olp.projects WHERE id=$1", *project).Scan(&templates); err != nil {
@@ -29,11 +31,4 @@ func CheckLimitTemplates(ctx context.Context, q Queryer, project *string, names 
 		}
 	}
 	return nil
-}
-
-func endUserTemplate(p *keyauthority.EndUserPolicy) *string {
-	if p == nil {
-		return nil
-	}
-	return p.LimitTemplate
 }

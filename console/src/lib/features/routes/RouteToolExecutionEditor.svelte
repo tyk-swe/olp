@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorMessage } from '#lib/management/http.js';
-  import RunLimits from '#lib/features/workflows/RunLimits.svelte';
+  import { RunLimits } from '#lib/features/workflows/index.js';
   import type { RouteDraftEditorState } from './routeDraftEditor.svelte';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();
@@ -139,7 +139,7 @@
   }
   h2 {
     margin: 0 0 1rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
   }
   fieldset {

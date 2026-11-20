@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type Failure string

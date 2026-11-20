@@ -1,14 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { useAction } from '#lib/editing/action.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { saveSink, type Sink, type SinkInput } from './api';
   import { sinkKeys } from './sinkKeys';
@@ -42,10 +39,9 @@
   let credential = $state('');
   let removeCredential = $state(false);
   const client = useQueryClient();
-  const action = useAction(() =>
+  const action = useMutation(() =>
     client.invalidateQueries({ queryKey: sinkKeys.all })
   );
-  const intent = useMutationIntent();
   usePrincipalLifetime(() => {
     credential = '';
   });
@@ -72,11 +68,9 @@
           ? { credential }
           : {})
     };
-    await action.run(
-      () =>
-        intent.submit({ current: baseline, body }, (input, requestId) =>
-          saveSink(input.current, input.body, requestId)
-        ),
+    await action.submit(
+      { current: baseline, body },
+      (input, requestId) => saveSink(input.current, input.body, requestId),
       async (value) => {
         baseline = value;
         credential = '';

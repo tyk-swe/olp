@@ -18,7 +18,6 @@ var (
 type Phase string
 
 const (
-	PhaseStart      Phase = ""
 	PhaseOutput     Phase = "output"
 	PhaseError      Phase = "error"
 	PhaseVertexDone Phase = "vertex_done"

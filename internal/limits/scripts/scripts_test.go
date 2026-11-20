@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 type scripted struct {
@@ -32,9 +32,7 @@ func (c *scripted) commands() [][]string {
 	return slices.Clone(c.asked)
 }
 
-type pipelinedScripted struct{ *scripted }
-
-func (c *pipelinedScripted) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+func (c *scripted) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
 	replies := make([]any, len(commands))
 	for i, command := range commands {
 		value, err := c.Do(ctx, command...)
@@ -151,12 +149,12 @@ func TestReserveRateRejectsMalformedResponses(t *testing.T) {
 func TestSupplyLoadsMissingScripts(t *testing.T) {
 	t.Parallel()
 	refusal := errors.New("NOSCRIPT No matching script. Please use EVAL.")
-	client := &pipelinedScripted{&scripted{answer: func(command []string) (any, error) {
+	client := &scripted{answer: func(command []string) (any, error) {
 		if command[0] == "EVALSHA" {
 			return nil, refusal
 		}
 		return []any{int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000)}, nil
-	}}}
+	}}
 	runner, err := NewRunner(client, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +225,7 @@ func TestSnapshotsInstallOnTheirOwnBasis(t *testing.T) {
 }
 
 func TestVerifyCostRefusesUnknownAccountingState(t *testing.T) {
-	caps := CostCaps{Owner: limits.Owner{ID: owner, Basis: limits.BasisCharge}, Daily: "1", Durable: true}
+	caps := CostCaps{Owner: limits.Owner{ID: owner, Basis: limits.BasisCharge}, Daily: "1"}
 	for _, test := range []struct {
 		name   string
 		status int64
@@ -274,7 +272,7 @@ func TestVerifyCostRetainsRefusedBudgetBasisAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusal := runner.VerifyCost(t.Context(), CostCaps{Owner: limits.Owner{ID: owner, Basis: limits.BasisCharge}, Daily: "1", Durable: true})
+	refusal := runner.VerifyCost(t.Context(), CostCaps{Owner: limits.Owner{ID: owner, Basis: limits.BasisCharge}, Daily: "1"})
 	var exceeded *limits.ExceededError
 	if !errors.As(refusal, &exceeded) || exceeded.Basis != limits.BasisCharge || exceeded.Dimension != limits.DimensionDailyCost || exceeded.RetryAfter != 250*time.Millisecond {
 		t.Fatalf("refusal lost the enforced charge budget or retry guidance: %v", refusal)

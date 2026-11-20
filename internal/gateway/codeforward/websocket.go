@@ -11,10 +11,10 @@ import (
 
 	"github.com/coder/websocket"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/release"
@@ -125,7 +125,7 @@ func (f *Forwarder) prepareCodeWebSocket(r *http.Request, release *release.Relea
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, forwarder: f, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, forwarder: f, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint, 1)}
 	handshake.client, err = f.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err

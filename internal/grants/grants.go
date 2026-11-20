@@ -24,8 +24,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -41,7 +42,7 @@ const (
 // plugin build and profile that enrolled a grant, its principal and facts,
 // and holds the grant beneath it. It returns the version's ID and number.
 func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest, profileID string, grant abi.Grant) (string, int, error) {
-	id := access.NewID()
+	id := httpkit.NewID()
 	facts, err := json.Marshal(grant.Facts)
 	if err != nil {
 		return "", 0, err
@@ -61,7 +62,7 @@ func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest,
 	}
 	var refresh *string
 	if grant.RefreshToken != "" {
-		refresh = new(access.NewID())
+		refresh = new(httpkit.NewID())
 		if err = a.Keys.Store(ctx, tx, a.Installation, *refresh, secrets.ProviderGrantRefresh, []byte(grant.RefreshToken), nil); err != nil {
 			return "", 0, err
 		}

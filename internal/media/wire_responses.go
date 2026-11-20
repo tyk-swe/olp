@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
@@ -282,7 +282,6 @@ type VideoJobResult struct {
 	Prompt       *string
 	Seconds      *string
 	Size         *string
-	RemixedFrom  *string
 	ErrorCode    *string
 	ErrorMessage *string
 	Extra        map[string]any
@@ -293,7 +292,6 @@ type VideoListResult struct {
 	FirstID *string
 	LastID  *string
 	HasMore bool
-	Extra   map[string]any
 }
 
 type VideoDeleteResult struct {
@@ -316,7 +314,6 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 		Prompt    *string  `json:"prompt"`
 		Seconds   *string  `json:"seconds"`
 		Size      *string  `json:"size"`
-		Remixed   *string  `json:"remixed_from_video_id"`
 		Error     *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
@@ -337,7 +334,7 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	result := &VideoJobResult{
 		ID: encodedWire.ID, Status: encodedWire.Status, Progress: encodedWire.Progress,
 		CreatedAt: encodedWire.CreatedAt, CompletedAt: encodedWire.Completed, ExpiresAt: encodedWire.Expires,
-		Prompt: encodedWire.Prompt, Seconds: encodedWire.Seconds, Size: encodedWire.Size, RemixedFrom: encodedWire.Remixed,
+		Prompt: encodedWire.Prompt, Seconds: encodedWire.Seconds, Size: encodedWire.Size,
 		Extra: diffFields(doc, "id", "object", "model", "status", "progress", "created_at",
 			"completed_at", "expires_at", "prompt", "seconds", "size", "remixed_from_video_id", "error"),
 	}
@@ -435,11 +432,11 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 		validStatus
 }
 
-func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, *Error) {
+func EncodeVideoListResponse(result *VideoListResult) ([]byte, *Error) {
 	data := make([]any, len(result.Jobs))
 	for i := range result.Jobs {
 		job := result.Jobs[i]
-		encoded, failure := EncodeVideoObject(&job, job.ID, modelForList(job, fallback))
+		encoded, failure := EncodeVideoObject(&job, job.ID, job.Route)
 		if failure != nil {
 			return nil, failure
 		}
@@ -456,23 +453,11 @@ func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, 
 	if result.LastID != nil {
 		doc["last_id"] = *result.LastID
 	}
-	for name, value := range result.Extra {
-		if _, exists := doc[name]; !exists {
-			doc[name] = value
-		}
-	}
 	body, err := json.Marshal(doc)
 	if err != nil {
 		return nil, ProtocolError("The provider video list could not be encoded.")
 	}
 	return body, nil
-}
-
-func modelForList(job VideoJobResult, fallback string) string {
-	if job.Route != "" {
-		return job.Route
-	}
-	return fallback
 }
 
 func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {

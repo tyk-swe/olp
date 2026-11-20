@@ -13,16 +13,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/console"
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/database"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/staging"
 )
@@ -89,7 +90,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 		if err != nil {
 			return err
 		}
-		result, err := access.RecoverPassword(ctx, pool, options.AccountEmail, password, options.ResetMFA)
+		result, err := identity.RecoverPassword(ctx, pool, options.AccountEmail, password, options.ResetMFA)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 	if err != nil {
 		return err
 	}
-	auth, keys, _, err := loadSecrets(ctx, pool, c, installation)
+	auth, keys, err := loadSecrets(ctx, c, installation)
 	if err != nil {
 		return err
 	}
@@ -152,7 +153,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 			return errors.New("master-key version is active or still referenced; finish rotation before retirement")
 		}
 	}
-	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
+	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": coordination.Namespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
 	if command == "doctor" {
 		referenceCatalog, err := catalog.Embedded()
 		if err != nil {

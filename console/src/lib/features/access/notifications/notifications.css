@@ -4,7 +4,7 @@
 }
 .notifications-panel h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -34,9 +34,6 @@
 .notifications-panel .form-actions {
   display: flex;
   justify-content: flex-end;
-}
-.notifications-panel .table-scroll {
-  overflow-x: auto;
 }
 .notifications-panel td small {
   color: var(--foreground-muted);

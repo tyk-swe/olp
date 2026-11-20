@@ -1,5 +1,7 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -21,14 +23,14 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { dateTimeLocalValue, formatDate } from '#lib/format.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
+    listProviderKinds,
     listProviderVendors,
-    type ProviderKind
-  } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+    providerKeys
+  } from '#lib/features/providers/index.js';
+  import type { ProviderKind } from '#lib/features/providers/index.js';
   import { operationKinds } from './history/api';
   import {
     createPricingRevision,
@@ -333,7 +335,7 @@
         <div class="form-field">
           <label for="provider-id">Only for provider</label><EntityPicker
             id="provider-id"
-            kind="provider"
+            source={providerOptions}
             bind:value={providerId}
             emptyLabel="Every provider of this kind"
             disabled={!canEditPricing}
@@ -467,13 +469,7 @@
               ><span class="badge">{revision.prices.length} entries</span
               ></summary
             >
-            <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-            <div
-              class="table-shell"
-              tabindex="0"
-              role="region"
-              aria-label={`Prices in revision ${revision.revision}`}
-            >
+            <ScrollTable label={`Prices in revision ${revision.revision}`}>
               <table class="data-table">
                 <caption class="sr-only"
                   >Prices in revision {revision.revision}</caption
@@ -519,7 +515,7 @@
                     >{/each}</tbody
                 >
               </table>
-            </div>
+            </ScrollTable>
           </details>
         {/each}
       </div>
@@ -540,7 +536,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -575,7 +571,7 @@
   }
   /* The price table sits flush inside its revision card; the hairline on top
      separates it from the summary instead of stacking a second frame. */
-  details .table-shell {
+  details :global(.table-shell) {
     border: 0;
     border-top: 1px solid var(--border-hairline);
     border-radius: 0;

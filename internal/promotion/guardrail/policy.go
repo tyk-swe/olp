@@ -7,10 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
+	"github.com/tyk-swe/olp/internal/platform/database"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -64,7 +66,7 @@ func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 
 func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail) (*guardrails.Engine, error) {
 	if duplicate || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
-		return nil, access.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
+		return nil, httpkit.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
 	}
 	type resolvedEntry struct {
 		Entry
@@ -73,7 +75,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	resolved, err := promotion.TryMap(p.Entries, func(e Entry) (resolvedEntry, error) {
 		g, ok := definitions[keyOf(p.Project, e.Guardrail)]
 		if !ok {
-			return resolvedEntry{}, access.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
+			return resolvedEntry{}, httpkit.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
 		}
 		return resolvedEntry{e, g}, nil
 	})
@@ -89,7 +91,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	})
 	engine, err := guardrails.Compile(entries, revisions)
 	if err != nil {
-		return nil, access.Invalid("guardrail_policies", "Invalid guardrail entries.")
+		return nil, httpkit.Invalid("guardrail_policies", "Invalid guardrail entries.")
 	}
 	return engine, nil
 }
@@ -128,7 +130,7 @@ func applies(a Attachment, slug, project, organization string) bool {
 
 func checkRoute(engine *guardrails.Engine, route contract.ConfigurationRouteEntry) error {
 	if _, passthrough := promotion.Present(route.Passthrough); passthrough {
-		return access.Fail(422, "passthrough_conflict", "A pass-through route cannot carry guardrails.")
+		return httpkit.Fail(422, "passthrough_conflict", "A pass-through route cannot carry guardrails.")
 	}
 	raw, err := fidelityOf(route)
 	if err != nil {
@@ -139,7 +141,7 @@ func checkRoute(engine *guardrails.Engine, route contract.ConfigurationRouteEntr
 		return nil
 	}
 	if engine.ValidateRoute(fidelity.Strict(), int64(route.OverallTimeoutMs)) != nil {
-		return access.Invalid("guardrail_policies", "Guardrails are incompatible with an attached route's fidelity or deadline.")
+		return httpkit.Invalid("guardrail_policies", "Guardrails are incompatible with an attached route's fidelity or deadline.")
 	}
 	return nil
 }
@@ -197,12 +199,12 @@ func redefined(before, after map[portable]Guardrail, key portable) bool {
 	return !ok || old.Type != next.Type || !equal(old, next)
 }
 
-func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, policy Policy) error {
+func applyPolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, policy Policy) error {
 	project, err := projectID(directory, policy.Project)
 	if err != nil {
 		return err
 	}
-	if err := p.Project(project, access.Change); err != nil {
+	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	entries, err := promotion.TryMap(policy.Entries, func(e Entry) (guardrails.Entry, error) { return pin(ctx, tx, project, e) })
@@ -230,7 +232,7 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 	return guardrailpolicy.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
-func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
+func pin(ctx context.Context, q database.Queryer, project *string, e Entry) (guardrails.Entry, error) {
 	current, err := definition.FindActive(ctx, q, guardrails.ProjectOf(project), e.Guardrail)
 	if err != nil {
 		return guardrails.Entry{}, err

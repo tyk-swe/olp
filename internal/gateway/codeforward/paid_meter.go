@@ -8,12 +8,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/panics"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 )
 
 type paidUsageObservation struct {
@@ -53,7 +53,7 @@ func (a *codeAttempt) meterPaidResponse(response *http.Response) (*http.Response
 
 func readPaidUsage(reader io.Reader, family wire.Format, streaming bool, encoding, route string) paidUsageObservation {
 	if streaming && (encoding == "" || encoding == "identity") {
-		completion, err := protocols.Stream(family, family, reader, codewire.MaxBody, route, true, func([]byte) error { return nil })
+		completion, err := protocols.Stream(family, family, reader, codewire.MaxBody, route, func([]byte) error { return nil })
 		if completion == nil {
 			return paidUsageObservation{}
 		}

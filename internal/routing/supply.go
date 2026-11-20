@@ -4,15 +4,15 @@ import (
 	"cmp"
 	"context"
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/domain/priority"
 )
 
-// The admission classes, most urgent first. Requests are normal unless their
-// key or caller says otherwise; the gateway's own traffic is low.
+// Requests are normal unless their key or caller says otherwise; the
+// gateway's own traffic is low.
 const (
-	PriorityCritical = "critical"
-	PriorityHigh     = "high"
-	PriorityNormal   = "normal"
-	PriorityLow      = "low"
+	PriorityNormal = "normal"
+	PriorityLow    = "low"
 )
 
 // Supply holds the controls a connection or credential slot quota declares
@@ -36,13 +36,13 @@ type Shares struct {
 
 // Of returns the share of one priority, or the normal share for an unknown
 // class.
-func (s Shares) Of(priority string) int64 {
-	switch priority {
-	case "critical":
+func (s Shares) Of(class string) int64 {
+	switch priority.Rank(class) {
+	case priority.Critical:
 		return s.Critical
-	case "high":
+	case priority.High:
 		return s.High
-	case "low":
+	case priority.Low:
 		return s.Low
 	}
 	return s.Normal

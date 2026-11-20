@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 
@@ -18,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -1326,7 +1327,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
+	operator := authz.Principal{User: authz.User{ID: user}, AllProjects: true}
 	enabled, disabled := true, false
 	save := func(id string, input codeaccounts.Input, existing bool) (map[string]any, error) {
 		t.Helper()
@@ -1335,7 +1336,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 			t.Fatal(err)
 		}
 		defer tx.Rollback(t.Context())
-		body, err := codeaccounts.Save(t.Context(), tx, operator, id, access.NewID(), input, existing)
+		body, err := codeaccounts.Save(t.Context(), tx, operator, id, httpkit.NewID(), input, existing)
 		if err != nil {
 			return nil, err
 		}
@@ -1453,7 +1454,7 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 			if len(items) != 1 || items[0].Kind != contract.ConfigurationPlanItemKindCodeAccount || items[0].Action != tc.action {
 				t.Fatalf("promotion plan = %+v, want one account %s", items, tc.action)
 			}
-			operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
+			operator := authz.Principal{User: authz.User{ID: user}, AllProjects: true}
 			if err := codepromotion.Applier(desired, providerpromotion.Deps{})(t.Context(), tx, operator); err != nil {
 				t.Fatal(err)
 			}

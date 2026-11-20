@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
 
 var (
@@ -21,9 +21,9 @@ func invalid(field, detail string) error {
 func Problem(err error) error {
 	switch {
 	case errors.Is(err, ErrRateCardExists):
-		return access.Fail(http.StatusConflict, "rate_card_exists", "The owner already has a rate card.")
+		return httpkit.Fail(http.StatusConflict, "rate_card_exists", "The owner already has a rate card.")
 	case errors.Is(err, ErrCatalogOutdated):
-		return access.Fail(http.StatusUnprocessableEntity, "catalog_outdated", "The catalog is older than one this source already took.")
+		return httpkit.Fail(http.StatusUnprocessableEntity, "catalog_outdated", "The catalog is older than one this source already took.")
 	default:
 		return err
 	}

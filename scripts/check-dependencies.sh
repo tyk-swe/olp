@@ -5,13 +5,20 @@ toolchain=$(sed -n 's/^toolchain go//p' go.mod)
 grep -q "^FROM golang:$toolchain-trixie@sha256:" deploy/Dockerfile || { echo "deploy/Dockerfile must build with the go.mod toolchain go$toolchain." >&2; exit 1; }
 package_manager=$(node -p "require('./package.json').packageManager")
 grep -qxF "RUN npm install --global $package_manager" deploy/Dockerfile || { echo "deploy/Dockerfile must install the package.json $package_manager." >&2; exit 1; }
+# GO-2026-6909 records no fixed version, yet saml v0.5.2 fixed both defects.
+# Pin the reviewed record, so a revised advisory gets reviewed again.
+# TODO: drop once https://go.dev/cl/861981 publishes the fixed version.
+reviewed_advisories='{"GO-2026-6909":"2026-11-05T22:55:15Z"}'
 # Tools are pinned independently of runtime dependencies.
-findings=$(go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -format json ./...)
-# GO-2026-6909 has no fixed crewjam/saml release. samlidentity.Verify requires
-# exactly one Issuer and one NameID, both in the SAML assertion namespace,
-# before the library parses the assertion, which closes both reported paths.
-called=$(jq -r 'select(.finding.trace[0].function) | .finding.osv' <<<"$findings" | sort -u | grep -vxF GO-2026-6909 || true)
-[[ -z $called ]] || { printf 'The code calls symbols affected by %s. Run govulncheck ./... for traces.\n' "$called" >&2; exit 1; }
+reachable=$(go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -format json ./... | jq -rs --argjson reviewed "$reviewed_advisories" '
+  [.[].osv | select(. != null and $reviewed[.id] == .modified) | .id] as $accepted
+  | [.[].finding | select(. != null and .trace[0].function != null and (.osv | IN($accepted[]) | not))
+     | "\(.osv) in \(.trace[0].module)@\(.trace[0].version), fixed in \(.fixed_version // "no release"), https://pkg.go.dev/vuln/\(.osv)"]
+  | unique | .[]')
+if [[ -n "$reachable" ]]; then
+  printf '%s\n' "$reachable" >&2
+  exit 1
+fi
 # nullable v1.2.0 carries the standard Apache-2.0 notice, rather than the
 # full text the classifier requires. Pin the reviewed notice, so an upstream
 # license change cannot inherit this classification silently.
@@ -29,6 +36,6 @@ go run github.com/google/go-licenses/v2@v2.0.1 check ./cmd/olp --ignore=github.c
   --allowed_licenses=AGPL-3.0,AGPL-3.0-only,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0,Unicode-DFS-2016,Unicode-3.0
 # The OpenAI rank files embedded for token estimation are data under tiktoken's
 # MIT license, which ships beside them and in the image. Pin the reviewed notice.
-tiktoken_notice=internal/operations/tokenization/estimate/ranks/LICENSE
+tiktoken_notice=internal/domain/operations/tokenization/estimate/ranks/LICENSE
 printf '%s  %s\n' 418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86 "$tiktoken_notice" | sha256sum --check --status
 pnpm audit --prod --audit-level high

@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
@@ -26,8 +26,6 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -35,10 +33,12 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
 
@@ -56,7 +56,34 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *jobs.Service, credentials release.Credentials, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *imports.Worker, reference *catalog.Signed) func() {
+type workerDeps struct {
+	pool         *pgxpool.Pool
+	vk           *coordination.Client
+	store        *debits.Store
+	shared       *sharedLimits
+	stream       string
+	mediaService *jobs.Service
+	credentials  release.Credentials
+	pluginHost   *plugins.Host
+	keys         *secrets.KeyRing
+	auth         *secrets.AuthKey
+	installation string
+	region       string
+	hostname     string
+	policy       *egress.Policy
+	log          *slog.Logger
+	exporter     *stream.Worker
+	focusWorker  *focus.Worker
+	importer     *imports.Worker
+	reference    *catalog.Signed
+}
+
+func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDeps) func() {
+	pool, vk, store, shared, streamName := d.pool, d.vk, d.store, d.shared, d.stream
+	mediaService, credentials, pluginHost := d.mediaService, d.credentials, d.pluginHost
+	keys, auth, policy, log := d.keys, d.auth, d.policy, d.log
+	installation, region, hostname := d.installation, d.region, d.hostname
+	exporter, focusWorker, importer, reference := d.exporter, d.focusWorker, d.importer, d.reference
 	var wg sync.WaitGroup
 	var limiter *admission.Limiter
 	var syncer *debits.Syncer
@@ -78,7 +105,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxp
 		Limiter: limiter, Log: log, Now: time.Now,
 	})
 	wg.Go(supervise(func() { batchWorker.Run(ctx) }))
-	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Log: log}
+	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Connections: egress.NewConnectionClientCache(128), Log: log}
 	wg.Go(supervise(func() { retained.Run(ctx) }))
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
@@ -100,7 +127,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxp
 		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
 			Pool: pool, Keys: keys, Installation: installation, Log: log,
 			Sender: notifications.NewSender(*policy), Fleet: fleetState, Catalog: reference,
-			NewID: access.NewID, Now: time.Now,
+			NewID: httpkit.NewID, Now: time.Now,
 		})
 	}))
 	wg.Go(supervise(func() { runDebitReconciliation(ctx, pool, store, syncer, log) }))
@@ -113,7 +140,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxp
 	wg.Go(supervise(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.
-		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: stream, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
+		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: streamName, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
 			log.Error("request metadata consumer stopped", "error", err)
 		}
 	}))

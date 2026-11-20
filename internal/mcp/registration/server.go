@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -119,15 +121,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	a.Route(mux, "PUT /api/v1/mcp-servers/{server_id}", s.update, access.Deadline(20*time.Second))
 	a.Route(mux, "DELETE /api/v1/mcp-servers/{server_id}", s.retire)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	page, err := httpkit.Page(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	summaryColumns := strings.Replace(columns, "v.tools", "'[]'::jsonb", 1)
 	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+summaryColumns+joined+" WHERE s.retired_at IS NULL AND s.id<$1 AND ($2 OR s.project_id=ANY($3::uuid[])) ORDER BY s.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (serverSummary, error) {
 		definition, scanErr := scan(row)
@@ -137,23 +139,23 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 		return summarize(*definition), nil
 	})
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item serverSummary) string { return item.ID }), nil
+	return httpkit.ListReplyBy(items, page, func(item serverSummary) string { return item.ID }), nil
 }
-func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "server_id")
+func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := Load(r.Context(), s.access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
+		return httpkit.Reply{}, err
 	}
-	return access.Detail(d, d.ETag), nil
+	return httpkit.Detail(d, d.ETag), nil
 }
 
 type revisionResponse struct {
@@ -174,21 +176,21 @@ type revisionResponse struct {
 	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "server_id")
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	revision, err := access.IDParam(r, "revision_id")
+	revision, err := httpkit.IDParam(r, "revision_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	d, err := Load(r.Context(), s.access.Pool, id, false)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
-		return access.Reply{}, err
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var version int64
 	catalog := upstream.Catalog{}
@@ -201,27 +203,27 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	toolPrices := map[string]string{}
 	err = s.access.Pool.QueryRow(r.Context(), "SELECT revision,endpoint,protocol_version,tools,digest,certified_at,unit_price::text,tool_prices,oauth,stdio,delegation FROM olp.mcp_server_revisions WHERE server_id=$1 AND id=$2", id, revision).Scan(&version, &endpoint, &catalog.Protocol, &catalog.Tools, &catalog.Digest, &certified, &unitPrice, &toolPrices, &oauth, &stdio, &delegation)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if toolPrices == nil {
 		toolPrices = map[string]string{}
 	}
-	return access.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
+	return httpkit.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
-func (s *Server) create(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) create(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.write(r, p, "", false)
 }
-func (s *Server) update(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "server_id")
+func (s *Server) update(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.write(r, p, id, false)
 }
-func (s *Server) retire(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "server_id")
+func (s *Server) retire(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.write(r, p, id, true)
 }
@@ -229,14 +231,14 @@ func (s *Server) retire(r *http.Request, p access.Principal) (access.Reply, erro
 // preflight authenticates and checks replay/preconditions before network IO,
 // then releases every database lock. The commit phase repeats the checks so
 // upstream validation cannot race a new owner or draft observation.
-func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *access.Reply, error) {
+func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *httpkit.Reply, error) {
 	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback(r.Context())
 	if id == "" && (in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid()) {
-		return nil, nil, access.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
+		return nil, nil, httpkit.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
 	}
 	d, err := s.loadForWrite(r.Context(), tx, p, in, id)
 	if err != nil {
@@ -251,17 +253,17 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 		return d, &reply, err
 	}
 	if d != nil {
-		if err = access.Match(r, d.ETag); err != nil {
+		if err = httpkit.Match(r, d.ETag); err != nil {
 			return nil, nil, err
 		}
 		if d.RetiredAt != nil {
-			return nil, nil, access.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
+			return nil, nil, httpkit.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 		}
 		if in.Present("stdio") {
-			return nil, nil, access.Invalid("stdio", "The executable binding is immutable.")
+			return nil, nil, httpkit.Invalid("stdio", "The executable binding is immutable.")
 		}
 		if in.ProjectID != nil || in.Transport != "" {
-			return nil, nil, access.Invalid("project_id", "Project and transport are immutable.")
+			return nil, nil, httpkit.Invalid("project_id", "Project and transport are immutable.")
 		}
 	}
 	return d, nil, nil
@@ -345,75 +347,75 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 	return effective != routing.EffectiveToolLimits(previous.CallsPerMinute, previous.MaxConcurrency, previous.PerKeyCallsPerMinute, previous.PerKeyMaxConcurrency)
 }
 
-func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bool) (access.Reply, error) {
+func (s *Server) write(r *http.Request, _ authz.Principal, id string, retire bool) (httpkit.Reply, error) {
 	in, err := s.prepareWrite(r, id, retire)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	previous, replayed, err := s.preflight(r, in, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
 		return *replayed, nil
 	}
 	if !retire && definitionTransport(in, previous) == routing.MCPStdio && (in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 || !definitionStdio(in, previous).Valid()) {
-		return access.Reply{}, access.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
+		return httpkit.Reply{}, httpkit.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
 	}
 	limitsOnly := !retire && limitsOnlyUpdate(in, previous)
 	material, catalog, err := s.certifyChange(r.Context(), in, previous, retire, limitsOnly)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer clear(material)
 	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := s.loadForWrite(r.Context(), tx, principal, in, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	claim, replay, err := s.access.Replay(r, tx, principal, in)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if replay != nil {
 		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
-		if err := access.Match(r, current.ETag); err != nil {
-			return access.Reply{}, err
+		if err := httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, err
 		}
 		if current.ETag != previous.ETag {
-			return access.Reply{}, access.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
+			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
 		}
 	}
 	change, err := s.saveChange(r.Context(), tx, principal.UserID(), in, current, catalog, material, retire, limitsOnly)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := DeleteReplacedCredentials(r.Context(), tx, current, replacedBy(in, retire)); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), change.action, "mcp_server", change.id, "success"); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	reply, err := changeReply(r.Context(), tx, change, retire, current == nil)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if _, err := access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	if s.access.RuntimePublisher != nil {
 		if err := s.access.RuntimePublisher(r.Context(), tx, principal.UserID()); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 	}
 	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
 }

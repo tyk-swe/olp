@@ -10,9 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type destinationInput struct {
@@ -63,15 +64,15 @@ func destinationSecret(typ contract.NotificationDestinationType, raw json.RawMes
 	if typ == contract.NotificationDestinationTypeWebhook {
 		var secret string
 		if err := json.Unmarshal(raw, &secret); err != nil {
-			return nil, access.Invalid("secret", "Use a signing secret string or null.")
+			return nil, httpkit.Invalid("secret", "Use a signing secret string or null.")
 		}
 		if secret == "" || len(secret) > signingSecretLimit {
-			return nil, access.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
+			return nil, httpkit.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 		}
 		return newSecret{[]byte(secret)}, nil
 	}
 	if len(raw) > secretObjectLimit {
-		return nil, access.Invalid("secret", "The secret object is too large.")
+		return nil, httpkit.Invalid("secret", "The secret object is too large.")
 	}
 	return newSecret{raw}, nil
 }
@@ -81,16 +82,16 @@ func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
 		return json.RawMessage(`{}`), nil
 	}
 	if len(raw) > configurationLimit {
-		return nil, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
+		return nil, httpkit.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
 	}
 	if _, err := decodeObject(raw); err != nil {
-		return nil, access.Invalid("configuration", "Use a configuration object.")
+		return nil, httpkit.Invalid("configuration", "Use a configuration object.")
 	}
 	return raw, nil
 }
 
 func parseDestination(input destinationInput) (destinationTarget, error) {
-	if err := access.ValidText("name", input.Name, nameLimit); err != nil {
+	if err := httpkit.ValidText("name", input.Name, nameLimit); err != nil {
 		return destinationTarget{}, err
 	}
 	configuration, err := configurationObject(input.Configuration)
@@ -112,10 +113,10 @@ func parseDestination(input destinationInput) (destinationTarget, error) {
 
 func (s *Server) checkEndpoint(d destination, enabled bool) error {
 	if err := kindOf(d.Type).check(&s.egress, d); err != nil {
-		return access.Invalid("destination", "The destination or its configuration is invalid.")
+		return httpkit.Invalid("destination", "The destination or its configuration is invalid.")
 	}
 	if enabled && requiresSecret(d.Type) {
-		return access.Invalid("secret", "This destination type requires a credential secret object.")
+		return httpkit.Invalid("secret", "This destination type requires a credential secret object.")
 	}
 	return nil
 }
@@ -123,18 +124,18 @@ func (s *Server) checkEndpoint(d destination, enabled bool) error {
 func (s *Server) checkBinding(d destination, secret []byte) error {
 	_, err := kindOf(d.Type).open(&s.egress, d, secret)
 	if errors.Is(err, errMalformedCredential) {
-		return access.Invalid("secret", "Use the channel credential object or null.")
+		return httpkit.Invalid("secret", "Use the channel credential object or null.")
 	}
 	if err != nil {
-		return access.Invalid("destination", "The destination, configuration or secret is invalid.")
+		return httpkit.Invalid("destination", "The destination, configuration or secret is invalid.")
 	}
 	return nil
 }
 
-func (s *Server) createNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) createNotificationDestination(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input destinationInput
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	return create(s, r, destinations, creation[destinationTarget]{projectID: input.ProjectID, fingerprint: input,
 		parse: func(*string) (destinationTarget, error) {
@@ -147,7 +148,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 			}
 			return target, nil
 		},
-		insert: func(tx pgx.Tx, p access.Principal, projectID *string, target destinationTarget, id, etag string) error {
+		insert: func(tx pgx.Tx, p authz.Principal, projectID *string, target destinationTarget, id, etag string) error {
 			if _, err := tx.Exec(r.Context(), createChannelDestinationSQL,
 				id, target.name, target.URL, projectID, etag, p.UserID(), target.enabled, target.Type, target.Configuration); err != nil {
 				return err
@@ -156,10 +157,10 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 		}})
 }
 
-func (s *Server) updateNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) updateNotificationDestination(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	patch, err := decodePatch(r, "destination", "Unknown destination field.", destinationPatchFields)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	return s.update(r, destinations, func(tx pgx.Tx, row document, etag string) error {
 		var current storedDestination
@@ -171,7 +172,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 			return err
 		}
 		if _, replaced := target.secret.(newSecret); !replaced && current.SecretConfigured && target.URL != current.URL {
-			return access.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
+			return httpkit.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
 		}
 		secret, err := s.effectiveSecret(r.Context(), tx, row.id, current, target.secret)
 		if err != nil {
@@ -193,7 +194,7 @@ func patchDestination(current storedDestination, patch map[string]json.RawMessag
 	if err != nil {
 		return destinationTarget{}, err
 	}
-	if err := access.ValidText("name", name, nameLimit); err != nil {
+	if err := httpkit.ValidText("name", name, nameLimit); err != nil {
 		return destinationTarget{}, err
 	}
 	url, err := patched(patch, "url", current.URL, "Use a valid destination URL.")
@@ -201,7 +202,7 @@ func patchDestination(current storedDestination, patch map[string]json.RawMessag
 		return destinationTarget{}, err
 	}
 	if raw, present := patch["type"]; present && !sameType(raw, current.Type) {
-		return destinationTarget{}, access.Invalid("type", "The destination type cannot be changed.")
+		return destinationTarget{}, httpkit.Invalid("type", "The destination type cannot be changed.")
 	}
 	configuration, err := patchedConfiguration(patch, current.Configuration)
 	if err != nil {
@@ -230,7 +231,7 @@ func patched[T any](patch map[string]json.RawMessage, field string, stored T, me
 	}
 	var value T
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return stored, access.Invalid(field, message)
+		return stored, httpkit.Invalid(field, message)
 	}
 	return value, nil
 }
@@ -331,7 +332,7 @@ func (s *Server) storeSecret(ctx context.Context, tx pgx.Tx, secret []byte) (*st
 	if secret == nil {
 		return nil, nil
 	}
-	id := access.NewID()
+	id := httpkit.NewID()
 	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.NotificationSecret, secret, nil); err != nil {
 		return nil, err
 	}

@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -133,10 +133,10 @@ func validateCodeAdmission(in Admission) error {
 	if err := in.Operation.Identity.Validate(); err != nil {
 		return err
 	}
-	if err := access.ValidText("operation", in.Operation.Name, 100); err != nil {
+	if err := httpkit.ValidText("operation", in.Operation.Name, 100); err != nil {
 		return codemode.Refuse(400, "code_operation_invalid")
 	}
-	if err := access.ValidText("model", in.Operation.Model, 200); err != nil {
+	if err := httpkit.ValidText("model", in.Operation.Model, 200); err != nil {
 		return codemode.Refuse(400, "code_model_invalid")
 	}
 	return nil
@@ -298,7 +298,7 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 		return out, tx.Commit(ctx)
 	}
 	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
-	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
+	out.Attempt = codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
 			return out, err
@@ -432,7 +432,7 @@ func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Bin
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return b, nil, err
 	}
-	b = codemode.Binding{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
+	b = codemode.Binding{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
 	b.RootID = b.ID
 	var root *codeSelection
 	if identity.Parent != "" {
@@ -778,6 +778,6 @@ func (s *Store) RecordRefusal(ctx context.Context, route codemode.Route, keyID, 
 	if !codeRefusalReason.MatchString(code) {
 		return codemode.Refuse(400, "code_refusal_invalid")
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, access.NewID(), route.ProjectID, route.ID, keyID, code, digest)
+	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, httpkit.NewID(), route.ProjectID, route.ID, keyID, code, digest)
 	return err
 }

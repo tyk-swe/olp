@@ -3,7 +3,9 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"os"
@@ -15,42 +17,48 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
 const legacyRouteSlug = "legacy-content-policy-for-a-route-whose-slug-is-long-enough-to-hash-its-name"
 
-func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixture canaryFixture) {
-	s := &service{t: t, pool: parent.pool, origin: parent.origin, env: parent.env}
+func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller, fixture canaryFixture) {
+	s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
 	operator := s.seedPromotion(owner, fixture)
 
-	exported := s.want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	exported := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	document := exported["document"].(map[string]any)
 	assertCanonicalDocument(t, document)
+	testPromotionPolicyMembers(t, s, operator, document)
 	assertExportedBillingImport(t, document)
 	request := map[string]any{"document": document, "expected_digest": exported["digest"]}
 
-	planned := s.want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
+	planned := s.Want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 	assertSettledPlan(t, planned)
 	testPromotionCLIReview(t, s, operator, document)
 	if planned["digest"] != exported["digest"] {
 		t.Errorf("plan digest %v differs from export digest %v", planned["digest"], exported["digest"])
 	}
 
-	s.want(operator, "POST", "/api/v1/configuration/apply", request, idempotent(), http.StatusOK)
+	s.Want(operator, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusOK)
 
-	reexported := s.want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	reexported := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	if reexported["digest"] != exported["digest"] {
 		t.Errorf("applying an unchanged export moved the digest from %v to %v", exported["digest"], reexported["digest"])
 	}
-	replanned := s.want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
+	replanned := s.Want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 	if !reflect.DeepEqual(replanned, planned) {
 		t.Errorf("re-plan after apply differs:\nbefore %v\nafter  %v", planned, replanned)
 	}
 
-	legacy := s.want(operator, "POST", "/api/v1/configuration/plan", map[string]any{"document": legacyDocument(t, document)}, nil, http.StatusOK)
+	legacy := s.Want(operator, "POST", "/api/v1/configuration/plan", map[string]any{"document": legacyDocument(t, document)}, nil, http.StatusOK)
 	policy := "route.legacy-content-policy-for-a-route-whose-slug-is-long-enoug-25c7b87b3a3e376a"
 	want := []map[string]any{
 		{"kind": "guardrail_attachment", "key": "route/" + legacyRouteSlug + "/" + policy, "action": "create"},
@@ -66,8 +74,8 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 		t.Errorf("v1 content policy converted to %v, want %v", got, want)
 	}
 
-	s.want(operator, "POST", "/api/v1/configuration/apply", map[string]any{"document": installationPolicyDocument(document)}, idempotent(), http.StatusOK)
-	policies := items(s.want(operator, "GET", "/api/v1/guardrail-policies", nil, nil, http.StatusOK)["items"])
+	s.Want(operator, "POST", "/api/v1/configuration/apply", map[string]any{"document": installationPolicyDocument(document)}, harness.Idempotent(), http.StatusOK)
+	policies := items(s.Want(operator, "GET", "/api/v1/guardrail-policies", nil, nil, http.StatusOK)["items"])
 	index := slices.IndexFunc(policies, func(p map[string]any) bool {
 		return p["name"] == "installation-wide" && p["project_id"] == "installation"
 	})
@@ -75,9 +83,9 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 		t.Fatalf("installation policy is not listed: %v", policies)
 	}
 	installed := policies[index]
-	s.want(operator, "POST", "/api/v1/guardrail-attachments", map[string]any{
+	s.Want(operator, "POST", "/api/v1/guardrail-attachments", map[string]any{
 		"scope": "installation", "scope_id": "installation", "policy_revision_id": installed["revision_id"], "order": 1,
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	testPromotionEmptyAttributionPolicyConverges(t, s, operator)
 }
 
@@ -94,67 +102,70 @@ func installationPolicyDocument(exported map[string]any) map[string]any {
 	return document
 }
 
-func (s *service) installationToken(owner *caller, name string) *caller {
-	s.t.Helper()
-	scopes := make([]string, 0, len(access.TokenScopes()))
-	for _, operation := range access.TokenScopes() {
+func (s *service) installationToken(owner *harness.Caller, name string) *harness.Caller {
+	s.T.Helper()
+	scopes := make([]string, 0, len(authz.TokenScopes()))
+	for _, operation := range authz.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
-	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{
 		"name": name, "scopes": scopes, "expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
-	}, idempotent(), http.StatusCreated)
-	return &caller{name: name + " token", token: token["secret"].(string)}
+	}, harness.Idempotent(), http.StatusCreated)
+	return &harness.Caller{Name: name + " token", Token: token["secret"].(string)}
 }
 
-func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {
-	s.t.Helper()
+func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) *harness.Caller {
+	s.T.Helper()
 	operator := s.installationToken(owner, "promotion")
 
-	zone := s.want(operator, "GET", "/api/v1/settings/budgets.time_zone", nil, nil, http.StatusOK)
-	s.want(operator, "PUT", "/api/v1/settings/budgets.time_zone", map[string]any{"value": "Europe/Berlin"}, etag(zone), http.StatusOK)
-	budget := s.want(operator, "GET", "/api/v1/budgets/installation", nil, nil, http.StatusOK)
-	s.want(operator, "PUT", "/api/v1/budgets/installation", map[string]any{"policy": map[string]any{"monthly_cost_limit": "500.00"}}, etag(budget), http.StatusOK)
+	zone := s.Want(operator, "GET", "/api/v1/settings/budgets.time_zone", nil, nil, http.StatusOK)
+	s.Want(operator, "PUT", "/api/v1/settings/budgets.time_zone", map[string]any{"value": "Europe/Berlin"}, harness.ETag(zone), http.StatusOK)
+	budget := s.Want(operator, "GET", "/api/v1/budgets/installation", nil, nil, http.StatusOK)
+	s.Want(operator, "PUT", "/api/v1/budgets/installation", map[string]any{"policy": map[string]any{"monthly_cost_limit": "500.00"}}, harness.ETag(budget), http.StatusOK)
 	organization := fixture.ids["organization_id"]
-	second := s.want(operator, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "Promotion-Second"}, idempotent(), http.StatusCreated)["id"].(string)
-	s.want(operator, "POST", "/api/v1/route-templates", map[string]any{
+	missingProjects := "/api/v1/organizations/" + uuid.NewString() + "/projects"
+	s.Want(operator, "GET", missingProjects, nil, nil, http.StatusNotFound)
+	s.Want(operator, "POST", missingProjects, map[string]any{"name": "Missing parent"}, harness.Idempotent(), http.StatusNotFound)
+	second := s.Want(operator, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "Promotion-Second"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	s.Want(operator, "POST", "/api/v1/route-templates", map[string]any{
 		"name": "promotion-template", "provider_selector": "provider:" + fixture.ids["provider_id"], "model_filter": "*",
 		"slug_pattern": "templated-{model}", "overall_timeout_ms": 5000, "max_attempts": 1, "project_id": fixture.project,
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 	price := func(model, input string) map[string]any {
 		return map[string]any{"provider_kind": "openai_compatible", "provider_id": fixture.ids["provider_id"], "model": model, "operation": "generation", "currency": "USD", "input_per_million": input, "output_per_million": "2.00"}
 	}
-	s.want(operator, "POST", "/api/v1/pricing/revisions", map[string]any{
+	s.Want(operator, "POST", "/api/v1/pricing/revisions", map[string]any{
 		"effective_at": time.Now().UTC().Format(time.RFC3339), "prices": []any{price(vendor.Model, "1.00"), price("a-cheaper-model", "0.50")},
-	}, idempotent(), http.StatusCreated)
-	s.want(operator, "POST", "/api/v1/pricing/discounts", map[string]any{"provider_kind": "openai_compatible", "provider_id": fixture.ids["provider_id"], "multiplier": "0.9"}, idempotent(), http.StatusCreated)
-	card := s.want(operator, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "organization", "id": organization}}, idempotent(), http.StatusCreated)
-	s.want(operator, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "1.25"}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
+	s.Want(operator, "POST", "/api/v1/pricing/discounts", map[string]any{"provider_kind": "openai_compatible", "provider_id": fixture.ids["provider_id"], "multiplier": "0.9"}, harness.Idempotent(), http.StatusCreated)
+	card := s.Want(operator, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "organization", "id": organization}}, harness.Idempotent(), http.StatusCreated)
+	s.Want(operator, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "1.25"}, harness.Idempotent(), http.StatusCreated)
 	group := func(name string, projects ...string) {
 		grants := make([]any, 0, len(projects))
 		for _, project := range projects {
 			grants = append(grants, map[string]any{"value": project, "role": "viewer"})
 		}
-		s.want(operator, "POST", "/scim/v2/Groups", map[string]any{
+		s.Want(operator, "POST", "/scim/v2/Groups", map[string]any{
 			"schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:Group"},
 			"displayName": name,
 			"urn:openllmproxy:params:scim:schemas:extension:2.0:Group": map[string]any{"role": "viewer", "accessScope": "assigned", "projects": grants},
 		}, nil, http.StatusCreated)
 	}
-	bedrock := s.want(operator, "POST", "/api/v1/providers", map[string]any{
+	bedrock := s.Want(operator, "POST", "/api/v1/providers", map[string]any{
 		"name": "promotion-bedrock", "project_id": fixture.project,
 		"configuration": map[string]any{"kind": "bedrock", "auth_mode": "default_chain", "cloud_region": "us-east-1"},
-	}, idempotent(), http.StatusCreated)
-	s.want(operator, "PUT", "/api/v1/providers/"+bedrock["id"].(string)+"/billing-import", map[string]any{
+	}, harness.Idempotent(), http.StatusCreated)
+	s.Want(operator, "PUT", "/api/v1/providers/"+bedrock["id"].(string)+"/billing-import", map[string]any{
 		"credential": map[string]any{"auth_mode": "workload"},
 		"scope": map[string]any{
 			"payer_account_id": "123456789012", "bucket": "olp-cur", "report_prefix": "cur/olp", "region": "us-east-1",
 			"linked_account_ids": []string{"210987654321", "123456789012"},
 		},
-	}, idempotent(etag(bedrock)), http.StatusCreated)
+	}, harness.Idempotent(harness.ETag(bedrock)), http.StatusCreated)
 	group("zeta", second, fixture.project)
 	group("alpha", fixture.project)
-	mfa := s.want(operator, "GET", "/api/v1/settings/auth.mfa_required", nil, nil, http.StatusOK)
-	s.want(operator, "PUT", "/api/v1/settings/auth.mfa_required", map[string]any{"value": "true"}, etag(mfa), http.StatusOK)
+	mfa := s.Want(operator, "GET", "/api/v1/settings/auth.mfa_required", nil, nil, http.StatusOK)
+	s.Want(operator, "PUT", "/api/v1/settings/auth.mfa_required", map[string]any{"value": "true"}, harness.ETag(mfa), http.StatusOK)
 	return operator
 }
 
@@ -265,7 +276,7 @@ func text(entry map[string]any, field string) string {
 	return value
 }
 
-func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owner *caller) {
+func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owner *harness.Caller) {
 	t.Helper()
 	policies := map[string]map[string]any{
 		uniqueName("empty-required"): {"required_attribution_keys": []any{}},
@@ -273,9 +284,9 @@ func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owne
 		uniqueName("empty-both"):     {"required_attribution_keys": []any{}, "attribution_defaults": map[string]any{}},
 	}
 	for name := range policies {
-		s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": name}, idempotent(), http.StatusCreated)
+		s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": name}, harness.Idempotent(), http.StatusCreated)
 	}
-	exported := s.want(owner, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	exported := s.Want(owner, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	document := exported["document"].(map[string]any)
 	for _, project := range items(document["projects"]) {
 		if policy, ok := policies[text(project, "name")]; ok {
@@ -283,15 +294,15 @@ func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owne
 		}
 	}
 	request := map[string]any{"document": document}
-	s.want(owner, "POST", "/api/v1/configuration/apply", request, idempotent(), http.StatusOK)
-	assertSettledPlan(t, s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
+	s.Want(owner, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusOK)
+	assertSettledPlan(t, s.Want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
 	for _, desired := range []any{map[string]any{"attribution_defaults": map[string]any{"team": "fixture"}}, nil} {
 		for _, project := range items(document["projects"]) {
 			if _, ok := policies[text(project, "name")]; ok {
 				project["attribution_policy"] = desired
 			}
 		}
-		plan := s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
+		plan := s.Want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 		actions := items(plan["actions"])
 		for name := range policies {
 			index := slices.IndexFunc(actions, func(action map[string]any) bool {
@@ -301,12 +312,12 @@ func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owne
 				t.Fatalf("changed attribution policy for %s was suppressed: %v", name, actions)
 			}
 		}
-		s.want(owner, "POST", "/api/v1/configuration/apply", request, idempotent(), http.StatusOK)
-		assertSettledPlan(t, s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
+		s.Want(owner, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusOK)
+		assertSettledPlan(t, s.Want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
 	}
 }
 
-func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document map[string]any) {
+func testPromotionCLIReview(t *testing.T, s *service, operator *harness.Caller, document map[string]any) {
 	t.Helper()
 	directory := t.TempDir()
 	documentPath, tokenPath := filepath.Join(directory, "configuration.json"), filepath.Join(directory, "token")
@@ -317,12 +328,12 @@ func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document
 	if err = os.WriteFile(documentPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(tokenPath, []byte(operator.token), 0o600); err != nil {
+	if err = os.WriteFile(tokenPath, []byte(operator.Token), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	plan, comment, review := filepath.Join(directory, "plan.json"), filepath.Join(directory, "comment.json"), filepath.Join(directory, "review.json")
 	command := exec.CommandContext(t.Context(), harness.Required(t, "OLP_TEST_BINARY"), "config", "plan", "--file", documentPath, "--output", plan)
-	command.Env = s.env.list(map[string]string{"OLP_MANAGEMENT_URL": s.origin, "OLP_MANAGEMENT_TOKEN_FILE": tokenPath})
+	command.Env = s.Env.List(map[string]string{"OLP_MANAGEMENT_URL": s.Origin, "OLP_MANAGEMENT_TOKEN_FILE": tokenPath})
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("plan configuration: %v\n%s", err, output)
 	}
@@ -335,5 +346,90 @@ func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("review current CLI plan: %v\n%s", err, output)
 		}
+	}
+}
+
+func testPromotionPolicyMembers(t *testing.T, s *service, operator *harness.Caller, document map[string]any) {
+	t.Helper()
+	for _, section := range []string{"routes", "templates"} {
+		for _, tc := range []struct {
+			policy string
+			valid  bool
+		}{
+			{`{"constraints":{"max_cost":"1.00"},"defaults":{"allow_fallbacks":false}}`, true},
+			{`{"constraints":null,"defaults":null}`, true},
+			{`{"constraints":{"max_cost":null},"defaults":{"strategy":null}}`, true},
+			{`{"constraints":{"max_costt":"1.00"}}`, false},
+			{`{"constraints":{"Require_zero_data_retention":true}}`, false},
+			{`{"defaults":{"allow_fallbackss":false}}`, false},
+			{`{"defaults":{"strategy":"weighted","Strategy":"price"}}`, false},
+		} {
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var changed map[string]any
+			if err := json.Unmarshal(encoded, &changed); err != nil {
+				t.Fatal(err)
+			}
+			entries := items(changed[section])
+			if len(entries) == 0 {
+				t.Fatalf("no %s fixture", section)
+			}
+			entries[0]["routing_policy"] = json.RawMessage(tc.policy)
+			if tc.valid {
+				s.Want(operator, "POST", "/api/v1/configuration/plan", map[string]any{"document": changed}, nil, http.StatusOK)
+				continue
+			}
+			for _, operation := range []string{"plan", "apply"} {
+				response := s.Want(operator, "POST", "/api/v1/configuration/"+operation, map[string]any{"document": changed}, harness.Idempotent(), http.StatusBadRequest)
+				if response["type"] != "https://openllmproxy.dev/problems/invalid_json" {
+					t.Fatalf("%s %s: %v", section, operation, response)
+				}
+			}
+		}
+	}
+}
+
+type promotionSnapshotCommands struct {
+	installed int
+	fail      bool
+}
+
+func (c *promotionSnapshotCommands) Do(context.Context, ...string) (any, error) {
+	c.installed++
+	if c.fail {
+		return nil, errors.New("Valkey unavailable")
+	}
+	return []any{int64(1), int64(1), "ok", int64(1), int64(1)}, nil
+}
+
+func (*promotionSnapshotCommands) Pipeline(context.Context, ...[]string) ([]any, error) {
+	return nil, errors.New("Valkey unavailable")
+}
+
+func TestPromotionStopsSnapshotInstallationOnFailure(t *testing.T) {
+	commands := &promotionSnapshotCommands{fail: true}
+	runner, err := scripts.NewRunner(commands, "olp:promotion:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	costs := project.CostsOf(admission.NewDurable(runner, nil))
+	snapshots := []limits.Snapshot{
+		{OwnerID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", Basis: limits.BasisCost, DailyAccrued: "1", MonthlyAccrued: "1"},
+		{OwnerID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", Basis: limits.BasisCharge, DailyAccrued: "1", MonthlyAccrued: "1"},
+	}
+	if err := costs.Install(t.Context(), snapshots); err == nil {
+		t.Fatal("accepted failed cost install")
+	}
+	if commands.installed != 1 {
+		t.Fatal("published charge snapshot after failed cost install")
+	}
+	commands.fail = false
+	if err := costs.Install(t.Context(), snapshots[1:]); err != nil {
+		t.Fatal(err)
+	}
+	if commands.installed != 2 {
+		t.Fatal("did not install valid snapshot")
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 var (
@@ -55,9 +55,6 @@ var (
 
 type Commander interface {
 	Do(ctx context.Context, args ...string) (any, error)
-}
-
-type Pipeliner interface {
 	Pipeline(ctx context.Context, commands ...[]string) ([]any, error)
 }
 
@@ -145,16 +142,7 @@ func (r Runner) runAll(ctx context.Context, calls []call) []reply {
 	if len(calls) == 0 {
 		return nil
 	}
-	pipeline, ok := r.client.(Pipeliner)
-	if !ok {
-		replies := make([]reply, len(calls))
-		for index, c := range calls {
-			value, err := r.run(ctx, c)
-			replies[index] = reply{value: value, err: err}
-		}
-		return replies
-	}
-	replies := pipelined(ctx, pipeline, calls, true)
+	replies := pipelined(ctx, r.client, calls, true)
 	missing := make([]int, 0, len(calls))
 	for index, answer := range replies {
 		if answer.err != nil && namesMissingScript(answer.err) {
@@ -168,13 +156,13 @@ func (r Runner) runAll(ctx context.Context, calls []call) []reply {
 	for position, index := range missing {
 		retried[position] = calls[index]
 	}
-	for position, answer := range pipelined(ctx, pipeline, retried, false) {
+	for position, answer := range pipelined(ctx, r.client, retried, false) {
 		replies[missing[position]] = answer
 	}
 	return replies
 }
 
-func pipelined(ctx context.Context, pipeline Pipeliner, calls []call, cached bool) []reply {
+func pipelined(ctx context.Context, pipeline Commander, calls []call, cached bool) []reply {
 	commands := make([][]string, len(calls))
 	for index, c := range calls {
 		commands[index] = c.command(cached)

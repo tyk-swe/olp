@@ -8,7 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 

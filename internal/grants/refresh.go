@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -13,15 +12,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -286,7 +287,7 @@ func (r *Refresher) run(ctx context.Context, conn *pgx.Conn, g *dueGrant) (abi.G
 	defer client.CloseIdleConnections()
 	// The advisory lock only serializes live database sessions. This claim
 	// survives session loss and worker exit, and fences every completion.
-	g.refreshAttemptID = new(access.NewID())
+	g.refreshAttemptID = new(httpkit.NewID())
 	tag, err := conn.Exec(ctx, `UPDATE olp.provider_grants SET refresh_attempt_id=$3,
 		refresh_at=now()+$4*interval '1 second',updated_at=now()
 		WHERE credential_id=$1 AND refresh_token_id=$2 AND refresh_attempt_id IS NULL`,

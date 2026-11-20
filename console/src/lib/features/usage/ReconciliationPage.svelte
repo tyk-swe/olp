@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -35,7 +36,7 @@
   }
 </script>
 
-<svelte:head><title>Reconciliation · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Reconciliation" />
 
 <form class="toolbar range" aria-label="Time range" onsubmit={apply}>
   <label class="filter-control"

@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
   import { createOwner } from '#lib/features/access/setup/api.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     PASSWORD_MAX_LENGTH,
@@ -225,8 +225,8 @@
       disabled={submitting}
     />
     <p class="field-hint" id="setup-token-hint">
-      Paste the one-time token supplied by your operator. It is not saved by
-      this console.
+      Print it on the server with <code>olp setup-token</code>. It is not saved
+      by this console.
     </p>
     {#if errors.setupToken}<p class="field-error" id="setupToken-error">
         {errors.setupToken}
@@ -323,10 +323,6 @@
 
   .field-hint {
     color: var(--foreground-muted);
-  }
-
-  .field-error {
-    color: var(--danger);
   }
 
   .submit {

@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/tests/harness"
 )
 
 // readinessRoute reports 503 by design until a process has a fresh snapshot.
@@ -75,20 +77,20 @@ type canaryFixture struct {
 
 // seedCanary creates a project whose resource names contain "canary", so any
 // response mentioning that word has crossed a project boundary.
-func (s *service) seedCanary(owner *caller, vendorURL string) canaryFixture {
-	s.t.Helper()
-	organization := s.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "canary-organization"}, idempotent(), http.StatusCreated)["id"].(string)
-	project := s.want(owner, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "canary-project"}, idempotent(), http.StatusCreated)["id"].(string)
+func (s *service) seedCanary(owner *harness.Caller, vendorURL string) canaryFixture {
+	s.T.Helper()
+	organization := s.Want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "canary-organization"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
+	project := s.Want(owner, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "canary-project"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 	provider := s.activeProvider(owner, "canary-provider", vendorURL, project)
 	draft, activated := s.publishedRoute(owner, "canary-route", provider, project)
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "canary-key", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
-	group := s.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "canary-budget", "monthly_cost_limit": "5.00", "project_id": project}, idempotent(), http.StatusCreated)
-	increase := s.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "budget_group", "id": group["id"]}, "window": "month", "amount": "1", "reason": "canary increase"}, idempotent(), http.StatusCreated)
-	policy := s.want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{"name": "canary-policy", "project_id": project, "entries": []any{}}, idempotent(), http.StatusCreated)
-	s.want(owner, "POST", "/api/v1/guardrail-policies/"+policy["policy_id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, idempotent(etag(policy)), http.StatusNoContent)
-	attachment := s.want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{"scope": "installation", "scope_id": "installation", "policy_revision_id": policy["revision_id"], "order": 0}, idempotent(), http.StatusCreated)
-	s.eventually("the canary runtime snapshot being ready", startupLimit, func() (bool, string) {
-		status, raw := s.do(owner, "GET", "/api/v1/health/ready", nil, nil)
+	key := s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "canary-key", "scopes": []string{"inference"}, "project_id": project}, harness.Idempotent(), http.StatusCreated)
+	group := s.Want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "canary-budget", "monthly_cost_limit": "5.00", "project_id": project}, harness.Idempotent(), http.StatusCreated)
+	increase := s.Want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "budget_group", "id": group["id"]}, "window": "month", "amount": "1", "reason": "canary increase"}, harness.Idempotent(), http.StatusCreated)
+	policy := s.Want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{"name": "canary-policy", "project_id": project, "entries": []any{}}, harness.Idempotent(), http.StatusCreated)
+	s.Want(owner, "POST", "/api/v1/guardrail-policies/"+policy["policy_id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, harness.Idempotent(harness.ETag(policy)), http.StatusNoContent)
+	attachment := s.Want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{"scope": "installation", "scope_id": "installation", "policy_revision_id": policy["revision_id"], "order": 0}, harness.Idempotent(), http.StatusCreated)
+	s.Eventually("the canary runtime snapshot being ready", harness.StartupLimit, func() (bool, string) {
+		status, raw := s.Do(owner, "GET", "/api/v1/health/ready", nil, nil)
 		return status == http.StatusOK, describe(status, raw)
 	})
 	return canaryFixture{
@@ -140,10 +142,10 @@ func secureReads(t *testing.T) []string {
 func TestManagementReadsAnswerWithoutServerErrors(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	owner := s.owner()
+	owner := s.Owner()
 	fixture := s.seedCanary(owner, newVendor(t).URL)
 	for _, pattern := range secureReads(t) {
-		status, raw := s.do(owner, "GET", sweepPath(pattern, fixture.ids), nil, nil)
+		status, raw := s.Do(owner, "GET", sweepPath(pattern, fixture.ids), nil, nil)
 		if pattern == readinessRoute && status == http.StatusServiceUnavailable {
 			continue
 		}
@@ -160,73 +162,73 @@ func TestManagementReadsAnswerWithoutServerErrors(t *testing.T) {
 func TestManagementIsolationSweep(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
-	owner := s.owner()
+	owner := s.Owner()
 	fixture := s.seedCanary(owner, newVendor(t).URL)
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "isolated"}, idempotent(), http.StatusCreated)
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "isolated"}, harness.Idempotent(), http.StatusCreated)
 
-	member := s.invite(owner, "isolated-operator@example.com", access.RoleOperator)
-	profile := s.want(member, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	member := s.Invite(owner, "isolated-operator@example.com", authz.RoleOperator)
+	profile := s.Want(member, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
 	userID := profile["id"].(string)
-	s.want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, etag(profile), http.StatusOK)
-	s.want(owner, "PUT", "/api/v1/projects/"+project["id"].(string)+"/members/"+userID, map[string]any{"role": "manager"}, etag(project), http.StatusOK)
+	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	s.Want(owner, "PUT", "/api/v1/projects/"+project["id"].(string)+"/members/"+userID, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
 
-	scopes := make([]string, 0, len(access.TokenScopes()))
-	for _, operation := range access.TokenScopes() {
+	scopes := make([]string, 0, len(authz.TokenScopes()))
+	for _, operation := range authz.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
-	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+	token := s.Want(owner, "POST", "/api/v1/management-tokens", map[string]any{
 		"name": "isolated", "scopes": scopes, "project_ids": []string{project["id"].(string)},
 		"expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
-	}, idempotent(), http.StatusCreated)
+	}, harness.Idempotent(), http.StatusCreated)
 
-	callers := []*caller{
-		s.login("isolated-operator@example.com"),
-		{name: "project token", token: token["secret"].(string)},
+	callers := []*harness.Caller{
+		s.Login("isolated-operator@example.com"),
+		{Name: "project token", Token: token["secret"].(string)},
 	}
 	for _, pattern := range secureReads(t) {
 		path := sweepPath(pattern, fixture.ids)
 		for _, c := range callers {
-			status, raw := s.do(c, "GET", path, nil, nil)
+			status, raw := s.Do(c, "GET", path, nil, nil)
 			if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
-				t.Errorf("%s as %s: %s", pattern, c.name, describe(status, raw))
+				t.Errorf("%s as %s: %s", pattern, c.Name, describe(status, raw))
 			}
 			if strings.Contains(string(raw), "canary") || strings.Contains(string(raw), fixture.ids["attachment_id"]) {
-				t.Errorf("%s as %s disclosed another project (%d)", pattern, c.name, status)
+				t.Errorf("%s as %s disclosed another project (%d)", pattern, c.Name, status)
 			}
 			if fixture.named(path) && status/100 == 2 {
-				t.Errorf("%s as %s: %s for another project's resource", pattern, c.name, describe(status, raw))
+				t.Errorf("%s as %s: %s for another project's resource", pattern, c.Name, describe(status, raw))
 			}
 		}
 	}
 
 	t.Run("project_policy_promotion_preserves_local_state_and_rolls_back", func(t *testing.T) {
-		other := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "batch-policy"}, idempotent(), http.StatusCreated)
+		other := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "batch-policy"}, harness.Idempotent(), http.StatusCreated)
 		projectID, otherID := project["id"].(string), other["id"].(string)
 		path := "/api/v1/projects/" + projectID
-		templates := s.want(owner, "GET", path+"/limit-templates", nil, nil, http.StatusOK)
-		s.want(owner, "PUT", path+"/limit-templates", map[string]any{
+		templates := s.Want(owner, "GET", path+"/limit-templates", nil, nil, http.StatusOK)
+		s.Want(owner, "PUT", path+"/limit-templates", map[string]any{
 			"templates": map[string]any{"retained": map[string]any{"requests_per_minute": 5}},
-		}, etag(templates), http.StatusOK)
-		s.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		}, harness.ETag(templates), http.StatusOK)
+		s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{
 			"name": "template-member", "scopes": []string{"inference"}, "project_id": projectID, "limit_template": "retained",
-		}, idempotent(), http.StatusCreated)
+		}, harness.Idempotent(), http.StatusCreated)
 		for index, id := range []string{projectID, otherID} {
 			policyPath := "/api/v1/projects/" + id + "/end-user-policy"
-			current := s.want(owner, "GET", policyPath, nil, nil, http.StatusOK)
-			s.want(owner, "PUT", policyPath, map[string]any{"policy": map[string]any{
+			current := s.Want(owner, "GET", policyPath, nil, nil, http.StatusOK)
+			s.Want(owner, "PUT", policyPath, map[string]any{"policy": map[string]any{
 				"defaults":  map[string]any{"requests_per_minute": 11 - index},
 				"overrides": map[string]any{strings.Repeat("a", 64): map[string]any{"requests_per_minute": 3}},
 				"blocked":   []string{strings.Repeat("b", 64)},
-			}}, etag(current), http.StatusOK)
+			}}, harness.ETag(current), http.StatusOK)
 		}
-		live := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		live := s.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
 		document := map[string]any{"api_version": "openllmproxy.dev/config/v2", "projects": []map[string]any{
 			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
 			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
 		}}
-		s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idempotent(), http.StatusOK)
-		liveAfter := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
-		promoted := s.want(owner, "GET", "/api/v1/projects/"+otherID+"/end-user-policy", nil, nil, http.StatusOK)
+		s.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, harness.Idempotent(), http.StatusOK)
+		liveAfter := s.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		promoted := s.Want(owner, "GET", "/api/v1/projects/"+otherID+"/end-user-policy", nil, nil, http.StatusOK)
 		livePolicy, err := json.Marshal(live["policy"])
 		if err != nil {
 			t.Fatal(err)
@@ -242,12 +244,12 @@ func TestManagementIsolationSweep(t *testing.T) {
 			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}},
 			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}, "limit_templates": map[string]any{}},
 		}}
-		problem := s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, idempotent(), http.StatusConflict)
+		problem := s.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, harness.Idempotent(), http.StatusConflict)
 		if problem["type"] != "https://openllmproxy.dev/problems/template_in_use" {
 			t.Fatalf("promotion did not reach the referenced-template check: %v", problem)
 		}
 		for index, id := range []string{projectID, otherID} {
-			current := s.want(owner, "GET", "/api/v1/projects/"+id+"/end-user-policy", nil, nil, http.StatusOK)
+			current := s.Want(owner, "GET", "/api/v1/projects/"+id+"/end-user-policy", nil, nil, http.StatusOK)
 			currentPolicy, err := json.Marshal(current["policy"])
 			if err != nil {
 				t.Fatal(err)
@@ -262,8 +264,8 @@ func TestManagementIsolationSweep(t *testing.T) {
 	t.Run("queued_mutation_rechecks_project_membership", func(t *testing.T) {
 		projectID := project["id"].(string)
 		path := "/api/v1/projects/" + projectID + "/end-user-policy"
-		current := s.want(callers[0], "GET", path, nil, nil, http.StatusOK)
-		gate, err := s.pool.Begin(t.Context())
+		current := s.Want(callers[0], "GET", path, nil, nil, http.StatusOK)
+		gate, err := s.Pool.Begin(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -278,12 +280,12 @@ func TestManagementIsolationSweep(t *testing.T) {
 		}
 		result := make(chan response, 1)
 		go func() {
-			status, raw := s.do(callers[0], "PUT", path, map[string]any{"policy": nil}, etag(current))
+			status, raw := s.Do(callers[0], "PUT", path, map[string]any{"policy": nil}, harness.ETag(current))
 			result <- response{status, raw}
 		}()
-		s.eventually("the policy mutation waiting for the concurrent membership change", 5*time.Second, func() (bool, string) {
+		s.Eventually("the policy mutation waiting for the concurrent membership change", 5*time.Second, func() (bool, string) {
 			var blocked bool
-			err := s.pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))", gatePID).Scan(&blocked)
+			err := s.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))", gatePID).Scan(&blocked)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -303,7 +305,7 @@ func TestManagementIsolationSweep(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("queued mutation did not finish after the membership change")
 		}
-		after := s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		after := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
 		beforeJSON, err := json.Marshal(current)
 		if err != nil {
 			t.Fatal(err)

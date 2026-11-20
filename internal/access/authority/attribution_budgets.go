@@ -3,6 +3,7 @@ package authority
 import (
 	"bytes"
 	"encoding/json"
+
 	"github.com/tyk-swe/olp/internal/attribution"
 )
 

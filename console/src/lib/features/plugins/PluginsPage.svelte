@@ -1,11 +1,14 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { formatBytes, formatDate } from '#lib/format.js';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import UnconfinedPlugins from '#lib/features/plugins/UnconfinedPlugins.svelte';
   import MCPExecutables from '#lib/features/plugins/MCPExecutables.svelte';
@@ -22,7 +25,7 @@
     uninstallPlugin,
     type Plugin
   } from '#lib/features/plugins/api.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/features/providers/index.js';
 
   const access = useRole();
   const canManage = $derived(access.can('plugins.manage'));
@@ -120,14 +123,14 @@
   }
 </script>
 
-<svelte:head><title>Plugins · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Plugins" />
 
 <PageHeader
   title="Plugins"
   description="Provider plugins supply authentication and hosting around built-in dialects. OpenLLMProxy runs them confined and stores each module by its digest. A plugin can't be used until an owner approves the origins it declares. A deployment may also enable experimental unconfined plugins, which an owner permits one by one."
 />
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 {#if canManage}
   <section class="card install-panel" aria-labelledby="plugin-install-heading">
@@ -258,7 +261,7 @@
         <div class="declarations">
           <section aria-labelledby={`${headingId}-profiles`}>
             <h3 id={`${headingId}-profiles`}>Profiles</h3>
-            <div class="table-shell">
+            <ScrollTable label="Plugin profiles">
               <table class="data-table">
                 <thead
                   ><tr
@@ -283,7 +286,7 @@
                   {/each}
                 </tbody>
               </table>
-            </div>
+            </ScrollTable>
           </section>
           <section aria-labelledby={`${headingId}-origins`}>
             <h3 id={`${headingId}-origins`}>Declared origins</h3>
@@ -374,7 +377,7 @@
 <style>
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -452,8 +455,7 @@
     margin: 0.25rem 0 0;
     min-width: 0;
   }
-  .facts small,
-  .muted {
+  .facts small {
     color: var(--foreground-muted);
   }
   summary {

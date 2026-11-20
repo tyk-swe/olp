@@ -13,14 +13,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
-)
-
-const (
-	Bedrock = identity.Bedrock
-	Vertex  = identity.Vertex
-	Azure   = identity.Azure
 )
 
 type Fields struct {
@@ -55,17 +49,14 @@ type Result struct {
 
 var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$`)
 
-func ResourceValid(backend, resource string) bool {
-	return identity.ValidResource(backend, resource)
-}
 func ProviderKind(backend string) string {
 	switch backend {
-	case Bedrock:
+	case identity.Bedrock:
 		return "bedrock"
-	case Vertex:
+	case identity.Vertex:
 		return "vertex_ai"
-	case Azure:
-		return Azure
+	case identity.Azure:
+		return identity.Azure
 	}
 	return ""
 }
@@ -83,10 +74,10 @@ func ValidateFields(backend string, fields Fields) error {
 			return errors.New("invalid metadata field mapping")
 		}
 	}
-	if backend == Azure && (fields.Text == "" || fields.ID == "") {
+	if backend == identity.Azure && (fields.Text == "" || fields.ID == "") {
 		return errors.New("Azure search requires text and id field mappings")
 	}
-	if backend != Azure && (fields.Text != "" || fields.ID != "" || fields.Title != "" || fields.URL != "" || len(fields.Search) > 0) {
+	if backend != identity.Azure && (fields.Text != "" || fields.ID != "" || fields.Title != "" || fields.URL != "" || len(fields.Search) > 0) {
 		return errors.New("this backend uses native text and citation fields")
 	}
 	return nil
@@ -110,7 +101,7 @@ func Encode(backend, resource string, fields Fields, raw []byte) ([]byte, error)
 	if doc, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 1 << 20}); err != nil || doc.Root().Kind() != oif.Object {
 		return nil, errors.New("one unambiguous JSON query object required")
 	}
-	if !ResourceValid(backend, resource) {
+	if !identity.ValidResource(backend, resource) {
 		return nil, errors.New("invalid backend resource")
 	}
 	if err := ValidateFields(backend, fields); err != nil {
@@ -140,12 +131,12 @@ func Encode(backend, resource string, fields Fields, raw []byte) ([]byte, error)
 			}
 		}
 	}
-	if thresholds && (backend != Vertex || q.VectorDistanceThreshold != nil && q.VectorSimilarityThreshold != nil) {
+	if thresholds && (backend != identity.Vertex || q.VectorDistanceThreshold != nil && q.VectorSimilarityThreshold != nil) {
 		return nil, errors.New("vector thresholds require Vertex and exactly one threshold")
 	}
 	var body any
 	switch backend {
-	case Bedrock:
+	case identity.Bedrock:
 		config := map[string]any{"numberOfResults": limit}
 		if q.Filters != nil {
 			f, err := bedrockFilter(*q.Filters, fields, 0)
@@ -155,7 +146,7 @@ func Encode(backend, resource string, fields Fields, raw []byte) ([]byte, error)
 			config["filter"] = f
 		}
 		body = map[string]any{"retrievalQuery": map[string]any{"text": q.Query}, "retrievalConfiguration": map[string]any{"vectorSearchConfiguration": config}}
-	case Vertex:
+	case identity.Vertex:
 		if q.Filters != nil {
 			return nil, errors.New("Vertex metadata filters are not supported by this binding; use a supported vector threshold")
 		}
@@ -167,7 +158,7 @@ func Encode(backend, resource string, fields Fields, raw []byte) ([]byte, error)
 			config["filter"] = map[string]any{"vectorSimilarityThreshold": q.VectorSimilarityThreshold}
 		}
 		body = map[string]any{"query": map[string]any{"text": q.Query, "ragRetrievalConfig": config}, "vertexRagStore": map[string]any{"ragResources": []any{map[string]any{"ragCorpus": resource}}}}
-	case Azure:
+	case identity.Azure:
 		config := map[string]any{"search": q.Query, "top": limit}
 		if len(fields.Search) > 0 {
 			config["searchFields"] = strings.Join(fields.Search, ",")
@@ -317,13 +308,13 @@ func Decode(backend string, fields Fields, raw []byte) ([]Result, error) {
 	}
 	var entries []any
 	switch backend {
-	case Bedrock:
+	case identity.Bedrock:
 		var ok bool
 		entries, ok = envelope["retrievalResults"].([]any)
 		if !ok {
 			return nil, errors.New("missing retrieval results")
 		}
-	case Vertex:
+	case identity.Vertex:
 		contexts, ok := envelope["contexts"].(map[string]any)
 		if !ok {
 			if _, present := envelope["contexts"]; present {
@@ -339,7 +330,7 @@ func Decode(backend string, fields Fields, raw []byte) ([]Result, error) {
 				return nil, errors.New("invalid Vertex contexts")
 			}
 		}
-	case Azure:
+	case identity.Azure:
 		var ok bool
 		entries, ok = envelope["value"].([]any)
 		if !ok {
@@ -362,20 +353,20 @@ func Decode(backend string, fields Fields, raw []byte) ([]Result, error) {
 		}
 		r := Result{ScoreKind: "score"}
 		switch backend {
-		case Bedrock:
+		case identity.Bedrock:
 			content, _ := item["content"].(map[string]any)
 			r.Text, _ = content["text"].(string)
 			r.Score, _ = item["score"].(json.Number)
 			r.Citation = item["location"]
 			r.Attributes, _ = item["metadata"].(map[string]any)
-		case Vertex:
+		case identity.Vertex:
 			r.Text, _ = item["text"].(string)
 			r.Score, _ = item["score"].(json.Number)
 			if v, ok := item["distance"].(json.Number); ok {
 				r.Score, r.ScoreKind = v, "distance"
 			}
 			r.Citation = map[string]any{"source_uri": item["sourceUri"], "source_display_name": item["sourceDisplayName"], "source_name": item["sourceName"], "chunk": item["chunk"]}
-		case Azure:
+		case identity.Azure:
 			r.Text, _ = fieldValue(item, fields.Text).(string)
 			r.Score, _ = item["@search.score"].(json.Number)
 			r.Citation = map[string]any{"id": fieldValue(item, fields.ID), "url": fieldValue(item, fields.URL), "title": fieldValue(item, fields.Title)}

@@ -12,17 +12,18 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 )
+
+const maxBodyBytes = 64 << 20
 
 type Config struct {
 	Provider                                 connectors.Config
 	ProviderID, RevisionID, Model, Operation string
 	Policy                                   *contentpolicy.Policy
-	MaxBodyBytes                             int
 	AllowProviderFetchedDocuments            bool
 }
 type Context struct {
@@ -96,12 +97,6 @@ func Compile(config Config) (*Template, error) {
 	policy, err := contentpolicy.Compile(config.Policy)
 	if err != nil {
 		return nil, err
-	}
-	if config.MaxBodyBytes == 0 {
-		config.MaxBodyBytes = 64 << 20
-	}
-	if config.MaxBodyBytes < 1 || config.MaxBodyBytes > 64<<20 {
-		return nil, fail("target_capability", "/limits", "bounded_buffering", "The operation response limit is invalid.")
 	}
 	serving := config.Provider.ServingIdentity(config.ProviderID, config.RevisionID, config.Model)
 	var schema struct {
@@ -285,7 +280,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if mapping != nil {
 		evidence = append(evidence, mapping.Evidence)
 	}
-	receipt := oif.Receipt{Class: class, Operation: t.codec.Operation.ID, SourceDialect: sourceCodec.Identity.ID, TargetDialect: t.codec.Identity.ID, ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: append(dispositions, semantic...), Evidence: evidence, Obligations: oif.Obligations{Delivery: "unary", Lifetime: "request", Submission: "immediate", Continuation: "none", Effects: []string{"inference"}, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: t.config.MaxBodyBytes, RejectAmbiguousFailover: true, GuardResults: true}}
+	receipt := oif.Receipt{Class: class, Operation: t.codec.Operation.ID, SourceDialect: sourceCodec.Identity.ID, TargetDialect: t.codec.Identity.ID, ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: append(dispositions, semantic...), Evidence: evidence, Obligations: oif.Obligations{Delivery: "unary", Lifetime: "request", Submission: "immediate", Continuation: "none", Effects: []string{"inference"}, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: maxBodyBytes, RejectAmbiguousFailover: true, GuardResults: true}}
 	var estimate int64
 	if sourceCodec.Estimate != nil {
 		estimate = sourceCodec.Estimate(sourceView)
@@ -369,7 +364,7 @@ func (p *Plan) RequestURL() (string, error) {
 	return endpoint + "?" + p.query.Encode(), nil
 }
 func (p *Plan) Decode(body []byte) (Result, error) {
-	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: p.template.config.MaxBodyBytes})
+	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: maxBodyBytes})
 	if err != nil {
 		return Result{}, operations.Violation("/result", "Native result is malformed or exceeds its declared bounds.")
 	}

@@ -9,11 +9,12 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const oauthTimeout = 20 * time.Second
@@ -26,22 +27,26 @@ type oauthClient struct {
 }
 
 func (s *Store) oauthClient(ctx context.Context, bound Binding, redirect, revisionID string) (oauthClient, error) {
-	if s.egress == nil {
+	secret, err := s.entraClientSecret(ctx, bound, revisionID)
+	if err != nil {
+		return oauthClient{}, err
+	}
+	return newOAuthClient(s.egress, bound, redirect, secret)
+}
+
+func newOAuthClient(policy *egress.Policy, bound Binding, redirect, secret string) (oauthClient, error) {
+	if policy == nil {
 		return oauthClient{}, errOAuth
 	}
 	for _, endpoint := range []string{bound.OAuth.AuthorizationEndpoint, bound.OAuth.TokenEndpoint, bound.OAuth.DeviceAuthorizationEndpoint} {
 		if endpoint == "" {
 			continue
 		}
-		if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
+		if _, err := policy.ValidateEndpoint(endpoint); err != nil {
 			return oauthClient{}, errOAuth
 		}
 	}
-	secret, secretErr := s.entraClientSecret(ctx, bound, revisionID)
-	if secretErr != nil {
-		return oauthClient{}, secretErr
-	}
-	return oauthClient{config: oauth2.Config{ClientSecret: secret, ClientID: bound.OAuth.ClientID, RedirectURL: redirect, Scopes: bound.OAuth.Scopes, Endpoint: oauth2.Endpoint{AuthURL: bound.OAuth.AuthorizationEndpoint, TokenURL: bound.OAuth.TokenEndpoint, DeviceAuthURL: bound.OAuth.DeviceAuthorizationEndpoint, AuthStyle: oauth2.AuthStyleInParams}}, client: s.egress.Client(oauthTimeout)}, nil
+	return oauthClient{config: oauth2.Config{ClientSecret: secret, ClientID: bound.OAuth.ClientID, RedirectURL: redirect, Scopes: bound.OAuth.Scopes, Endpoint: oauth2.Endpoint{AuthURL: bound.OAuth.AuthorizationEndpoint, TokenURL: bound.OAuth.TokenEndpoint, DeviceAuthURL: bound.OAuth.DeviceAuthorizationEndpoint, AuthStyle: oauth2.AuthStyleInParams}}, client: policy.Client(oauthTimeout)}, nil
 }
 
 func (o oauthClient) context(ctx context.Context) context.Context {
@@ -78,7 +83,7 @@ func (s *Store) verificationURL(bound Binding, raw string) error {
 
 func oauthProblem(err error) error {
 	if errors.Is(err, errOAuth) {
-		return access.Fail(422, "grant_authorization_failed", "Personal authorization failed. Start a new enrollment.")
+		return httpkit.Fail(422, "grant_authorization_failed", "Personal authorization failed. Start a new enrollment.")
 	}
 	return grantProblem(err)
 }

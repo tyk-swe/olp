@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 func DefaultProfileEndpoint(kind Kind, profileID, region, project string) string {
@@ -67,6 +67,7 @@ var bedrockInvokePath = upstreamPath{unary: "/model/{model}/invoke", streaming: 
 
 var wirePaths = map[wire.Format]upstreamPath{
 	wire.Decisions:             {unary: "/decisions"},
+	wire.GeminiDecisions:       {unary: "/decisions"},
 	wire.SystemOne:             {unary: "/systemone"},
 	wire.Completions:           {unary: "/completions"},
 	wire.Responses:             {unary: "/responses"},
@@ -85,7 +86,7 @@ var wirePaths = map[wire.Format]upstreamPath{
 	wire.VertexEmbeddings:      {unary: "/models/{model}:predict"},
 	wire.DocumentAIProcess:     {unary: "/processors/{model}:process"},
 	wire.Bedrock:               {unary: "/model/{model}/converse", streaming: "/model/{model}/converse-stream"},
-	"bedrock_count":            {unary: "/model/{model}/count-tokens"},
+	wire.BedrockCount:          {unary: "/model/{model}/count-tokens"},
 	wire.BedrockInvoke:         bedrockInvokePath,
 	wire.BedrockEmbeddings:     {unary: bedrockInvokePath.unary},
 }

@@ -3,9 +3,10 @@ package code
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
@@ -26,13 +27,13 @@ func (t PaidTarget) render() contract.ConfigurationCodePaidTarget {
 	return contract.ConfigurationCodePaidTarget{Provider: t.Provider, Slot: t.Slot, CredentialRef: t.CredentialRef}
 }
 
-func resolveTargets(ctx context.Context, q access.Queryer, targets map[string]PaidTarget, project string, credentials map[string]string) (map[string]codemode.PaidTarget, error) {
+func resolveTargets(ctx context.Context, q database.Queryer, targets map[string]PaidTarget, project string, credentials map[string]string) (map[string]codemode.PaidTarget, error) {
 	return promotion.TryMapValues(targets, func(_ string, t PaidTarget) (codemode.PaidTarget, error) {
 		return resolveTarget(ctx, q, t, project, credentials)
 	})
 }
 
-func resolveTarget(ctx context.Context, q access.Queryer, t PaidTarget, project string, credentials map[string]string) (codemode.PaidTarget, error) {
+func resolveTarget(ctx context.Context, q database.Queryer, t PaidTarget, project string, credentials map[string]string) (codemode.PaidTarget, error) {
 	credential, err := bound(t.CredentialRef, credentials)
 	if err != nil {
 		return codemode.PaidTarget{}, err
@@ -42,25 +43,25 @@ func resolveTarget(ctx context.Context, q access.Queryer, t PaidTarget, project 
 		return codemode.PaidTarget{}, err
 	}
 	if !found {
-		return codemode.PaidTarget{}, access.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
+		return codemode.PaidTarget{}, httpkit.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
 	}
 	return target, nil
 }
 
-func validLimits(ctx context.Context, q access.Queryer, frozen routing.Provider, slot routing.Slot, project string) error {
+func validLimits(ctx context.Context, q database.Queryer, frozen routing.Provider, slot routing.Slot, project string) error {
 	live, err := codeaccounts.ReadSlotLimits(ctx, q, frozen.ID, slot.ID, project)
 	if err != nil {
 		return err
 	}
 	if !routing.CodePaidLimitsMatch(live.Configuration.Options.Limits, frozen.Limits, live.Slot, slot) {
-		return access.Invalid("code.paid_connections.limits", "Frozen paid provider and slot limits must match the destination's live serving policy.")
+		return httpkit.Invalid("code.paid_connections.limits", "Frozen paid provider and slot limits must match the destination's live serving policy.")
 	}
 	return nil
 }
 
 func slotKey(providerID, slotID string) string { return promotion.TupleKey(providerID, slotID) }
 
-func readSlotNames(ctx context.Context, q access.Queryer) (map[string]PaidTarget, error) {
+func readSlotNames(ctx context.Context, q database.Queryer) (map[string]PaidTarget, error) {
 	names, err := codeaccounts.ReadSlotNames(ctx, q)
 	if err != nil {
 		return nil, err
@@ -74,7 +75,7 @@ func portableTargets(targets map[string]codemode.PaidTarget, names map[string]Pa
 	return promotion.TryMapValues(targets, func(_ string, t codemode.PaidTarget) (PaidTarget, error) {
 		target, ok := names[slotKey(t.ProviderID, t.SlotID)]
 		if !ok {
-			return PaidTarget{}, access.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")
+			return PaidTarget{}, httpkit.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")
 		}
 		return target, nil
 	})

@@ -1,10 +1,16 @@
 import type { components, paths } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 export type CodeAccount = Schemas['CodeAccount'];
-export type CodeAccountCooldown = Schemas['CodeAccountCooldown'];
 export type CodeAllowanceWindow = Schemas['CodeAllowanceWindow'];
 export type CodeAccountWrite = Schemas['CodeAccountWrite'];
 export type CodePool = Schemas['CodePool'];
@@ -107,14 +113,14 @@ export async function saveCodeAccount(command: CodeSave<CodeAccountWrite>) {
       await apiClient.PUT('/api/v1/code/accounts/{id}', {
         params: {
           path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
+          header: ifMatch(command.current.etag)
         },
         body: command.body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/code/accounts', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
+      params: { header: createHeaders(command.requestId) },
       body: command.body
     })
   );
@@ -138,14 +144,14 @@ export async function saveCodePool(command: CodeSave<CodePoolWrite>) {
       await apiClient.PUT('/api/v1/code/pools/{id}', {
         params: {
           path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
+          header: ifMatch(command.current.etag)
         },
         body: command.body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/code/pools', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
+      params: { header: createHeaders(command.requestId) },
       body: command.body
     })
   );
@@ -169,14 +175,14 @@ export async function saveCodeRoute(command: CodeSave<CodeRouteWrite>) {
       await apiClient.PUT('/api/v1/code/routes/{id}', {
         params: {
           path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
+          header: ifMatch(command.current.etag)
         },
         body: command.body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/code/routes', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
+      params: { header: createHeaders(command.requestId) },
       body: command.body
     })
   );
@@ -200,14 +206,14 @@ export async function saveCodeBudget(command: CodeSave<CodeBudgetWrite>) {
       await apiClient.PUT('/api/v1/code/budgets/{id}', {
         params: {
           path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
+          header: ifMatch(command.current.etag)
         },
         body: command.body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/code/budgets', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
+      params: { header: createHeaders(command.requestId) },
       body: command.body
     })
   );
@@ -281,10 +287,7 @@ export async function publishCodeRoute(
     await apiClient.POST('/api/v1/code/routes/{id}/publish', {
       params: {
         path: { id: route.id },
-        header: {
-          'If-Match': route.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(route.etag, requestId)
       }
     })
   );
@@ -303,28 +306,12 @@ export async function listCodeRevisions(
   );
 }
 
-export async function requestCodeAccountAllowanceRead(
-  account: Pick<CodeAccount, 'id'>,
-  requestId: string
-) {
-  if (!requestId)
-    throw new Error('An allowance read requires a stable request ID.');
-  return unwrap(
-    await apiClient.POST('/api/v1/code/accounts/{id}/allowance-reads', {
-      params: {
-        path: { id: account.id },
-        header: { 'Idempotency-Key': requestId }
-      }
-    })
-  );
-}
-
 export async function retireCodeBinding(id: string, requestId: string) {
   ensureOk(
     await apiClient.POST('/api/v1/code/bindings/{id}/retire', {
       params: {
         path: { id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     })
   );

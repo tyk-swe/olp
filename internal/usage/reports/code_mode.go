@@ -3,7 +3,9 @@ package reports
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 )
 
 func (s *API) registerCodeMode(mux *http.ServeMux) {
@@ -13,14 +15,14 @@ func (s *API) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/token-windows", s.codeTokenWindows)
 }
 
-func (s *API) codeDecisions(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.Access.CodeList(r, p, `SELECT to_jsonb(x) FROM olp.code_decisions x`,
-		access.CodeMatch{Field: "account_id", SQL: `x.chosen_account_id=$%[1]d::uuid`},
-		access.CodeMatch{Field: "attempt_id", SQL: `x.attempt_id=$%[1]d::uuid`})
+func (s *API) codeDecisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	return codeadmin.List(s.Access, r, p, `SELECT to_jsonb(x) FROM olp.code_decisions x`,
+		codeadmin.Match{Field: "account_id", SQL: `x.chosen_account_id=$%[1]d::uuid`},
+		codeadmin.Match{Field: "attempt_id", SQL: `x.attempt_id=$%[1]d::uuid`})
 }
 
-func (s *API) codeAttempts(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.Access.CodeUsageList(r, p, `SELECT jsonb_build_object(
+func (s *API) codeAttempts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	return codeadmin.UsageList(s.Access, r, p, `SELECT jsonb_build_object(
 'upstream_status',x.upstream_status,'outcome_origin',x.outcome_origin,'outcome',x.outcome,'outcome_observed_at',x.outcome_observed_at,
 'account_id',x.account_id,'api_key_id',x.api_key_id,'binding_id',x.binding_id,'bound_evidence',x.bound_evidence,
 'cached_tokens',x.cached_tokens,'created_at',x.created_at,'finished_at',x.finished_at,'id',x.id,
@@ -37,14 +39,14 @@ func (s *API) codeAttempts(r *http.Request, p access.Principal) (access.Reply, e
  WHEN EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.request_id=x.id AND f.usage_complete AND f.charge_status<>'billing_uncertain' AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL) THEN 'settled' ELSE 'unknown' END
 ) FROM olp.code_attempts x LEFT JOIN olp.code_attempts prior ON prior.id=x.recovery_from
  AND prior.project_id=x.project_id AND prior.route_id=x.route_id AND prior.api_key_id=x.api_key_id`,
-		access.CodeMatch{Field: "binding_id", SQL: `(x.binding_id=$%[1]d::uuid OR x.paid_binding_id=$%[1]d::uuid)`},
-		access.CodeMatch{Field: "attempt_id", SQL: `x.id=$%[1]d::uuid`})
+		codeadmin.Match{Field: "binding_id", SQL: `(x.binding_id=$%[1]d::uuid OR x.paid_binding_id=$%[1]d::uuid)`},
+		codeadmin.Match{Field: "attempt_id", SQL: `x.id=$%[1]d::uuid`})
 }
 
-func (s *API) codeRefusals(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.Access.CodeUsageList(r, p, `SELECT to_jsonb(x) FROM olp.code_refusals x`)
+func (s *API) codeRefusals(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	return codeadmin.UsageList(s.Access, r, p, `SELECT to_jsonb(x) FROM olp.code_refusals x`)
 }
 
-func (s *API) codeTokenWindows(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.Access.CodeList(r, p, `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'windows',COALESCE((SELECT jsonb_agg(jsonb_build_object('period',w.period,'starts_at',w.starts_at,'reserved',w.reserved,'measured',w.measured) ORDER BY w.starts_at DESC,w.period) FROM olp.code_token_windows w WHERE w.budget_id=x.id),'[]'::jsonb)) FROM olp.code_token_budgets x`)
+func (s *API) codeTokenWindows(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	return codeadmin.List(s.Access, r, p, `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'windows',COALESCE((SELECT jsonb_agg(jsonb_build_object('period',w.period,'starts_at',w.starts_at,'reserved',w.reserved,'measured',w.measured) ORDER BY w.starts_at DESC,w.period) FROM olp.code_token_windows w WHERE w.budget_id=x.id),'[]'::jsonb)) FROM olp.code_token_budgets x`)
 }

@@ -14,7 +14,7 @@ import {
   type ProviderModel
 } from './models';
 
-vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
+vi.mock('#lib/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })
@@ -60,7 +60,7 @@ describe('provider model API', () => {
           `/api/v1/providers/${provider.id}/discovery`
         );
         expect(request.method).toBe('POST');
-        expect(request.headers.get('If-Match')).toBe(provider.etag);
+        expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
         expect(await request.json()).toEqual({
           models: names.map((name) => ({
             upstream_model: name,
@@ -79,7 +79,7 @@ describe('provider model API', () => {
         `/api/v1/providers/${provider.id}/discovery`
       );
       expect(request.method).toBe('POST');
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ models: [] });
       return Response.json(provider);
     });
@@ -222,7 +222,7 @@ describe('provider model API', () => {
         `/api/v1/providers/${provider.id}/models/${model.id}`
       );
       expect(request.method).toBe('PATCH');
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ enabled: true, capabilities });
       return Response.json(provider);
     });
@@ -245,7 +245,7 @@ describe('provider model API', () => {
       );
       expect(request.method).toBe('POST');
       expect(request.signal.aborted).toBe(true);
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       return Response.json(result, { headers: { ETag: 'certified-version' } });
     });
     expect(

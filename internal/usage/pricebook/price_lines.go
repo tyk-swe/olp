@@ -9,15 +9,12 @@ import (
 
 var errInvalidLines = errors.New("price lines carry a malformed number")
 
-// priceLine is one SKU line of a priced attempt as olp.price_usage_lines
-// writes it: every number arrives as an exact decimal string.
+// priceLine holds the amounts of one SKU line from olp.price_usage_lines,
+// each an exact decimal string.
 type priceLine struct {
-	Component           string  `json:"component"`
-	Tier                *string `json:"tier"`
-	Unit                string  `json:"unit"`
-	Quantity            string  `json:"quantity"`
-	ListUnitPrice       string  `json:"list_unit_price"`
-	ContractedUnitPrice string  `json:"contracted_unit_price"`
+	Quantity            string `json:"quantity"`
+	ListUnitPrice       string `json:"list_unit_price"`
+	ContractedUnitPrice string `json:"contracted_unit_price"`
 }
 
 // sumPriceLines totals a lines document twice — once on the list unit prices,

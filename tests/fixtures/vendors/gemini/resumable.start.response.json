@@ -1,6 +1,0 @@
-{
-  "status": 200,
-  "headers": {
-    "X-Goog-Upload-URL": "https://generativelanguage.googleapis.com/upload/session/opaque-token"
-  }
-}

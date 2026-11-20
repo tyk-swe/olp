@@ -16,12 +16,12 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -69,10 +69,6 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 	}
 	if transport != codeadapter.HTTP || operation.Name == "compact" || operation.Name == "prewarm" {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
-	}
-	ledger, supported := f.ledger.(PaidLedger)
-	if !supported {
-		return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
 	}
 	target := route.PaidTarget(operation.Model, fallback)
 	provider, exists := release.Snapshot().FindCodePaidConnection(route.RevisionID + ":" + target.ProviderID)
@@ -133,11 +129,11 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
+	permit, err := f.ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
 	if err != nil {
 		return nil, err
 	}
-	a := &codeAttempt{forwarder: f, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: inbound.protocol, ClientPath: inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: inbound.protocol}), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
+	a := &codeAttempt{forwarder: f, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: inbound.protocol, ClientPath: inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: inbound.protocol}, observation.ChatChoices), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
 	ready := false
 	defer func() {
 		if !ready {
@@ -297,12 +293,6 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 	for _, lease := range p.supplyLeases {
 		lease.SetActualCost(cost, cost)
 	}
-	cardID := func() *string {
-		if p.card != nil {
-			return &p.card.ID
-		}
-		return nil
-	}()
 	mode := func() string {
 		if p.stream {
 			return "streaming"
@@ -315,7 +305,7 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		}
 		return "failure"
 	}()
-	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.forwarder.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
+	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.forwarder.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
 	p.targetLease.Settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
 		quota.SettleKey(ctx, lease, a.dispatched, a.usage.Total, a.forwarder.log)

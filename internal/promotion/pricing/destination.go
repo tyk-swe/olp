@@ -4,7 +4,8 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -17,7 +18,7 @@ type destination struct {
 	projects      promotion.Directory
 }
 
-func readDestination(ctx context.Context, q access.Queryer) (destination, error) {
+func readDestination(ctx context.Context, q database.Queryer) (destination, error) {
 	providerDirectory, err := readProviders(ctx, q)
 	if err != nil {
 		return destination{}, err
@@ -37,7 +38,7 @@ func readDestination(ctx context.Context, q access.Queryer) (destination, error)
 	}, nil
 }
 
-func readProviders(ctx context.Context, q access.Queryer) (promotion.Directory, error) {
+func readProviders(ctx context.Context, q database.Queryer) (promotion.Directory, error) {
 	names, err := providers.ReadProviderNames(ctx, q)
 	if err != nil {
 		return promotion.Directory{}, err
@@ -99,9 +100,9 @@ func ownerDeclared(owner Owner, names promotion.Names, at destination) error {
 }
 
 func undeclaredOrganization() error {
-	return access.Invalid("rate_cards.owner.organization", "The card names an organization neither the document nor this installation declares.")
+	return httpkit.Invalid("rate_cards.owner.organization", "The card names an organization neither the document nor this installation declares.")
 }
 
 func undeclaredProject() error {
-	return access.Invalid("rate_cards.owner.project", "The card names a project neither the document nor this installation declares.")
+	return httpkit.Invalid("rate_cards.owner.project", "The card names a project neither the document nor this installation declares.")
 }

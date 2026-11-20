@@ -3,9 +3,11 @@
 package integration_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -76,7 +79,7 @@ func contend(t *testing.T, limiter *admission.Limiter, request admission.Request
 func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 	t.Parallel()
 	const capacity, contenders = 5, 40
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{MaxConcurrency: new(int64(capacity))})
 	first := contend(t, limiter, request, contenders)
 	if len(first) != capacity {
@@ -84,7 +87,7 @@ func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 	}
 	for _, lease := range first {
 		for range 2 {
-			if err := lease.Release(t.Context()); err != nil {
+			if err := lease.Settle(t.Context(), nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -96,7 +99,7 @@ func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 
 func TestAbandonedConcurrencySlotComesBackWhenItsLeaseLapses(t *testing.T) {
 	t.Parallel()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{MaxConcurrency: new(int64(2))})
 	abandoned := request
 	abandoned.LeaseTTL = 50 * time.Millisecond
@@ -117,7 +120,7 @@ func TestAbandonedConcurrencySlotComesBackWhenItsLeaseLapses(t *testing.T) {
 func TestRequestWindowRefusesTheOverflowAndGivesBackRefunds(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{RequestsPerMinute: new(int64(3)), Report: true})
 	reserve := func() *admission.Lease {
 		lease, err := limiter.Reserve(t.Context(), request)
@@ -148,7 +151,7 @@ func TestRequestWindowRefusesTheOverflowAndGivesBackRefunds(t *testing.T) {
 func TestTokenWindowChargesWhatARequestActuallyUsed(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	request := rated(admission.RateLimits{TokensPerMinute: new(int64(100)), Tokens: 40})
 	asking := func(tokens int64) admission.Request {
 		sized := request
@@ -173,7 +176,7 @@ func TestTokenWindowChargesWhatARequestActuallyUsed(t *testing.T) {
 func TestSupplyReportsEachLookupsTightestHeadroom(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()
-	limiter := admission.New(newRunner(t))
+	limiter := admission.NewDurable(newRunner(t), nil)
 	busy := rated(admission.RateLimits{RequestsPerMinute: new(int64(4)), TokensPerMinute: new(int64(100)), Tokens: 10})
 	for range 3 {
 		if _, err := limiter.Reserve(t.Context(), busy); err != nil {
@@ -267,7 +270,7 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 		t.Fatalf("got %v for 0.60 on top of a held 0.60 under a 1.00 budget, want a daily cost refusal of the estimate", err)
 	}
 	first.SetActualCost("0.10", "0.10")
-	if err := first.SettleCost(t.Context()); err != nil {
+	if err := first.Settle(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
 	second, err := holding("0.60")
@@ -282,5 +285,59 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 	}
 	if _, err := holding("0.40"); err != nil {
 		t.Errorf("got %v for 0.40 after the held 0.60 was refunded", err)
+	}
+}
+
+type stubLedgerInstaller struct{}
+
+func (stubLedgerInstaller) InstallSnapshot(context.Context, limits.Snapshot) (limits.Installed, error) {
+	return limits.Installed{}, nil
+}
+
+func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
+	t.Parallel()
+	const poolTimeout = 100 * time.Millisecond
+	owner, address := harness.Database(t)
+	config, err := database.Configuration(address, 2, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(poolTimeout.Milliseconds(), 10)
+	pool, err := database.Open(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	leader, err := ledger.TryAcquireLeader(t.Context(), pool, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leader == nil {
+		t.Fatal("got no leader on a fresh database, want the reconciliation leader")
+	}
+	defer leader.Close(t.Context())
+	blocker, err := owner.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.WithoutCancel(t.Context()))
+	if _, err := blocker.Exec(t.Context(), `LOCK TABLE olp.api_keys IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	reconciled := make(chan error, 1)
+	go func() {
+		_, err := leader.Reconcile(context.WithoutCancel(t.Context()), stubLedgerInstaller{}, time.Now())
+		reconciled <- err
+	}()
+	select {
+	case err := <-reconciled:
+		t.Fatalf("got %v from a pass that waits behind a table lock, want it still waiting after the pool's %s statement timeout", err, poolTimeout)
+	case <-time.After(3 * poolTimeout):
+	}
+	if err := blocker.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reconciled; err != nil {
+		t.Fatalf("got %v from a pass that outlasted the pool's %s statement timeout, want the leader pass to run under its own budget", err, poolTimeout)
 	}
 }

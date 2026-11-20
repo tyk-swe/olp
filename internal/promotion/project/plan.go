@@ -6,22 +6,24 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 func Planner(desired []Project, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(ctx context.Context, q access.Queryer, p access.Principal) error {
+		Authorize: func(ctx context.Context, q database.Queryer, p authz.Principal) error {
 			current, err := Read(ctx, q)
 			if err != nil {
 				return err
 			}
 			return authorizeCatalog(p, desired, current)
 		},
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			if err := checkOrganizations(ctx, q, desired, names); err != nil {
 				return nil, err
 			}
@@ -37,7 +39,7 @@ func Planner(desired []Project, names promotion.Names) promotion.Planner {
 	}
 }
 
-func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project, names promotion.Names) error {
+func checkOrganizations(ctx context.Context, q database.Queryer, desired []Project, names promotion.Names) error {
 	for _, project := range desired {
 		if project.Organization == nil || names.Organization(*project.Organization) {
 			continue
@@ -47,7 +49,7 @@ func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project
 			return err
 		}
 		if !exists {
-			return access.Invalid("organization", "Reference an organization in the document or destination.")
+			return httpkit.Invalid("organization", "Reference an organization in the document or destination.")
 		}
 	}
 	return nil
@@ -91,11 +93,11 @@ func catalogItems(desired []Project, current State) []promotion.Item {
 	})
 }
 
-func authorizeCatalog(p access.Principal, desired []Project, current State) error {
+func authorizeCatalog(p authz.Principal, desired []Project, current State) error {
 	if len(publishing(desired, current)) == 0 {
 		return nil
 	}
-	return p.Authorize(access.Access)
+	return p.Authorize(authz.Access)
 }
 
 func publishing(desired []Project, state State) []Project {
@@ -122,9 +124,9 @@ func (p Project) imported(id string) projects.PolicyImport {
 }
 
 func foreignRoutes() error {
-	return access.Invalid("route_groups", "Group routes must belong to their project.")
+	return httpkit.Invalid("route_groups", "Group routes must belong to their project.")
 }
 
 func organizationImmutable() error {
-	return access.Fail(http.StatusConflict, "project_organization_immutable", "A project cannot move between organizations.")
+	return httpkit.Fail(http.StatusConflict, "project_organization_immutable", "A project cannot move between organizations.")
 }

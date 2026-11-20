@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -21,7 +23,7 @@ type applying struct {
 }
 
 func Applier(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
@@ -131,7 +133,7 @@ func (a applying) resolveSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot 
 		return providers.DraftSlot{}, err
 	}
 	return providers.DraftSlot{
-		ID:           cmp.Or(current.id, access.NewID()),
+		ID:           cmp.Or(current.id, httpkit.NewID()),
 		Default:      slot.Default,
 		Position:     slot.Position,
 		Name:         slot.Name,
@@ -167,7 +169,7 @@ func (a applying) replacement(ctx context.Context, tx pgx.Tx, entry Entry, slot 
 	return &id, nil
 }
 
-func (d Deps) matches(ctx context.Context, q access.Queryer, credentialID *string, credential promotion.Credential) (bool, error) {
+func (d Deps) matches(ctx context.Context, q database.Queryer, credentialID *string, credential promotion.Credential) (bool, error) {
 	if credentialID == nil {
 		return false, nil
 	}

@@ -11,7 +11,7 @@ export const DISPLAY_NAME_TOO_LONG = `Use ${DISPLAY_NAME_MAX_LENGTH} characters 
 export function validateDisplayName(value: string): string | undefined {
   const displayName = value.trim();
   if (!displayName) return DISPLAY_NAME_REQUIRED;
-  if (displayName.length > DISPLAY_NAME_MAX_LENGTH)
+  if ([...displayName].length > DISPLAY_NAME_MAX_LENGTH)
     return DISPLAY_NAME_TOO_LONG;
   return undefined;
 }

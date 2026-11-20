@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 const (
@@ -47,6 +47,8 @@ func touched(args []string) string {
 		return "reserve_cost"
 	case strings.HasSuffix(args[3], ":rate") && len(args) >= 12:
 		return "reserve_rate"
+	case strings.HasSuffix(args[3], ":rate") && args[2] == "1":
+		return "reconcile_rate"
 	case strings.HasSuffix(args[3], ":rate"):
 		return "refund_rate"
 	}
@@ -62,6 +64,18 @@ func (s *server) Do(_ context.Context, args ...string) (any, error) {
 		return nil, &coordination.CommandError{Cause: errors.New("connection refused")}
 	}
 	return found.value, found.err
+}
+
+func (s *server) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+	replies := make([]any, len(commands))
+	for index, command := range commands {
+		value, err := s.Do(ctx, command...)
+		replies[index] = value
+		if err != nil {
+			replies[index] = err
+		}
+	}
+	return replies, nil
 }
 
 func (s *server) sent(name string) [][]string {
@@ -99,7 +113,7 @@ func limiterOn(t *testing.T, client scripts.Commander) *Limiter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(runner)
+	return NewDurable(runner, nil)
 }
 
 func costRequest(basis limits.Basis, rate bool) Request {
@@ -143,8 +157,8 @@ func TestReleasingAnEstimateOutlastsASlowServer(t *testing.T) {
 					t.Fatalf("Reserve: %v", err)
 				}
 				lease.SetActualCost("0", "0")
-				if err := lease.SettleCost(t.Context()); err != nil {
-					t.Fatalf("SettleCost: %v", err)
+				if err := lease.Settle(t.Context(), nil); err != nil {
+					t.Fatalf("Settle: %v", err)
 				}
 			}},
 			"an estimate whose reservation reply was lost": {map[string]answer{"reserve_cost": {err: lostReply}, "settle_cost": {value: costSettled}}, func(t *testing.T, limiter *Limiter) {
@@ -183,8 +197,8 @@ func TestChargeBasisSettlesItsOwnReservation(t *testing.T) {
 		t.Fatalf("GrowCost: %v", err)
 	}
 	lease.SetActualCost("0.25", "0.55")
-	if err := lease.SettleCost(t.Context()); err != nil {
-		t.Fatalf("SettleCost: %v", err)
+	if err := lease.Settle(t.Context(), nil); err != nil {
+		t.Fatalf("Settle: %v", err)
 	}
 	reserved, settled := inner.sent("reserve_cost"), inner.sent("settle_cost")
 	if len(reserved) != 2 || len(settled) != 1 {
@@ -195,6 +209,87 @@ func TestChargeBasisSettlesItsOwnReservation(t *testing.T) {
 	}
 	if actual := strings.Join(settled[0], " "); !strings.Contains(actual, ":charge:pending") || !strings.Contains(actual, " 0.55 ") {
 		t.Fatalf("the actual settled %q, want the charge amount on the charge keys", actual)
+	}
+}
+
+func TestLeaseEndingGivesBackOnlyWhatTheOutcomeKept(t *testing.T) {
+	t.Parallel()
+	answers := map[string]answer{"reserve_cost": {value: costGranted}, "reserve_rate": {value: rateGranted}, "refund_rate": {value: costSettled}, "settle_cost": {value: costSettled}}
+	ended := func(t *testing.T, dispatched bool) *server {
+		t.Helper()
+		inner := &server{answers: answers}
+		lease, err := limiterOn(t, inner).Reserve(t.Context(), costRequest(limits.BasisCost, true))
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		lease.SetActualCost("0.5", "0.5")
+		if dispatched {
+			err = lease.Settle(t.Context(), nil)
+		} else {
+			err = lease.Refund(t.Context())
+		}
+		if err != nil {
+			t.Fatalf("ending the lease: %v", err)
+		}
+		return inner
+	}
+	dispatched := ended(t, true)
+	if got := dispatched.sent("refund_rate"); len(got) != 0 {
+		t.Fatalf("a dispatched request was refunded %d times, want its consumption kept", len(got))
+	}
+	settled := dispatched.sent("settle_cost")
+	if len(settled) != 1 || !strings.Contains(strings.Join(settled[0], " "), " 0.5 ") {
+		t.Fatalf("a dispatched request settled %v, want its recorded cost settled once", settled)
+	}
+	undispatched := ended(t, false)
+	if got := undispatched.sent("refund_rate"); len(got) != 1 {
+		t.Fatalf("a request that never dispatched was refunded %d times, want once", len(got))
+	}
+	released := undispatched.sent("settle_cost")
+	if len(released) != 1 || !strings.Contains(strings.Join(released[0], " "), " 0 ") {
+		t.Fatalf("a request that never dispatched released %v, want its estimate released at no cost", released)
+	}
+}
+
+func tokenCostRequest() Request {
+	budget := Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey, Basis: limits.BasisCost}, pointer("10"), nil, nil, "")
+	return Request{Lookup: "lookup_one_abc", LeaseTTL: 5 * time.Second, Rate: RateLimits{TokensPerMinute: pointer(int64(1000)), Tokens: 40}, Cost: budget.Holding("0.25", requestID)}
+}
+
+func TestSettleChargesTokensAboveTheEstimate(t *testing.T) {
+	t.Parallel()
+	inner := &server{answers: map[string]answer{"reserve_cost": {value: costGranted}, "reserve_rate": {value: rateGranted}, "reconcile_rate": {value: costSettled}, "settle_cost": {value: costSettled}}}
+	lease, err := limiterOn(t, inner).Reserve(t.Context(), tokenCostRequest())
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := lease.Settle(t.Context(), pointer(int64(70))); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	reconciled := inner.sent("reconcile_rate")
+	if len(reconciled) != 1 || !strings.Contains(strings.Join(reconciled[0], " "), " 30 ") {
+		t.Fatalf("settling 70 actual tokens on a 40 token estimate reconciled %v, want the 30 above the estimate charged once", reconciled)
+	}
+	if got := inner.sent("refund_rate"); len(got) != 0 {
+		t.Fatalf("a settled request was refunded %d times, want its consumption kept", len(got))
+	}
+}
+
+func TestSettleStillSettlesCostWhenReconcileFails(t *testing.T) {
+	t.Parallel()
+	inner := &server{answers: map[string]answer{"reserve_cost": {value: costGranted}, "reserve_rate": {value: rateGranted}, "settle_cost": {value: costSettled}}}
+	lease, err := limiterOn(t, inner).Reserve(t.Context(), tokenCostRequest())
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	lease.SetActualCost("0.5", "0.5")
+	err = lease.Settle(t.Context(), pointer(int64(70)))
+	if err == nil || !strings.Contains(err.Error(), "reconcile limit reservation") {
+		t.Fatalf("Settle error = %v, want the failed reconcile reported", err)
+	}
+	settled := inner.sent("settle_cost")
+	if len(settled) != 1 || !strings.Contains(strings.Join(settled[0], " "), " 0.5 ") {
+		t.Fatalf("a failed reconcile left the cost settled as %v, want the recorded cost settled once anyway", settled)
 	}
 }
 

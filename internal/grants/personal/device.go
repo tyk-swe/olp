@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
@@ -28,9 +28,9 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 		return Authorization{State: StandingState(item.Outcome)}, nil
 	}
 	if item.Flow != DeviceCode {
-		return Authorization{}, access.Invalid("enrollment_id", "This enrollment does not use device authorization.")
+		return Authorization{}, httpkit.Invalid("enrollment_id", "This enrollment does not use device authorization.")
 	}
-	attempt := access.NewID()
+	attempt := httpkit.NewID()
 	tag, claimErr := tx.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET poll_at=now()+$3::integer*interval '1 second',exchange_attempt_id=$2 WHERE id=$1 AND poll_at<=now() AND exchange_attempt_id IS NULL AND outcome IS NULL`, id, attempt, int64(grants.PollLease/time.Second))
 	if claimErr != nil {
 		return Authorization{}, claimErr
@@ -45,14 +45,14 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 	if _, err := liveBinding(ctx, tx, item.Binding); err != nil {
 		return Authorization{}, err
 	}
+	client, clientErr := newOAuthClient(s.egress, item.Binding, "", "")
+	if clientErr != nil {
+		return Authorization{}, httpkit.Fail(503, "grant_authorization_unavailable", "Personal authorization is unavailable. Try polling this enrollment again.")
+	}
+	defer client.client.CloseIdleConnections()
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
 	}
-	client, clientErr := s.oauthClient(ctx, item.Binding, "", "")
-	if clientErr != nil {
-		return Authorization{}, clientErr
-	}
-	defer client.client.CloseIdleConnections()
 	token, pollErr := client.config.Exchange(client.context(ctx), "", oauth2.SetAuthURLParam("grant_type", "urn:ietf:params:oauth:grant-type:device_code"), oauth2.SetAuthURLParam("device_code", session.DeviceCode))
 	if pollErr == nil {
 		if err := s.completeGrant(ctx, item, attempt, token); err != nil {

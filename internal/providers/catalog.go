@@ -9,7 +9,8 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -123,27 +124,27 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 	return out, nil
 }
 
-func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if s.catalog == nil {
-		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
+		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
-	id, err := access.IDParam(r, "provider_id")
+	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	models, err := loadModels(r.Context(), s.access.Pool, id)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
 	items, err := suggestionsFor(s.catalog, current.Connection.Document(), models)
 	if err != nil {
-		return access.Reply{}, err
+		return httpkit.Reply{}, err
 	}
-	return access.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
+	return httpkit.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -153,20 +154,20 @@ type acceptCatalogRequest struct {
 
 // The caller names the catalog it reviewed, so an upgrade between review and
 // acceptance cannot store facts nobody saw.
-func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input acceptCatalogRequest
-	if err := access.Decode(r, &input); err != nil {
-		return access.Reply{}, err
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
 	}
 	if s.catalog == nil {
-		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
+		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
-		return access.Reply{}, access.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
+		return httpkit.Reply{}, httpkit.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
-			return access.Reply{}, err
+			return httpkit.Reply{}, err
 		}
 		return s.detailReply(ctx, tx, current.ID)
 	})
@@ -174,7 +175,7 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 
 func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
 	if input.CatalogSHA256 != s.catalog.SHA256 {
-		return access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
+		return httpkit.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
 	models, err := loadModels(ctx, tx, current.ID)
 	if err != nil {
@@ -196,9 +197,9 @@ func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *rec
 		suggestion := byModel[name]
 		switch {
 		case suggestion == nil:
-			return access.Fail(422, "catalog_model_unmatched", "The reference catalog has no facts for "+name+".")
+			return httpkit.Fail(422, "catalog_model_unmatched", "The reference catalog has no facts for "+name+".")
 		case suggestion.Conflict != nil:
-			return access.Fail(422, "privacy_evidence", "The facts of "+name+" attest a privacy declaration; keep them and edit the model's facts instead.")
+			return httpkit.Fail(422, "privacy_evidence", "The facts of "+name+" attest a privacy declaration; keep them and edit the model's facts instead.")
 		}
 		merged, _, err := applyCatalogFacts(next.Options.Models[name], suggestion.Facts)
 		if err != nil {

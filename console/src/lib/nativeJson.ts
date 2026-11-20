@@ -14,7 +14,7 @@ type SourceJSON = typeof JSON & {
 };
 const sourceJSON = JSON as SourceJSON;
 const numberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-const maxCharacters = 4 * 1024 * 1024;
+const defaultMaxBytes = 4 * 1024 * 1024;
 
 export class NativeNumber {
   readonly source: string;
@@ -98,12 +98,15 @@ export function snapshotNativeJSON<T>(value: T): T {
   return copy(value) as T;
 }
 
-function checkUnambiguous(source: string): SourceOrder | undefined {
+function checkUnambiguous(
+  source: string,
+  maxBytes: number
+): SourceOrder | undefined {
   if (
-    source.length > maxCharacters ||
-    new TextEncoder().encode(source).byteLength > maxCharacters
+    source.length > maxBytes ||
+    new TextEncoder().encode(source).byteLength > maxBytes
   )
-    throw new Error('Native JSON must fit within 4 MiB.');
+    throw new Error(`Native JSON must fit within ${maxBytes / 1024 ** 2} MiB.`);
   let cursor = 0;
   let nodes = 0;
   const fail = (message = 'Invalid JSON'): never => {
@@ -202,12 +205,15 @@ function attachOrder(value: NativeValue, order: SourceOrder | undefined): void {
   }
 }
 
-export function parseNativeJSON(source: string): NativeValue {
+export function parseNativeJSON(
+  source: string,
+  maxBytes = defaultMaxBytes
+): NativeValue {
   if (typeof sourceJSON.rawJSON !== 'function')
     throw new Error(
       'This browser does not support lossless native JSON editing.'
     );
-  const order = checkUnambiguous(source);
+  const order = checkUnambiguous(source, maxBytes);
   const parsed = sourceJSON.parse(
     source,
     (_key: string, value: unknown, context: { source?: string }) => {
@@ -327,7 +333,8 @@ class NativeConfiguration {
 
 export function parseManagementJSON(
   source: string,
-  nativePaths: readonly NativePath[] = []
+  nativePaths: readonly NativePath[] = [],
+  maxBytes?: number
 ): unknown {
   const normalize = (
     value: NativeValue,
@@ -361,7 +368,7 @@ export function parseManagementJSON(
     );
     return result;
   };
-  return normalize(parseNativeJSON(source), []);
+  return normalize(parseNativeJSON(source, maxBytes), []);
 }
 
 /** An unfinished field edit is part of the one draft tree, never a second
@@ -403,8 +410,8 @@ export function freezeNative(value: NativeValue): NativeValue {
 
 /** The editor may display an unfinished fragment. API serialization still
  * uses stringifyNativeJSON, whose incomplete sentinel always throws. */
-export function renderNativeDraft(value: NativeValue, indentation = 2): string {
-  return renderJSON(value, indentation, true);
+export function renderNativeDraft(value: NativeValue): string {
+  return renderJSON(value, 2, true);
 }
 
 function renderJSON(

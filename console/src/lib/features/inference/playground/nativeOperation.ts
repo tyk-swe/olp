@@ -11,7 +11,7 @@ import {
 
 export const nativeOperationDialects = {
   completions: ['openai-completions'],
-  decision: ['openai-decisions', 'systemone'],
+  decision: ['openai-decisions', 'systemone', 'gemini-decisions'],
   embeddings: [
     'openai-embeddings',
     'voyage-embeddings',
@@ -58,9 +58,11 @@ export const publicNativeOperations: ReadonlySet<string> = new Set([
 ]);
 
 export type NativeOperation = keyof typeof nativeOperationDialects;
+const maxResultBytes = 8 * 1024 * 1024;
 const bodyModelDialects = new Set([
   'openai-completions',
   'openai-decisions',
+  'gemini-decisions',
   'systemone',
   'openai-embeddings',
   'voyage-embeddings',
@@ -74,6 +76,15 @@ const bodyModelDialects = new Set([
   'mistral-ocr',
   'azure-document-intelligence-ocr'
 ]);
+
+const publicPaths: Readonly<Record<string, string | undefined>> = {
+  'openai-completions': '/v1/completions',
+  'openai-decisions': '/v1/decisions',
+  'gemini-decisions': '/gemini/v1beta/decisions',
+  systemone: '/v1/systemone',
+  'mistral-ocr': '/v1/ocr',
+  'perplexity-search': '/v1/search'
+};
 
 // Search dialects carry the route in a header or the native path, never a
 // body model field.
@@ -154,17 +165,8 @@ export async function runNativeOperation(
     headers.set('X-OLP-Client-Contract', 'raw-vector-storage/1');
   if (dialect === 'perplexity-search') headers.set('X-OLP-Route', route);
   const response = await gatewayFetch(
-    operation === 'completions'
-      ? '/v1/completions'
-      : operation === 'decision'
-        ? dialect === 'systemone'
-          ? '/v1/systemone'
-          : '/v1/decisions'
-        : operation === 'ocr' && dialect === 'mistral-ocr'
-          ? '/v1/ocr'
-          : dialect === 'perplexity-search'
-            ? '/v1/search'
-            : `/native/${dialect}/models/${encodeURIComponent(route)}`,
+    publicPaths[dialect] ??
+      `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
       headers,
@@ -177,11 +179,11 @@ export async function runNativeOperation(
       `The public operation was not admitted (${response.status}). Check the route, key and native dialect.`
     );
   const raw = await response.text();
-  if (new TextEncoder().encode(raw).byteLength > 8 << 20)
+  if (new TextEncoder().encode(raw).byteLength > maxResultBytes)
     throw new Error('The native operation result exceeds the browser limit.');
   let document: NativeValue;
   try {
-    document = parseNativeJSON(raw);
+    document = parseNativeJSON(raw, maxResultBytes);
   } catch {
     throw new Error('The provider returned an invalid native JSON result.');
   }

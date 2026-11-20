@@ -1,11 +1,10 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, createHeaders } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 
 export type RateCard = components['schemas']['RateCard'];
-export type RateCardOwner = components['schemas']['RateCardOwner'];
 export type RateCardRevision = components['schemas']['RateCardRevision'];
 export type CardPriceDraft = components['schemas']['RateCardPriceEntry'];
 
@@ -26,7 +25,7 @@ export async function createRateCard(
   requestId: string
 ): Promise<RateCard> {
   const { data, error, response } = await apiClient.POST('/api/v1/rate-cards', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: { owner }
   });
   return unwrap({ data, error, response });
@@ -42,7 +41,7 @@ export async function createRateCardRevision(
     {
       params: {
         path: { rate_card_id: cardId },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       },
       body: draft
     }

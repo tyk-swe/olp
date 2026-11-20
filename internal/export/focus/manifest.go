@@ -14,6 +14,7 @@ import (
 )
 
 type completeness struct {
+	RawDetailUnavailable       bool  `json:"raw_detail_unavailable"`
 	IncludedAttempts           int64 `json:"included_attempts"`
 	FallbackLineAttempts       int64 `json:"fallback_line_attempts"`
 	UnpricedAttempts           int64 `json:"unpriced_attempts"`
@@ -39,7 +40,7 @@ type facts struct {
 
 func (f facts) complete() bool {
 	c := f.completeness
-	return !c.IngestionGap && c.IncompleteAttempts == 0 && c.UnpricedAttempts == 0 &&
+	return !c.RawDetailUnavailable && !c.IngestionGap && c.IncompleteAttempts == 0 && c.UnpricedAttempts == 0 &&
 		(f.commitments == nil || f.commitments.Complete && !f.commitments.Provisional)
 }
 
