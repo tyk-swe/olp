@@ -24,9 +24,11 @@ import (
 const cacheReadTimeout = 100 * time.Millisecond
 
 type cacheSubject struct {
-	attempt  routing.Attempt
-	provider routing.Provider
-	document oif.Document
+	attempt   routing.Attempt
+	provider  routing.Provider
+	document  oif.Document
+	generates bool
+	segments  []guardrails.Segment
 }
 
 type cacheAddress struct {
@@ -48,6 +50,9 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	subject, refusal := x.cacheSubject()
 	if refusal != nil {
 		return refusal
+	}
+	if subject.generates {
+		x.guard.input = subject.segments
 	}
 	// Defaults and protocol preparation can add retention even when the caller
 	// omitted it. Only the effective upstream request can establish eligibility.
@@ -111,8 +116,7 @@ func (x *Call) cacheSubject() (cacheSubject, *fault.Error) {
 	if err != nil {
 		return cacheSubject{}, RequestError(err)
 	}
-	x.guard.input = prepared.guardrailSegments
-	return cacheSubject{attempt: attempt, provider: provider, document: prepared.document}, nil
+	return cacheSubject{attempt: attempt, provider: provider, document: prepared.document, generates: true, segments: prepared.guardrailSegments}, nil
 }
 
 func (x *Call) cacheAddress(subject cacheSubject) (cacheAddress, bool) {
