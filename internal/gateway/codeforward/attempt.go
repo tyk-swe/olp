@@ -290,7 +290,7 @@ func (a *codeAttempt) finish(ctx context.Context) {
 }
 
 func codeProviderDemand(request codemode.Request) quota.TokenDemand {
-	return quota.GenerationDemand(request.Estimate-request.OutputCap, request.OutputCap)
+	return quota.GenerationDemand(request.Estimate-request.OutputCap, request.OutputCap, request.ChatChoices)
 }
 
 func settledCodeUsage(usage codemode.Usage) *admission.TokenUsage {

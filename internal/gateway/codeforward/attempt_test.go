@@ -1185,6 +1185,10 @@ func TestCodeProviderDemandHoldsTheReplyBoundAsOutput(t *testing.T) {
 		"messages cap":     {classify: codewire.ClassifyMessages, body: `{"model":"m","max_tokens":300,` + prompt + `}`, want: 300},
 		"chat cap":         {classify: codewire.ClassifyChat, body: `{"model":"m","max_completion_tokens":200,` + prompt + `}`, want: 200},
 		"chat without cap": {classify: codewire.ClassifyChat, body: `{"model":"m",` + prompt + `}`, want: estimate.DefaultOutputTokens},
+		"chat choices":     {classify: codewire.ClassifyChat, body: `{"model":"m","n":3,"max_completion_tokens":200,` + prompt + `}`, want: 600},
+		"chat choices without cap": {
+			classify: codewire.ClassifyChat, body: `{"model":"m","n":2,` + prompt + `}`, want: 2 * estimate.DefaultOutputTokens,
+		},
 		"responses cap": {
 			classify: func(body []byte, headers http.Header) (codemode.Request, error) {
 				return codexwire.Classify(body, headers, "responses", false)

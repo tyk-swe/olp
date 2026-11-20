@@ -47,11 +47,17 @@ func TestSettledAttemptUsageKeepsTheReservationWhenBillingIsUncertain(t *testing
 
 func TestGenerationDemandAlwaysHoldsAnOutputAllowance(t *testing.T) {
 	t.Parallel()
-	if got := GenerationDemand(120, 300); got != (TokenDemand{Input: 120, Output: 300, Total: 420}) {
+	if got := GenerationDemand(120, 300, 1); got != (TokenDemand{Input: 120, Output: 300, Total: 420}) {
 		t.Fatalf("GenerationDemand with a reply bound = %+v, want the bound held as output", got)
 	}
-	unbounded := GenerationDemand(120, 0)
+	unbounded := GenerationDemand(120, 0, 0)
 	if unbounded.Output != estimate.DefaultOutputTokens || unbounded.Total != unbounded.Input+unbounded.Output {
 		t.Fatalf("GenerationDemand without a reply bound = %+v, want the default output allowance inside the total", unbounded)
+	}
+	if got := GenerationDemand(120, 300, 3); got != (TokenDemand{Input: 120, Output: 900, Total: 1020}) {
+		t.Fatalf("GenerationDemand for three candidates = %+v, want the bound held once per candidate", got)
+	}
+	if got := GenerationDemand(1, estimate.MaxTokens, 2); got.Output != estimate.MaxTokens || got.Total != estimate.MaxTokens {
+		t.Fatalf("GenerationDemand past the limiter's range = %+v, want it saturated", got)
 	}
 }

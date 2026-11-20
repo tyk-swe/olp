@@ -22,8 +22,8 @@ func CombinedDemand(tokens int64) TokenDemand {
 	return TokenDemand{Input: tokens, Total: tokens}
 }
 
-func GenerationDemand(input, replyBound int64) TokenDemand {
-	output := cmp.Or(replyBound, estimate.DefaultOutputTokens)
+func GenerationDemand(input, replyBound, candidates int64) TokenDemand {
+	output := multiplyBounded(cmp.Or(replyBound, estimate.DefaultOutputTokens), max(candidates, 1))
 	return TokenDemand{Input: input, Output: output, Total: AddBounded(input, output)}
 }
 

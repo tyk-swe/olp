@@ -52,7 +52,7 @@ func (s *Server) GatePinnedGeneration(ctx context.Context, x *Call, p *Pin, oper
 	p.attempt.Price = s.Deps.Runtime.RoutingInputs().Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, operation, s.Now())
 	p.attempt.Discount = s.Deps.Runtime.RoutingInputs().Discount(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, s.Now())
 	deadline, _ := ctx.Deadline()
-	gate := s.gateAttempt(ctx, x, p.attempt, &p.Provider, &p.Slot, quota.GenerationDemand(x.estimate, replyBound), deadline)
+	gate := s.gateAttempt(ctx, x, p.attempt, &p.Provider, &p.Slot, quota.GenerationDemand(x.estimate, replyBound, 1), deadline)
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

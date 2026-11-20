@@ -1844,6 +1844,29 @@ func interactionStreamReplies(request string, nth int) map[string]string {
 	}
 }
 
+func TestNewGeminiInteractionsHoldTheirReplyBoundAgainstOutputTokenLimits(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "gemini-interactions", "gemini-model"
+	upstream := &retainedUpstream{replies: geminiReplies}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "gemini", surface: "gemini", profile: "gemini-interactions", version: "/v1beta", secure: true,
+		operations: []string{"generation"}, upstream: upstream, limits: &routing.Limits{OutputTokensPerMinute: new(int64(100))},
+	})
+	g.key(t, "owner")
+	const interactions = "/gemini/v1beta/interactions"
+	headers := geminiKey("owner", map[string]string{"Content-Type": "application/json"})
+	create := func(replyBound string) string {
+		return `{"model":"` + slug + `","input":"hi","generation_config":{"max_output_tokens":` + replyBound + `}}`
+	}
+
+	g.send(t, "POST", interactions, headers, create("500"), 429)
+	if sent := upstream.sent("POST /interactions"); len(sent) != 0 {
+		t.Fatalf("an Interaction allowed 500 output tokens reached the provider under a 100 token output limit: %+v", sent)
+	}
+	g.send(t, "POST", interactions, headers, create("50"), 200)
+}
+
 type streamedInteraction struct {
 	ids    []string
 	events []struct {
