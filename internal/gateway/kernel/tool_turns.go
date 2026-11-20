@@ -18,13 +18,20 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 	if failure != nil {
 		return &Outcome{Err: failure}
 	}
+	chatUsage := new(wire.Usage)
 	for iteration := first; int64(iteration) < *x.generation.runLimits.MaxIterations; iteration++ {
 		out, frames, failure := s.modelTurn(ctx, x, iteration)
 		if failure != nil {
 			return &Outcome{Err: failure}
 		}
-		if out.Err != nil || out.Completion == nil || len(out.Completion.ToolCalls) == 0 {
-			if failure := s.finalAnswer(x, out, frames); failure != nil {
+		if out.Err != nil || out.Completion == nil {
+			return out
+		}
+		if x.family == wire.Chat {
+			chatUsage = protocols.AddChatWorkflowUsage(chatUsage, out.Completion.Usage)
+		}
+		if len(out.Completion.ToolCalls) == 0 {
+			if failure := s.finalAnswer(x, out.Completion, frames, iteration > first, chatUsage); failure != nil {
 				return &Outcome{Err: failure}
 			}
 			return out
@@ -38,6 +45,19 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 		}
 	}
 	return &Outcome{Err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
+}
+
+func (s *Server) projectChatUsage(x *Call, turn *wire.Completion, frames []byte, usage *wire.Usage) ([]byte, error) {
+	maxBytes := int(s.Config.MaxResponseBytes)
+	if !x.generation.parsed.Stream {
+		body, err := protocols.ProjectChatWorkflowUsage(turn.Body, usage, maxBytes)
+		turn.Body = body
+		return frames, err
+	}
+	if !x.generation.parsed.IncludeUsage {
+		return frames, nil
+	}
+	return protocols.ProjectChatWorkflowStreamUsage(frames, usage, int(s.Config.MaxEventBytes), maxBytes)
 }
 
 func (s *Server) resumeToolLoop(ctx context.Context, x *Call) (int, *fault.Error) {
@@ -128,17 +148,21 @@ func (s *Server) readStreamedTurn(x *Call, turn *wire.Completion, frames []byte)
 	return nil
 }
 
-func (s *Server) finalAnswer(x *Call, out *Outcome, frames []byte) *fault.Error {
-	if out.Err != nil {
-		return nil
-	}
+func (s *Server) finalAnswer(x *Call, turn *wire.Completion, frames []byte, multiTurn bool, chatUsage *wire.Usage) *fault.Error {
 	unprepared := fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")
-	if out.Completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
-		body, err := projectResponseMCPItems(out.Completion.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
+	if multiTurn && x.family == wire.Chat {
+		projected, err := s.projectChatUsage(x, turn, frames, chatUsage)
 		if err != nil {
 			return unprepared
 		}
-		out.Completion.Body = body
+		frames = projected
+	}
+	if !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
+		body, err := projectResponseMCPItems(turn.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
+		if err != nil {
+			return unprepared
+		}
+		turn.Body = body
 	}
 	if !x.generation.parsed.Stream {
 		return nil
