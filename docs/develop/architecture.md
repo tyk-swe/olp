@@ -52,8 +52,8 @@ validation. Direct and promoted provider edits share credential-boundary,
 certification-invalidation and staged-inventory operations. Unchanged slots retain
 enrollment lifetime; parent/collection ETags advance coherently. Installation
 serialization protects reauthorization, replay, publication and atomic audit.
-`access.BeginMutation` acquires that lock and refreshes authorization before
-feature commands run. Project-policy batches and billing-import writes share
+Every `access` write helper acquires that lock and refreshes authorization
+before feature commands run. Project-policy batches and billing-import writes share
 their feature-owned persistence commands with promotion.
 
 Each promotion section parses its part of the generated contract document once at
@@ -297,6 +297,8 @@ management endpoint, and it shows the whole shape in one file.
      replay, then releases the installation lock so the upstream call never
      holds it. `internal/providers/credentials.go` rotates a credential this
      way.
+   - `access.Run` commits a step whose result is a value and not a reply,
+     such as claiming a grant enrollment before the upstream exchange.
 5. Each helper takes a lock step and an apply step. The lock step loads the
    current row `FOR UPDATE` and authorizes the caller against it, or calls
    `RequireProject` for a create. Use `access.Unlocked` when there is nothing to
@@ -304,11 +306,10 @@ management endpoint, and it shows the whole shape in one file.
    together with the `access.Event` to audit.
 
 The helper owns the transaction, the replay record, the audit row and the
-commit, so a handler never calls `BeginMutation`, `Replay`, `CompleteReplay` or
-`tx.Commit`. Call `access.Audit` directly only for a second audit row in the same
-change. Lint fails when a new file opens a management transaction by hand. The
-files still listed under `handRolledTransaction` in `.golangci-legacy.json`
-commit a step whose result is not a reply, and they are the exception.
+commit, so a handler never calls `tx.Commit`. The functions that open the
+management transaction and read the replay record are unexported, so only
+`internal/access` can call them. Call `access.Audit` directly only for a second
+audit row in the same change.
 
 ## Ordinary execution
 

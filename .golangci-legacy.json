@@ -141,9 +141,5 @@
     "internal/platform/secretstore/unwrap.go Resolver.Unwrap",
     "internal/usage/event_decode.go wireEvent.decode",
     "internal/usage/routinginputs/inputs.go loadRoutingRateCards"
-  ],
-  "handRolledTransaction": [
-    "internal/media/jobs/api.go",
-    "internal/providers/enrollments.go"
   ]
 }

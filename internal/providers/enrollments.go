@@ -178,28 +178,23 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ authz.Principal) (ht
 		return httpkit.Reply{}, httpkit.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
 	}
 	ctx := r.Context()
-	tx, principal, err := s.access.BeginMutation(r)
+	claim, err := access.Run(s.access, r, func(tx pgx.Tx, principal authz.Principal) (claimedEnrollment, access.Event, error) {
+		current, err := readProvider(ctx, tx, providerID)
+		if err != nil {
+			return claimedEnrollment{}, access.Event{}, err
+		}
+		if err := principal.Project(current.ProjectID, authz.Change); err != nil {
+			return claimedEnrollment{}, access.Event{}, err
+		}
+		enrollment, err := grants.Claim(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
+		return claimedEnrollment{actor: principal.Actor(), provider: current, enrollment: enrollment}, access.Event{}, err
+	})
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(ctx)
-	current, err := readProvider(ctx, tx, providerID)
+	completed, err := s.exchange(r, claim.provider, claim.enrollment, input.Input)
 	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := principal.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	enrollment, err := grants.Claim(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	completed, err := s.exchange(r, current, enrollment, input.Input)
-	if err != nil {
-		return httpkit.Reply{}, s.failedEnrollment(r, principal.Actor(), providerID, err)
+		return httpkit.Reply{}, s.failedEnrollment(r, claim.actor, providerID, err)
 	}
 	return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, nil
 }
@@ -219,11 +214,13 @@ func (s *Server) exchange(r *http.Request, current *record, enrollment grants.En
 func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
 	defer cancel()
-	tx, principal, err := s.access.BeginMutation(r.WithContext(ctx))
-	if err != nil {
-		return enrollmentCompletion{}, err
-	}
-	defer tx.Rollback(ctx)
+	return access.Run(s.access, r.WithContext(ctx), func(tx pgx.Tx, principal authz.Principal) (enrollmentCompletion, access.Event, error) {
+		completion, err := s.stageGrant(ctx, tx, r, principal, current, enrollment, grant)
+		return completion, access.Event{}, err
+	})
+}
+
+func (s *Server) stageGrant(ctx context.Context, tx pgx.Tx, r *http.Request, principal authz.Principal, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
 	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
 		return enrollmentCompletion{}, err
@@ -246,11 +243,13 @@ func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrol
 	if err := enrollment.Complete(ctx, tx, credentialID); err != nil {
 		return enrollmentCompletion{}, err
 	}
-	completion, err := bindGrant(ctx, tx, r, principal.Actor(), grantBinding{ProviderID: current.ID, SlotID: enrollment.SlotID, ExpectedCredentialID: enrollment.ExpectedCredentialID, Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: grantEnrollAction}, stale)
-	if err != nil {
-		return enrollmentCompletion{}, err
-	}
-	return completion, tx.Commit(ctx)
+	return bindGrant(ctx, tx, r, principal.Actor(), grantBinding{ProviderID: current.ID, SlotID: enrollment.SlotID, ExpectedCredentialID: enrollment.ExpectedCredentialID, Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: grantEnrollAction}, stale)
+}
+
+type claimedEnrollment struct {
+	actor      authz.Actor
+	provider   *record
+	enrollment grants.Enrollment
 }
 
 const grantEnrollAction = "provider.grant.enroll"
