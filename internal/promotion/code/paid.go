@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -101,7 +101,7 @@ func (c PaidConnection) render() (contract.ConfigurationCodePaidConnection, erro
 	return contract.ConfigurationCodePaidConnection{Provider: entries[0], SlotKeyRefs: refs}, nil
 }
 
-func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]PaidConnection, policy routes.CodeRouteInput, values bindings, deps provider.Deps) (map[string]routing.Provider, error) {
+func resolvePaid(ctx context.Context, q database.Queryer, connections map[string]PaidConnection, policy routes.CodeRouteInput, values bindings, deps provider.Deps) (map[string]routing.Provider, error) {
 	frozen, err := promotion.TryMap(slices.Sorted(maps.Keys(connections)), func(name string) (routing.Provider, error) {
 		return connections[name].resolve(ctx, q, policy.ProjectID, values, deps)
 	})
@@ -132,7 +132,7 @@ func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]P
 	return byProvider, nil
 }
 
-func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project string, values bindings, deps provider.Deps) (routing.Provider, error) {
+func (c PaidConnection) resolve(ctx context.Context, q database.Queryer, project string, values bindings, deps provider.Deps) (routing.Provider, error) {
 	entry := c.Provider
 	current, found, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
 	if err != nil {
@@ -183,7 +183,7 @@ func paidRoute(policy routes.CodeRouteInput) codemode.Route {
 	return codemode.Route{Models: policy.Models, ProjectID: policy.ProjectID, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
 }
 
-func preparedPaid(ctx context.Context, q access.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
+func preparedPaid(ctx context.Context, q database.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
 	prepared, err := connection.Prepare(ctx, deps.Drafts.ConnectionPolicy(q), configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return configuration, nil
@@ -228,7 +228,7 @@ func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (r
 	return routing.RevisionModel{ID: destination.ID, UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Capabilities: capabilities}, err
 }
 
-func (c PaidConnection) frozenSlot(ctx context.Context, q access.Queryer, slot provider.Slot, providerID string, current []routing.RevisionSlot, project string, values bindings) (routing.RevisionSlot, error) {
+func (c PaidConnection) frozenSlot(ctx context.Context, q database.Queryer, slot provider.Slot, providerID string, current []routing.RevisionSlot, project string, values bindings) (routing.RevisionSlot, error) {
 	at := slices.IndexFunc(current, func(s routing.RevisionSlot) bool { return s.Name == slot.Name })
 	if at < 0 {
 		return routing.RevisionSlot{}, httpkit.Invalid("code.paid_connections.slots", "Every frozen slot needs its published destination slot.")
@@ -249,7 +249,7 @@ func (c PaidConnection) frozenSlot(ctx context.Context, q access.Queryer, slot p
 	}}, nil
 }
 
-func (c PaidConnection) slotCredential(ctx context.Context, q access.Queryer, slot provider.Slot, live routing.RevisionSlot, providerID string, credentials map[string]string) (*string, error) {
+func (c PaidConnection) slotCredential(ctx context.Context, q database.Queryer, slot provider.Slot, live routing.RevisionSlot, providerID string, credentials map[string]string) (*string, error) {
 	ref, referenced := c.slotRef(slot)
 	if !referenced {
 		return nil, nil

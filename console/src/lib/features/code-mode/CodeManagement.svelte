@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -34,8 +35,10 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
-  import { listProviders } from '#lib/features/providers/providers.js';
-  import { listCredentialSlots } from '#lib/features/providers/credentials.js';
+  import {
+    listProviders,
+    listCredentialSlots
+  } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -208,7 +211,7 @@
       global authority.
     </ReadOnlyNote>{/if}
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if editing}
     {#if inventory.isError}<LoadError
         error={inventory.error}
@@ -586,9 +589,6 @@
   .empty {
     padding: 2rem;
     border: 1px dashed var(--border);
-  }
-  .field-error {
-    color: var(--danger);
   }
   @media (max-width: 40rem) {
     dl {

@@ -8,8 +8,7 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const revisionColumns = "v.id::text,g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,v.configuration,v.timeout_ms,v.on_error"
@@ -36,7 +35,7 @@ func scanPublishedRevision(row pgx.CollectableRow) (Revision, error) {
 	return d, row.Scan(append(d.columns(), &d.LegacyRuleID)...)
 }
 
-func collect[T any](ctx context.Context, q access.Queryer, sql string, scan pgx.RowToFunc[T], args ...any) ([]T, error) {
+func collect[T any](ctx context.Context, q database.Queryer, sql string, scan pgx.RowToFunc[T], args ...any) ([]T, error) {
 	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
@@ -55,7 +54,7 @@ func index[T, V any](values []T, entry func(T) (string, V)) map[string]V {
 
 func revisionEntry(d Revision) (string, Revision) { return d.ID, d }
 
-func ReadRevisions(ctx context.Context, q access.Queryer, ids []string) (map[string]Revision, error) {
+func ReadRevisions(ctx context.Context, q database.Queryer, ids []string) (map[string]Revision, error) {
 	revisions, err := collect(ctx, q, "SELECT "+revisionColumns+" FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.guardrail_id=g.id WHERE v.id=ANY($1::uuid[])", scanRevision, ids)
 	if err != nil {
 		return nil, err
@@ -63,16 +62,16 @@ func ReadRevisions(ctx context.Context, q access.Queryer, ids []string) (map[str
 	return index(revisions, revisionEntry), nil
 }
 
-func ReadUnmanagedActiveRevisions(ctx context.Context, q access.Queryer) ([]Revision, error) {
+func ReadUnmanagedActiveRevisions(ctx context.Context, q database.Queryer) ([]Revision, error) {
 	return collect(ctx, q, "SELECT "+revisionColumns+" FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.active_revision_id WHERE g.retired_at IS NULL AND g.managed_route_revision_id IS NULL", scanRevision)
 }
 
-func ReadUnmanagedPolicyRevisions(ctx context.Context, q access.Queryer) ([]NamedPolicyRevision, error) {
+func ReadUnmanagedPolicyRevisions(ctx context.Context, q database.Queryer) ([]NamedPolicyRevision, error) {
 	return collect(ctx, q, `SELECT v.id::text,p.name,(v.id=p.active_revision_id) FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id
  WHERE p.managed_route_revision_id IS NULL AND ((p.retired_at IS NULL AND v.id=p.active_revision_id) OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`, pgx.RowToStructByPos[NamedPolicyRevision])
 }
 
-func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
+func ReadRegistry(ctx context.Context, q database.Queryer) (*Registry, error) {
 	var unactivated bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(
  SELECT 1 FROM olp.guardrail_attachments a LEFT JOIN olp.guardrail_policy_revision_activations v ON v.revision_id=a.policy_revision_id WHERE v.revision_id IS NULL
@@ -136,7 +135,7 @@ func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
 
 type projectOrganization struct{ Project, Organization string }
 
-func requirePublishable(ctx context.Context, q access.Queryer, definitions []Revision) error {
+func requirePublishable(ctx context.Context, q database.Queryer, definitions []Revision) error {
 	var credentials, owners, digests, plugins []string
 	for _, d := range definitions {
 		spec, err := ParseRevision(d)
@@ -169,7 +168,7 @@ func requirePublishable(ctx context.Context, q access.Queryer, definitions []Rev
 	return nil
 }
 
-func streamWindow(ctx context.Context, q access.Queryer) (int, error) {
+func streamWindow(ctx context.Context, q database.Queryer) (int, error) {
 	var raw string
 	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='guardrails.stream_window_bytes'),'65536')").Scan(&raw); err != nil {
 		return 0, err

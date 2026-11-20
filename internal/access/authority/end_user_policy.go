@@ -1,11 +1,12 @@
 package authority
 
 import (
-	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // AdmissionLimits is a complete limit set. Nil dimensions are unlimited.

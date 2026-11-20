@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/oif"
 )
 
 type ToolPolicies interface {

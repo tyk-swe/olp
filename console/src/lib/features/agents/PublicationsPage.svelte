@@ -1,11 +1,12 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -328,12 +329,9 @@
   }
 </script>
 
-{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}{#if notice}<p
-    class="success-banner"
-    role="status"
-  >
-    {notice}
-  </p>{/if}
+{#if error}<p class="inline-problem" role="alert">
+    {error}
+  </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 {#if items.error}<p class="inline-problem" role="alert">
     {errorMessage(items.error)}
   </p>{/if}

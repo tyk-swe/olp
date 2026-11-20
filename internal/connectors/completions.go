@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 var tgiCompletionFields = strings.Fields("model prompt max_tokens temperature top_p stream seed repetition_penalty frequency_penalty stop stream_options")

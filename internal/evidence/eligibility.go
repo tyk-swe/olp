@@ -5,7 +5,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type stream string
@@ -35,7 +36,7 @@ func projectMembership(projectID string, role *string) map[string]string {
 	return map[string]string{projectID: *role}
 }
 
-func eligible(ctx context.Context, q access.Queryer, source stream, sourceID, projectID, creatorID string) (bool, error) {
+func eligible(ctx context.Context, q database.Queryer, source stream, sourceID, projectID, creatorID string) (bool, error) {
 	rows, err := q.Query(ctx, `SELECT u.access_scope, m.role AS project_role, (`+sourceQuery(source)+`) AS source_live
 		FROM olp.users u LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=$3
 		WHERE u.id=$1 AND u.active AND u.oidc_authorized`, creatorID, sourceID, projectID)
@@ -49,11 +50,11 @@ func eligible(ctx context.Context, q access.Queryer, source stream, sourceID, pr
 	if err != nil {
 		return false, err
 	}
-	principal := access.Principal{AllProjects: current.Scope == "global", Projects: projectMembership(projectID, current.ProjectRole)}
-	return current.SourceLive && principal.Project(&projectID, access.View) == nil, nil
+	principal := authz.Principal{AllProjects: current.Scope == "global", Projects: projectMembership(projectID, current.ProjectRole)}
+	return current.SourceLive && principal.Project(&projectID, authz.View) == nil, nil
 }
 
-func Admit(ctx context.Context, q access.Queryer, name string, sourceID, projectID *string, creatorID string) (bool, error) {
+func Admit(ctx context.Context, q database.Queryer, name string, sourceID, projectID *string, creatorID string) (bool, error) {
 	if name != string(runs) && name != string(traceSpans) {
 		return true, nil
 	}

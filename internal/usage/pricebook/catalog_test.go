@@ -18,10 +18,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // TestEmbeddedCatalogMapsToValidPrices proves the catalog this release ships

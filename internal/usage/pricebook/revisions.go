@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -219,7 +219,7 @@ const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.create
 
 // ListRevisions pages revisions newest first, each with its full price list.
 // The cursor is the revision number, which is dense and immutable.
-func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, limit int) ([]Revision, *string, error) {
+func ListRevisions(ctx context.Context, q database.Queryer, beforeRevision *int, limit int) ([]Revision, *string, error) {
 	if limit < 1 {
 		limit = 1
 	}

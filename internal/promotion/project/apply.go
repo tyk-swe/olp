@@ -5,12 +5,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 func Applier(desired []Project, costs Costs) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		current, err := Read(ctx, tx)
 		if err != nil {
 			return err
@@ -49,7 +51,7 @@ func imports(desired []Project, directory promotion.Directory) ([]projects.Polic
 	})
 }
 
-func ensure(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, project Project, state State) error {
+func ensure(ctx context.Context, tx pgx.Tx, p authz.Principal, costs Costs, project Project, state State) error {
 	current, ok := state.Project(project.Name)
 	if !ok {
 		return create(ctx, tx, p, project)
@@ -60,7 +62,7 @@ func ensure(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 	return assign(ctx, tx, p, costs, current.ID, *project.Organization)
 }
 
-func create(ctx context.Context, tx pgx.Tx, p access.Principal, project Project) error {
+func create(ctx context.Context, tx pgx.Tx, p authz.Principal, project Project) error {
 	organization, err := createIn(ctx, tx, p, project.Organization)
 	if err != nil {
 		return err
@@ -71,7 +73,7 @@ func create(ctx context.Context, tx pgx.Tx, p access.Principal, project Project)
 	return nil
 }
 
-func createIn(ctx context.Context, tx pgx.Tx, p access.Principal, name *string) (*string, error) {
+func createIn(ctx context.Context, tx pgx.Tx, p authz.Principal, name *string) (*string, error) {
 	if name == nil {
 		return nil, nil
 	}
@@ -79,13 +81,13 @@ func createIn(ctx context.Context, tx pgx.Tx, p access.Principal, name *string) 
 	if err != nil {
 		return nil, err
 	}
-	if err := p.Authorize(access.Access); err != nil {
+	if err := p.Authorize(authz.Access); err != nil {
 		return nil, err
 	}
 	return &id, nil
 }
 
-func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, project, organizationName string) error {
+func assign(ctx context.Context, tx pgx.Tx, p authz.Principal, costs Costs, project, organizationName string) error {
 	organization, err := organizationID(ctx, tx, organizationName)
 	if err != nil {
 		return err
@@ -100,7 +102,7 @@ func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 	if current != nil {
 		return organizationImmutable()
 	}
-	if err := p.Authorize(access.Access); err != nil {
+	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
 	snapshots, err := projects.AssignOrganization(ctx, tx, project, organization)
@@ -110,7 +112,7 @@ func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 	return costs.Install(ctx, snapshots)
 }
 
-func organizationID(ctx context.Context, q access.Queryer, name string) (string, error) {
+func organizationID(ctx context.Context, q database.Queryer, name string) (string, error) {
 	id, found, err := projects.OrganizationIDByName(ctx, q, name)
 	if err != nil || found {
 		return id, err

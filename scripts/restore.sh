@@ -22,7 +22,7 @@ jq -e --arg checksum "$checksum" '
   .migrations == (.migration_history | length)' "$manifest" >/dev/null
 while IFS=$'\t' read -r version checksum; do
   [[ $version =~ ^[0-9]{4}_[a-z0-9_]+\.sql$ && $checksum =~ ^[0-9a-f]{64}$ ]] || exit 1
-  file="$repo_dir/internal/database/migrations/$version"
+  file="$repo_dir/internal/platform/database/migrations/$version"
   [[ -f $file ]] || { echo 'Backup migration is not supported by this checkout.' >&2; exit 1; }
   actual_checksum=$(sha256sum < "$file")
   [[ ${actual_checksum%% *} == "$checksum" ]] || { echo 'Backup migration checksum differs from this checkout.' >&2; exit 1; }

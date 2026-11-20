@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 
@@ -175,7 +175,7 @@ func (t Totals) valid() bool {
 }
 
 // ReadSummary totals one range and reports how complete that total is.
-func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time) (Summary, error) {
+func ReadSummary(ctx context.Context, q database.Queryer, f Filters, now time.Time) (Summary, error) {
 	var query filterQuery
 	f.usageRows(&query, scopeFor(f))
 	query.push(" SELECT " + totalsColumns + " FROM report_rows")
@@ -205,7 +205,7 @@ func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time
 	return summary, nil
 }
 
-func ReadCompleteness(ctx context.Context, q access.Queryer, f Filters, now time.Time) (Completeness, error) {
+func ReadCompleteness(ctx context.Context, q database.Queryer, f Filters, now time.Time) (Completeness, error) {
 	scope := scopeFor(f)
 	var query filterQuery
 	query.push("WITH completeness_rows AS (SELECT" +
@@ -257,11 +257,11 @@ func ReadCompleteness(ctx context.Context, q access.Queryer, f Filters, now time
 // ReadBreakdown groups a range by one dimension. The count scope follows the
 // dimension as well as the filters: breaking down by provider counts provider
 // attempts, unless a model filter already narrowed the question to one target.
-func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension Dimension, limit int) (Breakdown, error) {
+func ReadBreakdown(ctx context.Context, q database.Queryer, f Filters, dimension Dimension, limit int) (Breakdown, error) {
 	return readBreakdown(ctx, q, f, dimension, limit, 200)
 }
 
-func ReadBreakdownExport(ctx context.Context, q access.Queryer, f Filters, dimension Dimension) (Breakdown, error) {
+func ReadBreakdownExport(ctx context.Context, q database.Queryer, f Filters, dimension Dimension) (Breakdown, error) {
 	report, err := readBreakdown(ctx, q, f, dimension, 10001, 10001)
 	if err == nil && len(report.Items) > 10000 {
 		return Breakdown{}, fail(FailureExportTooLarge, "Narrow the usage filters to at most 10000 groups.")
@@ -269,7 +269,7 @@ func ReadBreakdownExport(ctx context.Context, q access.Queryer, f Filters, dimen
 	return report, err
 }
 
-func readBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension Dimension, limit, maximum int) (Breakdown, error) {
+func readBreakdown(ctx context.Context, q database.Queryer, f Filters, dimension Dimension, limit, maximum int) (Breakdown, error) {
 	if limit < 1 {
 		limit = 1
 	}
@@ -313,7 +313,7 @@ func readBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension D
 
 // ReadSeries buckets a range by hour or day. The bucket boundary is stated in
 // UTC in SQL so a series bucket can never disagree with a rollup bucket.
-func ReadSeries(ctx context.Context, q access.Queryer, f Filters, granularity Granularity) (Series, error) {
+func ReadSeries(ctx context.Context, q database.Queryer, f Filters, granularity Granularity) (Series, error) {
 	var query filterQuery
 	f.usageRows(&query, scopeFor(f))
 	query.push(" SELECT date_trunc('" + string(granularity) + "', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'" +

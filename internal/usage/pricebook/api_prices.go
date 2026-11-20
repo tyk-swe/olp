@@ -10,12 +10,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *API) listPricingDiscounts(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingDiscounts(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -41,44 +42,27 @@ func (s *API) listPricingDiscounts(r *http.Request, _ access.Principal) (httpkit
 	return httpkit.ListReplyBy(items, page, func(d Discount) string { return d.ID }), nil
 }
 
-func (s *API) createPricingDiscount(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createPricingDiscount(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input DiscountInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	discount, err := NormalizeDiscount(r.Context(), tx, input, s.Normalizer)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	discount, err = CreateDiscount(r.Context(), tx, principal.UserID(), discount)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: http.StatusCreated,
-		Location: "/api/v1/pricing/discounts/" + discount.ID, Body: discount}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_discount.create",
-		"pricing_discount", discount.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		discount, err := NormalizeDiscount(r.Context(), tx, input, s.Normalizer)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		discount, err = CreateDiscount(r.Context(), tx, principal.UserID(), discount)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: http.StatusCreated,
+			Location: "/api/v1/pricing/discounts/" + discount.ID, Body: discount}
+		return result, access.Event{Action: "pricing_discount.create", Resource: "pricing_discount", ID: discount.ID}, nil
+	})
 }
 
-func (s *API) listPricingRevisions(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *API) listPricingRevisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var err error
 	query := r.URL.Query()
 	limit, err := param.Limit(query)
@@ -104,7 +88,7 @@ type pricingRevisionInput struct {
 	Prices      []rates.Price `json:"prices"`
 }
 
-func (s *API) createPricingRevision(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) createPricingRevision(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input pricingRevisionInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -113,35 +97,18 @@ func (s *API) createPricingRevision(r *http.Request, _ access.Principal) (httpki
 		return httpkit.Reply{}, httpkit.Invalid("effective_at",
 			"Give the time these prices take effect.")
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), *input.EffectiveAt,
-		input.Prices, s.Normalizer)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Body: revision}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_revision.create",
-		"pricing_revision", revision.ID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		revision, err := CreateRevision(r.Context(), tx, principal.UserID(), *input.EffectiveAt,
+			input.Prices, s.Normalizer)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: 201, Body: revision}
+		return result, access.Event{Action: "pricing_revision.create", Resource: "pricing_revision", ID: revision.ID}, nil
+	})
 }
 
-func (s *API) referenceCatalog(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) referenceCatalog(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if s.Catalog == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
@@ -151,7 +118,7 @@ func (s *API) referenceCatalog(r *http.Request, _ access.Principal) (httpkit.Rep
 // quotePricing runs the same pricing SQL accounting runs — unpinned, at the
 // simulated instant, with the given project as the charge's consumer — in a
 // transaction it never commits, so quoting writes and audits nothing.
-func (s *API) quotePricing(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input quoteInput
 	if err := httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err

@@ -4,7 +4,9 @@ import {
   type CursorPage,
   ensureOk,
   unwrap,
-  unwrapPage
+  unwrapPage,
+  ifMatch,
+  mutationHeaders
 } from '#lib/management/http.js';
 import { PROVIDER_CREDENTIAL_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
@@ -44,7 +46,7 @@ export async function putCredentialSlot(
       {
         params: {
           path: { provider_id: providerId, slot_id: slotId },
-          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
+          header: mutationHeaders(etag, requestId)
         },
         body: slot
       }
@@ -62,7 +64,7 @@ export async function validateCredentialSlot(
       '/api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate',
       {
         params: { path: { provider_id: providerId, slot_id: slotId } },
-        headers: { 'If-Match': etag }
+        headers: ifMatch(etag)
       }
     )
   );
@@ -105,10 +107,7 @@ export async function rotateProviderCredential(
     {
       params: {
         path: { provider_id: provider.id },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       },
       body:
         typeof secret === 'string'
@@ -129,10 +128,7 @@ export async function revokeProviderCredential(
     {
       params: {
         path: { provider_id: provider.id, credential_id: credentialId },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       }
     }
   );
@@ -151,7 +147,7 @@ export const deleteCredentialSlot = async (
       {
         params: {
           path: { provider_id: providerId, slot_id: slotId },
-          header: { 'If-Match': `"${etag}"`, 'Idempotency-Key': requestId }
+          header: mutationHeaders(etag, requestId)
         }
       }
     )

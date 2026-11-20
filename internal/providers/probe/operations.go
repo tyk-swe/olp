@@ -9,13 +9,13 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 const (
@@ -76,6 +76,12 @@ func DefaultTuple(transport connectors.Config) connection.Capability {
 	tuple := connection.Capability{Operation: operation, Surface: "openai", Mode: "unary"}
 	if transport.ProfileID == "" || Probeable(transport, tuple) {
 		return tuple
+	}
+	if codec, ok := configuredOperation(transport, "decision"); ok {
+		decision := connection.Capability{Operation: codec.Operation.ID, Surface: codec.Surface, Mode: "unary"}
+		if Probeable(transport, decision) {
+			return decision
+		}
 	}
 	profile, err := transport.Profile()
 	if err != nil {

@@ -10,14 +10,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 // Handler serves a management request whose caller the route has already
 // authenticated and admitted.
-type Handler func(*http.Request, Principal) (httpkit.Reply, error)
+type Handler func(*http.Request, authz.Principal) (httpkit.Reply, error)
 
 // StreamHandler is a Handler that writes its own response.
-type StreamHandler func(http.ResponseWriter, *http.Request, Principal) error
+type StreamHandler func(http.ResponseWriter, *http.Request, authz.Principal) error
 
 // PublicHandler serves a management request that authenticates no principal.
 type PublicHandler func(*http.Request) (httpkit.Reply, error)
@@ -26,7 +27,18 @@ type routeOptions struct {
 	maxBody int64
 	timeout time.Duration
 	keyAuth func(*http.Request) (keyauthority.Authority, error)
+	browser browserPolicy
 }
+
+// browserPolicy says which browser requests a route accepts when the caller
+// presents no management bearer token.
+type browserPolicy int
+
+const (
+	sameOrigin browserPolicy = iota
+	crossSiteNavigation
+	anyOrigin
+)
 
 // RouteOption adjusts a route's request bounds.
 type RouteOption func(*routeOptions)
@@ -44,6 +56,17 @@ func Deadline(d time.Duration) RouteOption { return func(o *routeOptions) { o.ti
 func InferenceKeyAuth(authenticate func(*http.Request) (keyauthority.Authority, error)) RouteOption {
 	return func(o *routeOptions) { o.keyAuth = authenticate }
 }
+
+// CrossSiteNavigation admits a navigation that another site started, for the
+// endpoints an identity provider redirects the browser back to.
+func CrossSiteNavigation() RouteOption {
+	return func(o *routeOptions) { o.browser = crossSiteNavigation }
+}
+
+// AnyOrigin skips the cookie and origin checks, for endpoints whose handler
+// trusts something other than the console session: a signed identity provider
+// response or a bearer token.
+func AnyOrigin() RouteOption { return func(o *routeOptions) { o.browser = anyOrigin } }
 
 func options(opts []RouteOption) routeOptions {
 	o := routeOptions{maxBody: 65536, timeout: 15 * time.Second}
@@ -83,13 +106,13 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 	if keyAlternative != (o.keyAuth != nil) || keyAlternative && !strings.HasPrefix(pattern, "GET ") {
 		panic(fmt.Sprintf("management route %s has an invalid inference-key authenticator", pattern))
 	}
-	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, func(r *http.Request) (httpkit.Reply, error) {
+	mux.HandleFunc(pattern, s.serve(o, func(r *http.Request) (httpkit.Reply, error) {
 		if o.keyAuth != nil && presentedInferenceKey(r) {
 			authority, err := o.keyAuth(r)
 			if err != nil {
 				return httpkit.Reply{}, err
 			}
-			p := Principal{Kind: "key", KeyAuthority: &authority}
+			p := authz.Principal{Kind: "key", KeyAuthority: &authority}
 			if req.Admits(p) != nil {
 				return httpkit.Reply{}, httpkit.Forbidden()
 			}
@@ -120,7 +143,7 @@ func presentedInferenceKey(r *http.Request) bool {
 func (s *Server) Stream(mux *http.ServeMux, pattern string, h StreamHandler, opts ...RouteOption) {
 	req := declared(pattern, false)
 	o := options(opts)
-	mux.HandleFunc(pattern, s.serveStream(o.maxBody, o.timeout, func(w http.ResponseWriter, r *http.Request) error {
+	mux.HandleFunc(pattern, s.serveStream(o, func(w http.ResponseWriter, r *http.Request) error {
 		r, p, err := s.admitRoute(r, req)
 		if err != nil {
 			return err
@@ -129,16 +152,33 @@ func (s *Server) Stream(mux *http.ServeMux, pattern string, h StreamHandler, opt
 	}))
 }
 
+// Admit returns the admission step of a secured route for a handler that
+// writes its own response format. The step applies the transport guards and
+// authenticates the caller against the requirement the contract declares for
+// pattern. The caller must run the returned cancel function.
+func (s *Server) Admit(pattern string, opts ...RouteOption) func(http.ResponseWriter, *http.Request) (*http.Request, authz.Principal, context.CancelFunc, error) {
+	req := declared(pattern, false)
+	o := options(opts)
+	return func(w http.ResponseWriter, r *http.Request) (*http.Request, authz.Principal, context.CancelFunc, error) {
+		guarded, cancel, err := s.guard(w, r, o)
+		if err != nil {
+			return guarded, authz.Principal{}, cancel, err
+		}
+		admitted, p, err := s.admitRoute(guarded, req)
+		return admitted, p, cancel, err
+	}
+}
+
 // Public mounts h at a pattern the contract declares public.
 func (s *Server) Public(mux *http.ServeMux, pattern string, h PublicHandler, opts ...RouteOption) {
 	declared(pattern, true)
 	o := options(opts)
-	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, h))
+	mux.HandleFunc(pattern, s.serve(o, h))
 }
 
 // admitRoute authenticates the caller and checks the route requirement, carrying
 // the requirement in the request so a transaction can check it again.
-func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, Principal, error) {
+func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, authz.Principal, error) {
 	r = r.WithContext(context.WithValue(r.Context(), requirementKey{}, req))
 	p, err := s.Authenticate(r, s.Pool)
 	if err != nil {
@@ -150,10 +190,10 @@ func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, Pr
 // Reauthorize resolves the caller again inside tx, after Begin has taken the
 // installation lock, and checks the route requirement again, so a mutation
 // never commits under authority revoked since the request was admitted.
-func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (Principal, error) {
+func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error) {
 	req, ok := r.Context().Value(requirementKey{}).(Requirement)
 	if !ok {
-		return Principal{}, fmt.Errorf("%s was not admitted by a secured route", r.Pattern)
+		return authz.Principal{}, fmt.Errorf("%s was not admitted by a secured route", r.Pattern)
 	}
 	p, err := s.Authenticate(r, tx)
 	if err != nil {
@@ -162,15 +202,15 @@ func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (Principal, error) {
 	return p, req.Admits(p)
 }
 
-func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, Principal, error) {
+func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, authz.Principal, error) {
 	tx, err := s.Begin(r)
 	if err != nil {
-		return nil, Principal{}, err
+		return nil, authz.Principal{}, err
 	}
 	principal, err := s.Reauthorize(r, tx)
 	if err != nil {
 		tx.Rollback(r.Context())
-		return nil, Principal{}, err
+		return nil, authz.Principal{}, err
 	}
 	return tx, principal, nil
 }

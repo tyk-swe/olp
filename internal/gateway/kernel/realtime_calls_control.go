@@ -1,0 +1,223 @@
+package kernel
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/platform/panics"
+	"github.com/tyk-swe/olp/internal/upstream"
+
+	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+func addUsageShare(dst **int64, share *int64) {
+	if share == nil {
+		return
+	}
+	total := *share
+	if *dst != nil {
+		total = quota.AddBounded(total, **dst)
+	}
+	*dst = &total
+}
+
+func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
+	sess.usage.InputTokens = quota.AddBounded(sess.usage.InputTokens, u.InputTokens)
+	sess.usage.OutputTokens = quota.AddBounded(sess.usage.OutputTokens, u.OutputTokens)
+	addUsageShare(&sess.usage.CachedInputTokens, u.CachedInputTokens)
+	addUsageShare(&sess.usage.AudioInputTokens, u.AudioInputTokens)
+	addUsageShare(&sess.usage.CachedAudioInputTokens, u.CachedAudioInputTokens)
+	addUsageShare(&sess.usage.AudioOutputTokens, u.AudioOutputTokens)
+	addUsageShare(&sess.usage.ImageInputTokens, u.ImageInputTokens)
+	addUsageShare(&sess.usage.CachedImageInputTokens, u.CachedImageInputTokens)
+	sess.haveUsage = true
+}
+
+func (s *Server) runWebRTCControl(sess *webrtcSession) {
+	readErr := make(chan error, 1)
+	go func() {
+		defer panics.Recover(s.Log, "webrtc control reader", func(err error) { readErr <- err })
+		for {
+			typ, data, err := sess.conn.Read(sess.ctx)
+			if err != nil {
+				readErr <- err
+				return
+			}
+			func() {
+				sess.usageMu.Lock()
+				defer sess.usageMu.Unlock()
+				if typ == websocket.MessageText && bytes.Contains(data, []byte("input_audio_transcription")) {
+					sess.responses.Untrackable()
+				}
+				if u := sess.responses.ProviderFrame(typ, data, true); u != nil {
+					sess.accumulateUsage(u)
+				}
+			}()
+		}
+	}()
+	reauth := time.NewTicker(ingress.ReauthInterval)
+	defer reauth.Stop()
+	heartbeat := time.NewTicker(realtimePing)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case err := <-readErr:
+			s.finishWebRTCControl(sess, err)
+			return
+		case <-reauth.C:
+			if e := s.webrtcAuthority(sess); e != nil {
+				if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+					s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+				}
+				s.settleWebRTC(sess, e)
+				sess.cancel()
+				return
+			}
+		case <-heartbeat.C:
+			pingCtx, pingCancel := context.WithTimeout(sess.ctx, ingress.ReauthInterval)
+			err := sess.conn.Ping(pingCtx)
+			pingCancel()
+			if err != nil {
+				s.finishWebRTCControl(sess, err)
+				return
+			}
+		case <-sess.ctx.Done():
+			if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+				s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+			}
+			s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
+			return
+		}
+	}
+}
+
+func (s *Server) webrtcAuthority(sess *webrtcSession) *fault.Error {
+	x := sess.x
+	authority, err := s.reauthenticateSession(sess.ctx, x, sess.token)
+	if err != nil || authority == nil || authority.ID != sess.keyID || !authority.Allows("inference", x.Route.Slug, x.Route.ProjectID, s.Now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
+		return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
+	}
+	if eligibility := s.pinEligibility(sess.p); eligibility != routing.Eligible {
+		return fault.PermissionError("provider_credential_"+string(eligibility), "The realtime provider credential is no longer eligible.")
+	}
+	current := *authority
+	current.EndUserDigest = x.endUserDigest
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(current), sess.p, x.Route); e != nil {
+		return e
+	}
+	return nil
+}
+
+func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
+	code := websocket.CloseStatus(readErr)
+	sess.usageMu.Lock()
+	pending := sess.responses.Pending()
+	sess.usageMu.Unlock()
+	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
+		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+			s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
+			sess.cancel()
+			return
+		}
+		s.settleWebRTC(sess, nil)
+		sess.cancel()
+		return
+	}
+	if errors.Is(sess.ctx.Err(), context.DeadlineExceeded) {
+		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
+		return
+	}
+	if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+	}
+	s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
+	sess.cancel()
+}
+
+func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
+	sess.settleOnce.Do(func() {
+		defer sess.admission.Release()
+		x := sess.x
+		s.finishSessionDebit(sess.ctx, x, failure != nil && !sess.rejected)
+		if sess.conn != nil {
+			_ = sess.conn.CloseNow()
+		}
+		sess.usageMu.Lock()
+		var observed *wire.Usage
+		if sess.haveUsage {
+			usageCopy := sess.usage
+			observed = &usageCopy
+		}
+		pending := sess.responses.Pending()
+		sess.usageMu.Unlock()
+		class := ClassProtocol
+		cancelled := false
+		if failure != nil {
+			switch {
+			case failure.Code == "key_revoked" || strings.HasPrefix(failure.Code, "provider_credential_"):
+				class = classCredential
+			case failure.Code == "realtime_session_expired":
+				class = ClassTimeout
+			}
+		}
+		if len(x.facts) > 0 {
+			fact := &x.facts[len(x.facts)-1]
+			if fact.Interaction != nil {
+				if observed != nil {
+					fact.Interaction.ClientState = usage.ClientPartial
+				}
+				if failure == nil || sess.rejected {
+					fact.Interaction.UpstreamState = upstream.Terminal
+					fact.Interaction.ClientState = usage.ClientTerminal
+				} else {
+					fact.Interaction.UpstreamState = upstream.Unknown
+				}
+			}
+			if observed != nil {
+				fact.Usage = observed
+				fact.UsageObserved = true
+				fact.UsageComplete = failure == nil && !pending
+				fact.BillingUncertain = !fact.UsageComplete
+			} else if x.dispatched && !sess.rejected {
+				fact.UsageComplete = false
+				fact.BillingUncertain = true
+			}
+			if failure != nil && fact.Class == "success" {
+				fact.Class = class
+			}
+		}
+		status := http.StatusOK
+		var out *Outcome
+		if failure != nil {
+			x.Failure = failure
+			status = failure.Status
+			out = &Outcome{Err: failure, Committed: x.dispatched, Cancelled: cancelled}
+		} else {
+			out = &Outcome{Committed: true}
+		}
+		s.Finish(x, out, status)
+		settled := sessionSettlement(x)
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
+		s.settleSessionHold(settleCtx, x, sess.p.Hold, settled)
+		s.recordCost(x)
+		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.Log)
+		s.settleCaps(settleCtx, x)
+		cancel()
+		s.unregisterWebRTCSession(sess.id)
+		sess.cancel()
+	})
+}

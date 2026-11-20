@@ -10,61 +10,18 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
-type Queryer interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-	Query(context.Context, string, ...any) (pgx.Rows, error)
-}
-type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Active      bool      `json:"active"`
-	AccessScope string    `json:"access_scope"`
-	ETag        string    `json:"etag"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
+const UserColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"
 
-// Principal is an authenticated management caller: a signed-in member
-// ("user"), or a management token ("machine") acting within its creator's
-// current authority.
-type Principal struct {
-	User
-	Kind string
-	// KeyAuthority is set only by an inference-key authentication alternative.
-	// It grants consumer catalog reads, never management mutation authority.
-	KeyAuthority     *keyauthority.Authority
-	Creator          string
-	AllProjects      bool
-	Projects         map[string]string
-	Organizations    map[string]string
-	SessionID, Token string
-
-	// scopes and creatorRole bound a management token's authority.
-	scopes      operationSet
-	creatorRole string
-}
-
-func (p Principal) UserID() string {
-	if p.Kind == "machine" {
-		return p.Creator
-	}
-	return p.ID
-}
-
-const userColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"
-
-func scanUser(row pgx.Row) (User, error) {
-	var u User
+func ScanUser(row pgx.Row) (authz.User, error) {
+	var u authz.User
 	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Active, &u.AccessScope, &u.ETag, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
 }
@@ -72,14 +29,14 @@ func scanUser(row pgx.Row) (User, error) {
 // Authenticate resolves the caller from a management token or the session
 // cookie and, for a browser session, requires the CSRF proof on unsafe
 // methods. It authorizes no operation.
-func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
+func (s *Server) Authenticate(r *http.Request, q database.Queryer) (authz.Principal, error) {
 	if secret, ok := managementBearer(r); ok {
 		return s.machinePrincipal(r, q, secret)
 	}
-	var p Principal
+	var p authz.Principal
 	p.Kind = "user"
-	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized AND (s.auth_method<>'local' OR s.mfa_verified OR (NOT EXISTS(SELECT 1 FROM olp.mfa_factors f WHERE f.user_id=u.id) AND NOT COALESCE((SELECT value<>'false' FROM olp.settings WHERE key='auth.mfa_required'),false)))", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	p.Token = CookieValue(r, SessionCookie)
+	err := q.QueryRow(r.Context(), "SELECT "+UserColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized AND (s.auth_method<>'local' OR s.mfa_verified OR (NOT EXISTS(SELECT 1 FROM olp.mfa_factors f WHERE f.user_id=u.id) AND NOT COALESCE((SELECT value<>'false' FROM olp.settings WHERE key='auth.mfa_required'),false)))", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, httpkit.Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -87,16 +44,16 @@ func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
 		return p, err
 	}
 	p.AllProjects = p.AccessScope == "global"
-	if err = p.loadProjects(r.Context(), q); err != nil {
+	if err = loadProjects(r.Context(), q, &p); err != nil {
 		return p, err
 	}
-	if r.Method != "GET" && r.Method != "HEAD" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.csrf(p.Token))) {
+	if r.Method != "GET" && r.Method != "HEAD" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.CSRF(p.Token))) {
 		return p, httpkit.Fail(403, "csrf_invalid", "Reload the console before trying again.")
 	}
 	return p, nil
 }
 
-func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
+func loadProjects(ctx context.Context, q database.Queryer, p *authz.Principal) error {
 	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp.effective_project_members WHERE user_id=$1", p.ID)
 	if err != nil {
 		return err
@@ -116,7 +73,7 @@ func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
 		return err
 	}
 	rows.Close()
-	return p.loadOrganizations(ctx, q, p.ID)
+	return loadOrganizations(ctx, q, p, p.ID)
 }
 func managementBearer(r *http.Request) (string, bool) {
 	const prefix = "Bearer olpm_"
@@ -132,8 +89,8 @@ func managementBearer(r *http.Request) (string, bool) {
 // Authorize bounds its scopes by the creator's role, and an assigned creator
 // narrows it to the creator's projects and project roles. The stored token is
 // never changed.
-func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Principal, error) {
-	var p Principal
+func (s *Server) machinePrincipal(r *http.Request, q database.Queryer, secret string) (authz.Principal, error) {
+	var p authz.Principal
 	p.Kind = "machine"
 	parts := strings.Split(secret, "_")
 	if len(parts) != 3 {
@@ -141,29 +98,31 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 	}
 	var digest, data, projectData, memberData []byte
 	var live, allProjects bool
-	var creatorScope string
+	var creatorScope, creatorRole string
 	err := q.QueryRow(r.Context(), `SELECT t.id::text,t.name,t.scopes,t.digest,t.created_by::text,
 		t.expires_at>now() AND t.revoked_at IS NULL AND u.active AND u.oidc_authorized,
 		t.all_projects,t.project_ids,u.role,u.access_scope,
 		COALESCE((SELECT jsonb_object_agg(m.project_id,m.role) FROM olp.effective_project_members m WHERE m.user_id=u.id),'{}'::jsonb)
-		FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by WHERE t.lookup_id=$1`, parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &allProjects, &projectData, &p.creatorRole, &creatorScope, &memberData)
+		FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by WHERE t.lookup_id=$1`, parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &allProjects, &projectData, &creatorRole, &creatorScope, &memberData)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest(secrets.ManagementTokenDigest, secret))) {
 		return p, httpkit.Fail(401, "authentication_required", "Sign in to continue.")
 	}
 	if err != nil {
 		return p, err
 	}
-	var scopes []string
-	if err = json.Unmarshal(data, &scopes); err != nil {
+	var names []string
+	if err = json.Unmarshal(data, &names); err != nil {
 		return p, err
 	}
-	for _, name := range scopes {
-		if op, ok := ParseOperation(name); ok {
-			p.scopes |= 1 << op
+	var scopes []authz.Operation
+	for _, name := range names {
+		if op, ok := authz.ParseOperation(name); ok {
+			scopes = append(scopes, op)
 		}
 	}
+	p = p.Delegated(scopes, creatorRole)
 	if allProjects {
-		if err = p.loadOrganizations(r.Context(), q, p.Creator); err != nil {
+		if err = loadOrganizations(r.Context(), q, &p, p.Creator); err != nil {
 			return p, err
 		}
 	}
@@ -194,6 +153,6 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 	}
 	return p, nil
 }
-func (s *Server) csrf(token string) string {
+func (s *Server) CSRF(token string) string {
 	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest(secrets.CSRFDigest, token))
 }

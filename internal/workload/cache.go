@@ -53,6 +53,25 @@ func Fetch(ctx context.Context, client *http.Client, url string) (map[string]jos
 }
 func (c *Cache) Keys(ctx context.Context, id, url, kid string, now time.Time) (map[string]jose.JSONWebKey, error) {
 	c.mu.Lock()
+	for issuer, candidate := range c.issuers {
+		if issuer == id {
+			continue
+		}
+		if !candidate.mu.TryLock() {
+			continue
+		}
+		stale := false
+		if candidate.keys != nil {
+			stale = !candidate.fetched.IsZero() && now.Sub(candidate.fetched) >= 5*time.Minute
+		} else {
+			stale = !candidate.attempted.IsZero() && now.Sub(candidate.attempted) >= 5*time.Minute
+		}
+		if stale && candidate.fetching.TryLock() {
+			delete(c.issuers, issuer)
+			candidate.fetching.Unlock()
+		}
+		candidate.mu.Unlock()
+	}
 	entry := c.issuers[id]
 	if entry == nil {
 		entry = &keyCache{}

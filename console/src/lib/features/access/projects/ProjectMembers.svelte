@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -141,7 +142,7 @@
       >{/snippet}
   </Callout>
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Project members">
     <table class="data-table">
       <thead
         ><tr
@@ -183,7 +184,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     label="Member pages"
     {...cursorPaginationProps(pagination, members.data.nextCursor)}

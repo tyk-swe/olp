@@ -1,10 +1,16 @@
 package probe
 
 import (
+	"encoding/json"
+	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -75,6 +81,7 @@ func TestCapabilityOptionsForKindOfferWhatAProfileCanCertify(t *testing.T) {
 		"vertex retrieval through its profile":          {connectors.KindVertexAI, retrieval, true},
 		"azure ai search retrieval through its profile": {connectors.KindAzureAISearch, retrieval, true},
 		"gemini realtime through the live profile":      {connectors.KindGemini, geminiRealtime, true},
+		"gemini decisions through its profile":          {connectors.KindGemini, connection.Capability{Operation: "decision", Surface: "gemini", Mode: "unary"}, true},
 		"compatible batches through a vendor profile":   {connectors.KindOpenAICompatible, openAIBatch, true},
 		"anthropic offers no realtime":                  {connectors.KindAnthropic, openAIRealtime, false},
 		"openai offers no native batch":                 {connectors.KindOpenAI, nativeBatch, false},
@@ -86,5 +93,62 @@ func TestCapabilityOptionsForKindOfferWhatAProfileCanCertify(t *testing.T) {
 				t.Fatalf("%s offers %+v = %t, want %t", c.kind, c.tuple, got, c.want)
 			}
 		})
+	}
+}
+
+func TestGeminiDecisionsCertifyThePublicSurface(t *testing.T) {
+	t.Parallel()
+	const model = "decision-model"
+	var probes atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probes.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1beta/decisions" || r.Header.Get("X-Goog-Api-Key") != "sk-test" {
+			t.Error("incorrect certification method, path, or credential")
+		}
+		var request struct {
+			Model     string                     `json:"model"`
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode certification request: %v", err)
+		}
+		if request.Model != model || len(request.Questions) == 0 {
+			t.Errorf("invalid certification request: %+v", request)
+		}
+		answers := maps.Collect(func(yield func(string, json.RawMessage) bool) {
+			for name := range request.Questions {
+				if !yield(name, json.RawMessage(`{"type":"noul","noul":0.9,"confidence":0.9}`)) {
+					return
+				}
+			}
+		})
+		if err := json.NewEncoder(w).Encode(struct {
+			Answers map[string]json.RawMessage `json:"answers"`
+		}{Answers: answers}); err != nil {
+			t.Errorf("encode certification result: %v", err)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	raw, err := json.Marshal(connection.Configuration{Identity: providerconfig.Identity[*string]{
+		Kind: connectors.KindGemini, AuthMode: connectors.AuthAPIKey, Endpoint: new(upstream.URL + "/v1beta"),
+		ProfileID: "gemini-decisions", ProfileRevision: connectors.ProfileRevision,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := connection.Load(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tuple := DefaultTuple(prepared.Transport())
+	want := connection.Capability{Operation: "decision", Surface: "gemini", Mode: "unary"}
+	if tuple != want {
+		t.Fatalf("default capability = %+v, want %+v", tuple, want)
+	}
+	if err := prober(loopback).Certify(t.Context(), Target{ProviderID: "provider", Connection: prepared, Credential: []byte("sk-test")}, model, tuple); err != nil {
+		t.Fatal(err)
+	}
+	if probes.Load() != 1 {
+		t.Fatalf("issued %d certification requests, want one", probes.Load())
 	}
 }

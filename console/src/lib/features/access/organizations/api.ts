@@ -1,5 +1,11 @@
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Organization = components['schemas']['Organization'];
@@ -16,7 +22,7 @@ export async function listOrganizations(signal?: AbortSignal) {
 export async function createOrganization(name: string, requestId: string) {
   return unwrap(
     await apiClient.POST('/api/v1/organizations', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: { name }
     })
   );
@@ -30,7 +36,7 @@ export async function renameOrganization(
     await apiClient.PATCH('/api/v1/organizations/{organization_id}', {
       params: {
         path: { organization_id },
-        header: { 'If-Match': `"${etag}"` }
+        header: ifMatch(etag)
       },
       body: { name }
     })
@@ -61,7 +67,7 @@ export async function putOrganizationMember(
       {
         params: {
           path: { organization_id, user_id },
-          header: { 'If-Match': `"${etag}"` }
+          header: ifMatch(etag)
         },
         body: { role }
       }
@@ -79,7 +85,7 @@ export async function removeOrganizationMember(
       {
         params: {
           path: { organization_id, user_id },
-          header: { 'If-Match': `"${etag}"` }
+          header: ifMatch(etag)
         }
       }
     )
@@ -107,7 +113,7 @@ export async function createOrganizationProject(
     await apiClient.POST('/api/v1/organizations/{organization_id}/projects', {
       params: {
         path: { organization_id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       },
       body: { name }
     })
@@ -143,7 +149,7 @@ export async function putProjectMember(
       {
         params: {
           path: { organization_id, project_id, user_id },
-          header: { 'If-Match': `"${etag}"` }
+          header: ifMatch(etag)
         },
         body: { role }
       }
@@ -162,7 +168,7 @@ export async function removeProjectMember(
       {
         params: {
           path: { organization_id, project_id, user_id },
-          header: { 'If-Match': `"${etag}"` }
+          header: ifMatch(etag)
         }
       }
     )
@@ -181,7 +187,7 @@ export async function renameProject(
       {
         params: {
           path: { organization_id, project_id },
-          header: { 'If-Match': `"${etag}"` }
+          header: ifMatch(etag)
         },
         body: { name }
       }

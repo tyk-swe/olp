@@ -1,15 +1,15 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjects } from '#lib/features/agents/api.js';
-  import { agentKeys } from '#lib/features/agents/agentKeys.js';
+  import { listProjects, agentKeys } from '#lib/features/agents/index.js';
   import {
     listTemplates,
     getTemplate,
@@ -63,7 +63,7 @@
   }
 </script>
 
-<svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Route templates" />
 <a class="text-button" href={resolve('routes')}>All routes</a>
 <div class="toolbar">
   <div class="page-actions">

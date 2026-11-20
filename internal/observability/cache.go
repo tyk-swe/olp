@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 const (

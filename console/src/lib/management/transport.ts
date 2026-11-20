@@ -67,26 +67,29 @@ export async function requestNative<
   method: Method,
   path: Path,
   init: FetchOptions<paths[Path][Method]>,
-  nativePaths: readonly NativePath[]
+  nativePaths: readonly NativePath[],
+  maxBytes?: number
 ): Promise<MethodResponse<ManagementClient, Method, Path>> {
   const request = client.request as NativeRequest;
   const outcome = await requestOutcome(() =>
     request(method, path, Object.assign({}, init, { parseAs: 'text' as const }))
   );
   const source = unwrapOutcome(outcome);
-  return unwrapOutcome(nativeResponse(source, nativePaths)) as MethodResponse<
-    ManagementClient,
-    Method,
-    Path
-  >;
+  return unwrapOutcome(
+    nativeResponse(source, nativePaths, maxBytes)
+  ) as MethodResponse<ManagementClient, Method, Path>;
 }
 
 function nativeResponse(
   source: string,
-  paths: readonly NativePath[]
+  paths: readonly NativePath[],
+  maxBytes: number | undefined
 ): ApiOutcome<unknown> {
   try {
-    return { kind: 'success', value: parseManagementJSON(source, paths) };
+    return {
+      kind: 'success',
+      value: parseManagementJSON(source, paths, maxBytes)
+    };
   } catch {
     return invalidResponse('The API response is not valid JSON');
   }

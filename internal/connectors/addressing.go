@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/vendors"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 func DefaultProfileEndpoint(kind Kind, profileID, region, project string) string {
@@ -67,6 +67,7 @@ var bedrockInvokePath = upstreamPath{unary: "/model/{model}/invoke", streaming: 
 
 var wirePaths = map[wire.Format]upstreamPath{
 	wire.Decisions:             {unary: "/decisions"},
+	wire.GeminiDecisions:       {unary: "/decisions"},
 	wire.SystemOne:             {unary: "/systemone"},
 	wire.Completions:           {unary: "/completions"},
 	wire.Responses:             {unary: "/responses"},

@@ -79,4 +79,37 @@ func TestStartupPortCollision(t *testing.T) {
 	s.Owner()
 }
 
+func TestEachSplitModeAnswersOnlyItsOwnPlaneAndStopsCleanly(t *testing.T) {
+	t.Parallel()
+	status := func(t *testing.T, s *harness.Service, path string) int {
+		t.Helper()
+		response, err := http.Get(s.Origin + path)
+		if err != nil {
+			return 0
+		}
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+	for mode, want := range map[string]struct{ management, inference int }{
+		"control": {management: http.StatusOK, inference: http.StatusNotFound},
+		"gateway": {management: http.StatusNotFound, inference: http.StatusUnauthorized},
+		"worker":  {},
+	} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			pool, databaseURL := harness.Database(t)
+			env := harness.NewEnvironment(t, databaseURL, "Split mode test")
+			harness.RunBinary(t, env, "migrate")
+			env.Mode = mode
+			s := harness.StartProcess(t, pool, env)
+			if got := status(t, s, "/api/v1/setup/status"); got != want.management {
+				t.Fatalf("management answered %d, want %d", got, want.management)
+			}
+			if got := status(t, s, "/v1/models"); got != want.inference {
+				t.Fatalf("inference answered %d, want %d", got, want.inference)
+			}
+		})
+	}
+}
+
 func describe(status int, raw []byte) string { return fmt.Sprintf("status %d: %s", status, raw) }

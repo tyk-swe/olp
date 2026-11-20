@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/metric"
-	"github.com/tyk-swe/olp/internal/priority"
+	"github.com/tyk-swe/olp/internal/domain/priority"
+	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
 type Class int
@@ -91,13 +91,26 @@ func (p *Pool) tryAcquire() bool {
 func (p *Pool) await(ctx context.Context, class Class, deadline time.Time) bool {
 	q := p.queue
 	started := time.Now()
-	if p.tryAcquire() {
-		q.observe(class, 0)
-		return true
-	}
 	limit := started.Add(q.timeout)
 	if !deadline.IsZero() && deadline.Before(limit) {
 		limit = deadline
+	}
+	expired := func() bool { return ctx.Err() != nil || !time.Now().Before(limit) }
+	if expired() {
+		q.expired[class].Add(1)
+		return false
+	}
+	accept := func() bool {
+		if expired() {
+			p.Release()
+			q.expired[class].Add(1)
+			return false
+		}
+		q.observe(class, time.Since(started))
+		return true
+	}
+	if p.tryAcquire() {
+		return accept()
 	}
 	w := &waiter{granted: make(chan struct{}, 1)}
 	q.mu.Lock()
@@ -112,23 +125,19 @@ func (p *Pool) await(ctx context.Context, class Class, deadline time.Time) bool 
 			<-w.granted
 			p.Release()
 		}
-		q.observe(class, time.Since(started))
-		return true
+		return accept()
 	}
 	timer := time.NewTimer(time.Until(limit))
 	defer timer.Stop()
 	select {
 	case <-w.granted:
-		q.observe(class, time.Since(started))
-		return true
+		return accept()
 	case <-timer.C:
 	case <-ctx.Done():
 	}
 	if !q.withdraw(class, w) {
-		// The handoff won the race with the timeout: the slot is ours.
 		<-w.granted
-		q.observe(class, time.Since(started))
-		return true
+		p.Release()
 	}
 	q.expired[class].Add(1)
 	return false

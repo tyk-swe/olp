@@ -1,7 +1,7 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
   import { parseJsonObject } from '#lib/editing/json.js';
-  import { parseManualModelNames } from '#lib/features/providers/providerEditor.js';
+  import { parseManualModelNames } from '#lib/features/providers/index.js';
   let {
     value = $bindable('{}'),
     id = 'routing-preferences',

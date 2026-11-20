@@ -1,8 +1,8 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { listRoutes } from '#lib/features/routes/api.js';
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
   import { ResourceRequestError } from './lifecycle';
@@ -80,8 +80,10 @@
     available.find((item) => key(item) === endpointKey)
   );
   const eligibleRoutes = $derived(
-    (routes.data ?? []).filter((item) =>
-      item.latest_revision.operations.includes(operation)
+    (routes.data ?? []).filter(
+      (item) =>
+        (item.state === 'active' || endpoint?.action === 'list') &&
+        item.latest_revision.operations.includes(operation)
     )
   );
   const writesBody = $derived(
@@ -386,7 +388,7 @@
         </div>{/if}
     </form>
   {/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
   {#if downloadUrl}<a
       class="button button-secondary"

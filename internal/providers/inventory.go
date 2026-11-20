@@ -8,22 +8,22 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-func (s *Server) kinds(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) kinds(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return httpkit.OK(map[string]any{"items": connection.Kinds()}), nil
 }
 
-func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) kindCapabilities(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	kind := connectors.Kind(r.PathValue("provider_kind"))
 	if _, ok := connection.LookupKind(kind); !ok {
 		return httpkit.Reply{}, httpkit.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
@@ -31,11 +31,11 @@ func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (httpkit.
 	return httpkit.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
 }
 
-func (s *Server) listVendors(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) listVendors(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return httpkit.OK(connection.Vendors()), nil
 }
 
-func (s *Server) inventory(r *http.Request, principal access.Principal) (httpkit.Reply, error) {
+func (s *Server) inventory(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -113,7 +113,7 @@ type inventoryItem struct {
 
 // generations lists installation-wide runtime releases, which span every
 // project and name their publishers, so it requires installation reach.
-func (s *Server) profiles(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) profiles(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -121,7 +121,7 @@ func (s *Server) profiles(r *http.Request, _ access.Principal) (httpkit.Reply, e
 	return httpkit.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
 }
 
-func (s *Server) operationDialects(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) operationDialects(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	items := []map[string]any{}
 	for _, d := range operationregistry.Catalog().Dialects() {
 		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})

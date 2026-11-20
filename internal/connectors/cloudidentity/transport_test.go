@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func TestIdentityRequestsReachOnlyTheEndpointsTheEnvironmentNames(t *testing.T) {

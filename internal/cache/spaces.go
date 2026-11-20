@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 var (
@@ -26,8 +26,13 @@ type Commander interface {
 	Do(context.Context, ...string) (any, error)
 }
 
+type cacheClient interface {
+	Commander
+	Search(context.Context, ...string) ([]coordination.SearchDocument, error)
+}
+
 type Store struct {
-	Client       Commander
+	Client       cacheClient
 	Keys         *secrets.KeyRing
 	Auth         *secrets.AuthKey
 	Installation string
@@ -46,7 +51,9 @@ type Ticket struct {
 	Key, Bucket string
 	// VectorSpace identifies the embedding model for semantic matches. Exact
 	// lookups leave it empty so they do not need another embedding request.
-	VectorSpace string
+	VectorSpace      string
+	GenerationKeys   []string
+	GenerationValues []string
 }
 
 type Entry struct {
@@ -102,7 +109,9 @@ for i, key in ipairs(KEYS) do
 	local value = redis.call('GET', key)
 	if not value then
 		value = ARGV[i]
-		redis.call('SET', key, value)
+		redis.call('SET', key, value, 'EX', 604800)
+	else
+		redis.call('EXPIRE', key, 604800)
 	end
 	generations[i] = value
 end
@@ -113,7 +122,11 @@ local entry = ''
 if ARGV[#KEYS + 3] == '1' then
 	entry = redis.call('HGET', key, 'sealed') or ''
 end
-return {key, bucket, entry}
+local result = {key, bucket, entry}
+for i, value in ipairs(generations) do
+	result[#result + 1] = value
+end
+return result
 `
 
 const putScript = `
@@ -151,7 +164,7 @@ func (s *Store) resolve(ctx context.Context, space Space, canonical []byte, read
 		return Ticket{}, "", ErrUnavailable
 	}
 	list, ok := result.([]any)
-	if !ok || len(list) != 3 {
+	if !ok || len(list) != 3+len(generations) {
 		return Ticket{}, "", ErrUnavailable
 	}
 	key, kok := list[0].(string)
@@ -163,7 +176,15 @@ func (s *Store) resolve(ctx context.Context, space Space, canonical []byte, read
 	if err != nil {
 		return Ticket{}, "", ErrUnavailable
 	}
-	return Ticket{Key: key, Bucket: bucket}, entry, nil
+	values := make([]string, len(generations))
+	for i := range generations {
+		value, err := replyString(list[3+i])
+		if err != nil || value == "" {
+			return Ticket{}, "", ErrUnavailable
+		}
+		values[i] = value
+	}
+	return Ticket{Key: key, Bucket: bucket, GenerationKeys: generations, GenerationValues: values}, entry, nil
 }
 
 func (s *Store) Begin(ctx context.Context, space Space, canonical []byte) (Ticket, error) {
@@ -291,7 +312,7 @@ func (s *Store) Purge(ctx context.Context, kind, id string) error {
 	if err != nil {
 		return ErrUnavailable
 	}
-	if _, err = s.Client.Do(ctx, "SET", s.generationKey(kind, id), nonce); err != nil {
+	if _, err = s.Client.Do(ctx, "SET", s.generationKey(kind, id), nonce, "EX", strconv.Itoa(maxTTLSeconds)); err != nil {
 		return ErrUnavailable
 	}
 	return nil

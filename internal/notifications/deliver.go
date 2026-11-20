@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const (
@@ -196,7 +196,7 @@ func (w *deliveryWorker) pending(ctx context.Context) ([]delivery, error) {
 	})
 }
 
-type database interface {
+type deliveryDB interface {
 	Begin(context.Context) (pgx.Tx, error)
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
@@ -265,7 +265,7 @@ func (d delivery) current(ctx context.Context, tx pgx.Tx) (bool, error) {
 	return true, nil
 }
 
-func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) bool {
+func (w *deliveryWorker) attempt(ctx context.Context, db deliveryDB, d delivery) bool {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		w.Log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)

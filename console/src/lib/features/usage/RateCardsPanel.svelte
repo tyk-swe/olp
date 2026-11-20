@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -9,15 +11,19 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { listOrganizations } from '#lib/features/access/organizations/api.js';
-  import { listProjects } from '#lib/features/access/projects/api.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
-  import { organizationKeys } from '#lib/features/access/organizations/organizationKeys.js';
+  import {
+    listOrganizations,
+    listProjects,
+    projectKeys,
+    organizationKeys
+  } from '#lib/features/access/index.js';
+  import {
+    listProviderKinds,
+    listProviderVendors,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     createRateCard,
     createRateCardRevision,
@@ -201,7 +207,7 @@
       >Your role can view rate cards but not publish them.</ReadOnlyNote
     >{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="inline-notice" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card card-form" onsubmit={addCard}>
     <div class="form-grid">
       <div class="form-field">
@@ -262,7 +268,7 @@
       provider costs you.</EmptyState
     >
   {:else}
-    <div class="table-shell" role="region" aria-label="Rate cards">
+    <ScrollTable label="Rate cards">
       <table class="data-table">
         <caption class="sr-only">Rate cards by owner</caption>
         <thead
@@ -432,7 +438,7 @@
           {/each}</tbody
         >
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(pagination, cards.data?.nextCursor)}
       label="Rate card pages"

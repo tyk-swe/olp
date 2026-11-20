@@ -4,15 +4,18 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 // ValidateTemplateReferences prevents removing templates still used by live local
 // keys/groups, enabled workload mappings or the project policy, including during
 // configuration promotion. Workload principals derive limits from their issuer.
-func ValidateTemplateReferences(ctx context.Context, q access.Queryer, project string, t authority.LimitTemplates) error {
+func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project string, t authority.LimitTemplates) error {
 	var names []string
 	err := q.QueryRow(ctx, `SELECT ARRAY(SELECT DISTINCT name FROM (
  SELECT policy->>'limit_template' name FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL AND revoked_at IS NULL
@@ -32,12 +35,12 @@ func ValidateTemplateReferences(ctx context.Context, q access.Queryer, project s
 	return nil
 }
 
-func (s *Server) projectLimitTemplates(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectLimitTemplates(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&id, access.View); err != nil {
+	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var templates authority.LimitTemplates
@@ -48,7 +51,7 @@ func (s *Server) projectLimitTemplates(r *http.Request, p access.Principal) (htt
 	return httpkit.Detail(map[string]any{"templates": templates, "etag": etag}, etag), nil
 }
 
-func (s *Server) putProjectLimitTemplates(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectLimitTemplates(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -65,33 +68,27 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ access.Principal) (
 	if err = input.Templates.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, etag, err := ReadPolicies(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = ValidateTemplateReferences(r.Context(), tx, id, input.Templates); err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: input.Templates, AttributionBudgets: current.AttributionBudgets})
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.limit_templates.update", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(map[string]any{"templates": input.Templates, "etag": etag}, etag), tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Project(&id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, etag, err := ReadPolicies(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = ValidateTemplateReferences(r.Context(), tx, id, input.Templates); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: input.Templates, AttributionBudgets: current.AttributionBudgets})
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(map[string]any{"templates": input.Templates, "etag": etag}, etag), access.Event{Action: "project.limit_templates.update", Resource: "project", ID: id}, nil
+	})
 }

@@ -93,7 +93,7 @@ OLP ties an uploaded module to a reviewed release only when its digest
 matches.
 
 The index's plugins build reproducibly: with the same Go toolchain,
-`go run ./internal/pluginindex/cmd/pluginindex check OUT_DIR` rebuilds each
+`go run ./cmd/pluginindex check OUT_DIR` rebuilds each
 listed plugin and fails unless its digest is the one listed. Each release runs
 it and publishes the modules it built, `plugin-index.json` and
 `plugin-index.json.sig` as release assets. To verify a module yourself, rebuild

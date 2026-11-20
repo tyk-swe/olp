@@ -18308,29 +18308,6 @@
     }
   },
   {
-    "name": "get_installation_branding",
-    "group": "branding",
-    "method": "GET",
-    "read_only": true,
-    "path": "/api/v1/branding",
-    "description": "Read the installation name and logo",
-    "scopes": [
-      [
-        "read"
-      ]
-    ],
-    "parameters": [],
-    "response_headers": {
-      "ETag": "etag"
-    },
-    "body_required": false,
-    "input_schema": {
-      "type": "object",
-      "properties": {},
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "get_installation_budget",
     "group": "projects",
     "method": "GET",
@@ -42216,6 +42193,7 @@
             "openai-completions",
             "openai-decisions",
             "systemone",
+            "gemini-decisions",
             "mistral-ocr",
             "azure-document-intelligence-ocr",
             "vertex-document-processing-ocr",
@@ -42629,6 +42607,7 @@
             "openai-completions",
             "openai-decisions",
             "systemone",
+            "gemini-decisions",
             "mistral-ocr",
             "azure-document-intelligence-ocr",
             "vertex-document-processing-ocr",
@@ -44671,7 +44650,8 @@
           "additionalProperties": false,
           "required": [
             "name",
-            "logo"
+            "logo",
+            "accent"
           ],
           "properties": {
             "name": {
@@ -44683,6 +44663,11 @@
               "type": "string",
               "maxLength": 100000,
               "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            },
+            "accent": {
+              "type": "string",
+              "pattern": "^(#[0-9a-fA-F]{6})?$",
+              "description": "Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text."
             }
           }
         }

@@ -15,7 +15,9 @@
 
 <details bind:open>
   <summary>Catalog disclosure settings</summary>
-  {#if routes.isError}<p role="alert">{errorMessage(routes.error)}</p>
+  {#if routes.isError}<p class="inline-problem" role="alert">
+      {errorMessage(routes.error)}
+    </p>
     <button class="button button-secondary" onclick={() => routes.refetch()}
       >Reload published routes</button
     >{/if}

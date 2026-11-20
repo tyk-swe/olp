@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDate } from '#lib/format.js';
   import {
     orderedRows,
     type ExplanationRow
@@ -63,7 +64,7 @@
         <dt>Model facts observed</dt>
         <dd>
           {row.metadataObservedAt
-            ? new Date(row.metadataObservedAt).toLocaleString()
+            ? formatDate(row.metadataObservedAt)
             : 'Unknown'}
         </dd>
       </dl>

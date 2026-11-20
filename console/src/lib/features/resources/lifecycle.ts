@@ -1,4 +1,5 @@
 import { gatewayFetch } from '#lib/management/gateway.js';
+import { createHeaders } from '#lib/management/http.js';
 import {
   parseNativeJSON,
   stringifyNativeJSON,
@@ -62,7 +63,7 @@ export async function runAgentRequest(request: AgentRequest): Promise<string> {
     body = stringifyNativeJSON(input);
     headers['Content-Type'] = 'application/json';
     headers['X-OLP-Route'] = request.route.trim();
-    headers['Idempotency-Key'] = request.submissionKey;
+    Object.assign(headers, createHeaders(request.submissionKey));
   } else if (request.action !== 'list') {
     if (!/^agent_resource_[a-f0-9]{32}$/.test(request.id ?? ''))
       throw new Error('Enter a gateway agent resource ID.');

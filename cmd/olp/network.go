@@ -6,10 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/surface"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // managementNetwork runs before routing, authentication and admission. The
@@ -35,7 +36,7 @@ func managementNetwork(allowed, trusted []netip.Prefix, next http.Handler) http.
 		w.Header().Set("Cache-Control", "no-store")
 		problem := httpkit.Fail(http.StatusForbidden, "management_ip_not_allowed", "Management access is not allowed from this client address.")
 		if strings.HasPrefix(r.URL.Path, "/scim/") {
-			access.WriteSCIMError(w, problem)
+			identity.WriteSCIMError(w, problem)
 		} else {
 			httpkit.WriteProblem(w, problem)
 		}

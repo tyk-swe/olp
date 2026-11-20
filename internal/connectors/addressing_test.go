@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 const (

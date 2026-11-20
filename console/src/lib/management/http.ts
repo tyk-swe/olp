@@ -193,8 +193,12 @@ export function serializeIfMatch(value: string): string {
   return `"${value}"`;
 }
 
+export function ifMatch(etag: string) {
+  return { 'If-Match': serializeIfMatch(etag) };
+}
+
 export function mutationHeaders(etag: string, requestId: string) {
-  return { 'If-Match': serializeIfMatch(etag), 'Idempotency-Key': requestId };
+  return { ...ifMatch(etag), 'Idempotency-Key': requestId };
 }
 
 export function createHeaders(requestId: string) {

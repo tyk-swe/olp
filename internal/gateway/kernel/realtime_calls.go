@@ -1,0 +1,705 @@
+package kernel
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptrace"
+	"net/textproto"
+	"net/url"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/admission"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/realtimeresponses"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/upstream"
+)
+
+const (
+	maxWebRTCSDPBytes     = 64 << 10
+	maxWebRTCSessionBytes = 64 << 10
+	webrtcCloseTimeout    = 10 * time.Second
+	webrtcAnswerTimeout   = 30 * time.Second
+)
+
+type webrtcSession struct {
+	id        string
+	callID    string
+	keyID     string
+	token     string
+	x         *Call
+	p         *Pin
+	conn      *websocket.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
+	started   time.Time
+	rejected  bool
+	admission *admission.Permit
+
+	settleOnce sync.Once
+	usageMu    sync.Mutex
+	usage      wire.Usage
+	haveUsage  bool
+	responses  realtimeresponses.Tracker
+}
+
+func (s *Server) registerWebRTCSession(sess *webrtcSession) {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	if s.webrtcSessions == nil {
+		s.webrtcSessions = map[string]*webrtcSession{}
+	}
+	s.webrtcSessions[sess.id] = sess
+}
+
+func (s *Server) unregisterWebRTCSession(id string) {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	delete(s.webrtcSessions, id)
+}
+
+func (s *Server) holdWebRTCExposure(keyID string, until time.Time) {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	if s.webrtcExposures == nil {
+		s.webrtcExposures = map[string]time.Time{}
+	}
+	now := s.Now()
+	for key, expiry := range s.webrtcExposures {
+		if now.After(expiry) {
+			delete(s.webrtcExposures, key)
+		}
+	}
+	if current, ok := s.webrtcExposures[keyID]; !ok || until.After(current) {
+		s.webrtcExposures[keyID] = until
+	}
+}
+
+func (s *Server) webrtcExposureHeld(keyID string) bool {
+	s.webrtcMu.Lock()
+	defer s.webrtcMu.Unlock()
+	until, ok := s.webrtcExposures[keyID]
+	if !ok {
+		return false
+	}
+	if s.Now().After(until) {
+		delete(s.webrtcExposures, keyID)
+		return false
+	}
+	return true
+}
+
+type webrtcCallRequest struct {
+	sdp       []byte
+	session   json.RawMessage
+	slug      string
+	bodyBytes int64
+}
+
+func readWebRTCPart(part *multipart.Part, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(part, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil, errors.New("part too large")
+	}
+	return data, nil
+}
+
+func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *fault.Error) {
+	invalid := func(message string, param *string) (*webrtcCallRequest, *fault.Error) {
+		return nil, fault.InvalidRequest("invalid_value", message, param)
+	}
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return invalid("The realtime call content type is malformed.", nil)
+	}
+	body := &io.LimitedReader{R: r.Body, N: bodylimit.Maximum + 1}
+	out := &webrtcCallRequest{slug: r.URL.Query().Get("model")}
+	switch mediaType {
+	case "application/sdp":
+		if len(r.URL.Query()["model"]) != 1 {
+			return invalid("model must name exactly one published route slug.", new("model"))
+		}
+		data, err := io.ReadAll(io.LimitReader(body, maxWebRTCSDPBytes+1))
+		if err != nil || len(data) == 0 || len(data) > maxWebRTCSDPBytes {
+			return invalid("The SDP offer is missing or too large.", new("sdp"))
+		}
+		out.sdp = data
+	case "multipart/form-data":
+		reader := multipart.NewReader(body, params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return invalid("The realtime call form is malformed.", nil)
+			}
+			switch part.FormName() {
+			case "sdp":
+				if out.sdp != nil {
+					return invalid("The sdp part must appear once.", new("sdp"))
+				}
+				data, err := readWebRTCPart(part, maxWebRTCSDPBytes)
+				if err != nil || len(data) == 0 {
+					return invalid("The SDP offer is missing or too large.", new("sdp"))
+				}
+				out.sdp = data
+			case "session":
+				if out.session != nil {
+					return invalid("The session part must appear once.", new("session"))
+				}
+				data, err := readWebRTCPart(part, maxWebRTCSessionBytes)
+				if err != nil || len(data) == 0 {
+					return invalid("The session document is missing or too large.", new("session"))
+				}
+				out.session = data
+			default:
+				return invalid("This realtime call field has no qualified binding.", new(part.FormName()))
+			}
+		}
+		if out.sdp == nil {
+			return invalid("The SDP offer is missing or too large.", new("sdp"))
+		}
+	default:
+		return nil, fault.InvalidRequest("unsupported_media_type", "Realtime calls require multipart form data or an SDP body.", nil)
+	}
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return invalid("The realtime call body could not be read.", nil)
+	}
+	if body.N == 0 {
+		return nil, ingress.BodyTooLarge()
+	}
+	out.bodyBytes = bodylimit.Maximum + 1 - body.N
+	return out, nil
+}
+
+func webrtcTranscriptionConfigured(members map[string]json.RawMessage) bool {
+	configured := func(raw json.RawMessage) bool {
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) != nil {
+			return false
+		}
+		model, ok := nested["model"]
+		return ok && string(model) != "null"
+	}
+	if raw, ok := members["input_audio_transcription"]; ok && configured(raw) {
+		return true
+	}
+	var audio map[string]json.RawMessage
+	if raw, ok := members["audio"]; !ok || json.Unmarshal(raw, &audio) != nil {
+		return false
+	}
+	var input map[string]json.RawMessage
+	if raw, ok := audio["input"]; !ok || json.Unmarshal(raw, &input) != nil {
+		return false
+	}
+	raw, ok := input["transcription"]
+	return ok && configured(raw)
+}
+
+func bindWebRTCSession(raw json.RawMessage, slug, providerModel string) (json.RawMessage, *fault.Error) {
+	if len(raw) == 0 {
+		bound, _ := json.Marshal(map[string]string{"type": "realtime", "model": providerModel})
+		return bound, nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil || members == nil {
+		return nil, fault.InvalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
+	}
+	if rawType, present := members["type"]; present {
+		var sessionType string
+		if err := json.Unmarshal(rawType, &sessionType); err != nil || sessionType != "realtime" {
+			return nil, fault.InvalidRequest("unsupported_session_type", "This surface only admits realtime sessions.", new("session"))
+		}
+	}
+	members["type"] = json.RawMessage(`"realtime"`)
+	for _, name := range []string{"client_secret", "client_secrets"} {
+		if _, ok := members[name]; ok {
+			return nil, fault.InvalidRequest("client_secrets_unavailable", "Raw provider client secrets are not available on this surface.", new("session"))
+		}
+	}
+	if webrtcTranscriptionConfigured(members) {
+		return nil, fault.InvalidRequest("unsupported_session_field", "Input transcription is not available on this surface.", new("session"))
+	}
+	if rawModel, ok := members["model"]; ok {
+		var model string
+		if err := json.Unmarshal(rawModel, &model); err != nil || model != slug {
+			return nil, fault.InvalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
+		}
+	}
+	encoded, _ := json.Marshal(providerModel)
+	members["model"] = encoded
+	bound, err := json.Marshal(members)
+	if err != nil {
+		return nil, fault.InvalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
+	}
+	return bound, nil
+}
+
+func webrtcSessionSlug(raw json.RawMessage, querySlug string) (string, *fault.Error) {
+	slug := querySlug
+	if len(raw) > 0 {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &members); err != nil || members == nil {
+			return "", fault.InvalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
+		}
+		if rawModel, ok := members["model"]; ok {
+			var model string
+			if err := json.Unmarshal(rawModel, &model); err != nil {
+				return "", fault.InvalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
+			}
+			if slug != "" && slug != model {
+				return "", fault.InvalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
+			}
+			slug = model
+		}
+	}
+	if !routeidentity.ValidSlug(slug) {
+		return "", fault.InvalidRequest("invalid_value", "model must name a published route slug.", new("model"))
+	}
+	return slug, nil
+}
+
+func buildWebRTCCallsBody(sdp, session []byte) ([]byte, string, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	sdpPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="sdp"`},
+		"Content-Type":        {"application/sdp"},
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := sdpPart.Write(sdp); err != nil {
+		return nil, "", err
+	}
+	sessionPart, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="session"`},
+		"Content-Type":        {"application/json"},
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := sessionPart.Write(session); err != nil {
+		return nil, "", err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+func parseWebRTCCallID(location string) (string, bool) {
+	parsed, err := url.Parse(location)
+	if err != nil || parsed.Path == "" {
+		return "", false
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(segments) == 0 {
+		return "", false
+	}
+	return segments[len(segments)-1], true
+}
+
+func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
+	x := &Call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
+	x.mode = "webrtc"
+	fail := func(e *fault.Error) { s.Refuse(x, w, e) }
+	permit := admission.PermitFromContext(r.Context())
+	if permit == nil {
+		permit = s.Gate.Pool().AcquirePermit()
+	}
+	if permit == nil {
+		fail(fault.Overloaded)
+		return
+	}
+	defer permit.Release()
+	if !s.browserOriginAllowed(r) {
+		fail(fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
+		return
+	}
+	token := ingress.BearerToken(r)
+	if token == "" {
+		fail(fault.AuthenticationError("missing_authorization", "Provide an Authorization Bearer [REDACTED] key."))
+		return
+	}
+	authority, e := s.Gate.AuthenticateRequest(r, token, "inference")
+	if e != nil {
+		fail(e)
+		return
+	}
+	s.bindAuthority(x, authority)
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
+		fail(e)
+		return
+	}
+	if !permit.Await(r.Context(), admission.ClassOf(x.priority), time.Time{}) {
+		fail(fault.Overloaded)
+		return
+	}
+	if x.attribution, e = ingress.ParseAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {
+		fail(e)
+		return
+	}
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(s.Now().Add(RequestBodyTimeout)); err != nil {
+		fail(fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
+		return
+	}
+	if s.Config.MaxBodyBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, s.Config.MaxBodyBytes)
+	}
+	callReq, e := parseWebRTCCallRequest(r)
+	if e != nil {
+		fail(e)
+		return
+	}
+	_ = controller.SetReadDeadline(time.Time{})
+	slug, e := webrtcSessionSlug(callReq.session, callReq.slug)
+	if e != nil {
+		fail(e)
+		return
+	}
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
+	if !ok {
+		fail(fault.ModelNotFound(slug))
+		return
+	}
+	x.Route = &route
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
+		fail(fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		return
+	}
+	if route.MaxBodyBytes != nil && callReq.bodyBytes > *route.MaxBodyBytes {
+		fail(ingress.BodyTooLarge())
+		return
+	}
+	if !slices.Contains(route.Operations, "realtime") {
+		fail(fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil))
+		return
+	}
+	if e := x.GuardrailSurfaceGate(&route); e != nil {
+		fail(e)
+		return
+	}
+	if !x.Strict() {
+		fail(PolicyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract."))
+		return
+	}
+	if held, exposureErr := s.sessionExposureHeld(r.Context(), authority.ID); exposureErr != nil {
+		fail(exposureErr)
+		return
+	} else if held {
+		fail(fault.ServerError(http.StatusConflict, "webrtc_exposure_unresolved", "An earlier WebRTC session for this key is still billing-uncertain; new sessions are refused until that exposure resolves."))
+		return
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), webRTCBound)
+	x.estimate = resourceEstimate
+	p, e := s.SelectPinSurface(bg, x, &route, "realtime", "openai", "webrtc", func(provider *routing.Provider, model string) bool {
+		return provider.Connector().Supports("realtime", "openai", "webrtc") && provider.Supports(model, "realtime", "openai", "webrtc")
+	})
+	if e != nil {
+		s.settleCaps(r.Context(), x)
+		cancel()
+		fail(e)
+		return
+	}
+	releasePin := func() {
+		s.settleSessionHold(r.Context(), x, p.Hold, nil)
+		s.settleCaps(r.Context(), x)
+	}
+	template, ok := snapshot.WebRTCTemplate(route.Slug, p.Target.ID)
+	if !ok || !template.WebRTC() {
+		releasePin()
+		cancel()
+		fail(PolicyUnavailable("webrtc_contract_unavailable", "The selected target has no compiled governed WebRTC contract."))
+		return
+	}
+	boundSession, e := bindWebRTCSession(callReq.session, slug, template.Model())
+	if e != nil {
+		releasePin()
+		cancel()
+		fail(e)
+		return
+	}
+	if e := s.UnboundedPinLimits(x.AdmissionAuthority(authority), p, &route); e != nil {
+		releasePin()
+		cancel()
+		fail(e)
+		return
+	}
+	if e := s.reserveState(bg, x, authority, webRTCBound); e != nil {
+		releasePin()
+		cancel()
+		fail(e)
+		return
+	}
+	if e := s.reserveSessionDebit(bg, x, authority, p.attempt, nil); e != nil {
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
+		releasePin()
+		cancel()
+		fail(e)
+		return
+	}
+	if e := s.reserveSessionCost(bg, x, authority, p.attempt, webRTCBound); e != nil {
+		s.abandonSessionDebit(r.Context(), x)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
+		releasePin()
+		cancel()
+		fail(e)
+		return
+	}
+	sess := &webrtcSession{
+		id: uuid.NewString(), keyID: authority.ID, token: token,
+		x: x, p: p, ctx: bg, cancel: cancel, started: s.Now(),
+		admission: permit.Transfer(),
+	}
+	s.registerWebRTCSession(sess)
+	answer, status, e := s.createWebRTCCall(bg, sess, callReq.sdp, boundSession)
+	if e != nil {
+		s.settleWebRTC(sess, e)
+		fault.WriteSurfaceError(w, e, "openai")
+		return
+	}
+	abandoned := fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
+	if r.Context().Err() != nil {
+		if err := s.hangupWebRTCCall(bg, sess); err != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		s.settleWebRTC(sess, abandoned)
+		cancel()
+		return
+	}
+	go s.runWebRTCControl(sess)
+	w.Header().Set("Content-Type", "application/sdp")
+	w.Header().Set("Location", "/v1/realtime/calls/"+sess.id)
+	_ = controller.SetWriteDeadline(s.Now().Add(webrtcAnswerTimeout))
+	w.WriteHeader(status)
+	_, werr := w.Write(answer)
+	if werr == nil {
+		werr = controller.Flush()
+	}
+	if werr != nil || r.Context().Err() != nil {
+		if herr := s.hangupWebRTCCall(bg, sess); herr != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		s.settleWebRTC(sess, abandoned)
+		cancel()
+	}
+}
+
+func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp, session []byte) ([]byte, int, *fault.Error) {
+	x, p := sess.x, sess.p
+	cfg := p.Provider.Connector()
+	endpoint, err := cfg.RealtimeCallsURL(p.Model)
+	if err != nil {
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
+	}
+	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy.")
+	}
+	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
+	fact.Mode = "webrtc"
+	if p.Hold != nil {
+		fact.Budgets = p.Hold.budgets
+	}
+	createCtx := ctx
+	cancelCreate := context.CancelFunc(func() {})
+	if p.attempt.Timeout > 0 {
+		createCtx, cancelCreate = context.WithTimeout(ctx, p.attempt.Timeout)
+	}
+	defer cancelCreate()
+	state := attemptState{parent: createCtx, classifier: upstream.Classifier{Declared: cfg.Classification()}}
+	body, contentType, err := buildWebRTCCallsBody(sdp, session)
+	if err != nil {
+		return nil, 0, fault.ServerError(http.StatusInternalServerError, "internal_error", "The realtime call could not be encoded.")
+	}
+	reqCtx := httptrace.WithClientTrace(createCtx, state.trace())
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/sdp")
+	req.Header.Set("User-Agent", "olp/gateway")
+	if err := s.applySlotCredential(reqCtx, x, req, cfg, p.Slot, body, &p.Provider, p.Model); err != nil {
+		fact.Class = classCredential
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		x.facts = append(x.facts, fact)
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
+	}
+	client, err := s.providerClient(ctx, x.request.release, &p.Provider, p.Slot)
+	if err != nil {
+		fact.Class = classCredential
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		x.facts = append(x.facts, fact)
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
+	}
+	if e := s.markSessionDispatched(reqCtx, x); e != nil {
+		fact.Class = ClassConnect
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		x.facts = append(x.facts, fact)
+		return nil, 0, e
+	}
+	resp, err := client.Do(req)
+	x.dispatched = x.dispatched || state.dispatched.Load() || resp != nil
+	if x.dispatched && p.Hold != nil {
+		x.spendCaps(p.Hold.budgets, p.attempt)
+	}
+	if err != nil {
+		fact.Class = ClassConnect
+		dispatched := state.dispatched.Load()
+		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
+		fact.RecordEvidence(dispatched)
+		if dispatched {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		x.facts = append(x.facts, fact)
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
+	}
+	defer resp.Body.Close()
+	state.status = resp.StatusCode
+	fact.Status = resp.StatusCode
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		nativeError := x.redacted(upstreamResponseError(resp))
+		evidence := state.evidence()
+		evidence.Error = nativeError
+		outcome := state.classifier.Classify(evidence)
+		sess.rejected = outcome.Acceptance == upstream.Terminal
+		fact.Class = string(outcome.Class)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		fact.RecordEvidence(false)
+		x.facts = append(x.facts, fact)
+		return nil, 0, UpstreamError(&AttemptFailure{Status: resp.StatusCode, upstream: nativeError})
+	}
+	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
+	if ok {
+		sess.callID = callID
+	}
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxWebRTCSDPBytes+1))
+	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
+		fact.Class = ClassProtocol
+		fact.RecordEvidence(true)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		x.facts = append(x.facts, fact)
+		if !ok || s.hangupWebRTCCall(ctx, sess) != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned an unusable session answer.")
+	}
+	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.Model, callID)
+	if !ok || controlErr != nil {
+		fact.Class = ClassProtocol
+		fact.RecordEvidence(true)
+		fact.Duration = s.Now().Sub(fact.StartedAt)
+		x.facts = append(x.facts, fact)
+		s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
+	}
+	sess.callID = callID
+	fact.Class = "success"
+	fact.Committed = true
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = upstream.Accepted
+	}
+	fact.Duration = s.Now().Sub(fact.StartedAt)
+	fact.RecordEvidence(true)
+	x.facts = append(x.facts, fact)
+	conn, e := s.dialWebRTCControl(createCtx, sess, controlEndpoint)
+	if e != nil {
+		if herr := s.hangupWebRTCCall(ctx, sess); herr != nil {
+			s.holdWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		}
+		return nil, 0, e
+	}
+	sess.conn = conn
+	return answer, resp.StatusCode, nil
+}
+
+func (s *Server) dialWebRTCControl(ctx context.Context, sess *webrtcSession, endpoint string) (*websocket.Conn, *fault.Error) {
+	x, p := sess.x, sess.p
+	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+	}
+	if err := s.applySlotCredential(ctx, x, probe, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
+	}
+	headers := http.Header{}
+	for name, values := range probe.Header {
+		headers[name] = append([]string{}, values...)
+	}
+	client, err := s.providerClient(ctx, x.request.release, &p.Provider, p.Slot)
+	if err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
+	}
+	conn, _, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
+	if err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "realtime_control_unavailable", "The provider session cannot be controlled by this gateway.")
+	}
+	limit := s.Config.MaxEventBytes
+	if limit <= 0 {
+		limit = 1 << 20
+	}
+	conn.SetReadLimit(bodylimit.Lower(limit, x.Route.MaxBodyBytes))
+	return conn, nil
+}
+
+func (s *Server) hangupWebRTCCall(parent context.Context, sess *webrtcSession) error {
+	if sess.callID == "" {
+		return errors.New("no provider call identity")
+	}
+	cfg := sess.p.Provider.Connector()
+	endpoint, err := cfg.RealtimeHangupURL(sess.p.Model, sess.callID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), webrtcCloseTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "olp/gateway")
+	if err := s.applySlotCredential(ctx, sess.x, req, cfg, sess.p.Slot, nil, &sess.p.Provider, sess.p.Model); err != nil {
+		return err
+	}
+	client, err := s.providerClient(ctx, sess.x.request.release, &sess.p.Provider, sess.p.Slot)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("provider hangup status %d", resp.StatusCode)
+	}
+	return nil
+}

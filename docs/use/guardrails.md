@@ -114,8 +114,11 @@ Legacy text completions inspect each text prompt as input and each choice's
 contract and refuse. Output policies refuse any non-null completion `logprobs`
 value. A choice's stream segment stays open until it reports a nonempty finish
 reason, so TGI's empty nonterminal reason does not end it. Decisions inspect
-their text input (OpenAI `input` or System One `state`) and question text as
-input, and their answers as unary output.
+input text, question instructions, and criteria, plus native answers as
+unary output.
+Gemini Decisions input checks join text blocks the same way the provider
+does. Enforcing text input checks refuse Gemini media because they cannot
+inspect its contents.
 
 Stored or background Responses requests are refused when an output policy or
 input masking is configured, because later retrieval cannot replay that

@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func metadataAttempt(ordinal int, providerID string, model string, committed bool) Attempt {
@@ -249,6 +249,26 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			huge := int64(math.MaxInt64)
 			e.CachedInputTokens = &huge
 			e.CacheWriteInputTokens = &huge
+		}},
+		{"attempt paired audio and image shares overflowing the input total", func(e *Event) {
+			huge := int64(math.MaxInt64)
+			e.Attempts[1].Usage.AudioInputTokens = &huge
+			e.Attempts[1].Usage.ImageInputTokens = &huge
+		}},
+		{"attempt paired cached audio and image shares overflowing the cached total", func(e *Event) {
+			huge, total, cached := int64(math.MaxInt64), int64(math.MaxInt64), int64(7)
+			e.Attempts[1].Usage.InputTokens = &total
+			e.Attempts[1].Usage.CachedInputTokens = &cached
+			e.Attempts[1].Usage.AudioInputTokens = &huge
+			e.Attempts[1].Usage.CachedAudioInputTokens = &huge
+			e.Attempts[1].Usage.ImageInputTokens = &huge
+			e.Attempts[1].Usage.CachedImageInputTokens = &huge
+		}},
+		{"attempt paired audio and image shares overflowing the output total", func(e *Event) {
+			huge, total := int64(math.MaxInt64), int64(7)
+			e.Attempts[1].Usage.OutputTokens = &total
+			e.Attempts[1].Usage.AudioOutputTokens = &huge
+			e.Attempts[1].Usage.ImageOutputTokens = &huge
 		}},
 		{"malformed media units", func(e *Event) {
 			units := "1.2.3"

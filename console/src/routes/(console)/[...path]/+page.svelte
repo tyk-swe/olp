@@ -1,9 +1,10 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { resolve } from '$app/paths';
   import NavIcon from '#lib/shell/NavIcon.svelte';
 </script>
 
-<svelte:head><title>Page not found · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Page not found" />
 
 <p class="eyebrow">Console</p>
 <h1 class="page-title">Page not found</h1>
@@ -37,7 +38,7 @@
   }
   .not-found h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

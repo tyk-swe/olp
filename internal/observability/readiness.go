@@ -10,9 +10,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 
@@ -35,7 +35,7 @@ type Sources struct {
 }
 
 type Store interface {
-	access.Queryer
+	database.Queryer
 	Pinger
 }
 

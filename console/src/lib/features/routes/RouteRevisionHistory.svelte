@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
@@ -17,7 +18,7 @@
     type RouteRevision,
     type RouteRevisionDiff
   } from '#lib/features/routes/api.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { fidelityLabel } from '#lib/features/routes/routeEditor.js';
   import { formatDate, formatInteger } from '#lib/format.js';
 
@@ -105,7 +106,7 @@
   }
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <PageHeader
   title={revisions.data?.[0]?.slug ?? 'Route'}
@@ -323,7 +324,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

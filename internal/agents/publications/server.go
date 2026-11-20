@@ -8,7 +8,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type Server struct {
@@ -20,18 +21,18 @@ type Server struct {
 func (s *Server) Register(mux *http.ServeMux) {
 	for _, kind := range []string{"toolset", "agent", "prompt"} {
 		root := "/api/v1/" + kind + "s"
-		s.access.Route(mux, "GET "+root, func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.list(r, p, kind) })
-		s.access.Route(mux, "POST "+root, func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "create") }, access.MaxBody(1<<20))
-		s.access.Route(mux, "GET "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.get(r, p, kind) })
-		s.access.Route(mux, "PUT "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "update") }, access.MaxBody(1<<20))
-		s.access.Route(mux, "DELETE "+root+"/{publication_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "retire") })
-		s.access.Route(mux, "POST "+root+"/{publication_id}/publish", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, kind, "publish") })
-		s.access.Route(mux, "GET "+root+"/{publication_id}/revisions/{revision_id}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.revision(r, p, kind) })
+		s.access.Route(mux, "GET "+root, func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.list(r, p, kind) })
+		s.access.Route(mux, "POST "+root, func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.write(r, kind, "create") }, access.MaxBody(1<<20))
+		s.access.Route(mux, "GET "+root+"/{publication_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.get(r, p, kind) })
+		s.access.Route(mux, "PUT "+root+"/{publication_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.write(r, kind, "update") }, access.MaxBody(1<<20))
+		s.access.Route(mux, "DELETE "+root+"/{publication_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.write(r, kind, "retire") })
+		s.access.Route(mux, "POST "+root+"/{publication_id}/publish", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.write(r, kind, "publish") })
+		s.access.Route(mux, "GET "+root+"/{publication_id}/revisions/{revision_id}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.revision(r, p, kind) })
 	}
-	s.access.Route(mux, "PUT /api/v1/prompts/{publication_id}/labels/{label}", func(r *http.Request, p access.Principal) (httpkit.Reply, error) { return s.write(r, "prompt", "label") })
+	s.access.Route(mux, "PUT /api/v1/prompts/{publication_id}/labels/{label}", func(r *http.Request, p authz.Principal) (httpkit.Reply, error) { return s.write(r, "prompt", "label") })
 }
 
-func (s *Server) list(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal, kind string) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -53,7 +54,7 @@ func (s *Server) list(r *http.Request, p access.Principal, kind string) (httpkit
 	return httpkit.ListReplyBy(items, page, func(item publicationSummary) string { return item.ID }), rows.Err()
 }
 
-func (s *Server) visible(r *http.Request, p access.Principal, kind string) (*agentcontract.Publication, error) {
+func (s *Server) visible(r *http.Request, p authz.Principal, kind string) (*agentcontract.Publication, error) {
 	id, err := httpkit.IDParam(r, "publication_id")
 	if err != nil {
 		return nil, err
@@ -62,19 +63,19 @@ func (s *Server) visible(r *http.Request, p access.Principal, kind string) (*age
 	if err != nil {
 		return nil, mapConflict(err)
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
 		return nil, err
 	}
 	return d, nil
 }
-func (s *Server) get(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
+func (s *Server) get(r *http.Request, p authz.Principal, kind string) (httpkit.Reply, error) {
 	d, err := s.visible(r, p, kind)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(d, d.ETag), nil
 }
-func (s *Server) revision(r *http.Request, p access.Principal, kind string) (httpkit.Reply, error) {
+func (s *Server) revision(r *http.Request, p authz.Principal, kind string) (httpkit.Reply, error) {
 	d, err := s.visible(r, p, kind)
 	if err != nil {
 		return httpkit.Reply{}, err

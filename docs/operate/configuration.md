@@ -20,6 +20,8 @@ configuration before binding any listener.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
+| `OLP_DATABASE_PASSWORD_FILE` | unset | Mounted PostgreSQL password for a connection without its own password or explicit passfile. Compose sets this for its bundled database. |
+| `OLP_DATABASE_PASSWORD_FILE_URL` | unset | Apply `OLP_DATABASE_PASSWORD_FILE` only when the resolved host, port, database, and user match this URL. Connection options such as `sslmode` can differ. Every fallback must use the same host and port. |
 | `OLP_DATABASE_READ_URL` | unset | Optional regional PostgreSQL replica for runtime release and key/credential authority reads. Writes and historical secret reads use the primary. Replica delay consumes the 60-second authority-age budget; see [regional deployment](deployment.md#regional-read-replicas). |
 | `OLP_DATABASE_READ_URL_FILE` | unset | Mounted read-replica URL, mutually exclusive with `OLP_DATABASE_READ_URL`. |
 | `OLP_REGION` | unset | Deployment region for key rate/concurrency overrides, regional cost-reconciliation leadership and provider locality. Set the same name on gateways and workers sharing a Valkey. See [regional fleets](deployment.md#regional-fleets). |
@@ -58,7 +60,7 @@ configuration before binding any listener.
 | `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
 | `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
 | `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
-| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB with a minimum of 256 MiB). The spool also limits uploads and pending cleanups to 4096 files in total. |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
 | `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](../use/plugins.md#unconfined-plugins-experimental); nothing else can. |
 | `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
@@ -136,8 +138,7 @@ provider quotas.
 ## File-based secrets
 
 Use regular files with mode `0400`, `0440`, `0600`, or `0640`; group-write and
-world permissions are rejected. A configured bootstrap file may be absent after
-setup. Workers require both the HMAC and master keys, including with mounted
+world permissions are rejected. Workers require both the HMAC and master keys, including with mounted
 connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 `OLP_MASTER_KEY`, or `OLP_BOOTSTRAP_TOKEN` is set inline.
 
@@ -145,7 +146,7 @@ connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 | --- | --- | --- |
 | `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below; also supports [workload-identity wrapped keys](external-secrets.md). |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first-owner setup on `all` or `control` | Random 32–256-byte token for one-time owner setup. Read on every setup attempt, so it may be mounted after start or removed after setup. A missing, unreadable or wrongly sized file makes setup report that no token is configured. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
 ```json
@@ -164,24 +165,26 @@ both files for recovery; follow the
 [key rotation procedure](operations.md#master-key-rotation-and-recovery)
 before retiring any master-key version.
 
-Generate Compose files with the [secret helper](../../deploy/secrets/README.md).
-For local/test scripts, `source scripts/secrets.sh <private-directory>` creates
-missing secret files without printing their contents. Production secret
-distribution remains the operator's responsibility. Database and Valkey URLs
-also accept `_FILE` settings, mutually exclusive with their inline values.
+Compose generates these files on first start, see
+[Getting Started](../getting-started.md#install-olp). For local/test scripts,
+`source scripts/secrets.sh <private-directory>` creates missing secret files
+without printing their contents. `olp init-secrets --dir DIR --database-dir DIR`
+creates the same set as Compose without replacing existing files. Production
+secret distribution remains the operator's responsibility. Database and Valkey
+URLs also accept `_FILE` settings, mutually exclusive with their inline values.
 
 ## Compose-only variables
 
 Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
-the quick start. `.env.example` also defines `OLP_HOST_PORT`,
-`POSTGRES_PASSWORD`, `POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`.
-`OLP_COMPOSE_SECRETS_DIR` selects an absolute secret-directory override for
-Compose and its preparation/retirement helpers. These settings configure the
-wrapper rather than the binary. The encoded password is used in the database
-URL; PostgreSQL receives the raw password. The tracing overlay
+the quick start, and `OLP_HOST_PORT`, which also sets the default
+`OLP_PUBLIC_ORIGIN`. These settings configure the wrapper rather than the
+binary. Compose supplies the generated password for the default database URL.
+A custom `OLP_DATABASE_URL` supplies its own credentials, for example through
+a `passfile` query parameter pointing to a mounted PostgreSQL password file.
+The tracing overlay
 `deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
-`OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from the same
-file; leave them empty to keep the binary defaults.
+`OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from `.env`;
+leave them empty to keep the binary defaults.
 
 ## OpenAI-compatible provider presets
 
@@ -195,7 +198,7 @@ host or path names the operator's account. The record stores the vendor ID
 separately from its editable resolved connection values.
 
 Each preset is a reviewed vendor contract in
-[`internal/vendors`](../../internal/vendors/catalog.go): its operations, generation
+[`internal/domain/vendors`](../../internal/domain/vendors/catalog.go): its operations, generation
 dialects, the request fields its documentation refuses or renames, and the
 documentation it was reviewed against. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
@@ -309,7 +312,7 @@ Probes and inference use the same normalized endpoint and egress policy. The
 allowlists never relax OIDC issuer or Vertex token endpoint checks.
 These exceptions are installation-wide administrative trust decisions.
 They do not provide origin-specific tenant isolation. See the
-[egress](../../internal/egress) policy for the boundary rules.
+[egress](../../internal/platform/egress) policy for the boundary rules.
 
 ## Operations script variables
 
@@ -346,9 +349,6 @@ default credential slot and enforces its slot and connection limits. Releases
 with enabled named slots require the master key so each attempt can use its
 published credential version. Database-encrypted revisions remain authoritative
 when the master key is configured.
-
-Production Compose can generate database credentials and their encoded URL using
-`scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).
 
 ## Configuration promotion artifacts
 

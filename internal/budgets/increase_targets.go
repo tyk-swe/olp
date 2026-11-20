@@ -1,0 +1,150 @@
+package budgets
+
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/limits"
+)
+
+// BudgetTarget identifies a single accounting boundary, never a template shared
+// by other members. Its identifiers are metadata, not raw end-user identities.
+type BudgetTarget struct {
+	Kind          string `json:"kind"`
+	ID            string `json:"id,omitempty"`
+	Route         string `json:"route,omitempty"`
+	EndUserDigest string `json:"end_user_digest,omitempty"`
+	Label         string `json:"label,omitempty"`
+	Value         string `json:"value,omitempty"`
+}
+
+func (t *BudgetTarget) validate() error {
+	if !limits.ValidBudgetBoundary(t.Kind) {
+		return httpkit.Invalid("target.kind", "Choose a supported budget boundary.")
+	}
+	if t.Kind != "installation" {
+		id, err := uuid.Parse(t.ID)
+		if err != nil {
+			return httpkit.Invalid("target.id", "A resource UUID is required.")
+		}
+		t.ID = id.String()
+	} else if t.ID != "" {
+		return httpkit.Invalid("target.id", "Installation targets have no resource ID.")
+	}
+	if (t.Kind == "key_route" && !routeidentity.ValidSlug(t.Route)) || (t.Kind != "key_route" && t.Route != "") {
+		return httpkit.Invalid("target.route", "Supply a route only for a key-route budget.")
+	}
+	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"
+	if (identified && !keyauthority.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
+		return httpkit.Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
+	}
+	if t.Kind == "attribution" {
+		if !attribution.ValidKey(t.Label) || !attribution.ValidValue(t.Value) {
+			return httpkit.Invalid("target", "Supply a valid attribution label and value.")
+		}
+	} else if t.Label != "" || t.Value != "" {
+		return httpkit.Invalid("target", "Labels belong only to attribution budgets.")
+	}
+	return nil
+}
+
+func costs(l keyauthority.AdmissionLimits) *keyauthority.BudgetPolicy {
+	return &keyauthority.BudgetPolicy{DailyCostLimit: l.DailyCostLimit, WeeklyCostLimit: l.WeeklyCostLimit, MonthlyCostLimit: l.MonthlyCostLimit}
+}
+
+func (a *API) target(r *http.Request, tx pgx.Tx, p authz.Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
+	if err = t.validate(); err != nil {
+		return
+	}
+	if t.Kind == "installation" {
+		if err = p.Authorize(authz.Settings); err != nil {
+			return
+		}
+		owner = limits.AggregateBudgetID("installation", a.server.Installation)
+		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
+		return
+	}
+	if t.Kind == "organization" {
+		// An organization's budget belongs to whoever manages it, so a token
+		// delegated only that scope raises it without managing keys.
+		if err = p.Authorize(authz.ManageOrganization); err != nil {
+			return
+		}
+		if err = p.Organization(t.ID, authz.Change); err != nil {
+			return
+		}
+		owner = limits.AggregateBudgetID("organization", t.ID)
+		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.organizations WHERE id=$1", t.ID).Scan(&policy)
+		return
+	}
+	if err = p.Authorize(authz.Keys); err != nil {
+		return
+	}
+	switch t.Kind {
+	case "project", "project_end_user", "attribution":
+		project = &t.ID
+		if err = p.Project(project, authz.Change); err != nil {
+			return
+		}
+		var endUser *keyauthority.EndUserPolicy
+		var templates keyauthority.LimitTemplates
+		var labels keyauthority.AttributionBudgets
+		if err = tx.QueryRow(r.Context(), "SELECT budget_policy,end_user_policy,limit_templates,attribution_budgets FROM olp.projects WHERE id=$1", t.ID).Scan(&policy, &endUser, &templates, &labels); err != nil {
+			return
+		}
+		switch t.Kind {
+		case "project":
+			owner = limits.AggregateBudgetID("project", t.ID)
+		case "attribution":
+			owner = limits.AttributionBudgetID(t.ID, t.Label, t.Value)
+			v := labels[t.Label][t.Value]
+			policy = &v
+		case "project_end_user":
+			owner = limits.EndUserProjectID(t.ID, t.EndUserDigest)
+			endUser, err = templates.EndUser(endUser)
+			if err == nil {
+				policy = costs(endUser.Limits(t.EndUserDigest))
+			}
+		}
+	case "budget_group":
+		var l keyauthority.AdmissionLimits
+		err = tx.QueryRow(r.Context(), "SELECT project_id::text,effective_limits FROM olp.budget_groups_with_limits WHERE id=$1", t.ID).Scan(&project, &l)
+		owner = t.ID
+		policy = costs(l)
+	default:
+		var a keyauthority.Authority
+		var templates keyauthority.LimitTemplates
+		err = tx.QueryRow(r.Context(), `SELECT k.project_id::text,k.policy,COALESCE(p.limit_templates,'{}'::jsonb) FROM olp.api_keys k LEFT JOIN olp.projects p ON p.id=k.project_id WHERE k.id=$1 AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())`, t.ID).Scan(&a.ProjectID, &a.Policy, &templates)
+		if err != nil {
+			return
+		}
+		project = a.ProjectID
+		if err = p.Project(project, authz.Change); err != nil {
+			return
+		}
+		if err = a.BindLimitTemplates(templates); err != nil {
+			return
+		}
+		switch t.Kind {
+		case "api_key":
+			owner = t.ID
+			policy = costs(a.Policy.AdmissionLimits())
+		case "key_route":
+			owner = limits.KeyRouteBudgetID(t.ID, t.Route)
+			policy = costs(a.Policy.RouteLimits[t.Route])
+		case "key_end_user":
+			owner = limits.EndUserKeyID(t.ID, t.EndUserDigest)
+			policy = costs(a.Policy.EndUserPolicy.Limits(t.EndUserDigest))
+		}
+	}
+	if err == nil {
+		err = p.Project(project, authz.Change)
+	}
+	return
+}

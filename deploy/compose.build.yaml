@@ -5,6 +5,8 @@ x-olp-build: &olp-build
     dockerfile: deploy/Dockerfile
 
 services:
+  init-secrets:
+    <<: *olp-build
   migrate:
     <<: *olp-build
   olp:

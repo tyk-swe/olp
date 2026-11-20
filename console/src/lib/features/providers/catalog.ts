@@ -1,7 +1,7 @@
 import { requestNative } from '#lib/management/transport.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, mutationHeaders } from '#lib/management/http.js';
 import type { Provider } from '#lib/features/providers/providers.js';
 
 type Schemas = components['schemas'];
@@ -39,10 +39,7 @@ export async function acceptCatalogSuggestions(
     {
       params: {
         path: { provider_id: provider.id },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       },
       body: { catalog_sha256: catalogSHA256, upstream_models: upstreamModels }
     },

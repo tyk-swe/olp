@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type Lifecycle string

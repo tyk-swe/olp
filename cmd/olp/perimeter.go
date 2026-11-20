@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/surface"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // Perimeter sets the security headers of every public response before

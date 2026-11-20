@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type GuardrailBuild struct {
@@ -15,7 +15,7 @@ type GuardrailBuild struct {
 	Guardrail bool
 }
 
-func FindGuardrailBuild(ctx context.Context, q access.Queryer, digest string) (*GuardrailBuild, error) {
+func FindGuardrailBuild(ctx context.Context, q database.Queryer, digest string) (*GuardrailBuild, error) {
 	var b GuardrailBuild
 	err := q.QueryRow(ctx, "SELECT manifest->>'name',approved_at IS NOT NULL,module IS NOT NULL,COALESCE((manifest->>'guardrail')::boolean,false) FROM olp.plugins WHERE digest=$1", digest).
 		Scan(&b.Name, &b.Approved, &b.Confined, &b.Guardrail)

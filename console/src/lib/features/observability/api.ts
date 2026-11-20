@@ -4,7 +4,9 @@ import {
   ensureOk,
   unwrap,
   unwrapPage,
-  type CursorPage
+  type CursorPage,
+  createHeaders,
+  ifMatch
 } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -43,7 +45,7 @@ export async function createExportSink(
   requestId: string
 ): Promise<ExportSink> {
   const response = await apiClient.POST('/api/v1/observability/sinks', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -58,7 +60,7 @@ export async function updateExportSink(
     {
       params: {
         path: { export_sink_id: sink.export_sink_id },
-        header: { 'If-Match': sink.etag }
+        header: ifMatch(sink.etag)
       },
       body: input
     }
@@ -72,7 +74,7 @@ export async function deleteExportSink(sink: ExportSink): Promise<void> {
     {
       params: {
         path: { export_sink_id: sink.export_sink_id },
-        header: { 'If-Match': sink.etag }
+        header: ifMatch(sink.etag)
       }
     }
   );
@@ -138,7 +140,7 @@ export async function updateCaptureConfiguration(
   input: Schemas['UpdateCaptureConfigurationRequest']
 ): Promise<CaptureConfiguration> {
   const response = await apiClient.PATCH('/api/v1/observability/capture', {
-    params: { header: { 'If-Match': configuration.etag } },
+    params: { header: ifMatch(configuration.etag) },
     body: input
   });
   return unwrap(response);
@@ -180,7 +182,7 @@ export async function createCapturePolicy(
   const response = await apiClient.POST(
     '/api/v1/observability/capture-policies',
     {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: input
     }
   );
@@ -196,7 +198,7 @@ export async function updateCapturePolicy(
     {
       params: {
         path: { capture_policy_id: policy.id },
-        header: { 'If-Match': policy.etag }
+        header: ifMatch(policy.etag)
       },
       body: input
     }
@@ -212,7 +214,7 @@ export async function deleteCapturePolicy(
     {
       params: {
         path: { capture_policy_id: policy.id },
-        header: { 'If-Match': policy.etag }
+        header: ifMatch(policy.etag)
       }
     }
   );

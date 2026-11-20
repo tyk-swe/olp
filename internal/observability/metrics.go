@@ -8,8 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/metric"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/platform/metric"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 

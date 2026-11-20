@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -70,9 +72,9 @@
         class="badge">{epochs.data.items.length} on page</span
       >{/if}
   </div>
-  {#if epochNotice}<div class="inline-notice" role="status">
+  {#if epochNotice}<Callout tone="success">
       {epochNotice}
-    </div>{/if}
+    </Callout>{/if}
   {#if epochError}<div class="inline-problem" role="alert">
       {epochError}
     </div>{/if}
@@ -90,13 +92,7 @@
       No unclean gateway epoch awaits acknowledgement.
     </div>
   {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-    <div
-      class="table-shell"
-      tabindex="0"
-      role="region"
-      aria-label="Unresolved request metadata gateway epochs"
-    >
+    <ScrollTable label="Unresolved request metadata gateway epochs">
       <table class="data-table">
         <caption class="sr-only"
           >Unclean request metadata gateway process epochs awaiting operator
@@ -161,7 +157,7 @@
             >{/each}</tbody
         >
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(
         pagination,

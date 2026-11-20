@@ -1,13 +1,22 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
   import { beginIdentityReauthentication } from '#lib/features/access/profile/api.js';
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
-  import { getMFA, enrollMFA, manageMFA, removeMFA, recoveryMFA } from './api';
-  import { confirmMFA } from './prompt.svelte';
+  import {
+    getMFA,
+    enrollMFA,
+    manageMFA,
+    removeMFA,
+    recoveryMFA,
+    type MFAFactor
+  } from './api';
+  import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
   let {
     hasLocalPassword = false,
     hasLinkedIdentity = false
@@ -98,17 +107,35 @@
       notice = 'Authenticator enrolled. Other sessions have ended.';
     });
   }
-  async function remove(id: string) {
+  async function remove(factor: MFAFactor) {
     if (!status.data) return;
     const etag = status.data.etag;
+    if (
+      !(await confirmAction({
+        title: `Remove ${factor.name}?`,
+        body: 'You can no longer sign in with this authenticator.',
+        confirmLabel: 'Remove authenticator',
+        danger: true
+      }))
+    )
+      return;
     await action(async () => {
-      await removeMFA(id, etag);
+      await removeMFA(factor.id, etag);
       notice = 'Authenticator removed.';
     });
   }
   async function regenerate() {
     if (!status.data) return;
     const etag = status.data.etag;
+    if (
+      !(await confirmAction({
+        title: 'Replace recovery codes?',
+        body: 'Your current recovery codes stop working immediately.',
+        confirmLabel: 'Replace codes',
+        danger: true
+      }))
+    )
+      return;
     await action(async () => {
       codes = (await recoveryMFA(etag)).recovery_codes;
       notice = 'Previous recovery codes no longer work.';
@@ -122,15 +149,12 @@
     Protect password sign-in with an authenticator app or a security key. Linked
     identity sign-in follows your identity provider’s policy.
   </p>
-  {#if error}<p class="form-alert" role="alert">{error}</p>{/if}{#if notice}<p
-      class="notice notice-success"
-      role="status"
-    >
-      {notice}
-    </p>{/if}
+  {#if error}<p class="inline-problem" role="alert">
+      {error}
+    </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if status.isPending}<p role="status">
       Loading authenticators…
-    </p>{:else if status.isError}<p class="form-alert" role="alert">
+    </p>{:else if status.isError}<p class="inline-problem" role="alert">
       {errorMessage(status.error, 'Authenticators could not be loaded.')}
     </p>
     <button class="button button-secondary" onclick={() => status.refetch()}
@@ -141,10 +165,10 @@
         Security keys need an HTTPS DNS public origin, or localhost for
         development. Authenticator apps remain available.
       </p>{/if}
-    {#if status.data.required}<p class="notice notice-info">
+    {#if status.data.required}<Callout>
         This installation requires a second factor for local sign-in. Enroll a
         replacement before removing the last factor.
-      </p>{/if}
+      </Callout>{/if}
     {#if status.data.factors.length}<ul>
         {#each status.data.factors as factor (factor.id)}<li>
             <div>
@@ -160,7 +184,7 @@
               class="button button-secondary"
               disabled={busy ||
                 (status.data.required && status.data.factors.length === 1)}
-              onclick={() => remove(factor.id)}>Remove {factor.name}</button
+              onclick={() => remove(factor)}>Remove {factor.name}</button
             >
           </li>{/each}
       </ul>

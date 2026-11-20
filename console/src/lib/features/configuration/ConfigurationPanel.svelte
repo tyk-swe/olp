@@ -3,7 +3,7 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import { parseExternalReference } from '#lib/features/providers/externalReference.js';
+  import { parseExternalReference } from '#lib/features/providers/index.js';
   import { resolve } from '$app/paths';
   import { parseNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
   import { ApiProblem, errorMessage } from '#lib/management/http.js';
@@ -311,6 +311,10 @@
         >External credential bindings<textarea
           class="filter-control"
           bind:value={externalBindingsJSON}
+          oninput={() => {
+            plan = null;
+            applyResult = '';
+          }}
           readonly={busy}
           rows="4"
           maxlength="65536"

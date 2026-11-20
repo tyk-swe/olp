@@ -1,10 +1,16 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import type { EntityKind } from '#lib/components/entityOptions.svelte.js';
+  import type { EntitySource } from '#lib/components/entityOptions.js';
+  import {
+    budgetGroupOptions,
+    organizationOptions,
+    projectOptions
+  } from '#lib/features/access/entityOptions.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '../session/useRole.svelte';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createIncrease,
     listIncreases,
@@ -21,6 +27,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   const access = useRole();
   const client = useQueryClient();
   let before = $state<string | undefined>();
@@ -38,15 +45,15 @@
   );
   let kind = $state<IncreaseInput['target']['kind']>('api_key');
   let resourceId = $state('');
-  const targetPicker = $derived<{ kind: EntityKind; label: string } | null>(
+  const targetPicker = $derived<{ source: EntitySource; label: string } | null>(
     kind === 'budget_group'
-      ? { kind: 'budget-group', label: 'Budget group' }
+      ? { source: budgetGroupOptions, label: 'Budget group' }
       : kind === 'organization'
-        ? { kind: 'organization', label: 'Organization' }
+        ? { source: organizationOptions, label: 'Organization' }
         : kind === 'project' ||
             kind === 'project_end_user' ||
             kind === 'attribution'
-          ? { kind: 'project', label: 'Project' }
+          ? { source: projectOptions, label: 'Project' }
           : null
   );
   let route = $state('');
@@ -137,6 +144,15 @@
   }
   async function revoke(item: BudgetIncrease) {
     if (busy) return;
+    if (
+      !(await confirmAction({
+        title: 'Revoke this increase?',
+        body: 'The raised limit ends now instead of at its expiry.',
+        confirmLabel: 'Revoke increase',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     let committed = false;
     busy = true;
@@ -171,7 +187,7 @@
   ];
 </script>
 
-<svelte:head><title>Budget increases · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Budget increases" />
 <div class="toolbar">
   <p class="lede">
     A temporary increase raises a budget cap until it expires or the budget
@@ -214,9 +230,9 @@
           </div>
           {#if targetPicker}<div class="form-field">
               <label for="increase-resource">{targetPicker.label}</label>
-              {#key targetPicker.kind}<EntityPicker
+              {#key targetPicker.source}<EntityPicker
                   id="increase-resource"
-                  kind={targetPicker.kind}
+                  source={targetPicker.source}
                   bind:value={resourceId}
                   emptyLabel="Choose one"
                   required

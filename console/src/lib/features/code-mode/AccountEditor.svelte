@@ -4,10 +4,10 @@
   import { resolve } from '$app/paths';
   import {
     getProvider,
-    listProviders
-  } from '#lib/features/providers/providers.js';
-  import { listProviderCredentials } from '#lib/features/providers/credentials.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+    listProviders,
+    listProviderCredentials,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     saveCodeAccount,
     type CodeAccount,

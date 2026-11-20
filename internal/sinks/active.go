@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type ActiveSink struct {
@@ -17,7 +17,7 @@ type ActiveSink struct {
 	Enabled      bool
 }
 
-func ReadActiveSinks(ctx context.Context, q access.Queryer) ([]ActiveSink, error) {
+func ReadActiveSinks(ctx context.Context, q database.Queryer) ([]ActiveSink, error) {
 	rows, err := q.Query(ctx, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.destination,s.streams,s.enabled FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err

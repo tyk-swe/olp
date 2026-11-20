@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
@@ -64,7 +64,7 @@ func Parse(document contract.ConfigurationDocument) (Section, error) {
 func Planner(desired Section, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
 		Claims: claims(desired.Guardrails),
-		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		Plan: func(ctx context.Context, q database.Queryer) ([]promotion.Item, error) {
 			definitions, err := planGuardrails(ctx, q, desired.Guardrails, names)
 			if err != nil {
 				return nil, err
@@ -86,7 +86,7 @@ func Planner(desired Section, names promotion.Names) promotion.Planner {
 	}
 }
 
-func Read(ctx context.Context, q access.Queryer) (Section, error) {
+func Read(ctx context.Context, q database.Queryer) (Section, error) {
 	projectName, err := readProjectNamer(ctx, q)
 	if err != nil {
 		return Section{}, err

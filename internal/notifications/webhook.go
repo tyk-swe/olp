@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func parseWebhook(policy *egress.Policy, d destination) (endpoint[signingKey], error) {

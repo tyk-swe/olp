@@ -5,6 +5,8 @@ import (
 	"os"
 	"slices"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func TestManagementAuthorizationGoldenMatrix(t *testing.T) {
@@ -48,13 +50,11 @@ func TestManagementAuthorizationGoldenMatrix(t *testing.T) {
 				t.Errorf("%s: invalid admission marker %q", pattern, expected[i])
 				continue
 			}
-			p := Principal{
-				User:        User{Role: archetype.Role},
+			p := authz.Principal{
+				User:        authz.User{Role: archetype.Role},
 				Kind:        archetype.Kind,
 				AllProjects: archetype.Global,
-				creatorRole: archetype.CreatorRole,
-				scopes:      goldenScopes(t, archetype.Name, archetype.Scopes),
-			}
+			}.Delegated(goldenTokenScopes(t, archetype.Scopes), archetype.CreatorRole)
 			admitted := req.Public || req.Admits(p) == nil
 			if admitted != (expected[i] == 'Y') {
 				t.Errorf("%s: %s admitted=%t, golden=%c", pattern, archetype.Name, admitted, expected[i])
@@ -68,7 +68,7 @@ func TestOperatorViewsRequireReadScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caller := Principal{Kind: "machine", AllProjects: true, creatorRole: RoleOwner, scopes: 1 << Configure}
+	caller := authz.Principal{Kind: "machine", AllProjects: true}.Delegated([]authz.Operation{authz.Configure}, authz.RoleOwner)
 	for _, pattern := range []string{
 		"GET /api/v1/a2a-tasks",
 		"GET /api/v1/a2a-tasks/{task_id}",
@@ -82,16 +82,4 @@ func TestOperatorViewsRequireReadScope(t *testing.T) {
 			t.Errorf("%s admitted a token without read scope", pattern)
 		}
 	}
-}
-
-func goldenScopes(t *testing.T, archetype string, scopes []string) operationSet {
-	t.Helper()
-	if len(scopes) == 0 {
-		return 0
-	}
-	op, ok := ParseOperation(scopes[0])
-	if !ok {
-		t.Fatalf("%s has unknown scope %q", archetype, scopes[0])
-	}
-	return 1<<op | goldenScopes(t, archetype, scopes[1:])
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -13,7 +14,7 @@
   }));
 </script>
 
-<svelte:head><title>Provisional exposure · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Provisional exposure" />
 <form
   class="filter-bar"
   onsubmit={(event) => {

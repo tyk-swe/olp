@@ -13,8 +13,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -191,7 +192,7 @@ DELETE FROM olp.secrets WHERE (purpose=$2 AND id IN (SELECT id FROM olp.grant_en
 // cancelled. Another principal's enrollment is not found, like one purged
 // after it expired, and so is a device authorization still pending, which is
 // polled rather than continued.
-func unavailable(ctx context.Context, q access.Queryer, providerID, id, principal string) error {
+func unavailable(ctx context.Context, q database.Queryer, providerID, id, principal string) error {
 	var continued, polled bool
 	err := q.QueryRow(ctx, "SELECT continued_at IS NOT NULL, poll_interval IS NOT NULL FROM olp.grant_enrollments WHERE id=$1 AND provider_id=$2 AND started_by=$3", id, providerID, principal).Scan(&continued, &polled)
 	switch {
