@@ -782,6 +782,87 @@ func TestCodeAccountGenerationCapacityAcrossReplicas(t *testing.T) {
 	}
 }
 
+func TestCodeAccountDrainAcrossReplicas(t *testing.T) {
+	t.Parallel()
+	pool, address := harness.Database(t)
+	home := seedCooldownJourney(t, pool)
+	remote := secondCodeReplica(t, pool, address, home)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admit := func(store *codesessions.Store, request codesessions.Admission, want string) codesessions.Permit {
+		t.Helper()
+		permit, err := store.Admit(t.Context(), request)
+		if err != nil || permit.Account.ID != want {
+			t.Fatalf("admission for %s = %s, %v, want %s", request.Operation.Identity.Conversation, permit.Account.ID, err, want)
+		}
+		return permit
+	}
+	refused := func(err error, code string, status int) {
+		t.Helper()
+		if refusal, ok := errors.AsType[*codemode.Refusal](err); !ok || refusal.Code != code || refusal.Status != status {
+			t.Fatalf("refusal = %v, want %d %s", err, status, code)
+		}
+	}
+
+	exec(`UPDATE olp.code_accounts SET max_concurrency=1,enabled=(id=$1) WHERE project_id=$2`, home.first, home.route.ProjectID)
+	pinned := home.admission("model", "pinned")
+	initial := admit(home.store, pinned, home.first)
+	exec(`UPDATE olp.code_accounts SET enabled=true,draining=(id=$1) WHERE project_id=$2`, home.first, home.route.ProjectID)
+	_, err := remote.store.Admit(t.Context(), pinned)
+	refused(err, "code_account_busy", 429)
+	if err := home.store.Abort(t.Context(), initial.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	admit(remote.store, remote.admission("model", "new-on-sibling"), home.second)
+	_, err = home.store.Admit(t.Context(), home.admission("model", "no-slot-on-sibling"))
+	refused(err, "code_account_busy", 429)
+	connection, err := remote.store.BindConnection(t.Context(), home.route, home.key, pinned.Operation.Identity, "model", pinned.Providers)
+	if err != nil || connection.Pin != initial.Pin {
+		t.Fatalf("reconnect = %+v, %v, want original pin %+v", connection.Pin, err, initial.Pin)
+	}
+	continued := admit(remote.store, pinned, home.first)
+	if continued.Binding.ID != initial.Binding.ID || continued.Pin != initial.Pin {
+		t.Fatal("drain replaced the conversation binding or model pin")
+	}
+	if err := remote.store.Abort(t.Context(), continued.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	child := home.admission("model", "child")
+	child.Operation.Identity.Parent = "pinned"
+	admit(remote.store, child, home.first)
+	_, err = home.store.Admit(t.Context(), home.admission("other", "pinned"))
+	refused(err, "code_account_unavailable", 503)
+
+	revision := home.route
+	revision.RevisionID, revision.Revision = uuid.NewString(), 2
+	document, err := json.Marshal(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO olp.code_route_revisions(id,route_id,revision,document,connections,created_by)
+		SELECT $1,route_id,2,$2,connections,created_by FROM olp.code_route_revisions WHERE id=$3`, revision.RevisionID, document, home.route.RevisionID)
+	exec(`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, revision.ID, revision.RevisionID)
+	exec(`UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, home.second)
+	fresh := home.admission("model", "new-after-publish")
+	fresh.Route = revision
+	_, err = remote.store.Admit(t.Context(), fresh)
+	refused(err, "code_account_unavailable", 503)
+	exec(`UPDATE olp.code_accounts SET draining=false,max_concurrency=NULL WHERE id=$1`, home.first)
+	admit(remote.store, fresh, home.first)
+	exec(`UPDATE olp.code_accounts SET draining=true WHERE id=$1`, home.first)
+	exec(`UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1`, initial.Account.CredentialID)
+	pinned.Route = revision
+	_, err = remote.store.Admit(t.Context(), pinned)
+	refused(err, "code_account_unavailable", 503)
+	exec(`UPDATE olp.code_accounts SET draining=false WHERE id=$1`, home.first)
+	_, err = home.store.Admit(t.Context(), home.admission("model", "after-revocation"))
+	refused(err, "code_account_unavailable", 503)
+}
+
 func TestCodeAccountGenerationCapacityIgnoresIdleAndAbandonedWork(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -813,6 +894,49 @@ func TestCodeAccountGenerationCapacityIgnoresIdleAndAbandonedWork(t *testing.T) 
 	}
 	if _, err := j.store.Admit(t.Context(), request); err != nil {
 		t.Fatalf("generation after cancellation before dispatch: %v", err)
+	}
+}
+
+func TestCodeRecoverySkipsDrainingAccounts(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	j := seedCooldownJourney(t, pool)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j.route.InitialRecoveryAttempts = 1
+	document, err := json.Marshal(j.route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE olp.code_route_revisions SET document=$2 WHERE id=$1`, j.route.RevisionID, document)
+	exec(`UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, j.second)
+	request := j.admission("model", "recover-after-drain")
+	request.InitialRecovery = true
+	first, err := j.store.Admit(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settleRejectedCodeAttempt(t, j.store, first.Attempt.ID, 401)
+	exec(`UPDATE olp.code_accounts SET draining=true,health='unavailable',unavailable_until=now() WHERE id=$1`, j.first)
+	exec(`UPDATE olp.provider_grants SET generation=2 WHERE credential_id=$1`, first.Account.CredentialID)
+	exec(`UPDATE olp.code_accounts SET enabled=true,draining=true WHERE id=$1`, j.second)
+	request.Recovery = &codesessions.Recovery{From: first.Attempt.ID, Envelope: "codex_invalid_token", Number: 1}
+	_, err = j.store.Admit(t.Context(), request)
+	if refusal, ok := errors.AsType[*codemode.Refusal](err); !ok || refusal.Code != "code_account_unavailable" {
+		t.Fatalf("recovery with only draining accounts = %v, want code_account_unavailable", err)
+	}
+	exec(`UPDATE olp.code_accounts SET draining=false WHERE id=$1`, j.second)
+	request.Recovery = &codesessions.Recovery{
+		From: first.Attempt.ID, Envelope: "codex_invalid_token", Number: 1, AccountID: j.first,
+		CredentialID: first.Account.CredentialID, GrantGeneration: 1, RejectedUntil: time.Now().Add(time.Minute),
+	}
+	recovered, err := j.store.Admit(t.Context(), request)
+	if err != nil || recovered.Account.ID != j.second {
+		t.Fatalf("recovery with a refreshed but draining grant = %s, %v, want sibling %s", recovered.Account.ID, err, j.second)
 	}
 }
 
@@ -1130,21 +1254,8 @@ func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.P
 	if err != nil || first.Account.ID != journey.first {
 		t.Fatalf("initial admission = %+v, %v", first, err)
 	}
+	settleRejectedCodeAttempt(t, journey.store, first.Attempt.ID, 429)
 	now := time.Now().UTC()
-	status := 429
-	if err := journey.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := journey.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := journey.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
-		t.Fatal(err)
-	}
-	zero := int64(0)
-	if err := journey.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: &zero}); err != nil {
-		t.Fatal(err)
-	}
 	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: now.Add(time.Hour)}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1164,6 +1275,22 @@ func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.P
 	decision := codeDecisionForAttempt(t, pool, recovered.Attempt.ID)
 	if decision.Reason != codemode.DecisionChosen || decision.ChosenAccountID != recovered.Account.ID || decision.Band != nil || decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 || len(decision.Skipped) != 1 || decision.Skipped[0].Class != codemode.SkipWeight || decision.Skipped[0].AccountID == recovered.Account.ID {
 		t.Fatalf("recovery decision = %+v", decision)
+	}
+}
+
+func settleRejectedCodeAttempt(t *testing.T, store *codesessions.Store, id string, status int) {
+	t.Helper()
+	if err := store.MarkDispatched(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ObserveOutcome(t.Context(), id, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ConfirmNonexecution(t.Context(), id, status); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Settle(t.Context(), id, codemode.Usage{Total: new(int64(0))}); err != nil {
+		t.Fatal(err)
 	}
 }
 

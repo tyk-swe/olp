@@ -126,6 +126,21 @@ export async function saveCodeAccount(command: CodeSave<CodeAccountWrite>) {
   );
 }
 
+export async function setCodeAccountDrain(
+  account: Pick<CodeAccount, 'id' | 'etag'>,
+  draining: boolean
+) {
+  return unwrap(
+    await apiClient.PUT('/api/v1/code/accounts/{id}/drain', {
+      params: {
+        path: { id: account.id },
+        header: ifMatch(account.etag)
+      },
+      body: { draining }
+    })
+  );
+}
+
 export async function listCodePools(
   filters: CodePoolsQuery = {},
   signal?: AbortSignal

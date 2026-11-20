@@ -3,6 +3,7 @@
 package e2e_test
 
 import (
+	"encoding/json"
 	"maps"
 	"net/http"
 	"slices"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/tests/harness"
 
@@ -87,6 +90,84 @@ func TestCodeAccountEndpoints(t *testing.T) {
 		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
 	}
 	codeAccountConcurrencyWrites(t, s, owner, project, codex)
+	codeAccountDrainWrites(t, s, owner, project, claude, user)
+}
+
+func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, project, id, user string) {
+	t.Helper()
+	find := func() map[string]any {
+		t.Helper()
+		for _, item := range s.Want(owner, "GET", "/api/v1/code/accounts?project_id="+project, nil, nil, http.StatusOK)["items"].([]any) {
+			account := item.(map[string]any)
+			if account["id"] == id {
+				return account
+			}
+		}
+		t.Fatal("enrolled account not found")
+		return nil
+	}
+	initial := find()
+	if initial["draining"] != false || initial["remaining_pins"] != float64(0) || initial["last_activity_at"] != nil {
+		t.Fatalf("unexpected drain progress on an unused account: %v", initial)
+	}
+	binding := seedCodeAccountPin(t, s, project, id, user, initial["provider_id"].(string))
+	path := "/api/v1/code/accounts/" + id + "/drain"
+	start, stop := map[string]bool{"draining": true}, map[string]bool{"draining": false}
+	s.Want(owner, "PUT", path, start, nil, http.StatusPreconditionRequired)
+	s.Want(owner, "PUT", path, map[string]bool{}, harness.ETag(initial), http.StatusUnprocessableEntity)
+	drained := s.Want(owner, "PUT", path, start, harness.ETag(initial), http.StatusOK)
+	progress := find()
+	if drained["draining"] != true || drained["eligible"] != false || drained["enabled"] != true ||
+		progress["remaining_pins"] != float64(1) || progress["last_activity_at"] == nil {
+		t.Fatalf("draining account lost its live pin or activity: %v", progress)
+	}
+	s.Want(owner, "PUT", path, stop, harness.ETag(initial), http.StatusPreconditionFailed)
+	viewer := s.Invite(owner, "code-viewer@example.com", authz.RoleViewer)
+	s.Want(viewer, "PUT", path, stop, harness.ETag(drained), http.StatusForbidden)
+	if _, err := s.Pool.Exec(t.Context(), `UPDATE olp.code_bindings SET retired_at=now() WHERE id=$1`, binding); err != nil {
+		t.Fatal(err)
+	}
+	resumed := s.Want(owner, "PUT", path, stop, harness.ETag(drained), http.StatusOK)
+	if resumed["draining"] != false || resumed["eligible"] != true || resumed["remaining_pins"] != float64(0) ||
+		resumed["last_activity_at"] != progress["last_activity_at"] {
+		t.Fatalf("unexpected drain progress after retiring the tree and resuming: %v", resumed)
+	}
+	if actions, want := auditActions(t, s, id), []string{"code_account.drain", "code_account.resume"}; !slices.Equal(actions, want) {
+		t.Fatalf("audit actions = %v, want %v", actions, want)
+	}
+}
+
+func seedCodeAccountPin(t *testing.T, s *service, project, account, user, provider string) string {
+	t.Helper()
+	key := uuid.NewString()
+	route := codemode.Route{ID: uuid.NewString(), ProjectID: project, Slug: "drain-journey", PoolID: uuid.NewString(), Models: []string{"model"}, Enabled: true, RevisionID: uuid.NewString(), Revision: 1}
+	document, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id) VALUES($1,$1::uuid::text,'\x00','drain',$2,'{"scopes":["inference"]}',$3,$4)`, []any{key, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.code_pools(id,project_id,name,kind,etag,created_by) VALUES($1,$2,'drain','shared',$3,$4)`, []any{route.PoolID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{route.PoolID, account}},
+		{`INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, []any{route.PoolID, key}},
+		{`INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,'{}',$4,$5)`, []any{route.ID, project, route.Slug, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_route_revisions(id,route_id,revision,document,connections,created_by)
+			SELECT $1,$2,1,$3,jsonb_build_object(id::text,configuration),$4 FROM olp.providers WHERE id=$5`, []any{route.RevisionID, route.ID, document, user, provider}},
+		{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{route.ID, route.RevisionID}},
+	} {
+		if _, err := s.Pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := codesessions.New(s.Pool)
+	permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "model", Identity: codemode.Identity{Conversation: "draining-pin"}}, Providers: []string{provider}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return permit.Binding.ID
 }
 
 func codeAccountConcurrencyWrites(t *testing.T, s *service, owner *harness.Caller, project, id string) {

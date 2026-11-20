@@ -25,6 +25,7 @@ func (a API) Register(mux *http.ServeMux) {
 	a.access.Route(mux, "GET /api/v1/code/accounts", a.list)
 	a.access.Route(mux, "POST /api/v1/code/accounts", a.write)
 	a.access.Route(mux, "PUT /api/v1/code/accounts/{id}", a.write)
+	a.access.Route(mux, "PUT /api/v1/code/accounts/{id}/drain", a.setDrain)
 	a.access.Route(mux, "POST /api/v1/code/accounts/{id}/allowance-reads", a.requestAllowanceRead)
 }
 
@@ -50,6 +51,48 @@ type connectionProfile struct {
 	kind     connectors.Kind
 	authMode connectors.AuthMode
 	id       string
+}
+
+func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "id")
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	var input struct {
+		Draining *bool `json:"draining"`
+	}
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
+	}
+	if input.Draining == nil {
+		return httpkit.Reply{}, httpkit.Invalid("draining", "Set draining to true or false.")
+	}
+	return access.Run(a.access, r, func(tx pgx.Tx, p authz.Principal) (httpkit.Reply, access.Event, error) {
+		ctx := r.Context()
+		var project, oldETag string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text,etag::text FROM olp.code_accounts WHERE id=$1`, id).Scan(&project, &oldETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(&project, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := httpkit.Match(r, oldETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag := httpkit.NewID()
+		if _, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET draining=$2,etag=$3 WHERE id=$1`, id, *input.Draining, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var body json.RawMessage
+		if err := tx.QueryRow(ctx, accountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		action := "code_account.resume"
+		if *input.Draining {
+			action = "code_account.drain"
+		}
+		return httpkit.Detail(body, etag), access.Event{Action: action, Resource: "code_account", ID: id, Project: &project}, nil
+	})
 }
 
 func (a API) requestAllowanceRead(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {

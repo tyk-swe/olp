@@ -8901,9 +8901,12 @@ type CodeAccount struct {
 
 	// CycleAnchor Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then.
 	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
-	Eligible    bool                                  `json:"eligible"`
-	Enabled     bool                                  `json:"enabled"`
-	Etag        openapi_types.UUID                    `json:"etag"`
+
+	// Draining Whether the account refuses new assignments while honoring existing model pins.
+	Draining bool               `json:"draining"`
+	Eligible bool               `json:"eligible"`
+	Enabled  bool               `json:"enabled"`
+	Etag     openapi_types.UUID `json:"etag"`
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled"`
@@ -8916,6 +8919,9 @@ type CodeAccount struct {
 	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
 	Id               openapi_types.UUID           `json:"id"`
 
+	// LastActivityAt Latest recorded Code Mode routing decision for this account, or null if none.
+	LastActivityAt nullable.Nullable[time.Time] `json:"last_activity_at"`
+
 	// MaxConcurrency Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.
 	MaxConcurrency nullable.Nullable[CodeAccountMaxConcurrency] `json:"max_concurrency"`
 	Models         []string                                     `json:"models"`
@@ -8923,6 +8929,9 @@ type CodeAccount struct {
 	Principal      string                                       `json:"principal"`
 	ProjectId      openapi_types.UUID                           `json:"project_id"`
 	ProviderId     openapi_types.UUID                           `json:"provider_id"`
+
+	// RemainingPins Nonretired model pins that still have account, grant, route, pool, and key enrollment. Transient capacity and health are not counted against this total.
+	RemainingPins int64 `json:"remaining_pins"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
@@ -8960,6 +8969,11 @@ type CodeAccountCooldown struct {
 
 // CodeAccountCooldownClass defines model for CodeAccountCooldown.Class.
 type CodeAccountCooldownClass string
+
+// CodeAccountDrainWrite defines model for CodeAccountDrainWrite.
+type CodeAccountDrainWrite struct {
+	Draining bool `json:"draining"`
+}
 
 // CodeAccountList defines model for CodeAccountList.
 type CodeAccountList struct {
@@ -17870,6 +17884,11 @@ type RequestCodeAccountAllowanceReadParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// SetCodeAccountDrainParams defines parameters for SetCodeAccountDrain.
+type SetCodeAccountDrainParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
 // ListCodeAttemptsParams defines parameters for ListCodeAttempts.
 type ListCodeAttemptsParams struct {
 	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -19823,6 +19842,9 @@ type CreateCodeAccountJSONRequestBody = CodeAccountWrite
 
 // ReplaceCodeAccountJSONRequestBody defines body for ReplaceCodeAccount for application/json ContentType.
 type ReplaceCodeAccountJSONRequestBody = CodeAccountWrite
+
+// SetCodeAccountDrainJSONRequestBody defines body for SetCodeAccountDrain for application/json ContentType.
+type SetCodeAccountDrainJSONRequestBody = CodeAccountDrainWrite
 
 // CreateCodeBudgetJSONRequestBody defines body for CreateCodeBudget for application/json ContentType.
 type CreateCodeBudgetJSONRequestBody = CodeBudgetWrite

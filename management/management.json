@@ -15617,6 +15617,21 @@
       "CodeAccount": {
         "additionalProperties": false,
         "properties": {
+          "draining": {
+            "type": "boolean",
+            "description": "Whether the account refuses new assignments while honoring existing model pins."
+          },
+          "remaining_pins": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Nonretired model pins that still have account, grant, route, pool, and key enrollment. Transient capacity and health are not counted against this total."
+          },
+          "last_activity_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Latest recorded Code Mode routing decision for this account, or null if none."
+          },
           "max_concurrency": {
             "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
           },
@@ -15810,6 +15825,9 @@
           "models",
           "extra_usage_enabled",
           "max_concurrency",
+          "draining",
+          "remaining_pins",
+          "last_activity_at",
           "principal",
           "etag",
           "health",
@@ -15853,6 +15871,16 @@
           "retry_at"
         ],
         "type": "object"
+      },
+      "CodeAccountDrainWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["draining"],
+        "properties": {
+          "draining": {
+            "type": "boolean"
+          }
+        }
       },
       "CodeAccountList": {
         "additionalProperties": false,
@@ -47962,6 +47990,57 @@
         "tags": [
           "code-mode"
         ]
+      }
+    },
+    "/api/v1/code/accounts/{id}/drain": {
+      "put": {
+        "operationId": "set_code_account_drain",
+        "summary": "Start or stop draining a Code Mode subscription account",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CodeAccountDrainWrite" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account with its drain state and current pin count",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CodeAccount" }
+              }
+            }
+          },
+          "default": {
+            "description": "Drain update refused",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+              }
+            }
+          }
+        },
+        "security": [
+          { "csrfToken": [], "sessionCookie": ["configure"] },
+          { "managementToken": ["configure"] }
+        ],
+        "tags": ["code-mode"]
       }
     },
     "/api/v1/code/accounts/{id}/allowance-reads": {
