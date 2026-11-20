@@ -394,11 +394,12 @@ Run one version across every process mode. To run a new release against an
 existing database, take a [drained backup](#backup-and-restore), stop every
 process, run `olp migrate` once with the new binary, and start all process
 modes on that version. With Helm, scale the gateway, control and worker
-Deployments to zero before `helm upgrade`; its pre-upgrade hook runs the
-migration Job before the new pods start. Verify readiness, generation
-convergence, backlog, usage completeness, provider probes, and latency before
-resuming admission. There is no rollback: a binary refuses a database whose
-schema is newer than its own, and migrations never run in reverse. Never edit
+Deployments to zero before [upgrading the release](deployment.md#upgrade-an-existing-release).
+Helm's pre-upgrade hook runs the migration Job before the new pods start.
+Verify readiness, generation convergence, backlog, usage completeness,
+provider probes, and latency before resuming admission. There is no rollback:
+a binary refuses a database whose schema is newer than its own, and migrations
+never run in reverse. Never edit
 migration history or checksums. The runner checks the recorded checksums and
 rejects gaps except for two upgrade paths from historical merges. It can apply
 the delegation migrations after the parallel code migrations. If Google billing
