@@ -252,41 +252,39 @@ func buildWebRTCCallsBody(sdp, session []byte) ([]byte, string, error) {
 
 type callTurn struct {
 	surface
-	w          http.ResponseWriter
-	r          *http.Request
-	x          *kernel.Call
-	authority  keyauthority.Authority
-	token      string
-	controller *http.ResponseController
-	snapshot   *routing.View
+	w         http.ResponseWriter
+	r         *http.Request
+	x         *kernel.Call
+	authority keyauthority.Authority
+	token     string
 }
 
 func (t callTurn) refuse(e *fault.Error) { t.kernel.Refuse(t.x, t.w, e) }
 
 func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	x := s.kernel.SessionCall(w, r, wire.Realtime, "webrtc")
-	t := callTurn{surface: s, w: w, r: r, x: x}
+	probe := callTurn{surface: s, w: w, r: r, x: x}
 	permit := admission.PermitFromContext(r.Context())
 	if permit == nil {
 		permit = s.kernel.Gate.Pool().AcquirePermit()
 	}
 	if permit == nil {
-		t.refuse(fault.Overloaded)
+		probe.refuse(fault.Overloaded)
 		return
 	}
 	defer permit.Release()
-	authority, token, e := t.admitCaller(permit)
+	authority, token, e := probe.admitCaller(permit)
+	if e != nil {
+		probe.refuse(e)
+		return
+	}
+	t := callTurn{surface: s, w: w, r: r, x: x, authority: authority, token: token}
+	callReq, slug, controller, e := t.readCall()
 	if e != nil {
 		t.refuse(e)
 		return
 	}
-	t.authority, t.token = authority, token
-	callReq, slug, e := t.readCall()
-	if e != nil {
-		t.refuse(e)
-		return
-	}
-	route, e := t.routeForCall(slug, callReq)
+	route, snapshot, e := t.routeForCall(slug, callReq)
 	if e != nil {
 		t.refuse(e)
 		return
@@ -304,7 +302,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		s.kernel.SettleSessionHold(r.Context(), x, p.Hold, nil)
 		s.kernel.SettleCaps(r.Context(), x)
 	}
-	boundSession, e := t.boundSession(route, p, slug, callReq)
+	boundSession, e := t.boundSession(snapshot, route, p, slug, callReq)
 	if e != nil {
 		releasePin()
 		cancel()
@@ -338,7 +336,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		admission: permit.Transfer(),
 	}
 	s.calls.register(sess)
-	t.launchCall(bg, cancel, sess, callReq, boundSession)
+	t.launchCall(bg, cancel, sess, callReq, boundSession, controller)
 }
 
 func (t callTurn) admitCaller(permit *admission.Permit) (keyauthority.Authority, string, *fault.Error) {
@@ -366,54 +364,54 @@ func (t callTurn) admitCaller(permit *admission.Permit) (keyauthority.Authority,
 	return authority, token, nil
 }
 
-func (t *callTurn) readCall() (*webrtcCallRequest, string, *fault.Error) {
-	t.controller = http.NewResponseController(t.w)
-	if err := t.controller.SetReadDeadline(t.kernel.Now().Add(kernel.RequestBodyTimeout)); err != nil {
-		return nil, "", fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
+func (t callTurn) readCall() (*webrtcCallRequest, string, *http.ResponseController, *fault.Error) {
+	controller := http.NewResponseController(t.w)
+	if err := controller.SetReadDeadline(t.kernel.Now().Add(kernel.RequestBodyTimeout)); err != nil {
+		return nil, "", nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
 	}
 	if t.kernel.Config.MaxBodyBytes > 0 {
 		t.r.Body = http.MaxBytesReader(t.w, t.r.Body, t.kernel.Config.MaxBodyBytes)
 	}
 	callReq, e := parseWebRTCCallRequest(t.r)
 	if e != nil {
-		return nil, "", e
+		return nil, "", nil, e
 	}
-	_ = t.controller.SetReadDeadline(time.Time{})
+	_ = controller.SetReadDeadline(time.Time{})
 	slug, e := webrtcSessionSlug(callReq.session, callReq.slug)
 	if e != nil {
-		return nil, "", e
+		return nil, "", nil, e
 	}
-	return callReq, slug, nil
+	return callReq, slug, controller, nil
 }
 
-func (t *callTurn) routeForCall(slug string, callReq *webrtcCallRequest) (*routing.Route, *fault.Error) {
-	t.snapshot = t.x.Snapshot()
-	route, ok := t.snapshot.FindRoute(slug)
+func (t callTurn) routeForCall(slug string, callReq *webrtcCallRequest) (*routing.Route, *routing.View, *fault.Error) {
+	snapshot := t.x.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok {
-		return nil, fault.ModelNotFound(slug)
+		return nil, snapshot, fault.ModelNotFound(slug)
 	}
 	t.x.Route = &route
 	if !t.authority.Allows("inference", route.Slug, route.ProjectID, t.kernel.Now()) {
-		return nil, fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+		return nil, snapshot, fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	if route.MaxBodyBytes != nil && callReq.bodyBytes > *route.MaxBodyBytes {
-		return nil, ingress.BodyTooLarge()
+		return nil, snapshot, ingress.BodyTooLarge()
 	}
 	if !slices.Contains(route.Operations, "realtime") {
-		return nil, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil)
+		return nil, snapshot, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil)
 	}
 	if e := t.x.GuardrailSurfaceGate(&route); e != nil {
-		return nil, e
+		return nil, snapshot, e
 	}
 	if !t.x.Strict() {
-		return nil, kernel.PolicyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract.")
+		return nil, snapshot, kernel.PolicyUnavailable("webrtc_contract_unavailable", "Governed WebRTC requires a strict route with a compiled calls contract.")
 	}
 	if held, exposureErr := t.kernel.SessionExposureHeld(t.r.Context(), t.authority.ID); exposureErr != nil {
-		return nil, exposureErr
+		return nil, snapshot, exposureErr
 	} else if held {
-		return nil, fault.ServerError(http.StatusConflict, "webrtc_exposure_unresolved", "An earlier WebRTC session for this key is still billing-uncertain; new sessions are refused until that exposure resolves.")
+		return nil, snapshot, fault.ServerError(http.StatusConflict, "webrtc_exposure_unresolved", "An earlier WebRTC session for this key is still billing-uncertain; new sessions are refused until that exposure resolves.")
 	}
-	return &route, nil
+	return &route, snapshot, nil
 }
 
 func (t callTurn) pinCall(bg context.Context, route *routing.Route) (*kernel.Pin, *fault.Error) {
@@ -422,8 +420,8 @@ func (t callTurn) pinCall(bg context.Context, route *routing.Route) (*kernel.Pin
 	})
 }
 
-func (t callTurn) boundSession(route *routing.Route, p *kernel.Pin, slug string, callReq *webrtcCallRequest) (json.RawMessage, *fault.Error) {
-	template, ok := t.snapshot.WebRTCTemplate(route.Slug, p.Target.ID)
+func (t callTurn) boundSession(snapshot *routing.View, route *routing.Route, p *kernel.Pin, slug string, callReq *webrtcCallRequest) (json.RawMessage, *fault.Error) {
+	template, ok := snapshot.WebRTCTemplate(route.Slug, p.Target.ID)
 	if !ok || !template.WebRTC() {
 		return nil, kernel.PolicyUnavailable("webrtc_contract_unavailable", "The selected target has no compiled governed WebRTC contract.")
 	}
@@ -437,7 +435,7 @@ func (t callTurn) boundSession(route *routing.Route, p *kernel.Pin, slug string,
 	return bound, nil
 }
 
-func (t callTurn) launchCall(bg context.Context, cancel context.CancelFunc, sess *webrtcSession, callReq *webrtcCallRequest, boundSession json.RawMessage) {
+func (t callTurn) launchCall(bg context.Context, cancel context.CancelFunc, sess *webrtcSession, callReq *webrtcCallRequest, boundSession json.RawMessage, controller *http.ResponseController) {
 	body, contentType, buildErr := buildWebRTCCallsBody(callReq.sdp, boundSession)
 	if buildErr != nil {
 		e := fault.ServerError(http.StatusInternalServerError, "internal_error", "The realtime call could not be encoded.")
@@ -455,10 +453,10 @@ func (t callTurn) launchCall(bg context.Context, cancel context.CancelFunc, sess
 		fault.WriteSurfaceError(t.w, e, "openai")
 		return
 	}
-	t.deliverCall(bg, cancel, sess, created.Answer, created.Status)
+	t.deliverCall(bg, cancel, sess, created.Answer, created.Status, controller)
 }
 
-func (t callTurn) deliverCall(bg context.Context, cancel context.CancelFunc, sess *webrtcSession, answer []byte, status int) {
+func (t callTurn) deliverCall(bg context.Context, cancel context.CancelFunc, sess *webrtcSession, answer []byte, status int, controller *http.ResponseController) {
 	abandoned := fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
 	if t.r.Context().Err() != nil {
 		if err := t.kernel.HangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
@@ -471,11 +469,11 @@ func (t callTurn) deliverCall(bg context.Context, cancel context.CancelFunc, ses
 	go t.surface.runWebRTCControl(sess)
 	t.w.Header().Set("Content-Type", "application/sdp")
 	t.w.Header().Set("Location", "/v1/realtime/calls/"+sess.id)
-	_ = t.controller.SetWriteDeadline(t.kernel.Now().Add(webrtcAnswerTimeout))
+	_ = controller.SetWriteDeadline(t.kernel.Now().Add(webrtcAnswerTimeout))
 	t.w.WriteHeader(status)
 	_, werr := t.w.Write(answer)
 	if werr == nil {
-		werr = t.controller.Flush()
+		werr = controller.Flush()
 	}
 	if werr != nil || t.r.Context().Err() != nil {
 		if herr := t.kernel.HangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); herr != nil {
