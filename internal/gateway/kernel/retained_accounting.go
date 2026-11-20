@@ -207,8 +207,11 @@ func observeRetainedUsage(exchange *PinnedExchange, source oif.Document, generat
 	if err != nil {
 		return err
 	}
+	if observation.Usage == nil {
+		return &wire.ProtocolError{Detail: "compaction response is missing usage"}
+	}
 	// Compaction is a terminal unary result and has no response status field.
-	fact.ObserveUsage(observation.Usage, observation.Usage != nil)
+	fact.ObserveUsage(observation.Usage, true)
 	return nil
 }
 
