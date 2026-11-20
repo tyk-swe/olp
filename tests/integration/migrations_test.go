@@ -382,13 +382,15 @@ func TestMigrationsKeepGoogleBillingWhenAWSHistoryIsMissing(t *testing.T) {
 
 func TestMigrationsIgnoreSessionStatementAndLockTimeouts(t *testing.T) {
 	t.Parallel()
+	const statementTimeout = time.Second
+	const lockTimeout = 100 * time.Millisecond
 	holder, address := harness.EmptyDatabase(t)
 	config, err := database.Configuration(address, 2, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
-	config.ConnConfig.RuntimeParams["lock_timeout"] = "25"
+	config.ConnConfig.RuntimeParams["statement_timeout"] = statementTimeout.String()
+	config.ConnConfig.RuntimeParams["lock_timeout"] = lockTimeout.String()
 	pool, err := database.Open(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -402,12 +404,28 @@ func TestMigrationsIgnoreSessionStatementAndLockTimeouts(t *testing.T) {
 	if _, err := tx.Exec(t.Context(), "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- database.Migrate(t.Context(), pool) }()
+	go func() { result <- database.Migrate(ctx, pool) }()
+	holderPID := int32(tx.Conn().PgConn().PID())
+	harness.Eventually(t, "migration waiting for the advisory lock", 5*time.Second, func() (bool, string) {
+		select {
+		case err := <-result:
+			t.Fatalf("migration returned before its lock wait was observed: %v", err)
+		default:
+		}
+		var blocked bool
+		if err := holder.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)))`, holderPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		return blocked, "PostgreSQL has not reported the migration blocked by the lock holder"
+	})
 	select {
 	case err := <-result:
 		t.Fatalf("migration returned while the advisory lock was held: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(statementTimeout + lockTimeout):
 	}
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
