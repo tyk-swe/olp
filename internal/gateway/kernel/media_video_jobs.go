@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/media/transport"
 )
 
 func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
@@ -244,38 +245,24 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	defer s.Gate.Release(r.Context())
 	x.family = wire.VideoDelete
 	x.mode = "unary"
-	loaded, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoDelete)
+	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoDelete)
 	if e != nil {
 		s.Refuse(x, w, e)
 		return
 	}
-	if e = strictVideoResourceContext(x, loaded, false); e != nil {
+	if e = strictVideoResourceContext(x, record, false); e != nil {
 		s.Refuse(x, w, e)
 		return
 	}
-	x.Route = videoJobRoute(loaded)
+	x.Route = videoJobRoute(record)
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
 		s.Refuse(x, w, admissionError)
 		return
 	}
 	defer complete()
-	r = r.WithContext(ctx)
-	record := *loaded
 	if record.Lifecycle == jobs.Deleted {
-		if record.StrictContract {
-			s.Refuse(x, w, fault.NotFoundError("video_not_found", "The video job does not exist."))
-			return
-		}
-		body, failure := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: record.ID, Deleted: true}, record.ID)
-		if failure != nil {
-			s.Refuse(x, w, mediaError(failure))
-			return
-		}
-		out := &mediaOutcome{committed: true, status: http.StatusOK}
-		x.dispatched = true
-		s.deliverMediaJSON(w, x, out, body)
-		s.finishMedia(x, out, out.status)
+		s.repeatVideoDeletion(w, x, record)
 		return
 	}
 	upstream, ok := record.Upstream()
@@ -283,29 +270,14 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, media.VideoDelete{ID: upstream})
+	result, transportFailure, fact := s.videoJobCall(ctx, x, record, media.VideoDelete{ID: upstream})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
-	deleted := false
-	if transportFailure != nil {
-		if transportFailure.Status != 404 {
-			s.mediaFailOutcome(x, w, transportFailure)
-			return
-		}
-		deleted = true
-	} else {
-		receipt := mediaDeleted(result)
-		if receipt == nil {
-			s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
-			return
-		}
-		deleted = receipt.Deleted
-	}
-	if !deleted {
-		s.mediaFailOutcome(x, w, &AttemptFailure{class: classUpstreamClient, Status: http.StatusBadGateway})
+	if undeleted := videoUndeleted(result, transportFailure); undeleted != nil {
+		s.mediaFailOutcome(x, w, undeleted)
 		return
 	}
-	finalized, err := s.Deps.Media.Store.Finalize(r.Context(), record.ID, jobs.Unfenced)
+	finalized, err := s.Deps.Media.Store.Finalize(ctx, record.ID, jobs.Unfenced)
 	if err != nil {
 		s.Refuse(x, w, jobError(err))
 		return
@@ -319,18 +291,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
 	}
-	var body []byte
-	var renderFailure *media.Error
-	if record.StrictContract {
-		body, renderFailure = media.EncodeStrictVideoObject(result.Source, upstream, record.ID, "")
-	} else {
-		local := ""
-		var extra map[string]any
-		if receipt := mediaDeleted(result); receipt != nil {
-			extra = receipt.Extra
-		}
-		body, renderFailure = media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
-	}
+	body, renderFailure := videoDeletion(record, upstream, result)
 	if renderFailure != nil {
 		s.mediaFailOutcome(x, w, &AttemptFailure{class: ClassProtocol})
 		return
@@ -338,6 +299,50 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
 	s.deliverMediaJSON(w, x, out, body)
 	s.finishMedia(x, out, out.status)
+}
+
+func (s *Server) repeatVideoDeletion(w http.ResponseWriter, x *Call, record *jobs.Record) {
+	if record.StrictContract {
+		s.Refuse(x, w, fault.NotFoundError("video_not_found", "The video job does not exist."))
+		return
+	}
+	body, failure := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: record.ID, Deleted: true}, record.ID)
+	if failure != nil {
+		s.Refuse(x, w, mediaError(failure))
+		return
+	}
+	out := &mediaOutcome{committed: true, status: http.StatusOK}
+	x.dispatched = true
+	s.deliverMediaJSON(w, x, out, body)
+	s.finishMedia(x, out, out.status)
+}
+
+func videoUndeleted(result *transport.Result, failure *AttemptFailure) *AttemptFailure {
+	if failure != nil {
+		if failure.Status != http.StatusNotFound {
+			return failure
+		}
+		return nil
+	}
+	receipt := mediaDeleted(result)
+	if receipt == nil {
+		return &AttemptFailure{class: ClassProtocol}
+	}
+	if !receipt.Deleted {
+		return &AttemptFailure{class: classUpstreamClient, Status: http.StatusBadGateway}
+	}
+	return nil
+}
+
+func videoDeletion(record *jobs.Record, upstream string, result *transport.Result) ([]byte, *media.Error) {
+	if record.StrictContract {
+		return media.EncodeStrictVideoObject(result.Source, upstream, record.ID, "")
+	}
+	receipt := mediaDeleted(result)
+	if receipt == nil {
+		return media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{Deleted: true}, record.ID)
+	}
+	return media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{Deleted: true, Extra: receipt.Extra}, record.ID)
 }
 
 func (s *Server) mediaFailOutcome(x *Call, w http.ResponseWriter, failure *AttemptFailure) {
