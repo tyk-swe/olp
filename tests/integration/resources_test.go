@@ -337,6 +337,7 @@ type storedPlan struct {
 	fidelity    string
 	probe       *routing.HealthProbe
 	limits      *routing.Limits
+	defaults    map[string]connectors.DefaultSet
 	sink        events.Sink
 	operations  []string
 	prices      []rates.RoutingPrice
@@ -391,7 +392,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	if plan.profile != "" {
 		profileRevision = connectors.ProfileRevision
 	}
-	providerConfig := encoded(t, map[string]any{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model, "profile_id": plan.profile, "profile_revision": profileRevision, "options": map[string]any{"network": network}})
+	providerConfig := encoded(t, map[string]any{"kind": kind, "endpoint": endpoint, "auth_mode": "api_key", "deployment": plan.model, "profile_id": plan.profile, "profile_revision": profileRevision, "options": map[string]any{"network": network, "operation_defaults": plan.defaults}})
 	modes := []string{"unary"}
 	if plan.streams {
 		modes = []string{"unary", "streaming"}
@@ -413,6 +414,9 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		encoded(t, []routing.RevisionSlot{{Slot: slot, Default: true}}), fixture.ownerID, models); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, fixture.providerID, g.providerRevisionID); err != nil {
+		t.Fatal(err)
+	}
 	routeID, routeRevisionID := g.seedRoute(plan.slug)
 	g.routeRevisionID = routeRevisionID
 
@@ -421,7 +425,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Providers: map[string]routing.Provider{fixture.providerID: {
 			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
-			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe, Limits: plan.limits,
+			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe, Limits: plan.limits, OperationDefaults: plan.defaults,
 		}},
 		Routes: map[string]routing.Route{plan.slug: {
 			ID: routeID, Slug: plan.slug, Operations: plan.operations, OverallTimeout: 5000, MaxAttempts: 3,
@@ -500,8 +504,9 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 		g.t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior)
-		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,'{"mode":"transformed"}','{}')`,
-		revisionID, routeID, slug, encoded(g.t, g.plan.operations), targets, uuid.NewString(), fixture.ownerID); err != nil {
+		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,$8,'{}')`,
+		revisionID, routeID, slug, encoded(g.t, g.plan.operations), targets, uuid.NewString(), fixture.ownerID,
+		encoded(g.t, routing.RouteFidelity{Mode: cmp.Or(g.plan.fidelity, routing.FidelityTransformed)})); err != nil {
 		g.t.Fatal(err)
 	}
 	return routeID, revisionID
@@ -3557,4 +3562,191 @@ func TestAStoredResponseStreamCarriesGatewayIdentifiersForwardsTheCursorSettlesT
 	if kept := storedResponses(t, pool, g, "owner"); kept[2].state != "completed" {
 		t.Errorf("a stream that ended completed left the stored response %q, want completed", kept[2].state)
 	}
+}
+
+type contractProvider struct {
+	mu     sync.Mutex
+	bodies []string
+}
+
+func (p *contractProvider) asked() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.bodies)
+}
+
+func anthropicEvents(events ...string) string {
+	var out strings.Builder
+	for i := 0; i < len(events); i += 2 {
+		out.WriteString("event: " + events[i] + "\ndata: " + events[i+1] + "\n\n")
+	}
+	return out.String()
+}
+
+func (p *contractProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	text := string(raw)
+	p.mu.Lock()
+	p.bodies = append(p.bodies, text)
+	p.mu.Unlock()
+	answered := strings.Contains(text, "tool_result")
+	opening := `{"type":"message_start","message":{"id":"msg_stream","type":"message","role":"assistant","model":"claude-model","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":5,"output_tokens":1}}}`
+	switch {
+	case strings.Contains(text, "outage?"):
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"type":"error","error":{"type":"api_error","message":"down"}}`)
+	case strings.Contains(text, "cut?"):
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, anthropicEvents("message_start", opening,
+			"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_cut","name":"lookup","input":{}}}`))
+	case strings.Contains(text, `"stream":true`):
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, anthropicEvents("message_start", opening,
+			"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_stream","name":"lookup","input":{}}}`,
+			"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"x\"}"}}`,
+			"content_block_stop", `{"type":"content_block_stop","index":0}`,
+			"message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":3}}`,
+			"message_stop", `{"type":"message_stop"}`))
+	case answered:
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"msg_2","type":"message","role":"assistant","model":"claude-model","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":9,"output_tokens":2}}`)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-model","content":[{"type":"tool_use","id":"toolu_1","name":"lookup","input":{"q":"x"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":5,"output_tokens":3}}`)
+	}
+}
+
+type contractReply struct {
+	Model   string `json:"model"`
+	Choices []struct {
+		Message json.RawMessage `json:"message"`
+	} `json:"choices"`
+	OLP struct {
+		Handle string `json:"handle"`
+	} `json:"olp"`
+	Error struct {
+		Code  string `json:"code"`
+		Param string `json:"param"`
+	} `json:"error"`
+}
+
+func TestANegotiatedToolContinuationKeepsTheProvidersTurnReplaysItsDeliveryAndRefusesWhatItCannotContinue(t *testing.T) {
+	pool, _ := harness.Database(t)
+	provider := &contractProvider{}
+	sink := &terminals{}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: "tool-contract", model: "claude-model", kind: "anthropic", surface: "openai", profile: "anthropic-messages", fidelity: routing.FidelityStrict, streams: true,
+		defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "anthropic-messages", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage("64")}}},
+		sink:     sink, operations: []string{"generation"}, upstream: provider,
+	})
+	g.key(t, "owner")
+	g.key(t, "stranger")
+	tools := `"tools":[{"type":"function","function":{"name":"lookup","description":"Looks up.","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}}]`
+	turn := func(question string, more ...string) string {
+		return `{"model":"tool-contract","messages":[{"role":"user","content":"` + question + `"}` + strings.Join(more, "") + `],` + tools + `}`
+	}
+	submission := func() string { return resources.SubmissionID(time.Now(), uuid.New()) }
+	ask := func(name, key, submission, handle, body string, status int, code string, attempts ...string) (contractReply, string, http.Header) {
+		t.Helper()
+		before, terminalsBefore := len(provider.asked()), len(sink.all())
+		req, err := http.NewRequest(http.MethodPost, g.server.URL+"/v1/chat/completions", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-OLP-Continuation", "chat-anthropic-tools-v1")
+		for header, value := range map[string]string{"X-OLP-Submission-ID": submission, "X-OLP-Continuation-Handle": handle} {
+			if value != "" {
+				req.Header.Set(header, value)
+			}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		var reply contractReply
+		_ = json.Unmarshal(raw, &reply)
+		if resp.StatusCode != status || reply.Error.Code != code {
+			t.Fatalf("%s: status %d, code %q, want %d %q: %s", name, resp.StatusCode, reply.Error.Code, status, code, raw)
+		}
+		harness.Eventually(t, name+" is recorded", time.Second, func() (bool, string) {
+			return len(sink.all()) == terminalsBefore+1, ""
+		})
+		seen := []string{}
+		for _, attempt := range sink.all()[terminalsBefore].Attempts {
+			seen = append(seen, fmt.Sprintf("%s %s committed=%v", attempt.Mode, attempt.Class, attempt.Committed))
+		}
+		if !slices.Equal(seen, attempts) || len(provider.asked())-before != len(attempts) {
+			t.Fatalf("%s: attempts %v with %d provider requests, want %v", name, seen, len(provider.asked())-before, attempts)
+		}
+		return reply, string(raw), resp.Header
+	}
+	replayed := func(name string, header http.Header, got, want string) {
+		t.Helper()
+		if got != want || header.Get("X-OLP-Delivery-Replay") != "true" || header.Get("X-Should-Retry") != "false" {
+			t.Fatalf("%s: replay %q retry %q body %s, want the first delivery %s", name, header.Get("X-OLP-Delivery-Replay"), header.Get("X-Should-Retry"), got, want)
+		}
+	}
+
+	first := submission()
+	opening, openingBody, _ := ask("first turn", "owner", first, "", turn("weather?"), 200, "", "unary success committed=true")
+	if opening.Model != "tool-contract" || !strings.HasPrefix(opening.OLP.Handle, "continuation_") || !strings.Contains(string(opening.Choices[0].Message), `"id":"toolu_1"`) {
+		t.Fatalf("first turn: %s", openingBody)
+	}
+	if sent := provider.asked()[0]; !strings.Contains(sent, `"max_tokens":64`) || !strings.Contains(sent, `"model":"claude-model"`) || !strings.Contains(sent, `"input_schema"`) {
+		t.Fatalf("first provider request: %s", sent)
+	}
+	_, again, header := ask("first turn again", "owner", first, "", turn("weather?"), 200, "")
+	replayed("first turn again", header, again, openingBody)
+	ask("submission reused for another request", "owner", first, "", turn("other?"), 409, "continuation_mismatch")
+
+	result := `,` + string(opening.Choices[0].Message) + `,{"role":"tool","tool_call_id":"toolu_1","content":"sunny"}`
+	second := submission()
+	closing, closingBody, _ := ask("tool result", "owner", second, opening.OLP.Handle, turn("weather?", result), 200, "", "unary success committed=true")
+	if !strings.Contains(string(closing.Choices[0].Message), `"content":"done"`) || closing.OLP.Handle == opening.OLP.Handle || !strings.HasPrefix(closing.OLP.Handle, "continuation_") {
+		t.Fatalf("tool result turn: %s", closingBody)
+	}
+	if sent := provider.asked()[1]; !strings.Contains(sent, `"type":"tool_use"`) || !strings.Contains(sent, `"tool_use_id":"toolu_1"`) || !strings.Contains(sent, `"content":"sunny"`) {
+		t.Fatalf("continued provider request: %s", sent)
+	}
+	_, again, header = ask("tool result again", "owner", second, opening.OLP.Handle, turn("weather?", result), 200, "")
+	replayed("tool result again", header, again, closingBody)
+
+	for _, tc := range []struct {
+		name, key, submission, handle, body string
+		status                              int
+		code, param                         string
+	}{
+		{"another key's handle", "stranger", submission(), opening.OLP.Handle, turn("weather?", result), 409, "continuation_unavailable", ""},
+		{"unknown handle", "owner", submission(), "continuation_" + strings.Repeat("0", 32), turn("weather?", result), 409, "continuation_unavailable", ""},
+		{"no submission identity", "owner", "", "", turn("weather?"), 400, "state_carrier", ""},
+		{"stale submission identity", "owner", resources.SubmissionID(time.Now().Add(-time.Hour), uuid.New()), "", turn("weather?"), 400, "invalid_submission_identity", ""},
+		{"rewritten history", "owner", submission(), opening.OLP.Handle, turn("rain?", result), 400, "state_carrier", "/messages"},
+	} {
+		if reply, raw, _ := ask(tc.name, tc.key, tc.submission, tc.handle, tc.body, tc.status, tc.code); reply.Error.Param != tc.param {
+			t.Fatalf("%s: %s", tc.name, raw)
+		}
+	}
+
+	streamed := strings.Replace(turn("weather?"), `{"model"`, `{"stream":true,"model"`, 1)
+	third := submission()
+	_, frames, _ := ask("streamed turn", "owner", third, "", streamed, 200, "", "streaming success committed=true")
+	if !strings.Contains(frames, `"id":"toolu_stream"`) || !strings.Contains(frames, `"handle":"continuation_`) || !strings.HasSuffix(frames, "data: [DONE]\n\n") || strings.Contains(frames, "msg_stream\"}}\n\nevent:") {
+		t.Fatalf("streamed turn: %s", frames)
+	}
+	_, again, header = ask("streamed turn again", "owner", third, "", streamed, 200, "")
+	replayed("streamed turn again", header, again, frames)
+
+	lost := submission()
+	if _, _, header := ask("provider outage", "owner", lost, "", turn("outage?"), 502, "ambiguous_upstream_result", "unary ambiguous committed=false"); header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("provider outage: retry hint %q", header.Get("X-Should-Retry"))
+	}
+	ask("provider outage again", "owner", lost, "", turn("outage?"), 409, "continuation_outcome_unknown")
+	cut := strings.Replace(turn("cut?"), `{"model"`, `{"stream":true,"model"`, 1)
+	broken := submission()
+	ask("provider stream cut inside a tool call", "owner", broken, "", cut, 502, "provider_protocol_error", "streaming protocol committed=false")
+	ask("cut stream again", "owner", broken, "", cut, 409, "continuation_outcome_unknown")
 }
