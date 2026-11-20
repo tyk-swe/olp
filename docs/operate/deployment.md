@@ -23,10 +23,8 @@ before installing (names and keys are configurable through `config`):
 Use the [secret-file formats](configuration.md#file-based-secrets) for the
 master-key ring and authentication key. The chart generates a one-time setup
 token Secret for control pods and keeps it across upgrades. Set
-`config.bootstrapTokenSecretName` to supply your own instead. After install,
-`helm install` prints the `olp setup-token` command for the first-owner form.
-Keep all secret
-values out of values files and shell history; the chart schema validates
+`config.bootstrapTokenSecretName` to supply your own instead. Keep all secret
+values out of values files and shell history. The chart schema validates
 configured names and keys.
 
 ### Database roles
@@ -337,17 +335,44 @@ helm template olp "openllmproxy-$VERSION.tgz" --namespace olp \
   --values production-values.yaml
 ```
 
-Install the verified archive with the approved values. The timeout must outlast
-the migration Job, whose `migration.activeDeadlineSeconds` defaults to 35
-minutes.
+### First install
+
+Install the verified archive with the approved values. Omit `--wait` and flags
+that imply it, such as `--atomic` or `--rollback-on-failure`. Helm still waits
+for the pre-install migration Job to succeed before creating the workloads.
+Set `--timeout` longer than `migration.activeDeadlineSeconds`, which defaults
+to 35 minutes.
 
 ```console
-helm upgrade --install olp "openllmproxy-$VERSION.tgz" \
+helm install olp "openllmproxy-$VERSION.tgz" \
   --namespace olp --create-namespace \
-  --values production-values.yaml --timeout 40m --wait
+  --values production-values.yaml --timeout 40m
 ```
 
+A fresh gateway stays unready until it loads a published runtime generation.
+Waiting for it during install would delay the Helm notes that tell you how to
+create the first owner. The rollout commands below use the default Deployment
+names for release `olp` in namespace `olp`. Wait for just the control Deployment
+first:
+
+```console
+kubectl --namespace olp rollout status deployment/olp-openllmproxy-control --timeout=5m
+```
+
+Run the `olp setup-token` command from the Helm notes and use the token on the
+first-owner setup page. Sign in, then
+[connect and activate a provider](../getting-started.md#connect-and-activate-a-provider)
+and [publish a route](../getting-started.md#publish-a-route) before waiting for
+the gateway.
+
 ## Readiness checks
+
+After publishing the first route, wait for the gateway and worker Deployments:
+
+```console
+kubectl --namespace olp rollout status deployment/olp-openllmproxy-gateway --timeout=5m
+kubectl --namespace olp rollout status deployment/olp-openllmproxy-worker --timeout=5m
+```
 
 Before issuing a proxy key or sending traffic, require a successful migration
 Job, ready pods, runtime-generation convergence, and healthy observability
@@ -356,20 +381,40 @@ task series and zero request-metadata pending/lag; see
 [worker health](operations.md#replicated-worker-health). Continue with the
 monitoring and recovery checks in [`operations.md`](operations.md).
 
+## Upgrade an existing release
+
+Follow the [upgrade preparation in the operations runbook](operations.md#installation-and-versions).
+When the installation already has a published runtime generation, keep
+`--wait` so Helm waits for the updated workloads. Verify and render the new
+archive as above, then upgrade. As on first install, set the timeout longer
+than the migration Job's deadline.
+
+```console
+helm upgrade olp "openllmproxy-$VERSION.tgz" \
+  --namespace olp \
+  --values production-values.yaml --timeout 40m --wait
+```
+
+Complete the [readiness checks](#readiness-checks) before resuming traffic.
+
 ## Production example and connection budget
 
 Start with `deploy/helm/values.production.yaml`, set real public origin, TLS
 Secret, trusted proxy ranges and network-policy namespace selectors, and pass
 `--set-string image.digest="$QUALIFIED_IMAGE_DIGEST"`. That variable must
-contain the qualified `sha256:...` value, not an example hash. Before
-installing, verify:
+contain the qualified `sha256:...` value, not an example hash. Verify the image
+and render the chart from the checkout:
 
 ```sh
 gh attestation verify "oci://ghcr.io/tyk-swe/olp@$QUALIFIED_IMAGE_DIGEST" \
   --repo tyk-swe/olp --signer-workflow tyk-swe/olp/.github/workflows/release.yml
-helm upgrade --install olp deploy/helm -f deploy/helm/values.production.yaml \
+helm template olp deploy/helm --namespace olp -f deploy/helm/values.production.yaml \
   --set-string image.digest="$QUALIFIED_IMAGE_DIGEST"
 ```
+
+To install from the checkout, follow the [first-install steps](#first-install).
+Use `deploy/helm` as the chart and pass the same values and image digest you
+rendered.
 
 The example runs three gateways, two control replicas and three workers with 10
 pooled connections per process: 80 pooled connections. Reserve two additional
