@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,14 +15,12 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
-	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type responseCacheCall struct {
@@ -274,189 +271,6 @@ func cacheAuthority(a keyauthority.Authority, rates, tokens, budgets bool) keyau
 	return a
 }
 
-func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
-	c := x.cache
-	a := x.attempts[0]
-	p := x.Snapshot().Provider(a.ProviderID)
-	var doc oif.Document
-	if x.unary != nil {
-		plan, err := x.unaryPlan(&p, a.TargetID, a.UpstreamModel)
-		if err != nil {
-			return RequestError(err)
-		}
-		var err2 error
-		doc, err2 = oif.ParseJSON(plan.Body(), x.unary.source.Document().Limits())
-		if err2 != nil {
-			return RequestError(err2)
-		}
-	} else {
-		prepared, err := x.generationRequest(&p, a.TargetID, a.UpstreamModel)
-		if err != nil {
-			return RequestError(err)
-		}
-		doc = prepared.document
-		x.guard.input = prepared.guardrailSegments
-	}
-	// Defaults and protocol preparation can add retention even when the caller
-	// omitted it. Only the effective upstream request can establish eligibility.
-	if cacheRetentionRequested(doc) {
-		c.result = "bypass"
-		return nil
-	}
-	c.target = a.TargetID
-	project := x.captureProject()
-	scope := x.keyID
-	if c.policy.Scope == "project" {
-		scope = project
-	} else if c.policy.Scope == "route" {
-		scope = x.Route.ID
-	}
-	entries, guardrailErr := x.Snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.Route.ID, KeyID: x.keyID})
-	if guardrailErr != nil {
-		c.result = "bypass"
-		return nil
-	}
-	headers := map[string][]string{}
-	for _, name := range []string{"Anthropic-Version", "Anthropic-Beta", "OpenAI-Organization", "OpenAI-Project", "OpenAI-Beta", "X-OLP-Client-Contract"} {
-		if v := x.semanticHeaders.Values(name); len(v) > 0 {
-			headers[name] = v
-		}
-	}
-	// Effective entries pin immutable definition revisions and capture attachment
-	// changes at every scope, without hashing unrelated tenants' policy registries.
-	encoding := ""
-	if x.unary == nil && x.family == wire.Embeddings {
-		// Native provider documents can omit this client response control, but
-		// the cache stores the response after projection to the caller's format.
-		encoding = protocols.EmbeddingEncoding(x.generation.parsed, p.ParameterDefaults)
-		if encoding == "" {
-			encoding = "float"
-		}
-	}
-	var dialect oif.Identity
-	if x.unary != nil {
-		dialect = x.unary.dialect.Identity
-	}
-	includeUsage := x.mode == "streaming" && x.family == wire.Chat && x.generation.parsed.IncludeUsage
-	// Entries already contain the caller's projected response, including its
-	// native dialect, named model, and usage preference. Upstream preparation
-	// always requests stream usage for accounting, even when the caller does not.
-	fingerprint, _ := json.Marshal([]any{x.Route.RevisionID, x.Route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
-	if c.policy.Mode == "semantic" {
-		er, ok := x.Snapshot().FindRoute(c.policy.EmbeddingRoute)
-		if !ok {
-			c.result = "bypass"
-			return nil
-		}
-		embeddingRevision, _ := json.Marshal(er)
-		fingerprint = append(fingerprint, embeddingRevision...)
-		for _, t := range er.Targets {
-			fingerprint = append(fingerprint, []byte(x.Snapshot().Provider(t.ProviderID).RevisionID)...)
-		}
-	}
-	sum := sha256.Sum256(fingerprint)
-	space := cache.Space{Project: project, Route: x.Route.ID, NamedRoute: x.named().ID, Scope: scope, Fingerprint: hex.EncodeToString(sum[:])}
-	canonical := cache.Canonical(doc)
-	var query string
-	if c.policy.Mode == "semantic" {
-		var ok bool
-		canonical, query, ok = semanticInput(doc, c.policy.AllowMultiturn)
-		if !ok {
-			c.result = "bypass"
-			return nil
-		}
-		// Match every non-query setting exactly, including prior conversation.
-		space.Fingerprint = space.Fingerprint + ":" + hexDigest(canonical)
-		canonical = append(canonical, []byte(query)...)
-	}
-	parallel := s.startParallel(ctx, x, func() {})
-	if parallel != nil {
-		defer parallel.cancel()
-	}
-	if err := parallel.join(x, true); err != nil {
-		return guardrailError(err)
-	}
-	if parallel != nil {
-		c.parallelEngine = x.guard.engine
-		c.parallelInput = slices.Clone(x.guard.input)
-	}
-	lookup, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	var ticket cache.Ticket
-	var entry *cache.Entry
-	var err error
-	if c.controls.NoCache {
-		ticket, err = s.Deps.Cache.Begin(lookup, space, canonical)
-	} else {
-		ticket, entry, err = s.Deps.Cache.Lookup(lookup, space, canonical, c.controls)
-	}
-	cancel()
-	if err != nil {
-		c.result = "bypass"
-		c.reason = "unavailable"
-		return nil
-	}
-	c.ticket = ticket
-	if c.controls.NoCache {
-		if c.policy.Mode == "semantic" {
-			c.vector, c.ticket.VectorSpace, err = s.cacheEmbedding(ctx, x, query)
-			if err != nil {
-				c.result = "bypass"
-				c.reason = "embedding"
-			}
-		}
-		return nil
-	}
-	if entry == nil && c.policy.Mode == "semantic" {
-		c.vector, c.ticket.VectorSpace, err = s.cacheEmbedding(ctx, x, query)
-		if err != nil {
-			c.result = "bypass"
-			c.reason = "embedding"
-			return nil
-		}
-		lookup, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
-		var similarity float64
-		entry, similarity, err = s.Deps.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
-		cancel()
-		if err != nil {
-			c.result = "bypass"
-			c.reason = "unavailable"
-			return nil
-		}
-		if entry != nil {
-			c.similarity = &similarity
-		}
-	}
-	if entry == nil {
-		return nil
-	}
-	if json.Unmarshal(entry.Metadata, &c.metadata) != nil || c.metadata.ProviderID != a.ProviderID || c.metadata.ProviderRevisionID != p.RevisionID || c.metadata.UpstreamModel != a.UpstreamModel || !c.metadata.UsageComplete || c.metadata.Usage == nil && x.operationName() != "moderation" {
-		c.result = "bypass"
-		return nil
-	}
-	c.entry = entry
-	c.age = int64(max(s.Now().Sub(entry.CreatedAt)/time.Second, 0))
-	c.budgetCost, c.budgetCharge = "0", "0"
-	fact := events.AttemptFact{Class: ClassSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
-	u := events.AttemptUsage(&fact, x.operationName())
-	var costPtr *rates.Cost
-	at := s.Now()
-	if a.Price != nil {
-		if cost, ok := a.Price.Cost(u, at, true, a.Discount); ok {
-			if x.committed(a.ProviderID) {
-				cost = rates.Cost{}
-			}
-			costPtr = &cost
-			c.budgetCost = cost.String()
-			c.budgetCharge = cost.String()
-		}
-	}
-	if rev := x.attemptCardRevision(a.ProviderID, at); rev != nil {
-		if charge, ok := rev.Charge(u, at, true, costPtr, string(p.Kind), p.VendorID, a.UpstreamModel, x.operationName()); ok {
-			c.budgetCharge = charge.String()
-		}
-	}
-	return nil
-}
 func hexDigest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 
 func (s *Server) recordCacheHit(x *Call) {
