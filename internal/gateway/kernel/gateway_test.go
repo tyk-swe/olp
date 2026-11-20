@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,8 +32,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
-	batchupstream "github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -42,6 +44,10 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
+
+	"errors"
+
+	"regexp"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -714,8 +720,8 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = spool.Close() })
 	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
-		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
+		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.Egress,
+		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.Log,
 	})}
 	h.gateway.Deps.Staging = spool
 	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
@@ -850,8 +856,8 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		name, class, outcome, errorClass string
 		overallTimeout                   int64
 	}{
-		{"client cancelled", classCancelled, "cancelled", "client_cancelled", 5000},
-		{"overall timeout", classTimeout, "failure", "gateway_timeout", 300},
+		{"client cancelled", ClassCancelled, "cancelled", "client_cancelled", 5000},
+		{"overall timeout", ClassTimeout, "failure", "gateway_timeout", 300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, Config{})
@@ -884,7 +890,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			if _, err := eventstream.NewDecoder().Decode(resp.Body, nil); err != nil || resp.StatusCode != http.StatusOK {
 				t.Fatalf("stream did not start: status=%d err=%v", resp.StatusCode, err)
 			}
-			if tc.class == classCancelled {
+			if tc.class == ClassCancelled {
 				cancel()
 			} else {
 				_, _ = io.ReadAll(resp.Body)
@@ -1256,9 +1262,9 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				writer = &deadlineFailWriter{ResponseRecorder: recorder, ctx: ctx}
 			}
 			failure := h.gateway.streamStoredResponse(ctx, writer, x, &resources.Resource{ID: uuid.NewString(), Kind: resources.KindResponse, UpstreamID: "response-local-fixture", RouteSlug: routeSlug}, p, nil)
-			code, status, class := "response_stream_incomplete", http.StatusBadGateway, classProtocol
+			code, status, class := "response_stream_incomplete", http.StatusBadGateway, ClassProtocol
 			if tc.timeout {
-				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, classTimeout
+				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, ClassTimeout
 			}
 			if tc.frame {
 				if failure != nil || recorder.Code != http.StatusOK {
@@ -1267,7 +1273,7 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				outcome := "failure"
 				envelopeStatus := http.StatusOK
 				if tc.writeFailure {
-					code, class, outcome, envelopeStatus = "client_cancelled", classCancelled, "cancelled", 0
+					code, class, outcome, envelopeStatus = "client_cancelled", ClassCancelled, "cancelled", 0
 				}
 				h.sink.mu.Lock()
 				defer h.sink.mu.Unlock()
@@ -1298,7 +1304,7 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 		name, object, class string
 	}{
 		{"valid terminal result", `"response"`, ClassSuccess},
-		{"invalid terminal result", `7`, classProtocol},
+		{"invalid terminal result", `7`, ClassProtocol},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
@@ -1333,59 +1339,6 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
 			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != (tc.class == ClassSuccess) {
-				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
-			}
-		})
-	}
-}
-
-func TestGeminiBatchSettlementValidatesResponseIdentities(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, nestedName, rootInput string
-		valid                       bool
-	}{
-		{"matching references", "batches/native", "files/native-input", true},
-		{"mismatched nested name", "batches/unrelated", "files/native-input", false},
-		{"conflicting input alias", "batches/native", "files/unrelated", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, Config{})
-			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `{"name":"batches/native","metadata":{"name":%q,"state":"BATCH_STATE_RUNNING","inputConfig":{"fileName":"files/native-input"}},"input_config":{"file_name":%q}}`, tc.nestedName, tc.rootInput)
-			})
-			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.Provider.ID)
-			if !probed || !granted {
-				t.Fatal("could not claim half-open probe")
-			}
-			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiBatch, actor: "api_key_resource", keyID: h.keyID}
-			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/batches/native", nil, "")
-			if failure != nil {
-				t.Fatal(failure.toError())
-			}
-			defer response.Body.Close()
-			body, err := response.ReadBody(h.gateway.Config.MaxResponseBytes)
-			if err != nil {
-				t.Fatal(err)
-			}
-			batch, err := batchupstream.DecodeGeminiBatch(body)
-			if err != nil {
-				t.Fatalf("could not decode native fixture: %v", err)
-			}
-			object, _, err := settleGeminiBatchResult(response.Exchange, body, batch, p.Model, geminiInputNames{Local: "files/local-input", Upstream: "files/native-input"})
-			if (err == nil) != tc.valid {
-				t.Fatalf("unexpected batch validation: %v", err)
-			}
-			if tc.valid {
-				projected, err := object.project("local", routeSlug, nil)
-				if err != nil || bytes.Contains(projected, []byte("native-input")) || bytes.Count(projected, []byte("files/local-input")) != 2 {
-					t.Fatalf("projected references: %s, %v", projected, err)
-				}
-			}
-			h.gateway.settlePinnedHold(t.Context(), p.Hold)
-			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted != tc.valid {
 				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
 			}
 		})
@@ -1428,7 +1381,7 @@ type failedFlushWriter struct{ *httptest.ResponseRecorder }
 
 func (w failedFlushWriter) FlushError() error { return io.ErrClosedPipe }
 
-func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
+func TestPinnedAcknowledgementRequiresFlush(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, Config{})
 	h.mock.set("a", status(http.StatusNoContent, ""))
@@ -1438,12 +1391,12 @@ func TestGeminiInteractionDeleteAcknowledgementRequiresFlush(t *testing.T) {
 	x.Route = &route
 	response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodDelete, p.Provider.Endpoint+"/interactions/native", nil, "")
 	if failure != nil {
-		t.Fatal(failure.toError())
+		t.Fatal(failure.Fault())
 	}
 	w := failedFlushWriter{httptest.NewRecorder()}
-	if failure := h.gateway.finishGeminiInteractionDeletion(t.Context(), w, x, response, func(context.Context) error { return nil }); failure != nil {
-		t.Fatal(failure)
-	}
+	defer response.Body.Close()
+	response.Exchange.Complete(ClassSuccess)
+	h.gateway.WriteStateJSONStatus(w, x, nil, http.StatusOK, response.Exchange)
 	env := h.sink.last(t)
 	if w.Code != http.StatusOK || env.Outcome != "cancelled" || env.ErrorClass != "client_delivery_failed" || len(env.Attempts) != 1 ||
 		env.Attempts[0].Class != ClassSuccess || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.ClientState != usage.ClientUnobserved {
@@ -1462,10 +1415,10 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 		family            retainedapi.Family
 	}{
 		{"accepted deletion", `{"id":"resource-native","deleted":true}`, ClassSuccess, true, "0.25", store},
-		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, classProtocol, false, "0", store},
-		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, classProtocol, false, "0", store},
+		{"malformed provider result", `{"id":"resource-native","deleted":true,"unknown_id":"unexpected"}`, ClassProtocol, false, "0", store},
+		{"unrelated native identity", `{"id":"unrelated","deleted":true}`, ClassProtocol, false, "0", store},
 		{"conversation item returns parent identity", `{"id":"conversation-native"}`, ClassSuccess, true, "0.25", item},
-		{"conversation item returns child identity", `{"id":"resource-native"}`, classProtocol, false, "0", item},
+		{"conversation item returns child identity", `{"id":"resource-native"}`, ClassProtocol, false, "0", item},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
@@ -1604,7 +1557,7 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	if status != http.StatusServiceUnavailable || w.Code != status || env.ErrorClass != "provider_state_unavailable" {
 		t.Fatalf("binding store failure was not reported as unavailable: %d, %s", status, w.Body.String())
 	}
-	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != ClassProtocol || env.Attempts[0].UsageObserved || !h.gateway.settledCharge(x).IsZero() {
 		t.Fatalf("unexpected attempt evidence or charge: %+v, %s", env.Attempts, h.gateway.settledCharge(x).String())
 	}
 	if probed, granted := h.gateway.health.Claim(p.Provider.ID); !probed || !granted {
@@ -1642,38 +1595,9 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 		t.Fatalf("attempts = %+v", env.Attempts)
 	}
 	attempt := env.Attempts[0]
-	if attempt.Class != classProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
+	if attempt.Class != ClassProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
 		attempt.Usage == nil || attempt.Usage.InputTokens != 10 || attempt.Usage.OutputTokens != 5 || attempt.Usage.TotalTokens != 15 {
 		t.Fatalf("compaction accounting after binding failure = %+v, usage = %+v", attempt, attempt.Usage)
-	}
-}
-
-func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
-	t.Parallel()
-	const exact = `{"count":9007199254740993}`
-	playground := Playground{Gateway: &Server{Now: time.Now}}
-	x := &Call{request: request{startedAt: time.Now()}, routeLeg: routeLeg{Route: &routing.Route{Slug: routeSlug}}}
-	in := playgroundRequest{ResponseFormat: &playgroundFormat{Type: "json_object"}}
-	for _, test := range []struct{ text, structured string }{
-		{exact, exact},
-		{`{"count":0,"count":9007199254740993}`, exact},
-		{exact + ` {"extra":true}`, ""},
-	} {
-		out := &Outcome{completion: &wire.Completion{OutputText: test.text}}
-		body, err := json.Marshal(playground.response(x, out, in))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var response struct {
-			Text       string          `json:"output_text"`
-			Structured json.RawMessage `json:"structured_output"`
-		}
-		if err := json.Unmarshal(body, &response); err != nil {
-			t.Fatal(err)
-		}
-		if response.Text != test.text || string(response.Structured) != test.structured {
-			t.Fatalf("unexpected Playground result for %q: %s", test.text, body)
-		}
 	}
 }
 
@@ -1708,7 +1632,7 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 			h.gateway.Refuse(x, w, failure)
 			h.gateway.settlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
-			if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].LocalRefusal != tc.local {
+			if len(env.Attempts) != 1 || env.Attempts[0].Class != ClassProtocol || env.Attempts[0].LocalRefusal != tc.local {
 				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
 			}
 			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed != tc.local || granted != tc.local {
@@ -1735,7 +1659,7 @@ func openTestProbe(t *testing.T, h *harness, provider string) (bool, bool) {
 			now = now.Add(health.CircuitOpenFor + time.Millisecond)
 			return h.gateway.health.Claim(provider)
 		}
-		h.gateway.health.Record(provider, events.AttemptFact{Class: classProtocol}, false)
+		h.gateway.health.Record(provider, events.AttemptFact{Class: ClassProtocol}, false)
 	}
 	t.Fatal("circuit stayed closed after consecutive provider failures")
 	return false, false
@@ -1937,7 +1861,7 @@ func TestListedResourcePageSkipsStaleRowsAndRefills(t *testing.T) {
 	authorize := func(row *resources.Resource) *fault.Error {
 		switch {
 		case strings.HasPrefix(row.ID, "stale"):
-			return pinUnavailable()
+			return PinUnavailable()
 		case strings.HasPrefix(row.ID, "hidden"):
 			return fault.NotFoundError("not_found", "No resource with this identifier exists for this key.")
 		case row.ID == "broken-1":
@@ -2037,5 +1961,710 @@ func TestFileDownloadHeadersForceAttachmentForHTML(t *testing.T) {
 	}
 	if got := response.Header.Get("Content-Length"); got != fmt.Sprint(len(body)) {
 		t.Errorf("Content-Length = %q", got)
+	}
+}
+
+type entryReply struct {
+	status int
+	retry  string
+	code   string
+	param  string
+}
+
+func enter(t *testing.T, h *harness, headers map[string]string, body string) entryReply {
+	t.Helper()
+	resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(body), headers)
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var decoded struct {
+		Error struct {
+			Code  string  `json:"code"`
+			Param *string `json:"param"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("reply %q is not JSON: %v", raw, err)
+	}
+	reply := entryReply{status: resp.StatusCode, retry: resp.Header.Get("X-Should-Retry"), code: decoded.Error.Code}
+	if decoded.Error.Param != nil {
+		reply.param = *decoded.Error.Param
+	}
+	return reply
+}
+
+func failingProvider(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	io.WriteString(w, `{"error":{"message":"boom","type":"server_error"}}`)
+}
+
+const entryChat = `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]}`
+
+func TestAProviderFailureFallsBackOnATransformedRouteAndIsFinalWithNoRetryHintOnAStrictOne(t *testing.T) {
+	for name, tc := range map[string]struct {
+		harness *harness
+		want    entryReply
+		second  int
+	}{
+		"transformed": {newHarness(t, Config{}), entryReply{status: http.StatusBadGateway, code: "upstream_unavailable"}, 1},
+		"strict":      {strictHarness(t, nil), entryReply{status: http.StatusBadGateway, code: "ambiguous_upstream_result", retry: "false"}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := tc.harness
+			h.mock.set("a", failingProvider)
+			h.mock.set("b", failingProvider)
+			if got := enter(t, h, nil, entryChat); got != tc.want {
+				t.Errorf("reply = %+v, want %+v", got, tc.want)
+			}
+			if first, second := h.mock.count("a"), h.mock.count("b"); first != 1 || second != tc.second {
+				t.Errorf("provider calls = %d and %d, want 1 and %d", first, second, tc.second)
+			}
+			if env := h.sink.last(t); env.Status != http.StatusBadGateway || len(env.Attempts) != 1+tc.second {
+				t.Errorf("recorded status %d with %d attempts, want 502 with %d", env.Status, len(env.Attempts), 1+tc.second)
+			}
+		})
+	}
+}
+
+func TestRequestsTheGatewayCannotUnderstandAreRefusedBeforeAnyProviderAndRecorded(t *testing.T) {
+	image := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAAAAAA"}}]}]}`
+	approval := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}],"olp_approval":{"approved":true}}`
+	for name, tc := range map[string]struct {
+		headers map[string]string
+		body    string
+		want    entryReply
+	}{
+		"routing preferences that are not an object": {map[string]string{"X-OLP-Routing": "{"}, entryChat,
+			entryReply{status: http.StatusBadRequest, code: "invalid_request", param: "X-OLP-Routing"}},
+		"a priority above the key's ceiling": {map[string]string{"X-OLP-Routing": `{"priority":"critical"}`}, entryChat,
+			entryReply{status: http.StatusBadRequest, code: "priority_increase_forbidden", param: "X-OLP-Routing"}},
+		"attribution that is not an object": {map[string]string{"X-OLP-Attribution": "!!!"}, entryChat,
+			entryReply{status: http.StatusBadRequest, code: "invalid_attribution"}},
+		"inline media over the installation limit": {nil, image,
+			entryReply{status: http.StatusBadRequest, code: "unsupported_parameter", param: "content"}},
+		"a tool approval on a route that runs no tools": {nil, approval,
+			entryReply{status: http.StatusForbidden, code: "tool_approval_invalid"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, Config{InlineMedia: protocols.InlineMediaLimits{Items: 4, ItemBytes: 2, TotalBytes: 2}})
+			if got := enter(t, h, tc.headers, tc.body); got != tc.want {
+				t.Errorf("reply = %+v, want %+v", got, tc.want)
+			}
+			if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
+				t.Errorf("provider calls = %d, want none", calls)
+			}
+			if env := h.sink.last(t); env.Status != tc.want.status || len(env.Attempts) != 0 {
+				t.Errorf("recorded status %d with %d attempts, want %d with none", env.Status, len(env.Attempts), tc.want.status)
+			}
+		})
+	}
+}
+
+type lostCaller struct {
+	header       http.Header
+	write, flush error
+}
+
+func (c lostCaller) Header() http.Header            { return c.header }
+func (lostCaller) WriteHeader(int)                  {}
+func (c lostCaller) Write(b []byte) (int, error)    { return len(b), c.write }
+func (lostCaller) SetReadDeadline(time.Time) error  { return nil }
+func (lostCaller) SetWriteDeadline(time.Time) error { return nil }
+func (c lostCaller) FlushError() error              { return c.flush }
+
+func TestAWholeReplyCountsAsDeliveredOnlyWhenTheCallerReceivesIt(t *testing.T) {
+	gone := errors.New("caller is gone")
+	lost := func(caller lostCaller) func(*harness) {
+		return func(h *harness) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(entryChat))
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", "application/json")
+			h.server.Config.Handler.ServeHTTP(caller, req)
+		}
+	}
+	for name, tc := range map[string]struct {
+		send      func(*harness)
+		outcome   string
+		delivered bool
+	}{
+		"received": {func(h *harness) {
+			resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(entryChat), nil)
+			resp.Body.Close()
+		}, "success", true},
+		"reply not written": {lost(lostCaller{header: http.Header{}, write: gone}), "cancelled", false},
+		"reply not flushed": {lost(lostCaller{header: http.Header{}, flush: gone}), "cancelled", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			tc.send(h)
+			env := h.sink.last(t)
+			attempt := env.Attempts[len(env.Attempts)-1]
+			if env.Outcome != tc.outcome || !env.Committed || !attempt.Committed || (env.FirstByte != nil) != tc.delivered {
+				t.Fatalf("envelope outcome %q, committed %t, attempt committed %t, first byte %v, want outcome %q and delivered %t",
+					env.Outcome, env.Committed, attempt.Committed, env.FirstByte, tc.outcome, tc.delivered)
+			}
+		})
+	}
+}
+
+type attemptSeen struct {
+	class     string
+	status    int
+	committed bool
+}
+
+const stalled = "<stalled>"
+
+func providerStream(frames ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, frame := range frames {
+			if frame == stalled {
+				<-r.Context().Done()
+				return
+			}
+			io.WriteString(w, "data: "+frame+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+	}
+}
+
+func providerReply(status int, headers map[string]string, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		for name, value := range headers {
+			w.Header().Set(name, value)
+		}
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}
+}
+
+var replyErrorCode = regexp.MustCompile(`"error":\{"code":"([a-z_]+)"`)
+
+func TestEachKindOfProviderFailureIsClassifiedAndFallsBackOnlyWhileTheReplyIsUncommitted(t *testing.T) {
+	const (
+		delta     = `{"choices":[{"index":0,"delta":{"content":"partial"}}]}`
+		inBand    = `{"error":{"message":"boom","type":"server_error"}}`
+		oversized = 5000
+
+		routeDeadline = 5 * time.Second
+	)
+	served := attemptSeen{"success", http.StatusOK, true}
+	for name, tc := range map[string]struct {
+		provider http.HandlerFunc
+		streamed bool
+		timeout  int64
+		status   int
+		code     string
+		attempts []attemptSeen
+	}{
+		"rate limited": {
+			provider: providerReply(http.StatusTooManyRequests, map[string]string{"Retry-After": "7"}, `{"error":{"message":"slow down","type":"rate_limit_error"}}`),
+			status:   http.StatusOK, attempts: []attemptSeen{{"rate_limit", http.StatusTooManyRequests, false}, served},
+		},
+		"credential refused": {
+			provider: providerReply(http.StatusUnauthorized, nil, `{"error":{"message":"bad key","type":"invalid_request_error"}}`),
+			status:   http.StatusOK, attempts: []attemptSeen{{"credential", http.StatusUnauthorized, false}, served},
+		},
+		"silent provider": {
+			provider: providerStream(stalled), timeout: 80,
+			status: http.StatusOK, attempts: []attemptSeen{{"timeout", 0, false}, served},
+		},
+		"stream opening with a provider error": {
+			provider: providerStream(inBand), streamed: true,
+			status: http.StatusOK, attempts: []attemptSeen{{"upstream_server", http.StatusOK, false}, served},
+		},
+		"unreadable reply": {
+			provider: providerReply(http.StatusOK, nil, `not json`),
+			status:   http.StatusBadGateway, code: "provider_protocol_error", attempts: []attemptSeen{{"protocol", http.StatusOK, false}},
+		},
+		"whole reply to a streamed request": {
+			provider: providerReply(http.StatusOK, nil, `{}`), streamed: true,
+			status: http.StatusBadGateway, code: "provider_protocol_error", attempts: []attemptSeen{{"protocol", http.StatusOK, false}},
+		},
+		"stream frame over the event limit": {
+			provider: providerStream(`{"choices":[{"index":0,"delta":{"content":"` + strings.Repeat("a", oversized) + `"}}]}`), streamed: true,
+			status: http.StatusBadGateway, code: "provider_protocol_error", attempts: []attemptSeen{{"protocol", http.StatusOK, false}},
+		},
+		"stream stalling after its first frame": {
+			provider: providerStream(delta, stalled), streamed: true, timeout: 80,
+			status: http.StatusOK, code: "gateway_timeout", attempts: []attemptSeen{{"timeout", http.StatusOK, true}},
+		},
+		"stream ending without a final frame": {
+			provider: providerStream(delta), streamed: true,
+			status: http.StatusOK, code: "provider_protocol_error", attempts: []attemptSeen{{"protocol", http.StatusOK, true}},
+		},
+		"provider error after the first frame": {
+			provider: providerStream(delta, inBand), streamed: true,
+			status: http.StatusOK, code: "provider_protocol_error", attempts: []attemptSeen{{"protocol", http.StatusOK, true}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, Config{})
+			if tc.timeout > 0 {
+				h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+					route := s.Routes[routeSlug]
+					for i := range route.Targets {
+						route.Targets[i].Timeout = tc.timeout
+					}
+					s.Routes[routeSlug] = route
+				})
+			}
+			h.mock.set("a", tc.provider)
+			body := entryChat
+			if tc.streamed {
+				h.mock.set("b", streamedChat(answerText))
+				body = strings.TrimSuffix(entryChat, "}") + `,"stream":true}`
+			}
+			started := time.Now()
+			resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(body), nil)
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if elapsed := time.Since(started); tc.timeout > 0 && elapsed > routeDeadline/2 {
+				t.Fatalf("a provider silent past its %dms target timeout held the caller for %v", tc.timeout, elapsed)
+			}
+
+			code := ""
+			if found := replyErrorCode.FindSubmatch(raw); found != nil {
+				code = string(found[1])
+			}
+			if resp.StatusCode != tc.status || code != tc.code {
+				t.Fatalf("reply = %d %q, want %d %q: %.300s", resp.StatusCode, code, tc.status, tc.code, raw)
+			}
+			if strings.Contains(string(raw), strings.Repeat("a", oversized)) {
+				t.Fatal("the caller received a frame over the event limit")
+			}
+			if tc.code == "" && !strings.Contains(string(raw), answerText) {
+				t.Fatalf("the caller did not get the second provider's answer: %.300s", raw)
+			}
+			if last := tc.attempts[len(tc.attempts)-1]; tc.code != "" && strings.Contains(string(raw), "partial") != last.committed {
+				t.Fatalf("partial output reached the caller = %t, want %t", !last.committed, last.committed)
+			}
+
+			env := h.sink.last(t)
+			seen := make([]attemptSeen, len(env.Attempts))
+			for i, attempt := range env.Attempts {
+				seen[i] = attemptSeen{attempt.Class, attempt.Status, attempt.Committed}
+			}
+			if len(seen) != len(tc.attempts) {
+				t.Fatalf("attempts = %+v, want %+v", seen, tc.attempts)
+			}
+			for i, want := range tc.attempts {
+				if seen[i] != want {
+					t.Fatalf("attempt %d = %+v, want %+v", i, seen[i], want)
+				}
+			}
+			first := env.Attempts[0]
+			if name == "rate limited" && (first.RetryAfter == nil || *first.RetryAfter != 7*time.Second) {
+				t.Fatalf("retry after = %v, want the provider's 7s", first.RetryAfter)
+			}
+			if name == "silent provider" && first.FirstByte != nil {
+				t.Fatal("a provider that never answered has a first byte time")
+			}
+			if succeeded := env.Outcome == "success"; succeeded != (tc.code == "") {
+				t.Fatalf("outcome = %s for reply code %q", env.Outcome, tc.code)
+			}
+		})
+	}
+}
+
+type providerCalls struct{ a, b atomic.Int64 }
+
+func refusing(calls *atomic.Int64, refusals int64, status int, retryAfter string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if calls.Add(1) > refusals {
+			completion(modelA, answerText)(w, r)
+			return
+		}
+		if retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"error":{"message":"refused"}}`)
+	}
+}
+
+func unreachableLimits(t *testing.T) Dependencies {
+	t.Helper()
+	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := func() limitadmission.OutagePolicy { return limitadmission.FailClosed }
+	return Dependencies{Admission: quota.NewAdmission(limitadmission.NewDurable(runner, nil), fleet.New(runner), closed, slog.New(slog.DiscardHandler))}
+}
+
+func TestARouteRetriesAProviderOnlyUnderItsRetryRuleThenMovesOnAndSaysWhyNoProviderServed(t *testing.T) {
+	const always = 1 << 20
+	brief := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1}}
+	patient := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
+	limited := &routing.Limits{RequestsPerMinute: new(int64(5))}
+	for name, tc := range map[string]struct {
+		retry      routing.Retry
+		refusals   [2]int64
+		refusal    int
+		retryAfter string
+		limits     [2]*routing.Limits
+		deadline   int64
+		status     int
+		code       string
+		calls      [2]int64
+		retries    []int
+		budget     int
+	}{
+		"a rate limited provider is retried until it answers": {
+			retry: brief, refusals: [2]int64{2, 0}, refusal: http.StatusTooManyRequests,
+			status: http.StatusOK, calls: [2]int64{3, 0}, retries: []int{0, 1, 2},
+		},
+		"retries run out and the next provider serves": {
+			retry: brief, refusals: [2]int64{always, 0}, refusal: http.StatusTooManyRequests,
+			status: http.StatusOK, calls: [2]int64{3, 1}, retries: []int{0, 1, 2, 0}, budget: 4,
+		},
+		"a failure without a retry rule moves on at once": {
+			retry: brief, refusals: [2]int64{always, 0}, refusal: http.StatusInternalServerError,
+			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"a wait the provider asks for past the deadline is not taken": {
+			retry: patient, refusals: [2]int64{always, 0}, refusal: http.StatusTooManyRequests, retryAfter: "60", deadline: 400,
+			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"every provider failing reports the last failure": {
+			refusals: [2]int64{always, always}, refusal: http.StatusInternalServerError,
+			status: http.StatusBadGateway, code: "upstream_unavailable", calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"a provider whose limit cannot be read is passed over": {
+			limits: [2]*routing.Limits{limited, nil},
+			status: http.StatusOK, calls: [2]int64{0, 1}, retries: []int{0},
+		},
+		"no provider with a readable limit reports the limits": {
+			limits: [2]*routing.Limits{limited, limited},
+			status: http.StatusServiceUnavailable, code: "distributed_limits_unavailable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var deps []Dependencies
+			if tc.limits != [2]*routing.Limits{} {
+				deps = append(deps, unreachableLimits(t))
+			}
+			h := newHarness(t, Config{}, deps...)
+			budget := 0
+			h.republish(func(s *routing.Snapshot, a, b routing.Provider) {
+				route := s.Routes[routeSlug]
+				route.Retry = tc.retry
+				route.MaxAttempts = cmp.Or(tc.budget, route.MaxAttempts)
+				if tc.deadline > 0 {
+					route.OverallTimeout = tc.deadline
+				}
+				budget = route.MaxAttempts
+				s.Routes[routeSlug] = route
+				for i, provider := range []routing.Provider{a, b} {
+					provider.Limits = tc.limits[i]
+					s.Providers[provider.ID] = provider
+				}
+			})
+			var calls providerCalls
+			h.mock.set("a", refusing(&calls.a, tc.refusals[0], tc.refusal, tc.retryAfter))
+			h.mock.set("b", refusing(&calls.b, tc.refusals[1], tc.refusal, tc.retryAfter))
+
+			reply := enter(t, h, nil, entryChat)
+
+			if reply.status != tc.status || reply.code != tc.code {
+				t.Fatalf("reply = %d %q, want %d %q", reply.status, reply.code, tc.status, tc.code)
+			}
+			if got := [2]int64{calls.a.Load(), calls.b.Load()}; got != tc.calls {
+				t.Fatalf("provider calls = %v, want %v", got, tc.calls)
+			}
+			attempts := h.sink.last(t).Attempts
+			retries := make([]int, len(attempts))
+			for i, fact := range attempts {
+				retries[i] = fact.Retry
+			}
+			if !slices.Equal(retries, tc.retries) {
+				t.Fatalf("recorded retries = %v, want %v", retries, tc.retries)
+			}
+			if len(attempts) > budget {
+				t.Fatalf("%d attempts ran on a route allowing %d", len(attempts), budget)
+			}
+		})
+	}
+}
+
+func TestARetryStopsAtTheRoutesAttemptBudgetAndReportsTheProvidersRefusal(t *testing.T) {
+	h := newHarness(t, Config{})
+	budget := 0
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Retry = routing.Retry{classRateLimit: {MaxRetries: 10, BaseBackoffMS: 1, MaxBackoffMS: 1}}
+		budget = route.MaxAttempts
+		s.Routes[routeSlug] = route
+	})
+	var calls providerCalls
+	h.mock.set("a", refusing(&calls.a, 1<<20, http.StatusTooManyRequests, ""))
+	h.mock.set("b", refusing(&calls.b, 0, 0, ""))
+
+	reply := enter(t, h, nil, entryChat)
+
+	if reply.status != http.StatusTooManyRequests || reply.code != "upstream_rate_limit" {
+		t.Fatalf("reply = %d %q, want the provider's rate limit", reply.status, reply.code)
+	}
+	if calls.a.Load() != int64(budget) || calls.b.Load() != 0 {
+		t.Fatalf("provider calls = %d and %d on a route allowing %d attempts", calls.a.Load(), calls.b.Load(), budget)
+	}
+}
+
+func TestACallerLeavingDuringARetryWaitEndsTheRequestAsCancelledWithoutAnotherAttempt(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Retry = routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
+		s.Routes[routeSlug] = route
+	})
+	var calls providerCalls
+	h.mock.set("a", refusing(&calls.a, 1<<20, http.StatusTooManyRequests, "2"))
+	h.mock.set("b", refusing(&calls.b, 0, 0, ""))
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/chat/completions", strings.NewReader(entryChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+fullKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("the caller got status %d while the route was waiting to retry", resp.StatusCode)
+	}
+
+	env := h.sink.last(t)
+	if env.Outcome != "cancelled" || len(env.Attempts) != 1 || calls.a.Load() != 1 || calls.b.Load() != 0 {
+		t.Fatalf("outcome = %q with %d attempts, provider calls %d and %d; want one attempt and a cancelled request", env.Outcome, len(env.Attempts), calls.a.Load(), calls.b.Load())
+	}
+}
+
+type unaryAttemptSeen struct {
+	class     string
+	status    int
+	uncertain bool
+}
+
+func TestAWholeOperationFallsBackOnlyWhenTheProviderRefusedItAndIsNeverRepeatedOnceItMayHaveRun(t *testing.T) {
+	const routeDeadline = 5 * time.Second
+	const found = `{"type":"search","web":{"results":[{"title":"Found","url":"https://example.com/found","description":"result"}]}}`
+	served := unaryAttemptSeen{"success", http.StatusOK, false}
+	for name, tc := range map[string]struct {
+		provider   http.HandlerFunc
+		timeout    int64
+		status     int
+		code       string
+		final      bool
+		retryAfter time.Duration
+		attempts   []unaryAttemptSeen
+	}{
+		"rate limited": {
+			provider: providerReply(http.StatusTooManyRequests, map[string]string{"Retry-After": "7"}, `{"error":{"message":"slow down"}}`),
+			status:   http.StatusOK, retryAfter: 7 * time.Second, attempts: []unaryAttemptSeen{{"rate_limit", http.StatusTooManyRequests, false}, served},
+		},
+		"credential refused": {
+			provider: providerReply(http.StatusUnauthorized, nil, `{"error":{"message":"bad key"}}`),
+			status:   http.StatusOK, attempts: []unaryAttemptSeen{{"credential", http.StatusUnauthorized, false}, served},
+		},
+		"request the provider rejects": {
+			provider: providerReply(http.StatusBadRequest, nil, `{"error":{"message":"bad","type":"invalid_request_error"}}`),
+			status:   http.StatusBadRequest, code: "upstream_rejected", attempts: []unaryAttemptSeen{{"upstream_client", http.StatusBadRequest, false}},
+		},
+		"provider error": {
+			provider: providerReply(http.StatusInternalServerError, nil, `{"error":{"message":"boom"}}`),
+			status:   http.StatusBadGateway, code: "ambiguous_upstream_result", final: true, attempts: []unaryAttemptSeen{{"ambiguous", http.StatusInternalServerError, true}},
+		},
+		"silent provider": {
+			provider: providerStream(stalled), timeout: 80,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", final: true, attempts: []unaryAttemptSeen{{"ambiguous", 0, true}},
+		},
+		"unreadable reply": {
+			provider: providerReply(http.StatusOK, nil, `not json`),
+			status:   http.StatusBadGateway, code: "fidelity_protocol_violation", final: true, attempts: []unaryAttemptSeen{{"protocol", http.StatusOK, true}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, Config{})
+			h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range s.Providers {
+					provider.VendorID = "brave"
+					provider.ProfileID, provider.ProfileRevision = "brave-search", connectors.ProfileRevision
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "search", Surface: "openai", Mode: "unary"}}
+					s.Providers[id] = provider
+				}
+				route := s.Routes[routeSlug]
+				route.Operations = []string{"search"}
+				for i := range route.Targets {
+					route.Targets[i].Timeout = cmp.Or(tc.timeout, route.Targets[i].Timeout)
+				}
+				s.Routes[routeSlug] = route
+			})
+			var second atomic.Int64
+			h.mock.set("a", tc.provider)
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				second.Add(1)
+				providerReply(http.StatusOK, nil, found)(w, r)
+			})
+			started := time.Now()
+			resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"test","max_results":1}`), map[string]string{"X-OLP-Route": routeSlug})
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if elapsed := time.Since(started); tc.timeout > 0 && elapsed > routeDeadline/2 {
+				t.Fatalf("a provider silent past its %dms target timeout held the caller for %v", tc.timeout, elapsed)
+			}
+
+			code := ""
+			if found := replyErrorCode.FindSubmatch(raw); found != nil {
+				code = string(found[1])
+			}
+			if resp.StatusCode != tc.status || code != tc.code {
+				t.Fatalf("reply = %d %q, want %d %q: %.300s", resp.StatusCode, code, tc.status, tc.code, raw)
+			}
+			if tc.code == "" && !strings.Contains(string(raw), "https://example.com/found") {
+				t.Fatalf("the caller did not get the result: %.300s", raw)
+			}
+			if final := resp.Header.Get("X-Should-Retry") == "false"; final != tc.final {
+				t.Fatalf("the reply told the caller not to retry = %t, want %t", final, tc.final)
+			}
+			if asked := second.Load() == 1; asked != (len(tc.attempts) == 2) {
+				t.Fatalf("the second provider was asked %d times after %s", second.Load(), name)
+			}
+
+			env := h.sink.last(t)
+			seen := make([]unaryAttemptSeen, len(env.Attempts))
+			for i, attempt := range env.Attempts {
+				seen[i] = unaryAttemptSeen{attempt.Class, attempt.Status, attempt.BillingUncertain}
+			}
+			if !slices.Equal(seen, tc.attempts) {
+				t.Fatalf("attempts = %+v, want %+v", seen, tc.attempts)
+			}
+			if got := cmp.Or(env.Attempts[0].RetryAfter, new(time.Duration)); *got != tc.retryAfter {
+				t.Fatalf("the first attempt recorded a provider wait of %v, want %v", *got, tc.retryAfter)
+			}
+		})
+	}
+}
+
+func TestARetainedRequestKeepsOnlyModelAndBillingFactsAndRefusesControlsThatSpendOutsideItsContract(t *testing.T) {
+	const judge, sampler, owner = "judge-model", "candidate-model", "key-1"
+	capable := func(models ...string) []routing.Capability {
+		var out []routing.Capability
+		for _, model := range models {
+			out = append(out, routing.Capability{Model: model, Operation: "eval", Surface: "openai", Mode: "unary"}, routing.Capability{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"})
+		}
+		return out
+	}
+	pin := &Pin{
+		Model: judge,
+		Slot:  routing.Slot{Enabled: true},
+		Provider: routing.Provider{
+			ID: "provider-1", Kind: "openai_compatible", Capabilities: capable(judge, sampler, "alias-model"),
+			TuningDatasetURIPrefixes: []string{"gs://tuning/owned/"},
+			Bindings:                 map[string]connectors.Binding{"alias-model": {Model: judge}},
+		},
+	}
+	route := &routing.Route{Slug: "retained", Operations: []string{"generation", "eval"}, Targets: []routing.Target{
+		{ProviderID: "provider-1", ProviderModel: judge}, {ProviderID: "provider-1", ProviderModel: sampler}, {ProviderID: "provider-1", ProviderModel: "alias-model"},
+	}}
+	graded := func(model string) string {
+		return `{"data_source_config":{"type":"custom"},"testing_criteria":[{"type":"score_model","model":"` + model + `"}]}`
+	}
+	definition := &resources.Resource{Kind: "eval", Metadata: []byte(`{"authorized_models":["` + judge + `"],"serving_models":{"` + judge + `":"` + judge + `"}}`)}
+	for _, tc := range []struct {
+		name, kind, action, operation, body string
+		parent                              *resources.Resource
+		kept, refused                       string
+	}{
+		{name: "a vector store keeps only the provider model", kind: "vector_store", action: "create", body: `{"name":"docs","metadata":{"team":"a"}}`, kept: `{}`},
+		{name: "metadata that is not an object", kind: "vector_store", action: "create", body: `{"metadata":"x"}`, refused: "metadata must be an object"},
+		{name: "metadata naming the gateway's submission marker", kind: "vector_store", action: "create", body: `{"metadata":{"olp_submission_id":"x"}}`, refused: "reserved"},
+		{name: "metadata naming the gateway's submission digest", kind: "vector_store", action: "create", body: `{"metadata":{"olp_submission_digest":"x"}}`, refused: "reserved"},
+
+		{name: "a container keeps the default memory tier", kind: "container", action: "create", body: `{"name":"box"}`, kept: `{"memory_tier":"` + resources.DefaultRetainedContainerMemoryTier + `"}`},
+		{name: "a container keeps the tier it asked for", kind: "container", action: "create", body: `{"memory_limit":"4g"}`, kept: `{"memory_tier":"4g"}`},
+		{name: "a container tier the gateway cannot bill", kind: "container", action: "create", body: `{"memory_limit":"3g"}`, refused: "memory tier"},
+		{name: "a container tier that is not text", kind: "container", action: "create", body: `{"memory_limit":4}`, refused: "memory tier"},
+		{name: "container metadata", kind: "container", action: "create", body: `{"metadata":null}`, refused: "does not accept metadata"},
+		{name: "a container file takes its container's tier", kind: "container_file", action: "create", body: `{}`, parent: &resources.Resource{Kind: "container", Metadata: []byte(`{"memory_tier":"16g"}`)}, kept: `{"memory_tier":"16g"}`},
+		{name: "a container file whose container has no tier", kind: "container_file", action: "create", body: `{}`, parent: &resources.Resource{Kind: "container", Metadata: []byte(`{}`)}, refused: resources.ErrContract.Error()},
+		{name: "a container file without its container", kind: "container_file", action: "create", body: `{}`, refused: resources.ErrContract.Error()},
+
+		{name: "supervised tuning", kind: "fine_tuning_job", action: "create", body: `{"method":{"type":"supervised"}}`, kept: `{}`},
+		{name: "preference tuning", kind: "fine_tuning_job", action: "create", body: `{"method":{"type":"dpo"}}`, kept: `{}`},
+		{name: "tuning with no method", kind: "fine_tuning_job", action: "create", body: `{"method":null}`, kept: `{}`},
+		{name: "a tuning method the gateway cannot settle", kind: "fine_tuning_job", action: "create", body: `{"method":{"type":"reinforcement"}}`, refused: "tuning method"},
+
+		{name: "cloud tuning from an owned dataset", kind: "vertex_tuning_job", action: "create", body: `{"labels":{"team":"a"},"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl","validationDatasetUri":"gs://tuning/owned/check.jsonl"}}`, kept: `{}`},
+		{name: "cloud tuning from a dataset outside the connection", kind: "vertex_tuning_job", action: "create", body: `{"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/other/train.jsonl"}}`, refused: "training dataset"},
+		{name: "cloud tuning without a dataset", kind: "vertex_tuning_job", action: "create", body: `{}`, refused: "training dataset"},
+		{name: "cloud tuning validated outside the connection", kind: "vertex_tuning_job", action: "create", body: `{"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl","validationDatasetUri":"gs://elsewhere/check.jsonl"}}`, refused: "validation dataset"},
+		{name: "cloud tuning labels that are not an object", kind: "vertex_tuning_job", action: "create", body: `{"labels":[],"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl"}}`, refused: resources.ErrContract.Error()},
+		{name: "cloud tuning labels naming the submission marker", kind: "vertex_tuning_job", action: "create", body: `{"labels":{"olp_submission_id":"x"},"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl"}}`, refused: "reserved"},
+		{name: "cloud tuning of custom weights", kind: "vertex_tuning_job", action: "create", body: `{"customBaseModel":"gs://weights","supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl"}}`, refused: "only the route's base model"},
+		{name: "cloud tuning by distillation", kind: "vertex_tuning_job", action: "create", body: `{"distillationSpec":{},"supervisedTuningSpec":{"trainingDatasetUri":"gs://tuning/owned/train.jsonl"}}`, refused: "only the route's base model"},
+
+		{name: "a context cache keeps its serving model and that it holds no tools", kind: "context_cache", action: "create", body: `{"tools":[],"toolConfig":null}`, kept: `{"serving_model":"` + judge + `","no_cached_tools":true}`},
+		{name: "a context cache holding tools", kind: "context_cache", action: "create", body: `{"tools":[{"functionDeclarations":[]}]}`, refused: "cached tools"},
+		{name: "a context cache holding tool configuration", kind: "context_cache", action: "create", body: `{"tool_config":{}}`, refused: "cached tool configuration"},
+		{name: "a context cache expiry change", kind: "context_cache", action: "patch", body: `{"ttl":"60s"}`, kept: `{"serving_model":"` + judge + `"}`},
+		{name: "an empty context cache change", kind: "context_cache", action: "patch", body: `{}`, refused: "must not be empty"},
+		{name: "a context cache change of anything but its expiry", kind: "context_cache", action: "patch", body: `{"ttl":"60s","displayName":"x"}`, refused: "only cache expiration"},
+
+		{name: "an evaluation keeps the graders it may spend on", kind: "eval", action: "create", operation: "eval", body: graded(judge), kept: `{"authorized_models":["` + judge + `"],"serving_models":{"` + judge + `":"` + judge + `"}}`},
+		{name: "an evaluation with no model graders keeps an empty list it can still run under", kind: "eval", action: "create", operation: "eval", body: `{"data_source_config":{"type":"custom"},"testing_criteria":[{"type":"string_check"}]}`, kept: `{"authorized_models":[],"serving_models":{}}`},
+		{name: "an evaluation grading with a model off the route", kind: "eval", action: "create", operation: "eval", body: graded("stranger-model"), refused: "not authorized"},
+		{name: "an evaluation grading with no model", kind: "eval", action: "create", operation: "eval", body: `{"testing_criteria":[{"type":"label_model"}]}`, refused: "explicitly authorized model"},
+		{name: "an evaluation reading provider logs", kind: "eval", action: "create", operation: "eval", body: `{"data_source_config":{"type":"logs"}}`, refused: "owner-bound source"},
+		{name: "an evaluation whose two names reach one provider model", kind: "eval", action: "create", operation: "eval", body: `{"testing_criteria":[{"type":"score_model","model":"` + judge + `"},{"type":"score_model","model":"alias-model"}]}`, refused: "distinct native models"},
+		{name: "an evaluation rename keeps its graders", kind: "eval", action: "update", operation: "eval", body: `{"name":"renamed"}`, parent: definition, kept: `{"authorized_models":["` + judge + `"],"serving_models":{"` + judge + `":"` + judge + `"}}`},
+		{name: "an evaluation change of anything but its name", kind: "eval", action: "update", operation: "eval", body: `{"testing_criteria":[]}`, parent: definition, refused: "only evaluation name and metadata"},
+		{name: "a run adds its sampling model to the definition's graders", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"completions","model":"` + sampler + `","source":{"type":"file_content","content":[{"model":"ignored"}]}}}`, parent: definition, kept: `{"authorized_models":["` + sampler + `","` + judge + `"],"serving_models":{"` + judge + `":"` + judge + `","` + sampler + `":"` + sampler + `"}}`},
+		{name: "a run without its definition", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"jsonl"}}`, refused: resources.ErrContract.Error()},
+		{name: "a run under something that is not a definition", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"jsonl"}}`, parent: &resources.Resource{Kind: "container", Metadata: definition.Metadata}, refused: resources.ErrContract.Error()},
+		{name: "a run of a definition stored without graders", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"jsonl"}}`, parent: &resources.Resource{Kind: "eval", Metadata: []byte(`{}`)}, refused: "recreate it"},
+		{name: "a run of a definition bound to another provider model", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"jsonl"}}`, parent: &resources.Resource{Kind: "eval", Metadata: []byte(`{"authorized_models":["` + judge + `"],"serving_models":{"` + judge + `":"moved-model"}}`)}, refused: "compatible native grader"},
+		{name: "a run of a definition whose grader left the route", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"completions","model":"` + sampler + `","source":{"type":"file_content","content":[]}}}`, parent: &resources.Resource{Kind: "eval", Metadata: []byte(`{"authorized_models":["retired-model"],"serving_models":{"retired-model":"retired-model"}}`)}, refused: resources.ErrContract.Error()},
+		{name: "a run from a source the gateway cannot account", kind: "eval_run", action: "create", operation: "eval", body: `{"data_source":{"type":"stored_completions"}}`, parent: definition, refused: "unsupported evaluation data source"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, err := oif.ParseJSON([]byte(tc.body), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Kind: tc.kind, Operation: tc.operation}, Action: tc.action}
+			fields, err := retainedInputMetadata(pin, route, owner, endpoint, source, tc.parent)
+			if tc.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refused) {
+					t.Fatalf("refusal = %v, want one naming %q", err, tc.refused)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fields["upstream_model"] != judge || fields["contract_revision"] != retainedapi.Revision {
+				t.Fatalf("kept %v, want the provider model and contract revision", fields)
+			}
+			delete(fields, "upstream_model")
+			delete(fields, "contract_revision")
+			got, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want, have any
+			if json.Unmarshal([]byte(tc.kept), &want) != nil || json.Unmarshal(got, &have) != nil || !reflect.DeepEqual(want, have) {
+				t.Fatalf("kept %s beyond the provider model, want %s", got, tc.kept)
+			}
+		})
 	}
 }

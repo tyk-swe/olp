@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type pinnedExchange struct {
+type PinnedExchange struct {
 	request  *Call
 	state    attemptState
 	index    int
@@ -27,16 +27,16 @@ type pinnedExchange struct {
 	now      func() time.Time
 }
 
-type pinnedResponse struct {
+type PinnedResponse struct {
 	*http.Response
-	Exchange *pinnedExchange
+	Exchange *PinnedExchange
 }
 
-func (e *pinnedExchange) fact() *events.AttemptFact {
+func (e *PinnedExchange) fact() *events.AttemptFact {
 	return &e.request.facts[e.index]
 }
 
-func (s *Server) beginPinned(ctx context.Context, x *Call, p *Pin, method string) *pinnedExchange {
+func (s *Server) beginPinned(ctx context.Context, x *Call, p *Pin, method string) *PinnedExchange {
 	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
 	fact.Mode = x.mode
 	if x.retainedAdmission != nil {
@@ -47,7 +47,7 @@ func (s *Server) beginPinned(ctx context.Context, x *Call, p *Pin, method string
 	}
 	retainedBillable := x.retained.billing == retainedMeteredWork || x.retainedAdmission != nil && (fact.Price != nil || fact.CardRev != nil)
 	nativeBillable := (x.family == wire.GeminiInteractions || x.family == wire.Bedrock || x.family == wire.BedrockInvoke) && x.actor != "api_key_resource"
-	exchange := &pinnedExchange{
+	exchange := &PinnedExchange{
 		state:   attemptState{parent: ctx, classifier: upstream.Classifier{AtMostOnce: method == http.MethodPost, Declared: p.Provider.Connector().Classification()}},
 		request: x, index: len(x.facts), hold: p.Hold, billable: retainedBillable || nativeBillable, now: s.Now,
 	}
@@ -60,13 +60,13 @@ func (s *Server) beginPinned(ctx context.Context, x *Call, p *Pin, method string
 	return exchange
 }
 
-func (e *pinnedExchange) fail(class string, failure *attemptFailure) *attemptFailure {
+func (e *PinnedExchange) fail(class string, failure *AttemptFailure) *AttemptFailure {
 	if failure == nil {
-		failure = &attemptFailure{}
+		failure = &AttemptFailure{}
 	}
 	failure.class, failure.dispatched = class, e.state.dispatched.Load()
 	failure.credentialRefused = e.state.credentialRefused
-	failure.acceptance = e.state.evidence().Acceptance()
+	failure.Acceptance = e.state.evidence().Acceptance()
 	failure.accepted = e.state.accepted
 	fact := e.fact()
 	fact.Class = class
@@ -80,7 +80,7 @@ func (e *pinnedExchange) fail(class string, failure *attemptFailure) *attemptFai
 	return failure
 }
 
-func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *pinnedExchange, req *http.Request, decodeError func([]byte) *wire.UpstreamError) (*pinnedResponse, *attemptFailure) {
+func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *PinnedExchange, req *http.Request, decodeError func([]byte) *wire.UpstreamError) (*PinnedResponse, *AttemptFailure) {
 	client, err := exchange.bound.client(ctx)
 	if err != nil {
 		return nil, exchange.fail(classCredential, nil)
@@ -103,13 +103,13 @@ func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *pinnedEx
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		exchange.state.accepted = true
 		// Headers prove acceptance, never valid completion or delivery.
-		fact.Class = classProtocol
+		fact.Class = ClassProtocol
 		exchange.recordEvidence()
-		return &pinnedResponse{Response: resp, Exchange: exchange}, nil
+		return &PinnedResponse{Response: resp, Exchange: exchange}, nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	_ = resp.Body.Close()
-	failure := &attemptFailure{Status: resp.StatusCode, upstream: x.redacted(decodeError(raw))}
+	failure := &AttemptFailure{Status: resp.StatusCode, upstream: x.redacted(decodeError(raw))}
 	class := exchange.state.rejected(resp.StatusCode, failure.upstream)
 	if class == classRateLimit {
 		failure.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
@@ -117,7 +117,7 @@ func (s *Server) doPinnedRequest(ctx context.Context, p *Pin, exchange *pinnedEx
 	return nil, exchange.fail(class, failure)
 }
 
-func (e *pinnedExchange) Complete(class string) {
+func (e *PinnedExchange) Complete(class string) {
 	if e.state.settled && class == ClassSuccess {
 		return
 	}
@@ -126,7 +126,7 @@ func (e *pinnedExchange) Complete(class string) {
 	e.end()
 }
 
-func (e *pinnedExchange) interrupt(class string, local bool) {
+func (e *PinnedExchange) Interrupt(class string, local bool) {
 	if e.state.settled {
 		return
 	}
@@ -136,17 +136,17 @@ func (e *pinnedExchange) interrupt(class string, local bool) {
 	e.end()
 }
 
-func (e *pinnedExchange) invalidNative() {
+func (e *PinnedExchange) InvalidNative() {
 	if e.state.settled {
 		if e.fact().Class == ClassSuccess {
-			e.fact().Class = classProtocol
+			e.fact().Class = ClassProtocol
 		}
 		return
 	}
-	e.interrupt(classProtocol, false)
+	e.Interrupt(ClassProtocol, false)
 }
 
-func (e *pinnedExchange) end() {
+func (e *PinnedExchange) end() {
 	if !e.endedAt.IsZero() {
 		return
 	}
@@ -154,7 +154,7 @@ func (e *pinnedExchange) end() {
 	e.recordEvidence()
 }
 
-func (e *pinnedExchange) recordEvidence() {
+func (e *PinnedExchange) recordEvidence() {
 	fact := e.fact()
 	if !e.endedAt.IsZero() {
 		fact.Duration = e.endedAt.Sub(fact.StartedAt)
@@ -172,7 +172,7 @@ func (x *Call) finalizePinned() {
 	}
 }
 
-func (e *pinnedExchange) Delivery(state usage.ClientState) {
+func (e *PinnedExchange) Delivery(state usage.ClientState) {
 	fact := e.fact()
 	fact.Committed = true
 	if fact.Interaction == nil {
@@ -189,7 +189,7 @@ func (s *Server) settlePinnedHold(ctx context.Context, hold *dispatchHold) {
 	if hold == nil || hold.settled {
 		return
 	}
-	var latest *pinnedExchange
+	var latest *PinnedExchange
 	var total int64
 	var reconciled bool
 	for _, exchange := range hold.pinned {
@@ -229,7 +229,7 @@ func DeliveryState[T ~int | ~int64](written T) usage.ClientState {
 	return usage.ClientUnobserved
 }
 
-func (r *pinnedResponse) ReadBody(limit int64) ([]byte, error) {
+func (r *PinnedResponse) ReadBody(limit int64) ([]byte, error) {
 	body, err := readBounded(r.Body, limit)
 	if err != nil {
 		r.Exchange.readFailure()
@@ -237,18 +237,18 @@ func (r *pinnedResponse) ReadBody(limit int64) ([]byte, error) {
 	return body, err
 }
 
-func (e *pinnedExchange) readFailure() {
+func (e *PinnedExchange) readFailure() {
 	switch e.state.interrupted(nil) {
 	case context.Canceled:
-		e.interrupt(classCancelled, true)
+		e.Interrupt(ClassCancelled, true)
 	case context.DeadlineExceeded:
-		e.interrupt(classTimeout, false)
+		e.Interrupt(ClassTimeout, false)
 	}
 }
 
-func (r *pinnedResponse) StageBody(ctx context.Context, spool *staging.Spool, filename, contentType string, maximumLength int64) (*staging.Artifact, error) {
+func (r *PinnedResponse) StageBody(ctx context.Context, spool *staging.Spool, filename, contentType string, maximumLength int64) (*staging.Artifact, error) {
 	if spool == nil {
-		r.Exchange.interrupt(classProtocol, true)
+		r.Exchange.Interrupt(ClassProtocol, true)
 		return nil, staging.ErrUnavailable
 	}
 	artifact, err := spool.Put(ctx, staging.Upload{
@@ -259,16 +259,16 @@ func (r *pinnedResponse) StageBody(ctx context.Context, spool *staging.Spool, fi
 	}
 	_, tooLarge := errors.AsType[*staging.TooLargeError](err)
 	local := !tooLarge && (err == staging.ErrUnavailable || !errors.Is(err, staging.ErrUnavailable))
-	r.Exchange.interrupt(classProtocol, local)
+	r.Exchange.Interrupt(ClassProtocol, local)
 	r.Exchange.readFailure()
 	return nil, err
 }
 
 var errPinnedUploadRead = errors.New("staged upload read failed")
 
-type pinnedUploadSource struct{ io.Reader }
+type PinnedUploadSource struct{ io.Reader }
 
-func (r pinnedUploadSource) Read(buffer []byte) (int, error) {
+func (r PinnedUploadSource) Read(buffer []byte) (int, error) {
 	n, err := r.Reader.Read(buffer)
 	if err != nil && err != io.EOF {
 		return n, fmt.Errorf("%w: %w", errPinnedUploadRead, err)

@@ -168,9 +168,15 @@ packages hold what the kernel uses and never import it back.
 | `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
 | `gateway/guardstream` | streamed output guardrails, with the tool call and text framing of each wire family in its own file | none |
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
+| `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
+| `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement and the surfaces still inside it | every package above |
+| `gateway/healthprobes` | The health probe worker. It picks the opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
+| `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
+| `gateway/surface/playground` | The console playground, which runs a route for a signed-in member through `kernel.MemberGeneration`. The composition root registers its two handlers on the management API | `fault`, `kernel`, `publishedprompt` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
@@ -182,6 +188,26 @@ flag for one. A surface that needs something from a shared step sets a general
 field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
 kernel's tests register the same assembly, so the refusal matrix in
 `kernel/surfaces_test.go` covers a surface's routes after it moves.
+
+The kernel owns the `/gemini/{version}/models/{model}:{action}` route because
+generation lives there. A surface that serves one of those actions returns it
+from an `Actions` function, as `surface/geministate` does for
+`batchGenerateContent`, and the assembly passes the map to `RegisterKernel`.
+
+A handler in a surface reads as a list of steps. `surface/geminiinteractions`
+is the example for a request that admits, pins, sends and answers. Its handler
+calls one named kernel step per stage, such as `ReserveGeneration`,
+`GatePinnedGeneration` and `SettleGeneration` in `kernel/pinned_generation.go`,
+and a surface calls kernel steps and never reads or writes the `Call`'s
+admission or settlement fields. When a surface needs a stage the kernel does
+not name yet, add the step to the kernel and call it.
+
+A step takes what it needs as arguments and returns what it found, so its
+dependencies are in its signature. The request value is built once and is not
+written again. `kernel/retained_request.go` is the example. The only state a
+handler writes is what its deferred settlement must still read when a step
+panics, such as the pin and the status, and that state lives in one small type
+that says so, like `retainedEnd`.
 
 Put new code in the kernel only when every surface needs it. Code that reads a
 few values from the `Call` takes them as a config struct and moves beneath the

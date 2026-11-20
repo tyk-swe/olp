@@ -278,10 +278,10 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy gua
 	if problem != nil {
 		return nil, problem
 	}
-	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
-	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
+	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.Log)
 	// Later steps must include this independently routed attempt in the same run.
 	parent.facts, parent.spent = x.facts, x.spent
 	if result.err != nil {

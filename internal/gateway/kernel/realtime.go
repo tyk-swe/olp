@@ -166,7 +166,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		u.RawQuery, u.Fragment = "", ""
 		check = u.String()
 	}
-	if _, err := s.egress.ValidateEndpoint(check); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}
@@ -210,7 +210,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(limit)
 	x.dispatched = true
 	observedUsage, observed, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
-	class := classProtocol
+	class := ClassProtocol
 	cancelled := false
 	var ineligible *realtimeCredentialError
 	if relayErr != nil {
@@ -218,11 +218,11 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(relayErr, errRealtimeAuthorityRevoked), errors.As(relayErr, &ineligible):
 			class = classCredential
 		case errors.Is(relayErr, errRealtimeClientClosed):
-			class, cancelled = classCancelled, true
+			class, cancelled = ClassCancelled, true
 		case errors.Is(relayErr, context.Canceled):
-			class, cancelled = classCancelled, true
+			class, cancelled = ClassCancelled, true
 		case errors.Is(relayErr, context.DeadlineExceeded):
-			class = classTimeout
+			class = ClassTimeout
 		}
 	}
 	if len(x.facts) > 0 {
@@ -256,10 +256,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 			x.Failure = fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
 		case errors.As(relayErr, &ineligible):
 			x.Failure = fault.PermissionError("provider_credential_"+string(ineligible.eligibility), "The realtime provider credential is no longer eligible.")
-		case class == classCancelled:
-			x.Failure = (&attemptFailure{class: classCancelled}).toError()
-		case class == classTimeout:
-			x.Failure = (&attemptFailure{class: classTimeout}).toError()
+		case class == ClassCancelled:
+			x.Failure = (&AttemptFailure{class: ClassCancelled}).Fault()
+		case class == ClassTimeout:
+			x.Failure = (&AttemptFailure{class: ClassTimeout}).Fault()
 		}
 		status := x.Failure.Status
 		if x.Strict() {
@@ -338,7 +338,7 @@ func realtimeDial(ctx context.Context, s *Server, x *Call, p *Pin, endpoint stri
 	}
 	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
+		return nil, finish(ClassConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
 	if err := s.applySlotCredential(ctx, x, probe, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
 		return nil, finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
@@ -373,7 +373,7 @@ func realtimeDial(ctx context.Context, s *Server, x *Call, p *Pin, endpoint stri
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = outcome.Acceptance
 		}
-		return nil, finish(string(outcome.Class), UpstreamError(&attemptFailure{Status: status, upstream: nativeError}))
+		return nil, finish(string(outcome.Class), UpstreamError(&AttemptFailure{Status: status, upstream: nativeError}))
 	}
 	fact.Class = "success"
 	fact.Status = http.StatusOK
@@ -550,7 +550,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *Call, p *Pin, client, con
 	done := make(chan relayEnd, 2)
 	remaining := 2
 	relay := func(dst, src duplexPeer, inspect bool) {
-		defer panics.Recover(s.log, "realtime relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "realtime relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, inspect)
 	}
 	go relay(conn, client, false)

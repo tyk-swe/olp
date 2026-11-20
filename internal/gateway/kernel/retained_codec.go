@@ -35,12 +35,12 @@ func retainedBindingStoreError(err error) error {
 	return fmt.Errorf("%w: %w", errRetainedBindingUnavailable, err)
 }
 
-func retainedProjectionError(exchange *pinnedExchange, err error) *fault.Error {
+func retainedProjectionError(exchange *PinnedExchange, err error) *fault.Error {
 	if errors.Is(err, errRetainedBindingUnavailable) {
-		exchange.interrupt(classProtocol, true)
+		exchange.Interrupt(ClassProtocol, true)
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Resource identity bindings are unavailable.")
 	}
-	exchange.invalidNative()
+	exchange.InvalidNative()
 	return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider response contained an unbound resource identity.")
 }
 
@@ -63,7 +63,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 			return nil, source, "", fault.ServerError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
 		}
 		body, err := readBounded(r.Body, s.Config.MaxBodyBytes)
-		if errors.Is(err, errResponseTooLarge) {
+		if errors.Is(err, ErrResponseTooLarge) {
 			return nil, source, "", ingress.BodyTooLarge()
 		}
 		if err != nil {
@@ -378,7 +378,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *Call, a keyautho
 				}
 			}
 		}
-		if err != nil || !retainedAffinity(bound, p, route) || bound.State == "submitting" || bound.State == "submission_unknown" || bound.State == "not_accepted" {
+		if err != nil || !retainedAffinity(bound, p, route) || retainedUnsettled(bound.State) {
 			return "", resources.ErrNotFound
 		}
 		if kind == resources.KindGeminiFile {

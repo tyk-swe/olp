@@ -247,11 +247,11 @@ func workflowApprovalFrames(pause *workflowPause, maxEvent, maxResponse int) ([]
 				Item        workflowApprovalItem `json:"item"`
 			}{Type: kind, Sequence: sequence, OutputIndex: index, Item: item})
 			if err != nil || len(payload) > maxEvent {
-				return nil, errResponseTooLarge
+				return nil, ErrResponseTooLarge
 			}
 			frame := sse.Frame{Event: &kind, Data: string(payload)}.Encode()
 			if output.Len()+len(frame) > maxResponse {
-				return nil, errResponseTooLarge
+				return nil, ErrResponseTooLarge
 			}
 			output.Write(frame)
 			sequence++
@@ -264,11 +264,11 @@ func workflowApprovalFrames(pause *workflowPause, maxEvent, maxResponse int) ([]
 		Response *workflowPause `json:"response"`
 	}{Type: kind, Sequence: sequence, Response: pause})
 	if err != nil || len(payload) > maxEvent {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	frame := sse.Frame{Event: &kind, Data: string(payload)}.Encode()
 	if output.Len()+len(frame) > maxResponse {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	output.Write(frame)
 	return output.Bytes(), nil
@@ -378,16 +378,16 @@ func workflowPauseFrames(family wire.Format, model, id string, pause *workflowPa
 			data, err := json.Marshal(geminiEvent{Candidates: []geminiCandidate{{Content: geminiContent{Role: "model", Parts: []json.RawMessage{}}, FinishReason: "STOP"}}, Approval: pause})
 			return []event{{data: data}}, err
 		default:
-			return nil, errResponseTooLarge
+			return nil, ErrResponseTooLarge
 		}
 	}()
 	if err != nil {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	var output bytes.Buffer
 	for _, event := range events {
 		if len(event.data) > maxEvent {
-			return nil, errResponseTooLarge
+			return nil, ErrResponseTooLarge
 		}
 		frame := sse.Frame{Data: string(event.data)}
 		if event.name != "" {
@@ -395,7 +395,7 @@ func workflowPauseFrames(family wire.Format, model, id string, pause *workflowPa
 		}
 		encoded := frame.Encode()
 		if output.Len()+len(encoded) > maxResponse {
-			return nil, errResponseTooLarge
+			return nil, ErrResponseTooLarge
 		}
 		output.Write(encoded)
 	}

@@ -214,7 +214,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 	budgetRoute := *x.Route
 	budgetRoute.CallerCostExempt = x.callerCostExempt()
 	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
-		if err := unboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
+		if err := UnboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
 			return err
 		}
 	}
@@ -226,7 +226,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 		// estimate alone cannot enforce a token or spend cap on this request.
 		if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
 			authority := x.AdmissionAuthority(x.authority)
-			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
+			if err := UnboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
 				session.semantic = err
 				return nil, err
 			}
@@ -234,7 +234,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
 					continue
 				}
-				if err := unboundedWorkLimits(authority, &p, &slot, &budgetRoute, x.limitRoute()); err != nil {
+				if err := UnboundedWorkLimits(authority, &p, &slot, &budgetRoute, x.limitRoute()); err != nil {
 					session.semantic = err
 					return nil, err
 				}
@@ -288,7 +288,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call, bod
 		s.recordCacheHit(x)
 		result.result.Body = x.cache.entry.Body
 	} else {
-		result = runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+		result = runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 	}
@@ -318,7 +318,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call, bod
 		err = rc.Flush()
 	}
 	if err != nil {
-		out.Err = (&attemptFailure{class: classCancelled}).toError()
+		out.Err = (&AttemptFailure{class: ClassCancelled}).Fault()
 		out.Cancelled = true
 	} else {
 		x.Delivered(s.Now())

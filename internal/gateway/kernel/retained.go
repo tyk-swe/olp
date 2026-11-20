@@ -26,7 +26,7 @@ import (
 // that does not exist, and a resource whose serving identity is gone answers
 // that it is unavailable.
 
-func pinUnavailable() *fault.Error {
+func PinUnavailable() *fault.Error {
 	return fault.ServerError(http.StatusConflict, "provider_resource_credential_unavailable",
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
@@ -41,7 +41,7 @@ func (s *Server) AuthorizeListedResource(ctx context.Context, authority keyautho
 	}
 	resolved, err := s.Deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	if err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
@@ -225,7 +225,7 @@ func (s *Server) ResolveResource(ctx context.Context, x *Call, authority keyauth
 	}
 	resolved, err := s.Deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
-		return nil, nil, pinUnavailable()
+		return nil, nil, PinUnavailable()
 	}
 	if err != nil {
 		return nil, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
@@ -247,18 +247,18 @@ func (s *Server) ResolveResource(ctx context.Context, x *Call, authority keyauth
 	if e := x.retainedContentGate(res, route, use); e != nil {
 		return nil, nil, e
 	}
-	if e := x.checkBody(route); e != nil {
+	if e := x.CheckBody(route); e != nil {
 		return nil, nil, e
 	}
 	target := &resolved.Target
 	if target.ProviderModel != ResourceModel(res) {
-		return nil, nil, pinUnavailable()
+		return nil, nil, PinUnavailable()
 	}
 	if use == RetainedNewWork {
 		if e := restrictRetainedWork(x.request.release.Snapshot(), authority.ID, provider, route, slot, target, operation); e != nil {
 			return nil, nil, e
 		}
-		if e := x.checkBody(route); e != nil {
+		if e := x.CheckBody(route); e != nil {
 			return nil, nil, e
 		}
 	}
@@ -290,11 +290,11 @@ func (s *Server) admitStoredResponse(ctx context.Context, x *Call, authority key
 		return p, route, e
 	}
 	if !p.Provider.Enabled || !p.Slot.Allows(p.Model, res.RouteSlug, authority.ID) || p.Model != contract.Binding || p.Provider.RevisionID != contract.Receipt.Serving.RevisionID || p.Provider.ProfileID != contract.Receipt.ProfileID || p.Provider.ProfileRevision != contract.Receipt.ProfileRevision {
-		return nil, nil, pinUnavailable()
+		return nil, nil, PinUnavailable()
 	}
 	if p.Provider.Network != nil && p.Provider.Network.CredentialID != "" {
 		if _, err := s.providerNetworkSecret(ctx, x.request.release, &p.Provider); err != nil {
-			return nil, nil, pinUnavailable()
+			return nil, nil, PinUnavailable()
 		}
 	}
 	return p, route, nil
@@ -323,11 +323,11 @@ func (s *Server) admitDurable(ctx context.Context, x *Call, authority keyauthori
 	}
 	profile, profileErr := p.Provider.Connector().Profile()
 	if profileErr != nil || !p.Provider.Enabled || !p.Slot.Allows(p.Model, r.RouteSlug, authority.ID) || p.Model != doc.Binding || p.Provider.RevisionID != doc.Serving.RevisionID || profile.ID != doc.Serving.ProfileID || profile.Revision != doc.Serving.ProfileRevision {
-		return nil, nil, pinUnavailable()
+		return nil, nil, PinUnavailable()
 	}
 	if p.Provider.Network != nil && p.Provider.Network.CredentialID != "" {
 		if _, err := s.providerNetworkSecret(ctx, x.request.release, &p.Provider); err != nil {
-			return nil, nil, pinUnavailable()
+			return nil, nil, PinUnavailable()
 		}
 	}
 	return p, route, nil
@@ -348,11 +348,11 @@ func (s *Server) authorizeDurable(ctx context.Context, x *Call, authority keyaut
 func restrictRetainedWork(current *routing.View, keyID string, provider *routing.Provider, route *routing.Route, slot *routing.Slot, target *routing.Target, operation string) *fault.Error {
 	live, ok := current.FindProvider(provider.ID)
 	if !ok || !live.Enabled {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	liveRoute, ok := current.FindRoute(route.Slug)
 	if !ok || liveRoute.ID != route.ID || !slices.Contains(liveRoute.Operations, operation) {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	foundTarget := false
 	for i := range liveRoute.Targets {
@@ -368,7 +368,7 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 		}
 	}
 	if !foundTarget {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	var liveSlot *routing.Slot
 	for _, candidate := range live.Slots {
@@ -378,7 +378,7 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 		}
 	}
 	if liveSlot == nil || !liveSlot.Allows(target.ProviderModel, route.Slug, keyID) || !slot.Allows(target.ProviderModel, route.Slug, keyID) {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	slot.RequestsPerMinute = tighterRetainedLimit(slot.RequestsPerMinute, liveSlot.RequestsPerMinute)
 	slot.TokensPerMinute = tighterRetainedLimit(slot.TokensPerMinute, liveSlot.TokensPerMinute)

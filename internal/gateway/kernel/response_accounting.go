@@ -126,7 +126,7 @@ func (s *Server) finalizeGenerationHTTP(x *Call, env events.Envelope) {
 	last := &owner.event.Attempts[len(owner.event.Attempts)-1]
 	fact := &env.Attempts[len(env.Attempts)-1]
 	if fact.Ordinal != last.Ordinal || fact.ProviderID != last.ProviderID || fact.UpstreamModel != last.UpstreamModel || !fact.StartedAt.Equal(last.StartedAt) {
-		s.log.Warn("deferred generation HTTP outcome has a different final attempt", "request_id", env.RequestID)
+		s.Log.Warn("deferred generation HTTP outcome has a different final attempt", "request_id", env.RequestID)
 		return
 	}
 	completion := usage.HTTPCompletion{
@@ -150,7 +150,7 @@ func (s *Server) finalizeGenerationHTTP(x *Call, env events.Envelope) {
 	if err := s.Deps.Resources.CompleteGenerationHTTP(ctx, owner.localID, completion); err != nil {
 		// A crash or failed bounded finalization leaves explicit missing HTTP
 		// metadata. Never manufacture success or replay its financial event.
-		s.log.Warn("deferred generation HTTP outcome not recorded", "request_id", env.RequestID, "error", err)
+		s.Log.Warn("deferred generation HTTP outcome not recorded", "request_id", env.RequestID, "error", err)
 	}
 }
 
@@ -172,7 +172,7 @@ func (s *Server) applyResponseObservation(ctx context.Context, localID string, o
 		return fault.ServerError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
 	}
 	if err := s.Deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
-		s.log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
+		s.Log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
 	}
 	return nil
 }

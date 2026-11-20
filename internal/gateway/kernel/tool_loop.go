@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
@@ -191,7 +189,7 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *Call, toolsetI
 	route := x.Route
 	go func() {
 		defer close(done)
-		defer panics.Recover(s.log, "workflow authority monitor", func(error) {
+		defer panics.Recover(s.Log, "workflow authority monitor", func(error) {
 			result <- fault.ServerError(http.StatusInternalServerError, "internal_error", "The workflow tool authority could not be checked.")
 			cancel()
 		})
@@ -243,8 +241,8 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *Call) *fault.Error
 		return s.Deps.Debits.MarkNotSent(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
-		if s.log != nil {
-			s.log.Warn("workflow debit release failed", "error", err.Error())
+		if s.Log != nil {
+			s.Log.Warn("workflow debit release failed", "error", err.Error())
 		}
 		s.markSessionUnknown(ctx, x)
 		return quota.LimitsUnavailable()
@@ -252,257 +250,6 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *Call) *fault.Error
 	x.facts[len(x.facts)-1].Execution = nil
 	x.sessionDebit = nil
 	return nil
-}
-
-func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
-	firstIteration, resumeError := func() (int, *fault.Error) {
-		if x.workflow.resume == nil {
-			return 0, nil
-		}
-		state := x.workflow.resume
-		x.workflow.calls = state.Calls
-		parsed, err := x.generation.parsed.WithField(x.family.WorkflowTranscriptField(), state.Transcript)
-		if err != nil {
-			return 0, fault.InvalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
-		}
-		x.generation.parsed = parsed
-		if x.guard.engine != nil && x.guard.engine.HasCompression() {
-			x.guard.ctx = ctx
-			if _, _, err := x.inspectGuardrailInput(parsed.OIF().Document()); err != nil {
-				return 0, guardrailError(err)
-			}
-		}
-		continued, failure := s.continueToolLoop(ctx, x, state.Completion, x.workflow.resumeStart)
-		if failure != nil {
-			return 0, failure
-		}
-		x.generation.parsed = continued
-		return state.Iteration + 1, nil
-	}()
-	if resumeError != nil {
-		return &Outcome{Err: resumeError}
-	}
-	for iteration := firstIteration; int64(iteration) < *x.generation.runLimits.MaxIterations; iteration++ {
-		if iteration > 0 {
-			parsed, failure := s.pruneWorkflow(ctx, x, x.generation.parsed)
-			if failure != nil {
-				return &Outcome{Err: failure}
-			}
-			x.generation.parsed = parsed
-		}
-		authority, e := s.workflowAuthority(ctx, x, x.Route, "")
-		if e != nil {
-			return &Outcome{Err: e}
-		}
-		var frames bytes.Buffer
-		if x.generation.parsed.Stream {
-			x.generation.emit = func(frame []byte) error {
-				if int64(frames.Len()+len(frame)) > s.Config.MaxResponseBytes {
-					return errResponseTooLarge
-				}
-				_, err := frames.Write(frame)
-				return err
-			}
-		}
-		out := s.executeModelStep(ctx, x, x.generation.parsed, *authority)
-		if out.Err == nil && out.completion != nil && x.workflow.responseMCP && !x.responseMCPContractCertified() {
-			x.workflow.responseMCP = false
-			x.workflow.responseItems = nil
-		}
-		if out.Err == nil && out.completion != nil && x.generation.parsed.Stream {
-			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.Config.MaxEventBytes), int(s.Config.MaxResponseBytes), x.named().Slug)
-			if err != nil {
-				return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
-			}
-			out.completion.ToolCalls, out.completion.OutputText, out.completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
-			if len(completion.ToolCalls) != 0 && x.family == wire.Responses {
-				out.completion.Body = completion.Body
-			} else if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
-				body, err := protocols.WorkflowStreamBody(x.family, bytes.NewReader(frames.Bytes()), int(s.Config.MaxEventBytes))
-				if err != nil {
-					return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
-				}
-				out.completion.Body = body
-			}
-		}
-		if out.Err == nil && out.completion != nil && !x.generation.parsed.Stream && x.family.Surface() == "gemini" && !protocols.WorkflowSingleCandidate(out.completion.Body) {
-			return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
-		}
-		if out.Err != nil || out.completion == nil || len(out.completion.ToolCalls) == 0 {
-			if out.Err == nil && out.completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
-				body, err := projectResponseMCPItems(out.completion.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
-				if err != nil {
-					return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
-				}
-				out.completion.Body = body
-			}
-			if out.Err == nil && x.generation.parsed.Stream {
-				if len(x.workflow.responseItems) > 0 {
-					projected, err := projectResponseMCPFrames(frames.Bytes(), x.workflow.responseItems, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
-					if err != nil {
-						return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
-					}
-					x.workflow.finalFrames = projected
-				} else {
-					x.workflow.finalFrames = slices.Clone(frames.Bytes())
-				}
-			}
-			return out
-		}
-		if int64(iteration)+1 == *x.generation.runLimits.MaxIterations {
-			return &Outcome{Err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
-		}
-		if int64(len(out.completion.ToolCalls)+x.workflow.calls) > *x.generation.runLimits.MaxToolCalls {
-			return &Outcome{Err: fault.InvalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
-		}
-		pause, failure := s.pauseWorkflow(ctx, x, out.completion, iteration)
-		if failure != nil {
-			return &Outcome{Err: failure}
-		}
-		if pause != nil {
-			return &Outcome{completion: out.completion, approval: pause}
-		}
-		parsed, failure := s.continueToolLoop(ctx, x, out.completion, x.workflow.ordinal)
-		if failure != nil {
-			return &Outcome{Err: failure}
-		}
-		x.generation.parsed = parsed
-	}
-	return &Outcome{Err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
-}
-
-func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent, maxResponse int, route string) (*wire.Completion, error) {
-	if family == wire.Responses {
-		completion, err := openai.Aggregate(family, frames, maxEvent, maxResponse)
-		if err != nil {
-			return nil, err
-		}
-		return openai.DecodeResponse(completion.Body, route)
-	}
-	if family == wire.Chat {
-		return openai.Stream(wire.Chat, frames, maxEvent, route)
-	}
-	source := family
-	if family.Surface() == "gemini" {
-		source = wire.Gemini
-	}
-	var translated bytes.Buffer
-	_, err := protocols.StreamWithEvents(source, wire.Chat, frames, maxEvent, route, true, func(frame []byte) error {
-		_, err := translated.Write(frame)
-		return err
-	}, nil, 1)
-	if err != nil {
-		return nil, err
-	}
-	return openai.Stream(wire.Chat, &translated, maxEvent, route)
-}
-
-func (s *Server) continueToolLoop(ctx context.Context, x *Call, completion *wire.Completion, identityStart int) (*wire.Request, *fault.Error) {
-	var response struct {
-		Choices []struct {
-			Message json.RawMessage `json:"message"`
-		} `json:"choices"`
-	}
-	var messages []json.RawMessage
-	if x.family == wire.Chat && x.generation.parsed.Stream {
-		calls := make([]map[string]any, len(completion.ToolCalls))
-		for i, call := range completion.ToolCalls {
-			calls[i] = map[string]any{"id": call.ID, "type": "function", "function": map[string]string{"name": call.Name, "arguments": call.Arguments}}
-		}
-		assistant, err := json.Marshal(map[string]any{"role": "assistant", "content": completion.OutputText, "tool_calls": calls})
-		if err != nil {
-			return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
-		}
-		response.Choices = append(response.Choices, struct {
-			Message json.RawMessage `json:"message"`
-		}{Message: assistant})
-	} else if x.family == wire.Chat && (json.Unmarshal(completion.Body, &response) != nil || len(response.Choices) != 1 || len(response.Choices[0].Message) == 0) {
-		return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
-	}
-	field := x.family.WorkflowTranscriptField()
-	input := x.generation.parsed.Field(field)
-	if x.family == wire.Responses && len(input) > 0 && input[0] == '"' {
-		message, err := json.Marshal(struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		}{Role: "user", Content: input})
-		if err != nil {
-			return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
-		}
-		messages = []json.RawMessage{message}
-	} else if err := json.Unmarshal(input, &messages); err != nil {
-		return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
-	}
-	if x.family == wire.Chat {
-		messages = append(messages, response.Choices[0].Message)
-	}
-	results := make([]protocols.WorkflowResult, 0, len(completion.ToolCalls))
-	for callIndex, call := range completion.ToolCalls {
-		authority, e := s.workflowAuthority(ctx, x, x.Route, "")
-		if e != nil {
-			return nil, e
-		}
-		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
-		if index < 0 || call.ID == "" || slices.Contains(x.workflowRecoveryCalls, call.ID) || !json.Valid([]byte(call.Arguments)) {
-			return nil, fault.InvalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
-		}
-		// A shallow copy retains fresh limits while binding request-local attribution.
-		toolAuthority := *authority
-		toolAuthority.Attribution = x.attribution
-		toolCost, costKnown, costErr := x.workflowToolCost(x.workflow.tools[index])
-		if costErr != nil {
-			return nil, costErr
-		}
-		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
-		result, err := s.callWorkflowTool(callCtx, x, toolAuthority, x.workflow.tools[index], call, identityStart+callIndex)
-		authorityErr := finish()
-		x.workflow.ordinal++
-		x.workflow.calls++
-		if authorityErr != nil {
-			return nil, authorityErr
-		}
-		if err != nil {
-			return nil, workflowError(err)
-		}
-		if x.workflow.responseMCP && call.Name != recoveryToolName {
-			item, err := responseMCPCall(x.workflow.tools[index], call, result)
-			if err != nil {
-				return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The tool returned an invalid response.")
-			}
-			x.workflow.responseItems = append(x.workflow.responseItems, item)
-		}
-		x.workflow.toolCost = x.workflow.toolCost.Add(toolCost)
-		x.workflow.unknownCost = x.workflow.unknownCost || !costKnown
-		if x.family != wire.Chat {
-			results = append(results, protocols.WorkflowResult{CallID: call.ID, Content: string(result)})
-			continue
-		}
-		message, err := json.Marshal(struct {
-			Role       string `json:"role"`
-			ToolCallID string `json:"tool_call_id"`
-			Content    string `json:"content"`
-		}{Role: "tool", ToolCallID: call.ID, Content: string(result)})
-		if err != nil {
-			return nil, fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The tool result could not be continued.")
-		}
-		messages = append(messages, message)
-	}
-	if x.family != wire.Chat {
-		turns, err := protocols.WorkflowTurns(x.family, completion, results)
-		if err != nil {
-			return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
-		}
-		messages = append(messages, turns...)
-	}
-	raw, err := json.Marshal(messages)
-	if err != nil {
-		return nil, fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow could not be continued.")
-	}
-	parsed, err := x.generation.parsed.WithField(field, raw)
-	if err != nil {
-		return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
-	}
-	return parsed, nil
 }
 
 func selectToolsets(allowed []string, request *wire.Request) ([]string, *wire.Request, *fault.Error) {

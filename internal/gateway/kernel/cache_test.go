@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/google/uuid"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -24,6 +26,9 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -401,5 +406,162 @@ func TestCachedTransformedBedrockRejectsInvalidUsage(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+type cachedAnswer struct {
+	result, age, body string
+	asked             bool
+}
+
+type cacheCallers struct {
+	t *testing.T
+	h *harness
+}
+
+func (c cacheCallers) ask(key, body string, headers map[string]string) cachedAnswer {
+	c.t.Helper()
+	before := c.h.mock.count("a") + c.h.mock.count("b")
+	r := c.h.do(c.t.Context(), http.MethodPost, "/v1/chat/completions", key, []byte(body), headers)
+	defer r.Body.Close()
+	raw, _ := io.ReadAll(r.Body)
+	if r.StatusCode != http.StatusOK {
+		c.t.Fatalf("%d %s", r.StatusCode, raw)
+	}
+	return cachedAnswer{result: r.Header.Get("X-OLP-Cache"), age: r.Header.Get("Age"), body: string(raw), asked: c.h.mock.count("a")+c.h.mock.count("b") != before}
+}
+
+func (c cacheCallers) stores(what, key, body string, headers map[string]string) cachedAnswer {
+	c.t.Helper()
+	answer := c.ask(key, body, headers)
+	if answer.result != "miss" || !answer.asked || answer.age != "" {
+		c.t.Fatalf("%s: got %s (provider asked %v, age %q), want a miss that asks the provider", what, answer.result, answer.asked, answer.age)
+	}
+	return answer
+}
+
+func (c cacheCallers) replays(what, key, body string, headers map[string]string, stored cachedAnswer) {
+	c.t.Helper()
+	answer := c.ask(key, body, headers)
+	if answer.result != "hit" || answer.asked || answer.body != stored.body {
+		c.t.Fatalf("%s: got %s (provider asked %v), want the stored reply without asking the provider", what, answer.result, answer.asked)
+	}
+	if age, err := strconv.Atoi(answer.age); err != nil || age < 0 {
+		c.t.Fatalf("%s: a replayed reply states age %q", what, answer.age)
+	}
+}
+
+func (c cacheCallers) publish(policy cache.Policy, edit func(*routing.Route)) {
+	c.t.Helper()
+	c.h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
+		route := s.Routes[routeSlug]
+		route.Cache = &policy
+		if edit != nil {
+			edit(&route)
+		}
+		s.Routes[routeSlug] = route
+	})
+}
+
+func TestACachedReplyAnswersOnlyTheScopeHeadersAndReleaseThatStoredIt(t *testing.T) {
+	h, _ := cacheHarness(t)
+	project := uuid.NewString()
+	inference := keyauthority.KeyPolicy{Scopes: []string{"inference"}}
+	h.rt.mu.Lock()
+	h.rt.keys["colleague"] = keyauthority.Authority{ID: uuid.NewString(), Policy: inference}
+	h.rt.keys["member"] = keyauthority.Authority{ID: uuid.NewString(), ProjectID: &project, Policy: inference}
+	h.rt.keys["teammate"] = keyauthority.Authority{ID: uuid.NewString(), ProjectID: &project, Policy: inference}
+	h.rt.mu.Unlock()
+	callers := cacheCallers{t: t, h: h}
+	chat := func(more, content string) string {
+		return `{"model":"` + routeSlug + `",` + more + `"messages":[{"role":"user","content":"` + content + `"}]}`
+	}
+	hello := chat("", "hello")
+
+	stored := callers.stores("the first request", fullKey, hello, nil)
+	callers.replays("the same request", fullKey, hello, nil, stored)
+	callers.replays("a header no provider reads", fullKey, hello, map[string]string{"User-Agent": "another-client"}, stored)
+	callers.stores("another key under key scope", "colleague", hello, nil)
+	beta := map[string]string{"OpenAI-Beta": "responses=v9"}
+	optedIn := callers.stores("a provider opt-in header", fullKey, hello, beta)
+	callers.replays("the same opt-in header", fullKey, hello, beta, optedIn)
+	callers.stores("another message", fullKey, chat("", "goodbye"), nil)
+
+	callers.publish(cache.Policy{Mode: "exact"}, func(route *routing.Route) { route.OverallTimeout = 4000 })
+	callers.stores("the same request after the route changed", fullKey, hello, nil)
+
+	h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
+		a.RevisionID = uuid.NewString()
+		s.Providers[a.ID] = a
+	})
+	callers.stores("the same request after the provider changed", fullKey, hello, nil)
+
+	callers.publish(cache.Policy{Mode: "exact", Scope: "route"}, nil)
+	shared := callers.stores("the first request under route scope", fullKey, hello, nil)
+	callers.replays("another key under route scope", "colleague", hello, nil, shared)
+
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if answer := callers.ask(fullKey, chat("", "served elsewhere"), nil); answer.result != "miss" || h.mock.count("b") != 1 {
+		t.Fatalf("fallback answered %s after %d calls to the second provider", answer.result, h.mock.count("b"))
+	}
+	h.mock.set("a", completion(modelA, answerText))
+	callers.stores("a request the fallback provider answered", fullKey, chat("", "served elsewhere"), nil)
+
+	callers.publish(cache.Policy{Mode: "exact", Scope: "project"}, func(route *routing.Route) { route.ProjectID = &project })
+	owned := callers.stores("the first request under project scope", "member", hello, nil)
+	callers.replays("another key of the project", "teammate", hello, nil, owned)
+	callers.publish(cache.Policy{Mode: "exact"}, nil)
+	callers.stores("a project key under key scope", "member", hello, nil)
+	callers.stores("another project key under key scope", "teammate", hello, nil)
+
+	stream, err := fixtures.Files.ReadFile("streams/openai-chat.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write(stream)
+	})
+	callers.publish(cache.Policy{Mode: "exact", Streaming: "replay"}, nil)
+	plain := callers.stores("a stream", "member", chat(`"stream":true,`, "hello"), nil)
+	callers.replays("the same stream", "member", chat(`"stream":true,`, "hello"), nil, plain)
+	metered := callers.stores("the same stream asking for usage", "member", chat(`"stream":true,"stream_options":{"include_usage":true},`, "hello"), nil)
+	if strings.Contains(plain.body, `"usage":{`) || !strings.Contains(metered.body, `"usage":{`) {
+		t.Fatalf("usage reached the caller that did not ask or missed the one that did:\n%s\n%s", plain.body, metered.body)
+	}
+	callers.replays("the same stream asking for usage", "member", chat(`"stream":true,"stream_options":{"include_usage":true},`, "hello"), nil, metered)
+}
+
+func TestACacheHitReportsTheSpendItAvoidedAndCountsAgainstBudgetsOnlyWhenTheRouteSaysSo(t *testing.T) {
+	h, _ := cacheHarness(t)
+	callers := cacheCallers{t: t, h: h}
+	var kind string
+	h.republish(func(_ *routing.Snapshot, a, _ routing.Provider) { kind = string(a.Kind) })
+	h.rt.inputs = &routinginputs.Inputs{RefreshedAt: time.Now(), Prices: []rates.RoutingPrice{
+		*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: kind, Model: modelA, Operation: "generation", InputPerMillion: new("1000000"), OutputPerMillion: new("2000000"), Currency: "USD"}}),
+	}}
+	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]}`
+	hit := func(policy cache.Policy) *usage.CacheEvidence {
+		t.Helper()
+		callers.publish(policy, nil)
+		stored := callers.stores("the first request", fullKey, body, nil)
+		callers.replays("the same request", fullKey, body, nil, stored)
+		attempts := h.sink.last(t).Attempts
+		if len(attempts) != 1 || attempts[0].Class != "cache_hit" || attempts[0].Cache == nil {
+			t.Fatalf("a replayed reply recorded %#v", attempts)
+		}
+		return attempts[0].Cache
+	}
+	free := hit(cache.Policy{Mode: "exact"})
+	if free.AvoidedCost != "8" || free.Currency != "USD" || free.BudgetCost != "" || free.BudgetCharge != "" {
+		t.Fatalf("a hit that counts against nothing recorded %#v, want 2 input and 3 output tokens avoided at 1 and 2 each", free)
+	}
+	counted := hit(cache.Policy{Mode: "exact", CountHitsAgainst: []string{"requests", "budgets"}})
+	if counted.AvoidedCost != "8" || counted.BudgetCost != "8" || counted.BudgetCharge != "8" {
+		t.Fatalf("a hit that counts against budgets recorded %#v", counted)
 	}
 }

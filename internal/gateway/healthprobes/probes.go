@@ -1,7 +1,6 @@
-package kernel
+package healthprobes
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -10,18 +9,16 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
+	generation = "generation"
 	// probeTick is how often the probe worker looks for targets due a probe.
 	probeTick = 15 * time.Second
 	// probeDeadline bounds one probe, below any route deadline.
@@ -47,23 +44,23 @@ var probeRequests = map[string]struct {
 	family wire.Format
 	body   string
 }{
-	operationGeneration: {wire.Chat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
-	"embeddings":        {wire.Embeddings, `{"model":%q,"input":"embedding probe"}`},
-	"rerank":            {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
+	generation:   {wire.Chat, `{"model":%q,"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}`},
+	"embeddings": {wire.Embeddings, `{"model":%q,"input":"embedding probe"}`},
+	"rerank":     {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
 }
 
-// RunHealthProbes probes every target whose connection enables probing, each
+// Run probes every target whose connection enables probing, each
 // once per its interval across the fleet, until ctx ends. Every pass is
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
-func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
+func Run(ctx context.Context, s *kernel.Server, checkpoint func(ctx context.Context, probed int, err error)) {
 	if !s.Deps.Admission.Ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
 	defer ticker.Stop()
 	for {
-		probed, err := s.probeDue(ctx)
+		probed, err := probeDue(ctx, s)
 		if ctx.Err() != nil {
 			return
 		}
@@ -77,7 +74,7 @@ func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx contex
 }
 
 // probeDue probes the targets whose fleet-wide claim this replica wins.
-func (s *Server) probeDue(ctx context.Context) (int, error) {
+func probeDue(ctx context.Context, s *kernel.Server) (int, error) {
 	release := s.Deps.Runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
@@ -94,12 +91,12 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 		if !claimed {
 			continue
 		}
-		result, ok := s.probe(ctx, release, target)
+		result, ok := probe(ctx, s, release, target)
 		if !ok {
 			continue
 		}
 		probed++
-		if err := s.shareProbe(ctx, limiter, target, result); err != nil {
+		if err := shareProbe(ctx, s, limiter, target, result); err != nil {
 			return probed, err
 		}
 	}
@@ -115,7 +112,7 @@ func probeTargets(snapshot *routing.View) []probeTarget {
 	for _, slug := range snapshot.RouteSlugs() {
 		route := snapshot.Route(slug)
 		operation := ""
-		for _, candidate := range []string{operationGeneration, "embeddings", "rerank"} {
+		for _, candidate := range []string{generation, "embeddings", "rerank"} {
 			if slices.Contains(route.Operations, candidate) {
 				operation = candidate
 				break
@@ -143,9 +140,9 @@ func probeTargets(snapshot *routing.View) []probeTarget {
 // planning and execution, so it is gated, priced and recorded like any
 // attempt, and accounted to the installation as a probe. It reports false
 // when no attempt reached the provider, which says nothing about its health.
-func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (fleet.ProbeResult, bool) {
+func probe(ctx context.Context, s *kernel.Server, release *release.Release, target probeTarget) (fleet.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
-	if target.operation == operationGeneration {
+	if target.operation == generation {
 		provider := release.Snapshot().Provider(target.provider)
 		if family, err := provider.Connector().TargetFamily(wire.Chat); err == nil && family == wire.Completions {
 			shape.family = wire.Completions
@@ -154,53 +151,30 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	}
 	parsed, err := protocols.Parse(shape.family, fmt.Appendf(nil, shape.body, target.route.Slug), target.route.Slug)
 	if err != nil {
-		s.log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
+		s.Log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
 		return fleet.ProbeResult{}, false
 	}
-	// The probe plans against the route narrowed to the probed target, with
-	// one attempt, no route behavior beyond its spend cap, and a short
-	// deadline.
 	route := target.route
 	route.Targets = []routing.Target{target.target}
 	route.MaxAttempts = 1
 	route.OverallTimeout = min(route.OverallTimeout, probeDeadline.Milliseconds())
 	route.Behavior = routing.Behavior{Budget: route.Budget}
-	x := &Call{
-		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: release},
-		family:             shape.family,
-		historicalSnapshot: release.Snapshot().WithRoute(route),
-		actor:              "system",
-		mode:               "unary",
-
-		origin:   usage.OriginProbe,
-		priority: routing.PriorityLow, routeLeg: routeLeg{Route: &route}, generation: generationCall{parsed: parsed},
+	attempt := s.ProbeGeneration(ctx, release, route, parsed)
+	if e := attempt.Unplanned; e != nil {
+		s.Log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
 	}
-	x.bind(canonicalPlanner, nil, true)
-	defer s.settleAdmission(ctx, x)
-	if e := s.planCanonical(ctx, x); e != nil {
-		s.log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
+	if !attempt.Reached {
 		return fleet.ProbeResult{}, false
 	}
-	x.budget, x.allowance = 1, 1
-	if e := s.reserveSystemBudgets(ctx, x); e != nil {
-		s.Finish(x, &Outcome{Err: e}, e.Status)
-		return fleet.ProbeResult{}, false
-	}
-	out := s.execute(ctx, x)
-	s.Finish(x, out, cmp.Or(errorStatus(out.Err), 200))
-	if !x.dispatched || len(x.facts) == 0 {
-		return fleet.ProbeResult{}, false
-	}
-	fact := x.facts[len(x.facts)-1]
 	result := fleet.ProbeResult{
 		Status:     fleet.ProbeHealthy,
 		Model:      target.target.ProviderModel,
 		ObservedAt: s.Now().UTC(),
-		LatencyMS:  fact.Duration.Milliseconds(),
+		LatencyMS:  attempt.Latency.Milliseconds(),
 	}
-	if out.Err != nil {
-		result.Class = fact.Class
-		if unhealthyClass(fact.Class) {
+	if attempt.Failed {
+		result.Class = attempt.Class
+		if unhealthyClass(attempt.Class) {
 			result.Status = fleet.ProbeUnhealthy
 		}
 	}
@@ -210,7 +184,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 // shareProbe publishes a probe result: an unhealthy one opens the provider's
 // fleet circuit until the next probe can decide again, a healthy one closes
 // it.
-func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
+func shareProbe(ctx context.Context, s *kernel.Server, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
 	call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
 	if err := limiter.RecordProbe(call, target.provider, result); err != nil {
@@ -227,15 +201,8 @@ func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target pr
 // as opposed to the request, its credential or its quota.
 func unhealthyClass(class string) bool {
 	switch class {
-	case classUpstreamServer, classConnect, classTimeout, classProtocol:
+	case kernel.ClassUpstreamServer, kernel.ClassConnect, kernel.ClassTimeout, kernel.ClassProtocol:
 		return true
 	}
 	return false
-}
-
-func errorStatus(e *fault.Error) int {
-	if e == nil {
-		return 0
-	}
-	return e.Status
 }

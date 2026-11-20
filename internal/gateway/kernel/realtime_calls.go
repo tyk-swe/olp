@@ -360,7 +360,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(s.Now().Add(requestBodyTimeout)); err != nil {
+	if err := controller.SetReadDeadline(s.Now().Add(RequestBodyTimeout)); err != nil {
 		fail(fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
 		return
 	}
@@ -454,7 +454,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := s.reserveSessionDebit(bg, x, authority, p.attempt, nil); e != nil {
-		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
 		releasePin()
 		cancel()
 		fail(e)
@@ -462,7 +462,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if e := s.reserveSessionCost(bg, x, authority, p.attempt, webRTCBound); e != nil {
 		s.abandonSessionDebit(r.Context(), x)
-		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.Log)
 		releasePin()
 		cancel()
 		fail(e)
@@ -514,7 +514,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
 	}
-	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy.")
 	}
 	fact := s.newFact(x, p.attempt, p.Slot, len(x.facts)+1, &p.Provider)
@@ -557,7 +557,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
 	if e := s.markSessionDispatched(reqCtx, x); e != nil {
-		fact.Class = classConnect
+		fact.Class = ClassConnect
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
@@ -569,7 +569,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		x.spendCaps(p.Hold.budgets, p.attempt)
 	}
 	if err != nil {
-		fact.Class = classConnect
+		fact.Class = ClassConnect
 		dispatched := state.dispatched.Load()
 		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
 		fact.RecordEvidence(dispatched)
@@ -593,7 +593,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
-		return nil, 0, UpstreamError(&attemptFailure{Status: resp.StatusCode, upstream: nativeError})
+		return nil, 0, UpstreamError(&AttemptFailure{Status: resp.StatusCode, upstream: nativeError})
 	}
 	callID, ok := parseWebRTCCallID(resp.Header.Get("Location"))
 	if ok {
@@ -602,7 +602,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxWebRTCSDPBytes+1))
 	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
-		fact.Class = classProtocol
+		fact.Class = ClassProtocol
 		fact.RecordEvidence(true)
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
@@ -613,7 +613,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	}
 	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.Model, callID)
 	if !ok || controlErr != nil {
-		fact.Class = classProtocol
+		fact.Class = ClassProtocol
 		fact.RecordEvidence(true)
 		fact.Duration = s.Now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)

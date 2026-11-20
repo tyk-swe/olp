@@ -2,13 +2,11 @@ package kernel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -47,7 +45,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
@@ -170,9 +167,9 @@ type Dependencies struct {
 type Server struct {
 	Deps Dependencies
 
-	log         *slog.Logger
+	Log         *slog.Logger
 	Config      Config
-	egress      *egress.Policy
+	Egress      *egress.Policy
 	client      *http.Client
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
@@ -210,9 +207,9 @@ func New(deps Dependencies, cfg Config) *Server {
 	normalized := normalizedDependencies(deps)
 	gate := ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now)
 	return &Server{
-		log:         log,
+		Log:         log,
 		Config:      config,
-		egress:      policy,
+		Egress:      policy,
 		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
@@ -237,14 +234,18 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 	if !s.Deps.Admission.Ready() {
 		return
 	}
-	s.fleet.Follow(ctx, s.health, s.Deps.Admission.Fleet(), quota.ReserveTimeout, s.log)
+	s.fleet.Follow(ctx, s.health, s.Deps.Admission.Fleet(), quota.ReserveTimeout, s.Log)
 }
 
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
-func (s *Server) RegisterKernel(mux *http.ServeMux) {
+// GeminiActions are the Gemini model actions a surface serves, keyed by the
+// name after the colon in /models/{model}:{action}.
+type GeminiActions map[string]http.HandlerFunc
+
+func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
 	if s.code != nil {
 		s.code.Register(mux)
 	}
@@ -257,7 +258,7 @@ func (s *Server) RegisterKernel(mux *http.ServeMux) {
 		Now:      s.Now,
 		Workflow: s.workflowCapability,
 	})
-	s.registerNative(mux, catalog)
+	s.registerNative(mux, catalog, actions)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
@@ -266,8 +267,8 @@ func (s *Server) RegisterKernel(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", catalog.List)
 	mux.HandleFunc("GET /v1/models/{model}", catalog.Get)
-	mux.HandleFunc("OPTIONS /v1/", s.preflight)
-	mux.HandleFunc("OPTIONS /bedrock/", s.preflight)
+	mux.HandleFunc("OPTIONS /v1/", s.Preflight)
+	mux.HandleFunc("OPTIONS /bedrock/", s.Preflight)
 	mux.HandleFunc("/v1/", s.unknown)
 	mux.HandleFunc("/bedrock/", s.unknown)
 }
@@ -363,7 +364,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h.Set("Access-Control-Expose-Headers", expose)
 }
 
-func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -440,7 +441,7 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *fault.Error) {
 	}
 	return p, nil
 }
-func requestError(err error) *fault.Error {
+func RequestError(err error) *fault.Error {
 	var guard guardrails.Failure
 	if errors.As(err, &guard) {
 		return guardrailError(guard)
@@ -502,354 +503,6 @@ func selectionError(err error, model string) *fault.Error {
 		}
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
-}
-
-const requestBodyTimeout = 15 * time.Second
-
-func (s *Server) inference(family wire.Format) http.HandlerFunc {
-	return s.inferenceOperation(family, "")
-}
-func (s *Server) inferenceOperation(family wire.Format, dialect string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
-		if dialect == "" && fault.RequestSurface(r) == "gemini" {
-			// Gemini embeddings match OpenAI embedding capabilities but
-			// speak Gemini on the wire.
-			x.ingress = "gemini"
-		}
-		writeError := func(w http.ResponseWriter, e *fault.Error) {
-			if x.Strict() && x.dispatched && e.Status >= 500 {
-				copy := *e
-				copy.NoRetry = true
-				e = &copy
-			}
-			fault.WriteSurfaceError(w, e, x.clientSurface())
-		}
-		x.semanticHeaders = semanticHeaders(r.Header)
-		query, queryErr := url.ParseQuery(r.URL.RawQuery)
-		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
-		status := http.StatusInternalServerError
-		var out *Outcome
-		defer func() {
-			s.Finish(x, out, status)
-			// The budgets this request reserved are settled even when the
-			// client is gone: a concurrency slot nobody releases is a slot
-			// every replica keeps counting.
-			s.settleAdmission(r.Context(), x)
-			// Mirrors start once the caller's response is complete, so they
-			// never add to its latency.
-			if out != nil {
-				s.mirror(x)
-			}
-		}()
-		// A context timeout alone cannot interrupt a blocked socket read.
-		rc := http.NewResponseController(w)
-		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-			e := fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if !s.Gate.AdmitLater(r.Context()) {
-			x.Failure, status = fault.Overloaded, fault.Overloaded.Status
-			writeError(w, fault.Overloaded)
-			return
-		}
-		defer s.Gate.Release(r.Context())
-		token, e := ingress.PresentedKey(r)
-		if e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		authority, e := s.Gate.AuthenticateRequest(r, token, "inference")
-		if e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		s.bindAuthority(x, authority)
-		x.mirrors = true
-		if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		body, e := s.Gate.ReadBody(r)
-		if e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		// Keep the deadline on failed reads so HTTP/1 body draining stays
-		// bounded; successful uploads must not limit the inference stream.
-		rc.SetReadDeadline(time.Time{})
-		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model"), r.Header.Get(StateRouteHeader)); selected || err != nil {
-			if err != nil {
-				e = requestError(err)
-				x.Failure, status = e, e.Status
-				writeError(w, e)
-				return
-			}
-			out, status = s.serveUnary(w, r, x, body)
-			return
-		}
-		var parsed *wire.Request
-		var err error
-		if family == wire.Chat || family == wire.Responses || family == wire.Anthropic || family == wire.Gemini || family == wire.GeminiStream {
-			var prompt parsedRequest
-			prompt, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
-			parsed, x.prompt = prompt.request, prompt.reference
-			if x.request.body != nil {
-				x.request.body.Decoded = max(x.request.body.Decoded, prompt.decoded)
-			}
-		} else if family == wire.Bedrock {
-			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
-		} else {
-			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
-		}
-		if err != nil {
-			e = requestError(err)
-		}
-		if e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if err := protocols.ValidateInlineMedia(parsed, s.Config.InlineMedia); err != nil {
-			e = requestError(err)
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		x.generation.parsed, x.generation.approval, err = stripWorkflowApproval(parsed)
-		if err != nil {
-			e = fault.InvalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if e := s.prepareContinuation(r.Context(), x); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if x.generation.continuation != nil && x.generation.continuation.replay != nil {
-			var deliveryErr error
-			status, deliveryErr = s.replayContinuation(w, x)
-			out = continuationDeliveryOutcome(deliveryErr)
-			// Replaying a committed response never starts shadow inference.
-			x.mirrors = false
-			return
-		}
-		if family == wire.Responses {
-			if e := s.responsesStateGate(r.Context(), x, authority, parsed); e != nil {
-				x.Failure, status = e, e.Status
-				writeError(w, e)
-				return
-			}
-		}
-		if e := s.bindGenerationReferences(r.Context(), x); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if e := s.prepare(r.Context(), x, s.keyAuthorizer(authority)); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if x.named().ToolExecution == "gateway" {
-			if e := s.prepareWorkflow(r.Context(), x, token); e != nil {
-				x.Failure, status = e, e.Status
-				writeError(w, e)
-				return
-			}
-			if e := s.prepareWorkflowResume(r.Context(), x); e != nil {
-				x.Failure, status = e, e.Status
-				writeError(w, e)
-				return
-			}
-		} else if len(x.generation.approval) > 0 {
-			e := fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if s.Deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
-			x.captureContext = r.Context()
-			x.capture = s.Deps.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
-		}
-
-		// Admission happens once the request is understood and before any
-		// provider is called, so a rejected request costs an upstream nothing.
-		// The lease outlives the route deadline it is sized against: it is the
-		// backstop for a replica that dies mid-request, not the deadline.
-		x.estimate = requestEstimate(x)
-		overall := time.Duration(x.named().OverallTimeout) * time.Millisecond
-		// Admission is part of the same deadline as execution; starting a new
-		// full deadline afterwards could outlive the concurrency reservation.
-		ctx, cancel := x.routeContext(r.Context())
-		defer cancel()
-		if e = s.Gate.AwaitAdmission(ctx, x.priority); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		reservationEstimate := quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		admitted := x.AdmissionAuthority(authority)
-		if e = s.admitCacheAware(ctx, x, &admitted, reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		workflowLease, e := s.reserveWorkflowRun(ctx, x)
-		if e != nil {
-			x.Failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		defer func() {
-			if err := workflowLease.Settle(ctx, nil); err != nil {
-				s.Deps.Admission.Logger().Error("release workflow concurrency", "error", err)
-			}
-		}()
-		if x.workflow != nil && x.workflow.runID == "" {
-			runID, err := s.Deps.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
-			if err != nil {
-				x.Failure = fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
-				status = x.Failure.Status
-				writeError(w, x.Failure)
-				return
-			}
-			x.workflow.runID = runID
-		}
-		if parsed.Stream && x.workflow == nil {
-			sw := &fault.StreamWriter{W: w, Family: family, Headers: streamedHeaders{x}}
-			x.generation.emit = func(frame []byte) error {
-				err := sw.Emit(frame)
-				if err == nil {
-					x.captureCacheFrame(frame)
-					x.Delivered(s.Now())
-				}
-				return err
-			}
-			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
-			status = sw.Finish(out.Err, out.Cancelled)
-			return
-		}
-		if x.workflow != nil {
-			out = s.executeToolLoop(ctx, x)
-		} else {
-			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
-		}
-		if out.Err != nil {
-			status = out.Err.Status
-			if out.Err.Status > 0 {
-				writeError(w, out.Err)
-			}
-			return
-		}
-		if out.approval != nil {
-			if parsed.Stream {
-				frames, err := workflowPauseFrames(family, x.named().Slug, x.request.accountingID(), out.approval, int(s.Config.MaxEventBytes), int(s.Config.MaxResponseBytes))
-				if err != nil {
-					out.Err = fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
-					status = out.Err.Status
-					writeError(w, out.Err)
-					return
-				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				status = http.StatusOK
-				if _, err := w.Write(frames); err != nil {
-					out.Cancelled = true
-				}
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			status = http.StatusOK
-			if err := json.NewEncoder(w).Encode(out.approval); err != nil {
-				out.Cancelled = true
-			}
-			return
-		}
-		if parsed.Stream && x.workflow != nil {
-			sw := &fault.StreamWriter{W: w, Family: family, Headers: streamedHeaders{x}}
-			if err := sw.Emit(x.workflow.finalFrames); err != nil {
-				out.Err = (&attemptFailure{class: classCancelled}).toError()
-				out.Cancelled = true
-			} else {
-				out.Committed = true
-				x.facts[len(x.facts)-1].Committed = true
-				x.Delivered(s.Now())
-			}
-			status = sw.Finish(out.Err, out.Cancelled)
-			return
-		}
-		if err := rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
-			out.Err = fault.ServerError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
-			status = out.Err.Status
-			writeError(w, out.Err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if family == wire.Responses && x.providerState {
-			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
-			if me != nil {
-				out.Err = me
-				status = me.Status
-				writeError(w, me)
-				return
-			}
-			out.completion.Body = mapped
-		}
-		if family == wire.Responses && len(x.facts) > 0 {
-			identity := responseNativeIdentity(x, &x.facts[len(x.facts)-1], "")
-			mapped, err := s.mapGenerationResultReferences(r.Context(), x, identity, out.completion.Body)
-			if err != nil {
-				out.Err = fault.ServerError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
-				status = out.Err.Status
-				writeError(w, out.Err)
-				return
-			}
-			out.completion.Body = mapped
-		}
-		enforced, pe := s.enforceContentOutput(x, out.completion.Body)
-		if pe != nil {
-			out.Err = pe
-			status = pe.Status
-			writeError(w, pe)
-			return
-		}
-		out.completion.Body = enforced
-		status = http.StatusOK
-		x.ResponseHeaders(w.Header(), false)
-		w.WriteHeader(http.StatusOK)
-		out.Committed = true
-		x.facts[len(x.facts)-1].Committed = true
-		if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
-			fact.Interaction.ClientState = usage.ClientPartial
-		}
-		_, err = w.Write(out.completion.Body)
-		if err == nil {
-			// Flush buffered responses before recording successful delivery.
-			err = rc.Flush()
-		}
-		if err != nil {
-			out.Err = (&attemptFailure{class: classCancelled}).toError()
-			out.Cancelled = true
-		} else {
-			x.Delivered(s.Now())
-			if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
-				fact.Interaction.ClientState = usage.ClientTerminal
-			}
-		}
-	}
 }
 
 // prepare resolves the route, lets authorize refuse the caller's use of it in

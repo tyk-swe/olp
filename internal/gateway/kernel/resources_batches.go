@@ -40,7 +40,7 @@ type batchPlan struct {
 	expected       *int64
 	serving        oif.ServingIdentity
 	submission     batches.Submission
-	manifest       batchManifest
+	manifest       BatchManifest
 	clientMetadata json.RawMessage
 }
 
@@ -211,29 +211,29 @@ func (s *Server) strictBatchAdmission(ctx context.Context, x *Call, authority ke
 }
 
 type storedFileManifest struct {
-	batchManifest
-	Qualified *batchManifest `json:"batch_manifest"`
+	BatchManifest
+	Qualified *BatchManifest `json:"batch_manifest"`
 }
 
-func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (batchManifest, *fault.Error) {
+func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (BatchManifest, *fault.Error) {
 	if strict || adapter != connectors.BatchOpenAI && !adapter.Managed() {
-		return batchManifest{}, nil
+		return BatchManifest{}, nil
 	}
 	var stored storedFileManifest
 	decodeErr := json.Unmarshal(file.Metadata, &stored)
 	if adapter == connectors.BatchOpenAI {
 		if decodeErr != nil || stored.Qualified == nil || !stored.Qualified.usable(adapter) || stored.Qualified.Endpoint != endpoint {
-			return batchManifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
+			return BatchManifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
 		}
 		return *stored.Qualified, nil
 	}
-	if decodeErr != nil || !stored.batchManifest.usable(adapter) {
-		return batchManifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
+	if decodeErr != nil || !stored.BatchManifest.usable(adapter) {
+		return BatchManifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
 	}
-	return stored.batchManifest, nil
+	return stored.BatchManifest, nil
 }
 
-func (m batchManifest) usable(adapter connectors.BatchAdapter) bool {
+func (m BatchManifest) usable(adapter connectors.BatchAdapter) bool {
 	return m.Adapter == adapter && m.Endpoint != "" && m.LineCount >= 1 && m.ManifestDigest != ""
 }
 
@@ -322,7 +322,7 @@ func openAIBatchBody(source oif.Document, upstreamFile string, p *Pin, window ba
 	return effective.Bytes(), nil
 }
 
-func (s *Server) submitBatch(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *pinnedExchange, *fault.Error) {
+func (s *Server) submitBatch(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, request batchCreateRequest, plan batchPlan) (*resources.Resource, *PinnedExchange, *fault.Error) {
 	submission, e := s.BeginBatch(ctx, x, authority.ID, p, BatchIntent{
 		ResourceID: plan.id, Kind: plan.kind, Adapter: plan.adapter, Surface: batches.SurfaceOpenAI,
 		Operation: request.operation, Window: plan.window.length, Expected: plan.expected, Submission: plan.submission,
@@ -583,7 +583,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *Call, res *resources.Resou
 	return nil
 }
 
-func (s *Server) fetchBatch(ctx context.Context, x *Call, p *Pin, method, path string, body []byte) ([]byte, *pinnedExchange, *fault.Error) {
+func (s *Server) fetchBatch(ctx context.Context, x *Call, p *Pin, method, path string, body []byte) ([]byte, *PinnedExchange, *fault.Error) {
 	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, path, nil)
 	if err != nil {
 		return nil, nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -657,14 +657,14 @@ func refreshGeminiManagedBatch(res *resources.Resource, result []byte) (refreshe
 	return refreshedBatch{state: managed.status, metadata: managed.metadata}, nil
 }
 
-func (s *Server) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchange *pinnedExchange, res *resources.Resource, state string, result []byte) *fault.Error {
+func (s *Server) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchange *PinnedExchange, res *resources.Resource, state string, result []byte) *fault.Error {
 	validated, _, err := strictBatchResult(result, res.UpstreamID)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result.")
 	}
 	_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
 	if err != nil {
-		exchange.interrupt(classProtocol, true)
+		exchange.Interrupt(ClassProtocol, true)
 		return durableError(err)
 	}
 	if !strictBatchInputMatches(validated, contract.Effective) {

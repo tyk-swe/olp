@@ -46,7 +46,7 @@ func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
 func (s *Server) runWebRTCControl(sess *webrtcSession) {
 	readErr := make(chan error, 1)
 	go func() {
-		defer panics.Recover(s.log, "webrtc control reader", func(err error) { readErr <- err })
+		defer panics.Recover(s.Log, "webrtc control reader", func(err error) { readErr <- err })
 		for {
 			typ, data, err := sess.conn.Read(sess.ctx)
 			if err != nil {
@@ -164,14 +164,14 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		}
 		pending := sess.responses.Pending()
 		sess.usageMu.Unlock()
-		class := classProtocol
+		class := ClassProtocol
 		cancelled := false
 		if failure != nil {
 			switch {
 			case failure.Code == "key_revoked" || strings.HasPrefix(failure.Code, "provider_credential_"):
 				class = classCredential
 			case failure.Code == "realtime_session_expired":
-				class = classTimeout
+				class = ClassTimeout
 			}
 		}
 		if len(x.facts) > 0 {
@@ -214,7 +214,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
 		s.settleSessionHold(settleCtx, x, sess.p.Hold, settled)
 		s.recordCost(x)
-		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
+		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.Log)
 		s.settleCaps(settleCtx, x)
 		cancel()
 		s.unregisterWebRTCSession(sess.id)

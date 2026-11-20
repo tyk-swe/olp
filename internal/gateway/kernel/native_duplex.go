@@ -108,7 +108,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
-	if e := unboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &route); e != nil {
+	if e := UnboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &route); e != nil {
 		x.Failure, status = e, e.Status
 		fault.WriteSurfaceError(w, e, surface)
 		return
@@ -128,7 +128,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		limit = 1 << 20
 	}
 	client.SetReadLimit(limit)
-	setupCtx, stopSetup := context.WithTimeout(ctx, requestBodyTimeout)
+	setupCtx, stopSetup := context.WithTimeout(ctx, RequestBodyTimeout)
 	messageType, initial, err := client.Read(setupCtx)
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
@@ -241,7 +241,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 			client.Close(websocket.StatusInternalError, "setup uncertain")
 			if errors.Is(ackErr, errDuplexProtocol) {
 				x.Failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid setup acknowledgement."), http.StatusBadGateway
-				markDuplexFactUncertain(x, classProtocol)
+				markDuplexFactUncertain(x, ClassProtocol)
 			} else {
 				x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex provider did not acknowledge setup."), http.StatusBadGateway
 				markDuplexFactUncertain(x, classAmbiguous)
@@ -255,21 +255,21 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
 	usageRecord, usageComplete, relayErr := s.relayNativeDuplex(ctx, x, p, client, upstream, token, observer, template.Transport(), int(limit))
-	class := classProtocol
+	class := ClassProtocol
 	cancelled := false
 	if x.Strict() && relayErr != nil {
 		class = classAmbiguous
 		switch {
 		case errors.Is(relayErr, errDuplexProviderError):
-			class = classUpstreamServer
+			class = ClassUpstreamServer
 		case errors.Is(relayErr, errDuplexClientProtocol), errors.Is(relayErr, errDuplexProtocol):
-			class = classProtocol
+			class = ClassProtocol
 		case errors.Is(relayErr, errDuplexAuthority):
 			class = classCredential
 		case errors.Is(relayErr, errDuplexClientClosed), errors.Is(relayErr, context.Canceled):
-			class, cancelled = classCancelled, true
+			class, cancelled = ClassCancelled, true
 		case errors.Is(relayErr, context.DeadlineExceeded):
-			class = classTimeout
+			class = ClassTimeout
 		}
 	}
 	if len(x.facts) > 0 {
@@ -305,10 +305,10 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 				x.Failure = fault.InvalidRequest("invalid_duplex_frame", "The duplex client sent an invalid frame.", nil)
 			case errors.Is(relayErr, errDuplexAuthority):
 				x.Failure = fault.PermissionError("key_revoked", "The duplex session no longer has route authority.")
-			case class == classCancelled:
-				x.Failure = (&attemptFailure{class: classCancelled}).toError()
-			case class == classTimeout:
-				x.Failure = (&attemptFailure{class: classTimeout}).toError()
+			case class == ClassCancelled:
+				x.Failure = (&AttemptFailure{class: ClassCancelled}).Fault()
+			case class == ClassTimeout:
+				x.Failure = (&AttemptFailure{class: ClassTimeout}).Fault()
 			}
 			status = http.StatusSwitchingProtocols
 			out = &Outcome{Err: x.Failure, Committed: true, Cancelled: cancelled}
@@ -335,7 +335,7 @@ func (s *Server) duplexDial(ctx context.Context, x *Call, p *Pin, template *dupl
 			parsed.RawQuery = ""
 			check = parsed.String()
 		}
-		if _, err := s.egress.ValidateEndpoint(check); err != nil {
+		if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 			return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex provider address is not permitted.")
 		}
 		dialCtx, cancel := context.WithCancel(ctx)
@@ -411,7 +411,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *Call, p *Pin, client,
 	}
 	done := make(chan relayEnd, 2)
 	relay := func(dst, src duplexPeer, fromProvider bool) {
-		defer panics.Recover(s.log, "duplex relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "duplex relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, fromProvider)
 	}
 	go relay(upstream, client, false)

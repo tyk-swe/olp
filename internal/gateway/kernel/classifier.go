@@ -183,7 +183,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	x.mode = "unary"
 	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
-		return failed, &Outcome{Err: requestError(err)}
+		return failed, &Outcome{Err: RequestError(err)}
 	}
 	x.unary.source = source
 	if e := s.prepareUnary(ctx, x); e != nil {
@@ -192,7 +192,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	if e := s.admitClassifier(ctx, x); e != nil {
 		return failed, &Outcome{Err: e}
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {
@@ -217,7 +217,7 @@ func (s *Server) generateLabel(ctx context.Context, x *Call, slug, text string) 
 	}
 	parsed, err := protocols.Parse(wire.Chat, body, "")
 	if err != nil {
-		return failed, &Outcome{Err: requestError(err)}
+		return failed, &Outcome{Err: RequestError(err)}
 	}
 	x.family, x.generation.parsed = wire.Chat, parsed
 	if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
@@ -227,12 +227,12 @@ func (s *Server) generateLabel(ctx context.Context, x *Call, slug, text string) 
 		return failed, &Outcome{Err: e}
 	}
 	out := s.execute(ctx, x)
-	if out.Err != nil || out.completion == nil {
+	if out.Err != nil || out.Completion == nil {
 		return failed, out
 	}
 	out.Committed = true
 	x.facts[len(x.facts)-1].Committed = true
-	label := strings.TrimSpace(out.completion.OutputText)
+	label := strings.TrimSpace(out.Completion.OutputText)
 	if label == "" {
 		return failed, out
 	}

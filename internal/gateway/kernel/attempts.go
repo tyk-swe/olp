@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -16,14 +17,14 @@ import (
 
 type attemptAdapter[Result any] struct {
 	estimate func(routing.Attempt, *routing.Provider) int64
-	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *attemptFailure)
+	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure)
 }
 
-func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *attemptFailure, *fault.Error) {
+func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure, *fault.Error) {
 	dispatchCtx, finish, err := hold.authorize(ctx, s, x)
 	if err != nil {
 		var result Result
-		return fact, result, &attemptFailure{class: classLimitsUnavailable, noRetry: true}, err
+		return fact, result, &AttemptFailure{class: classLimitsUnavailable, noRetry: true}, err
 	}
 	completed, result, failure := adapter.dispatch(dispatchCtx, attempt, provider, slot, fact)
 	return completed, result, failure, finish()
@@ -61,7 +62,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter at
 			}
 			return out
 		}
-		if e := s.reserveFallbackCost(ctx, x); e != nil {
+		if e := s.ReserveFallbackCost(ctx, x); e != nil {
 			return attemptOutcome[Result]{err: e}
 		}
 	}
@@ -72,13 +73,11 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter at
 // conditions the route met.
 func runRoute[Result any](ctx context.Context, s *Server, x *Call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
 	deadline, _ := ctx.Deadline()
+	run := routeRun[Result]{ctx: ctx, server: s, call: x, adapter: adapter, deadline: deadline}
 	snapshot := x.Snapshot()
-	unmeterable := false
-	var last *attemptFailure
-	var met []string
-route:
+	var seen routeEvidence
 	for _, attempt := range x.attempts {
-		if x.spent >= x.budget || ctx.Err() != nil {
+		if run.over() {
 			break
 		}
 		provider, ok := snapshot.FindProvider(attempt.ProviderID)
@@ -88,131 +87,218 @@ route:
 		if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
 			return attemptOutcome[Result]{err: e}, nil
 		}
-		next := false
-		slots := s.slots(x, attempt, &provider)
-		// retry counts the repeats of slot retried; any other slot starts
-		// afresh.
-		retry, retried := 0, -1
-		for i := 0; i < len(slots) && !next; i++ {
-			slot := slots[i]
-			if i != retried {
-				retry = 0
-			}
-			if x.spent >= x.budget || ctx.Err() != nil {
-				break
-			}
-			if !x.servingAllowed(&provider, attempt.TargetID, attempt.UpstreamModel, slot, false) {
-				continue
-			}
-			estimate := adapter.estimate(attempt, &provider)
-			gate := s.gateAttempt(ctx, x, attempt, &provider, &slot, estimate, deadline)
-			switch gate.verdict {
-			case gateExpired:
-				return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
-			case gateDenied:
-				next = true
-			case gateRejected:
-				// A local quota refusal consumes an attempt but provides no
-				// upstream evidence, so it never updates provider health.
-				x.spent++
-				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, x.spent, gate.rejection))
-				last = gate.rejection
-				met = meet(met, gate.rejection.class)
-				if gate.rejection.quota == quota.Route {
-					break route
-				}
-				next = gate.rejection.quota == quota.Connection // every sibling shares this quota
-			case gateUnmeterable:
-				unmeterable = true
-				if gate.quota == quota.Route {
-					break route
-				}
-				next = gate.quota == quota.Connection
-			case gateAdmitted:
-				ready, admissionErr := gate.hold.begin(ctx, s, x, attempt, &provider, slot)
-				if admissionErr != nil {
-					return attemptOutcome[Result]{err: admissionErr}, nil
-				}
-				if !ready {
-					continue
-				}
-				x.spent++
-				x.preparation().activate(attempt)
-				x.grantGeneration = 0
-				fact := s.newFact(x, attempt, slot, x.spent)
-				// Streams can persist accounting before dispatch returns.
-				fact.Retry, fact.Budgets = retry, gate.hold.budgets
-				if x.guard.engine != nil {
-					x.guard.ledger.startAttempt(fact.GuardrailDecisions)
-				}
-				dispatchCtx, finishLease := gate.hold.dispatchContext(ctx, s, x)
-				fact, result, failure, authorityErr := dispatchWithLease(dispatchCtx, gate.hold, adapter, s, x, attempt, &provider, slot, fact)
-				if x.guard.engine != nil {
-					fact.GuardrailDecisions = x.guard.ledger.finishAttempt()
-				}
-				if completionErr, cancelled := gate.hold.complete(ctx, s, x, attemptCompletion{fact: fact, failure: failure, authority: authorityErr, attempt: attempt, estimate: estimate, finishLease: finishLease}); completionErr != nil {
-					return attemptOutcome[Result]{err: completionErr, cancelled: cancelled}, nil
-				}
-				if failure == nil {
-					return attemptOutcome[Result]{result: result, committed: fact.Committed}, nil
-				}
-				if failure.overall || !failoverAllowed(failure.class, failure.committed) {
-					s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure, fact.CredentialSource == "caller")
-					out := attemptOutcome[Result]{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
-					if failure.class == classContentFilter && !failure.committed {
-						// A content filter refuses the request on every target
-						// of the route; only a fallback route can serve it.
-						return out, []string{routing.FallbackContentFilter}
-					}
-					return out, nil
-				}
-				if wait, ok := s.retryWait(x, provider.ID, failure, retry, deadline); ok {
-					// The slot is retried before it cools down, so the
-					// failure is recorded against it only once.
-					if !pause(ctx, wait) {
-						break
-					}
-					retry, retried = retry+1, i
-					i-- // the same slot again
-					continue
-				}
-				next = s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure, fact.CredentialSource == "caller")
-				last = failure
-				met = meet(met, failure.class)
-			}
+		step := run.target(attempt, &provider)
+		if step.then == finished {
+			return step.out, step.conditions
+		}
+		seen = seen.and(step.seen)
+		if step.then == leaveRoute {
+			break
 		}
 	}
+	return run.exhausted(seen)
+}
+
+type routeRun[Result any] struct {
+	ctx      context.Context
+	server   *Server
+	call     *Call
+	adapter  attemptAdapter[Result]
+	deadline time.Time
+}
+
+type routeEvidence struct {
+	last        *AttemptFailure
+	unmeterable bool
+	met         []string
+}
+
+func (e routeEvidence) and(later routeEvidence) routeEvidence {
+	met := slices.Clone(e.met)
+	for _, condition := range later.met {
+		if !slices.Contains(met, condition) {
+			met = append(met, condition)
+		}
+	}
+	return routeEvidence{last: cmp.Or(later.last, e.last), unmeterable: e.unmeterable || later.unmeterable, met: met}
+}
+
+func refusedBy(failure *AttemptFailure) routeEvidence {
+	if condition := fallbackCondition(failure.class); condition != "" {
+		return routeEvidence{last: failure, met: []string{condition}}
+	}
+	return routeEvidence{last: failure}
+}
+
+type routeFlow int
+
+const (
+	tryNextSlot routeFlow = iota
+	retrySlot
+	tryNextTarget
+	leaveRoute
+	finished
+)
+
+type routeStep[Result any] struct {
+	then       routeFlow
+	out        attemptOutcome[Result]
+	conditions []string
+	seen       routeEvidence
+}
+
+func (r routeRun[Result]) over() bool {
+	return r.call.spent >= r.call.budget || r.ctx.Err() != nil
+}
+
+func (r routeRun[Result]) finish(out attemptOutcome[Result], conditions ...string) routeStep[Result] {
+	return routeStep[Result]{then: finished, out: out, conditions: conditions}
+}
+
+func (r routeRun[Result]) target(attempt routing.Attempt, provider *routing.Provider) routeStep[Result] {
+	slots := r.server.slots(r.call, attempt, provider)
+	retry := 0
+	var seen routeEvidence
+	for i := 0; i < len(slots) && !r.over(); {
+		if !r.call.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slots[i], false) {
+			i, retry = i+1, 0
+			continue
+		}
+		step := r.slot(attempt, provider, slots[i], retry)
+		seen = seen.and(step.seen)
+		switch step.then {
+		case retrySlot:
+			retry++
+		case tryNextSlot:
+			i, retry = i+1, 0
+		case finished:
+			return step
+		default:
+			return routeStep[Result]{then: step.then, seen: seen}
+		}
+	}
+	return routeStep[Result]{then: tryNextTarget, seen: seen}
+}
+
+func (r routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int) routeStep[Result] {
+	estimate := r.adapter.estimate(attempt, provider)
+	gate := r.server.gateAttempt(r.ctx, r.call, attempt, provider, &slot, estimate, r.deadline)
+	switch gate.verdict {
+	case gateExpired:
+		return r.finish(attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()})
+	case gateDenied:
+		return routeStep[Result]{then: tryNextTarget}
+	case gateRejected:
+		return r.rejected(attempt, slot, gate.rejection)
+	case gateUnmeterable:
+		return routeStep[Result]{then: afterQuota(gate.quota), seen: routeEvidence{unmeterable: true}}
+	case gateAdmitted:
+		return r.dispatch(attempt, provider, slot, retry, estimate, gate.hold)
+	}
+	return routeStep[Result]{then: tryNextSlot}
+}
+
+func afterQuota(scope string) routeFlow {
+	switch scope {
+	case quota.Route:
+		return leaveRoute
+	case quota.Connection:
+		return tryNextTarget
+	}
+	return tryNextSlot
+}
+
+// rejected records a local quota refusal. It consumes an attempt but provides
+// no upstream evidence, so it never updates provider health.
+func (r routeRun[Result]) rejected(attempt routing.Attempt, slot routing.Slot, rejection *AttemptFailure) routeStep[Result] {
+	x := r.call
+	x.spent++
+	x.facts = append(x.facts, r.server.rejectedFact(x, attempt, slot, x.spent, rejection))
+	return routeStep[Result]{then: afterQuota(rejection.quota), seen: refusedBy(rejection)}
+}
+
+func (r routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int, estimate int64, hold *dispatchHold) routeStep[Result] {
+	s, x := r.server, r.call
+	ready, admissionErr := hold.begin(r.ctx, s, x, attempt, provider, slot)
+	if admissionErr != nil {
+		return r.finish(attemptOutcome[Result]{err: admissionErr})
+	}
+	if !ready {
+		return routeStep[Result]{then: tryNextSlot}
+	}
+	x.spent++
+	x.preparation().activate(attempt)
+	x.grantGeneration = 0
+	fact := s.newFact(x, attempt, slot, x.spent)
+	// Streams can persist accounting before dispatch returns.
+	fact.Retry, fact.Budgets = retry, hold.budgets
+	if x.guard.engine != nil {
+		x.guard.ledger.startAttempt(fact.GuardrailDecisions)
+	}
+	dispatchCtx, finishLease := hold.dispatchContext(r.ctx, s, x)
+	fact, result, failure, authorityErr := dispatchWithLease(dispatchCtx, hold, r.adapter, s, x, attempt, provider, slot, fact)
+	if x.guard.engine != nil {
+		fact.GuardrailDecisions = x.guard.ledger.finishAttempt()
+	}
+	if completionErr, cancelled := hold.complete(r.ctx, s, x, attemptCompletion{fact: fact, failure: failure, authority: authorityErr, attempt: attempt, estimate: estimate, finishLease: finishLease}); completionErr != nil {
+		return r.finish(attemptOutcome[Result]{err: completionErr, cancelled: cancelled})
+	}
+	if failure == nil {
+		return r.finish(attemptOutcome[Result]{result: result, committed: fact.Committed})
+	}
+	return r.failed(provider, slot, retry, failure, fact.CredentialSource == "caller")
+}
+
+func (r routeRun[Result]) failed(provider *routing.Provider, slot routing.Slot, retry int, failure *AttemptFailure, callerCredential bool) routeStep[Result] {
+	s, x := r.server, r.call
+	if failure.overall || !failoverAllowed(failure.class, failure.committed) {
+		s.cooldownFailure(r.ctx, provider.ID, &slot, x.grantGeneration, failure, callerCredential)
+		out := attemptOutcome[Result]{err: failure.Fault(), committed: failure.committed, cancelled: failure.class == ClassCancelled}
+		if failure.class == classContentFilter && !failure.committed {
+			// A content filter refuses the request on every target of the
+			// route; only a fallback route can serve it.
+			return r.finish(out, routing.FallbackContentFilter)
+		}
+		return r.finish(out)
+	}
+	if wait, ok := s.retryWait(x, provider.ID, failure, retry, r.deadline); ok {
+		// The slot is retried before it cools down, so the failure is
+		// recorded against it only once.
+		if !pause(r.ctx, wait) {
+			return routeStep[Result]{then: leaveRoute}
+		}
+		return routeStep[Result]{then: retrySlot}
+	}
+	if s.cooldownFailure(r.ctx, provider.ID, &slot, x.grantGeneration, failure, callerCredential) {
+		return routeStep[Result]{then: tryNextTarget, seen: refusedBy(failure)}
+	}
+	return routeStep[Result]{then: tryNextSlot, seen: refusedBy(failure)}
+}
+
+func (r routeRun[Result]) exhausted(seen routeEvidence) (attemptOutcome[Result], []string) {
 	switch {
-	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-		return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
-	case ctx.Err() != nil:
-		return attemptOutcome[Result]{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}, nil
+	case r.ctx.Err() != nil && errors.Is(context.Cause(r.ctx), context.DeadlineExceeded):
+		return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()}, nil
+	case r.ctx.Err() != nil:
+		return attemptOutcome[Result]{err: (&AttemptFailure{class: ClassCancelled}).Fault(), cancelled: true}, nil
 	}
 	// Every attempt the route could make failed in a way another target, or
 	// another route, might not.
-	met = append(met, routing.FallbackExhausted)
+	met := append(slices.Clone(seen.met), routing.FallbackExhausted)
 	switch {
-	case last != nil:
-		return attemptOutcome[Result]{err: last.toError()}, met
-	case unmeterable:
+	case seen.last != nil:
+		return attemptOutcome[Result]{err: seen.last.Fault()}, met
+	case seen.unmeterable:
 		// Every eligible target had a quota that could not be consulted.
 		return attemptOutcome[Result]{err: quota.LimitsUnavailable()}, met
 	}
-	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
-}
-
-// meet adds the fallback condition a failure class meets to met.
-func meet(met []string, class string) []string {
-	if condition := fallbackCondition(class); condition != "" && !slices.Contains(met, condition) {
-		return append(met, condition)
-	}
-	return met
+	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+r.call.named().Slug+"`.")}, met
 }
 
 // retryWait reports how long to wait before retrying a failed attempt on the
 // same slot, when the route's retry policy allows another try within the
 // request's attempt budget and deadline. An open circuit ends retries.
-func (s *Server) retryWait(x *Call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
+func (s *Server) retryWait(x *Call, providerID string, failure *AttemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
 	rule, ok := x.Route.Retry.Retries(failure.class)
 	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.Open(providerID) {
 		return 0, false
@@ -244,7 +330,7 @@ func failoverAllowed(class string, committed bool) bool {
 		return false
 	}
 	switch class {
-	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential, classContextWindow:
+	case ClassConnect, ClassTimeout, classRateLimit, ClassUpstreamServer, classCredential, classContextWindow:
 		return true
 	}
 	return false

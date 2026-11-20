@@ -166,7 +166,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Cal
 		}
 		if err != nil {
 			if ctx.Err() != nil {
-				fail((&attemptFailure{class: classTimeout}).toError())
+				fail((&AttemptFailure{class: ClassTimeout}).Fault())
 				return
 			}
 			fail(fault.InvalidRequest("invalid_request", "The request body could not be read.", nil))
@@ -177,7 +177,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Cal
 			return
 		}
 	}
-	base, err := s.egress.ValidateEndpoint(provider.Endpoint)
+	base, err := s.Egress.ValidateEndpoint(provider.Endpoint)
 	if err != nil {
 		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection endpoint is unavailable."))
 		return
@@ -204,10 +204,10 @@ slots:
 			break slots
 		case gateRejected:
 			x.facts = append(x.facts, s.rejectedFact(x, attempt, candidate, 1, gate.rejection))
-			fail(gate.rejection.toError())
+			fail(gate.rejection.Fault())
 			return
 		case gateExpired:
-			fail((&attemptFailure{class: classTimeout}).toError())
+			fail((&AttemptFailure{class: ClassTimeout}).Fault())
 			return
 		case gateUnmeterable:
 			unmeterable = true
@@ -278,14 +278,14 @@ slots:
 			if resp != nil {
 				factP.Status = resp.StatusCode
 			}
-			factP.Class = classProtocol
+			factP.Class = ClassProtocol
 			factP.RecordEvidence(true)
 			fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 			return
 		}
-		factP.Class = classConnect
+		factP.Class = ClassConnect
 		if ctx.Err() != nil {
-			factP.Class = classTimeout
+			factP.Class = ClassTimeout
 		}
 		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request."))
@@ -296,7 +296,7 @@ slots:
 	factP.FirstByte, factP.Status = &received, resp.StatusCode
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = ClassProtocol, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 		return
@@ -306,16 +306,16 @@ slots:
 		responseLimit = 1 << 20
 	}
 	if r.Method != http.MethodHead && resp.ContentLength > responseLimit {
-		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = ClassProtocol, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
 	responseBody, responseError := passthroughResponseBody(resp, x.sensitive, responseLimit)
 	if responseError != nil {
-		factP.Class, factP.Duration = classProtocol, s.Now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = ClassProtocol, s.Now().Sub(factP.StartedAt)
 		if ctx.Err() != nil {
-			factP.Class = classTimeout
+			factP.Class = ClassTimeout
 		}
 		factP.RecordEvidence(true)
 		fail(responseError)
@@ -343,9 +343,9 @@ slots:
 	providerSuccess := readErr == nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusNotModified)
 	switch {
 	case readErr != nil:
-		factP.Class = classProtocol
+		factP.Class = ClassProtocol
 		if ctx.Err() != nil {
-			factP.Class = classTimeout
+			factP.Class = ClassTimeout
 		}
 		factP.RecordEvidence(true)
 	case providerSuccess:
@@ -354,13 +354,13 @@ slots:
 		factP.TokenlessUsage = true
 		factP.RecordEvidence(false)
 	case resp.StatusCode >= 500:
-		factP.Class = classUpstreamServer
+		factP.Class = ClassUpstreamServer
 		factP.RecordEvidence(true)
 	case resp.StatusCode >= 400:
 		factP.Class = classUpstreamClient
 		factP.RecordEvidence(true)
 	default:
-		factP.Class = classProtocol
+		factP.Class = ClassProtocol
 		factP.RecordEvidence(true)
 	}
 	out := &Outcome{Committed: providerSuccess && copyErr == nil}
@@ -368,7 +368,7 @@ slots:
 	case readErr != nil || copyErr != nil:
 		out.Err = fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
 	case !providerSuccess:
-		out.Err = UpstreamError(&attemptFailure{Status: resp.StatusCode})
+		out.Err = UpstreamError(&AttemptFailure{Status: resp.StatusCode})
 	}
 	s.Finish(x, out, resp.StatusCode)
 	if readErr != nil || copyErr != nil {

@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Server) ReadResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {
-	deadline := time.Now().Add(requestBodyTimeout)
+	deadline := time.Now().Add(RequestBodyTimeout)
 	if parent, ok := r.Context().Deadline(); ok && parent.Before(deadline) {
 		deadline = parent
 	}

@@ -135,7 +135,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	}
 	endpoint, endpointErr := p.Provider.Connector().ResourceURL(p.Model, "files", nil)
 	if endpointErr != nil {
-		fail(pinUnavailable())
+		fail(PinUnavailable())
 		return
 	}
 	if err := lifecycle.Dispatch(ctx); err != nil {

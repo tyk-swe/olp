@@ -17,7 +17,7 @@ func callerCostBudgeted(authority *keyauthority.Authority, route string) bool {
 // Request-rate and concurrency limits remain supported by normal admission.
 // Caller-paid exempt routes waive cost caps on caller-credential providers only.
 // callerRoute retains named-route key limits when a selector changes route.
-func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *fault.Error {
+func UnboundedWorkLimits(authority keyauthority.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *fault.Error {
 	var slug string
 	if route != nil {
 		slug = route.Slug
@@ -35,7 +35,7 @@ func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Pro
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
 func (s *Server) UnboundedPinLimits(authority keyauthority.Authority, p *Pin, route *routing.Route) *fault.Error {
-	if e := unboundedWorkLimits(authority, &p.Provider, &p.Slot, route); e != nil {
+	if e := UnboundedWorkLimits(authority, &p.Provider, &p.Slot, route); e != nil {
 		return e
 	}
 	if release := s.Deps.Runtime.Release(); release != nil {
@@ -47,12 +47,12 @@ func (s *Server) UnboundedPinLimits(authority keyauthority.Authority, p *Pin, ro
 		if provider, ok := release.Snapshot().FindProvider(p.Provider.ID); ok {
 			for _, slot := range provider.Slots {
 				if slot.ID == p.Slot.ID {
-					return unboundedWorkLimits(authority, &provider, &slot, route)
+					return UnboundedWorkLimits(authority, &provider, &slot, route)
 				}
 			}
-			return unboundedWorkLimits(authority, &provider, nil, route)
+			return UnboundedWorkLimits(authority, &provider, nil, route)
 		}
-		return unboundedWorkLimits(authority, nil, nil, route)
+		return UnboundedWorkLimits(authority, nil, nil, route)
 	}
 	return nil
 }

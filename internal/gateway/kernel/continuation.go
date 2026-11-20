@@ -152,15 +152,15 @@ func (s *Server) authorizeContinuation(ctx context.Context, x *Call, res *resour
 }
 func (s *Server) authorizeContinuationPin(ctx context.Context, x *Call, res *resources.Resource, state *storedContinuation, p *Pin) *fault.Error {
 	if !p.Provider.Enabled || !p.Slot.Allows(p.Model, res.RouteSlug, x.keyID) {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	if p.Provider.Network != nil && p.Provider.Network.CredentialID != "" {
 		if _, err := s.providerNetworkSecret(ctx, x.request.release, &p.Provider); err != nil {
-			return pinUnavailable()
+			return PinUnavailable()
 		}
 	}
 	if p.Model != state.Binding || p.Provider.RevisionID != state.Receipt.Serving.RevisionID || p.Provider.ProfileID != state.Receipt.ProfileID || p.Provider.ProfileRevision != state.Receipt.ProfileRevision {
-		return pinUnavailable()
+		return PinUnavailable()
 	}
 	return nil
 }
@@ -260,7 +260,7 @@ func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *Call, data [
 func continuationDeliveryOutcome(err error) *Outcome {
 	out := &Outcome{Committed: true}
 	if err != nil {
-		out.Err = (&attemptFailure{class: classCancelled}).toError()
+		out.Err = (&AttemptFailure{class: ClassCancelled}).Fault()
 		out.Cancelled = true
 	}
 	return out
@@ -273,7 +273,7 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 		}
 	}
 	if int64(len(delivery.Body)) > s.Config.MaxResponseBytes {
-		return errResponseTooLarge
+		return ErrResponseTooLarge
 	}
 	return nil
 }

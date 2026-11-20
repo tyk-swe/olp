@@ -45,17 +45,13 @@ func (s *Server) registerGeminiLifecycle(mux *http.ServeMux) {
 	live := connectors.GeminiLiveMethod
 	mux.HandleFunc("GET /gemini/ws/"+live, s.geminiLive)
 	mux.HandleFunc("GET /ws/"+live, s.geminiLive)
-	mux.HandleFunc("OPTIONS /gemini/ws/", s.preflight)
-	mux.HandleFunc("POST /gemini/v1beta/interactions", s.geminiInteractionCreate)
-	mux.HandleFunc("GET /gemini/v1beta/interactions/{id}", s.geminiInteractionResource)
-	mux.HandleFunc("DELETE /gemini/v1beta/interactions/{id}", s.geminiInteractionResource)
-	mux.HandleFunc("POST /gemini/v1beta/interactions/{id}/cancel", s.geminiInteractionResource)
+	mux.HandleFunc("OPTIONS /gemini/ws/", s.Preflight)
 }
 
 // geminiClientKey validates all SDK-supported key locations before the shared
 // authority authenticates one value. Duplicate keys or competing locations
 // must not silently select the first query/header value.
-func geminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Error) {
+func GeminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Error) {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		return "", fault.InvalidRequest("invalid_request", "The Gemini query is malformed.", nil)
@@ -117,7 +113,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		fault.WriteSurfaceError(w, e, "gemini")
 		return
 	}
-	token, e := geminiClientKey(r)
+	token, e := GeminiClientKey(r)
 	if e == nil {
 		var authority keyauthority.Authority
 		authority, e = s.Gate.AuthenticateRequest(r, token, "inference")
@@ -147,7 +143,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		limit = 1 << 20
 	}
 	client.SetReadLimit(limit)
-	setupCtx, stopSetup := context.WithTimeout(ctx, requestBodyTimeout)
+	setupCtx, stopSetup := context.WithTimeout(ctx, RequestBodyTimeout)
 	messageType, initial, err := client.Read(setupCtx)
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
@@ -184,7 +180,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.Failure, status = e, e.Status
 		return
 	}
-	if e := unboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &route); e != nil {
+	if e := UnboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
 		x.Failure, status = e, e.Status
 		return
@@ -222,7 +218,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	check := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
-	if _, err := s.egress.ValidateEndpoint(check); err != nil {
+	if _, err := s.Egress.ValidateEndpoint(check); err != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
 		x.Failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live provider address is not permitted."), http.StatusBadGateway
 		return
@@ -278,7 +274,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.Failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent a malformed setup acknowledgement."), http.StatusBadGateway
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
-			fact.Class, fact.BillingUncertain = classProtocol, true
+			fact.Class, fact.BillingUncertain = ClassProtocol, true
 			if fact.Interaction != nil {
 				fact.Interaction.UpstreamState = acceptance.Terminal
 			}
@@ -306,23 +302,23 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
 	usageRecord, usageComplete, relayErr := s.relayGeminiLive(ctx, x, p, client, upstream, token, int(limit))
-	class := classProtocol
+	class := ClassProtocol
 	cancelled := false
 	if x.Strict() && relayErr != nil {
 		class = classAmbiguous
 		switch {
 		case errors.Is(relayErr, errGeminiLiveProviderError):
-			class = classUpstreamServer
+			class = ClassUpstreamServer
 		case errors.Is(relayErr, errGeminiLiveClientClosed):
-			class, cancelled = classCancelled, true
+			class, cancelled = ClassCancelled, true
 		case errors.Is(relayErr, errGeminiLiveClientProtocol), errors.Is(relayErr, errGeminiLiveProtocol):
-			class = classProtocol
+			class = ClassProtocol
 		case errors.Is(relayErr, errGeminiLiveAuthority):
 			class = classCredential
 		case errors.Is(relayErr, context.Canceled):
-			class, cancelled = classCancelled, true
+			class, cancelled = ClassCancelled, true
 		case errors.Is(relayErr, context.DeadlineExceeded):
-			class = classTimeout
+			class = ClassTimeout
 		}
 	}
 	if len(x.facts) > 0 {
@@ -358,10 +354,10 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 				x.Failure = fault.InvalidRequest("invalid_live_frame", "The Live client sent an invalid frame.", nil)
 			case errors.Is(relayErr, errGeminiLiveAuthority):
 				x.Failure = fault.PermissionError("key_revoked", "The Live session no longer has route authority.")
-			case class == classCancelled:
-				x.Failure = (&attemptFailure{class: classCancelled}).toError()
-			case class == classTimeout:
-				x.Failure = (&attemptFailure{class: classTimeout}).toError()
+			case class == ClassCancelled:
+				x.Failure = (&AttemptFailure{class: ClassCancelled}).Fault()
+			case class == ClassTimeout:
+				x.Failure = (&AttemptFailure{class: ClassTimeout}).Fault()
 			}
 			status = http.StatusSwitchingProtocols
 			out = &Outcome{Err: x.Failure, Committed: true, Cancelled: cancelled}
@@ -523,7 +519,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *Call, p *Pin, client, u
 	done := make(chan relayEnd, 2)
 	remaining := 2
 	relay := func(dst, src duplexPeer, fromProvider bool) {
-		defer panics.Recover(s.log, "gemini live relay", func(err error) { done <- relayEnd{err: err} })
+		defer panics.Recover(s.Log, "gemini live relay", func(err error) { done <- relayEnd{err: err} })
 		done <- forward(dst, src, fromProvider)
 	}
 	go relay(upstream, client, false)

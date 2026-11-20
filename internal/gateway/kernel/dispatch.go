@@ -42,7 +42,7 @@ const (
 // refusal attached to it.
 type gateResult struct {
 	verdict   gateVerdict
-	rejection *attemptFailure // gateRejected: the refusing quota
+	rejection *AttemptFailure // gateRejected: the refusing quota
 	hold      *dispatchHold   // gateAdmitted: the resources to settle
 	quota     string          // gateUnmeterable: the unreadable cap's scope
 }
@@ -57,7 +57,7 @@ type dispatchHold struct {
 	settled     bool
 	budgets     []string
 	estimate    int64
-	pinned      []*pinnedExchange
+	pinned      []*PinnedExchange
 }
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
@@ -120,7 +120,7 @@ func (s *Server) settleSession(ctx context.Context, x *Call, p *Pin) {
 	}
 	s.settleCaps(ctx, x)
 	s.recordCost(x)
-	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
 }
 
 func sessionSettlement(x *Call) *int64 {
@@ -155,7 +155,7 @@ func (s *Server) settleSessionHold(ctx context.Context, x *Call, hold *dispatchH
 
 type attemptCompletion struct {
 	fact        events.AttemptFact
-	failure     *attemptFailure
+	failure     *AttemptFailure
 	authority   *fault.Error
 	attempt     routing.Attempt
 	estimate    int64
@@ -258,7 +258,7 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *Call, complet
 		return completion.authority, false
 	}
 	if completion.failure.dispatched {
-		return completion.failure.toError(), completion.failure.class == classCancelled
+		return completion.failure.Fault(), completion.failure.class == ClassCancelled
 	}
 	return nil, false
 }
@@ -335,7 +335,7 @@ func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provi
 // upstream failure and reports whether the provider's remaining slots should
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
-func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *routing.Slot, generation int64, failure *attemptFailure, caller ...bool) bool {
+func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *routing.Slot, generation int64, failure *AttemptFailure, caller ...bool) bool {
 	if len(caller) != 0 && caller[0] && (failure.class == classCredential || failure.class == classRateLimit || failure.credentialRefused) {
 		return true
 	}
@@ -377,6 +377,6 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	s.Deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }
 
-func rateLimitedTarget(refusal *quota.TargetRefusal) *attemptFailure {
-	return &attemptFailure{class: classRateLimit, quota: refusal.Quota, retryAfter: refusal.RetryAfter}
+func rateLimitedTarget(refusal *quota.TargetRefusal) *AttemptFailure {
+	return &AttemptFailure{class: classRateLimit, quota: refusal.Quota, retryAfter: refusal.RetryAfter}
 }

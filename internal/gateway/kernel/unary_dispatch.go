@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -16,123 +17,205 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
+type unaryRun struct {
+	server   *Server
+	ctx      context.Context
+	x        *Call
+	target   routing.Attempt
+	provider *routing.Provider
+	slot     routing.Slot
+	state    *attemptState
+	traced   context.Context
+	trace    *telemetry.AttemptTrace
+}
+
+type unarySent struct {
+	fact     events.AttemptFact
+	plan     *operationplan.Plan
+	raw      []byte
+	cancel   context.CancelFunc
+	timer    *time.Timer
+	parallel *parallelGuardrail
+}
+
+func (sent unarySent) release() {
+	if sent.parallel != nil {
+		sent.parallel.cancel()
+	}
+	if sent.timer != nil {
+		sent.timer.Stop()
+	}
+	if sent.cancel != nil {
+		sent.cancel()
+	}
+}
+
+func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true, Declared: provider.Connector().Classification()}}
-	var parallel *parallelGuardrail
-	attemptCtx, trace := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
-	finish := func() {
-		if trace != nil {
-			if u := fact.Usage; u != nil {
-				trace.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
-			}
-			trace.Finish(fact.Class, fact.Status)
-		}
+	traced, trace := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
+	run := unaryRun{server: s, ctx: ctx, x: x, target: a, provider: provider, slot: slot, state: state, traced: traced, trace: trace}
+	sent, end := run.send(fact)
+	defer sent.release()
+	if end != nil {
+		return run.fail(sent.fact, sent.parallel, end)
 	}
-	fail := func(class string, f *attemptFailure) (events.AttemptFact, operationplan.Result, *attemptFailure) {
-		if f == nil {
-			f = &attemptFailure{}
-		}
-		if err := parallel.join(x, true); err != nil {
-			class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
-		}
-		f.dispatched = state.dispatched.Load()
-		f.acceptance = state.evidence().Acceptance()
-		f.accepted = state.accepted
-		f.noRetry = f.noRetry || f.dispatched
-		f.class = class
-		fact.Class = class
-		fact.Duration = s.Now().Sub(fact.StartedAt)
-		if f.retryAfter > 0 {
-			v := f.retryAfter
-			fact.RetryAfter = &v
-		}
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = f.acceptance
-		}
-		fact.RecordEvidence(f.billingUncertain())
-		finish()
-		return fact, operationplan.Result{}, f
+	result, measured, end := run.decode(sent)
+	if end != nil {
+		return run.fail(measured, sent.parallel, end)
 	}
-	plan, err := x.unaryPlan(provider, a.TargetID, a.UpstreamModel)
+	if end := run.inspect(sent, result); end != nil {
+		return run.fail(measured, sent.parallel, end)
+	}
+	return run.succeed(measured, result)
+}
+
+func (run unaryRun) send(fact events.AttemptFact) (unarySent, *attemptEnd) {
+	s, x, state := run.server, run.x, run.state
+	plan, err := x.unaryPlan(run.provider, run.target.TargetID, run.target.UpstreamModel)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return unarySent{fact: fact}, ended(ClassProtocol, nil)
 	}
 	submit, err := plan.RequestURL()
 	if err != nil {
-		return fail(classProtocol, nil)
+		return unarySent{fact: fact, plan: plan}, ended(ClassProtocol, nil)
 	}
-	bound := s.bindExchange(x, provider, slot, a.UpstreamModel, plan.Config(), state)
+	bound := s.bindExchange(x, run.provider, run.slot, run.target.UpstreamModel, plan.Config(), state)
 	if err := bound.validateEndpoint(submit); err != nil {
-		return fail(classConnect, nil)
+		return unarySent{fact: fact, plan: plan}, ended(ClassConnect, nil)
 	}
-	deadline, _ := ctx.Deadline()
+	deadline, _ := run.ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return unarySent{fact: fact, plan: plan}, ended(ClassTimeout, &AttemptFailure{overall: true})
 	}
-	actx, cancel := context.WithCancel(attemptCtx)
-	defer cancel()
-	timer := time.AfterFunc(min(a.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
-	defer timer.Stop()
-	client, err := bound.client(actx)
+	sending, cancel := context.WithCancel(run.traced)
+	timer := time.AfterFunc(min(run.target.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
+	client, err := bound.client(sending)
 	if err != nil {
-		return fail(classCredential, nil)
+		return unarySent{fact: fact, plan: plan, cancel: cancel, timer: timer}, ended(classCredential, nil)
 	}
-	parallel = s.startParallel(actx, x, cancel)
-	if parallel != nil {
-		defer parallel.cancel()
-	}
-	cap := plan.Receipt().Obligations.MaxBodyBytes
-	if s.Config.MaxResponseBytes > 0 {
-		cap = min(cap, int(s.Config.MaxResponseBytes))
-	}
-	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
+	parallel := s.startParallel(sending, x, cancel)
+	observed := fact
+	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &observed, bodyCap: run.replyLimit(plan), inject: run.trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
+	sent := unarySent{fact: observed, plan: plan, raw: raw, cancel: cancel, timer: timer, parallel: parallel}
 	if failure != nil {
-		return fail(failure.class, failure.failure)
+		return sent, ended(failure.class, failure.failure)
 	}
-	state.settled = true
-	result, err := plan.Decode(raw)
-	fact.Usage = accountingUsage(result.Usage)
+	return sent, nil
+}
+
+func (run unaryRun) replyLimit(plan *operationplan.Plan) int {
+	limit := plan.Receipt().Obligations.MaxBodyBytes
+	if run.server.Config.MaxResponseBytes > 0 {
+		return min(limit, int(run.server.Config.MaxResponseBytes))
+	}
+	return limit
+}
+
+func (run unaryRun) decode(sent unarySent) (operationplan.Result, events.AttemptFact, *attemptEnd) {
+	run.state.settled = true
+	result, err := sent.plan.Decode(sent.raw)
+	measured := sent.fact
+	measured.Usage = accountingUsage(result.Usage)
 	for _, decision := range result.Decisions {
-		recordDecision(x, decision)
+		recordDecision(run.x, decision)
 	}
+	if err == nil {
+		return result, measured, nil
+	}
+	var incompatible *oif.Incompatibility
+	if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
+		return result, measured, ended(classPolicy, &AttemptFailure{policyCode: incompatible.Code})
+	}
+	return result, measured, ended(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})
+}
+
+func (run unaryRun) inspect(sent unarySent, result operationplan.Result) *attemptEnd {
+	x := run.x
+	if guardErr := sent.parallel.join(x, true); guardErr != nil {
+		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+	}
+	if !x.guard.engine.HasPhase(guardrails.Output) {
+		return nil
+	}
+	if guardErr := run.inspectOutput(sent.plan, result); guardErr != nil {
+		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+	}
+	return nil
+}
+
+func (run unaryRun) inspectOutput(plan *operationplan.Plan, result operationplan.Result) error {
+	x := run.x
+	texts, err := plan.GuardrailOutput(result)
 	if err != nil {
-		var incompatible *oif.Incompatibility
-		if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
-			return fail(classPolicy, &attemptFailure{policyCode: incompatible.Code})
-		}
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+		unavailable, unavailableErr := x.guard.engine.Unavailable(guardrails.Output)
+		x.guard.record(unavailable.Decisions)
+		return unavailableErr
 	}
-	if guardErr := parallel.join(x, true); guardErr != nil {
-		return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+	return x.inspectOperationOutput(texts)
+}
+
+func (run unaryRun) finishTrace(fact events.AttemptFact) {
+	if run.trace == nil {
+		return
 	}
-	if x.guard.engine.HasPhase(guardrails.Output) {
-		texts, guardErr := plan.GuardrailOutput(result)
-		if guardErr != nil {
-			unavailable, e := x.guard.engine.Unavailable(guardrails.Output)
-			x.guard.record(unavailable.Decisions)
-			guardErr = e
-		} else {
-			guardErr = x.inspectOperationOutput(texts)
-		}
-		if guardErr != nil {
-			return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
-		}
+	if u := fact.Usage; u != nil {
+		run.trace.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}
-	fact.Class = ClassSuccess
-	fact.Duration = s.Now().Sub(fact.StartedAt)
-	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = upstream.Terminal
+	run.trace.Finish(fact.Class, fact.Status)
+}
+
+func (run unaryRun) fail(fact events.AttemptFact, parallel *parallelGuardrail, end *attemptEnd) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	f := run.failure(parallel, end)
+	failed := fact
+	failed.Class = f.class
+	failed.Duration = run.server.Now().Sub(fact.StartedAt)
+	if f.retryAfter > 0 {
+		wait := f.retryAfter
+		failed.RetryAfter = &wait
+	}
+	if failed.Interaction != nil {
+		failed.Interaction.UpstreamState = f.Acceptance
+	}
+	failed.RecordEvidence(f.billingUncertain())
+	run.finishTrace(failed)
+	return failed, operationplan.Result{}, f
+}
+
+func (run unaryRun) failure(parallel *parallelGuardrail, end *attemptEnd) *AttemptFailure {
+	state := run.state
+	f := AttemptFailure{class: end.class}
+	if end.failure != nil {
+		f = *end.failure
+		f.class = end.class
+	}
+	if err := parallel.join(run.x, true); err != nil {
+		f.class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
+	}
+	f.dispatched = state.dispatched.Load()
+	f.Acceptance = state.evidence().Acceptance()
+	f.accepted = state.accepted
+	f.noRetry = f.noRetry || f.dispatched
+	return &f
+}
+
+func (run unaryRun) succeed(fact events.AttemptFact, result operationplan.Result) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	done := fact
+	done.Class = ClassSuccess
+	done.Duration = run.server.Now().Sub(fact.StartedAt)
+	if done.Interaction != nil {
+		done.Interaction.UpstreamState = upstream.Terminal
 	}
 	// Moderation and search have no usage counters; a validated result
 	// completes their evidence.
-	fact.RecordEvidence(x.operationName() != "moderation" && x.operationName() != "search")
-	finish()
-	return fact, result, nil
+	operation := run.x.operationName()
+	done.RecordEvidence(operation != "moderation" && operation != "search")
+	run.finishTrace(done)
+	return done, result, nil
 }
 
 // accountingUsage converts operation usage into the usage an accounting fact

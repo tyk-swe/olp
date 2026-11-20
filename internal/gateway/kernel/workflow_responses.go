@@ -111,7 +111,7 @@ func projectResponseMCPItems(body []byte, items []responseMCPItem, maxBytes int6
 		return nil, err
 	}
 	if int64(len(result.Bytes())) > maxBytes {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	return result.Bytes(), nil
 }
@@ -158,7 +158,7 @@ func projectResponseMCPFrames(raw []byte, items []responseMCPItem, maxEvent int,
 	write := func(frame sse.Frame) error {
 		encoded := frame.Encode()
 		if len(frame.Data) > maxEvent || int64(out.Len()+len(encoded)) > maxBytes {
-			return errResponseTooLarge
+			return ErrResponseTooLarge
 		}
 		_, err := out.Write(encoded)
 		return err

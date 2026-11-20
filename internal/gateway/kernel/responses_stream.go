@@ -2,27 +2,18 @@ package kernel
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"mime"
-	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // A retrieved stream is a read of one authorized response, never another
@@ -171,181 +162,4 @@ func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]by
 	out = append(out, redacted.Bytes()...)
 	out = append(out, '\n', '\n')
 	return out, nil
-}
-
-func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *Call, res *resources.Resource, p *Pin, query url.Values) *fault.Error {
-	if res.Kind == resources.KindStrictResponse &&
-		(!p.Provider.Supports(p.Model, "generation", "openai", "streaming") || !p.Provider.Connector().Supports("generation", "openai", "streaming")) {
-		return fault.InvalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
-	}
-	projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
-	if res.Kind == resources.KindStrictResponse {
-		var parentErr error
-		projection.previousUpstream, projection.previousLocal, parentErr = responseParentProjection(res, x.generation.responseContract)
-		if parentErr != nil {
-			return fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
-		}
-	}
-	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
-	if err != nil {
-		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
-	}
-	x.mode = "streaming"
-	resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
-	if failure != nil {
-		if failure.Status == http.StatusNotFound {
-			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-		}
-		return UpstreamError(failure)
-	}
-	defer resp.Body.Close()
-	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || mediaType != "text/event-stream" {
-		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
-	}
-	limit := int(s.Config.MaxEventBytes)
-	if limit <= 0 {
-		limit = 1 << 20
-	}
-	committed := false
-	nativeIncomplete := false
-	nativeTerminalFailure := false
-	exchange := resp.Exchange
-	credentialValues := x.sensitive
-	previous := func(upstream string) string {
-		lookupCtx, stopLookup := ResourceCommitContext(ctx)
-		defer stopLookup()
-		return s.previousResponseLocal(lookupCtx, res.NativeIdentity(), nil, upstream)
-	}
-	observe := func(event oif.Event) error {
-		observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
-		if err != nil {
-			return err
-		}
-		if !lifecycle {
-			return nil
-		}
-		if res.Kind == resources.KindStrictResponse {
-			if _, err := validateNativeResponse(event.Source(), "/response", res.UpstreamID); err != nil {
-				return err
-			}
-		} else {
-			id, present := event.Source().Lookup("/response/id")
-			upstreamID, valid := id.Text()
-			if !present || !valid || upstreamID != res.UpstreamID {
-				return errors.New("retained response observation has a different identifier")
-			}
-		}
-		status := observation.Status
-		if status == "incomplete" {
-			nativeIncomplete = true
-		}
-		if status == "failed" {
-			nativeTerminalFailure = true
-		}
-		switch {
-		case nativeTerminalFailure:
-			exchange.Complete(classUpstreamServer)
-		case nativeIncomplete && res.Kind == resources.KindStrictResponse:
-			exchange.Complete(classProtocol)
-		case wire.ResponseStatusFinished(status):
-			exchange.Complete(ClassSuccess)
-		}
-		commitCtx, stopCommit := ResourceCommitContext(ctx)
-		reconcileErr := s.applyResponseObservation(commitCtx, res.ID, observation)
-		stopCommit()
-		if reconcileErr != nil {
-			return &responseLocalRefusal{cause: errors.New("retained response observation could not be committed")}
-		}
-		return nil
-	}
-	emit := func(frame []byte) error {
-		projected, _, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse, previous)
-		if err != nil || len(projected) > limit {
-			return errors.New("retained response event could not be projected")
-		}
-		projected, err = s.mapGenerationReferenceFrame(ctx, x, res.NativeIdentity(), projected)
-		if err != nil {
-			return &responseLocalRefusal{cause: err}
-		}
-		if len(projected) > limit {
-			return &responseLocalRefusal{cause: errors.New("projected retained response event exceeds byte limit")}
-		}
-		if bytes.Contains(projected, []byte("event: response.failed\n")) || bytes.Contains(projected, []byte("event: error\n")) {
-			projected, err = redactFailedResponseFrame(projected, credentialValues)
-			if err != nil {
-				return err
-			}
-			if len(projected) > limit {
-				return errors.New("redacted response event exceeds byte limit")
-			}
-		}
-		if !committed {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-store")
-			x.ResponseHeaders(w.Header(), true)
-			w.WriteHeader(http.StatusOK)
-			committed = true
-			exchange.Delivery(usage.ClientUnobserved)
-		}
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
-		if n, err := w.Write(projected); err != nil || n != len(projected) {
-			if n > 0 {
-				exchange.Delivery(usage.ClientPartial)
-			}
-			if err == nil {
-				err = io.ErrShortWrite
-			}
-			return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
-		}
-		if err := http.NewResponseController(w).Flush(); err != nil {
-			return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
-		}
-		x.Delivered(s.Now())
-		exchange.Delivery(usage.ClientPartial)
-		return nil
-	}
-	_, streamErr := protocols.StreamWithEvents(wire.Responses, wire.Responses,
-		p.Provider.Connector().StreamPayload(resp.Body, limit), limit, x.Route.Slug, true, emit, observe)
-	if streamErr != nil && (errors.Is(streamErr, fault.ErrClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
-		// The client left; the provider is not at fault.
-		x.Failure = (&attemptFailure{class: classCancelled}).toError()
-		exchange.interrupt(classCancelled, true)
-		s.Finish(x, &Outcome{Err: x.Failure, Committed: committed, Cancelled: true}, 0)
-		return nil
-	}
-	if streamErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		x.Failure = (&attemptFailure{class: classTimeout}).toError()
-		exchange.interrupt(classTimeout, false)
-		if !committed {
-			return x.Failure
-		}
-		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
-		return nil
-	}
-	if streamErr != nil {
-		var upstream *wire.UpstreamError
-		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
-			x.Failure = fault.ServerError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
-		} else {
-			x.Failure = fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
-			_, local := errors.AsType[*responseLocalRefusal](streamErr)
-			exchange.interrupt(classProtocol, local)
-		}
-		if !committed {
-			return x.Failure
-		}
-		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
-		return nil
-	}
-	if nativeIncomplete && res.Kind == resources.KindStrictResponse {
-		x.Failure = fault.ServerError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
-		exchange.Delivery(usage.ClientTerminal)
-		s.Finish(x, &Outcome{Err: x.Failure, Committed: true}, http.StatusOK)
-		return nil
-	}
-	exchange.Complete(ClassSuccess)
-	exchange.Delivery(usage.ClientTerminal)
-	s.Finish(x, &Outcome{Committed: true}, http.StatusOK)
-	return nil
 }

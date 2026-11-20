@@ -37,7 +37,6 @@ func (s *Server) registerState(mux *http.ServeMux) {
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
 	if s.Deps.Staging != nil {
-		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -77,7 +76,7 @@ func (s *Server) settleFence(ctx context.Context, settle func(context.Context) e
 	commit, cancel := ResourceCommitContext(ctx)
 	defer cancel()
 	if err := settle(commit); err != nil {
-		s.log.Warn("retained resource fence not settled", "error", err.Error())
+		s.Log.Warn("retained resource fence not settled", "error", err.Error())
 	}
 }
 
@@ -98,7 +97,7 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		return nil, errResponseTooLarge
+		return nil, ErrResponseTooLarge
 	}
 	return body, nil
 }
@@ -163,7 +162,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
-	if e := x.checkBody(route); e != nil {
+	if e := x.CheckBody(route); e != nil {
 		return nil, e
 	}
 	snapshot := x.request.release.Snapshot()
@@ -248,18 +247,18 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 		case gateAdmitted:
 			return &Pin{Target: target, Provider: provider, attempt: attempt, Slot: *slot, Model: attempt.UpstreamModel, Hold: gate.hold}, nil
 		case gateRejected:
-			return nil, gate.rejection.toError()
+			return nil, gate.rejection.Fault()
 		case gateExpired:
-			return nil, (&attemptFailure{class: classTimeout}).toError()
+			return nil, (&AttemptFailure{class: ClassTimeout}).Fault()
 		}
 	}
 	return nil, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
 }
 
-func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint string, body []byte, contentType string) (*pinnedResponse, *attemptFailure) {
+func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint string, body []byte, contentType string) (*PinnedResponse, *AttemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
 	if err := exchange.bound.validateEndpoint(endpoint); err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	var reader io.Reader
 	if body != nil {
@@ -267,7 +266,7 @@ func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint
 	}
 	req, err := exchange.bound.request(ctx, method, endpoint, reader, make(http.Header))
 	if err != nil {
-		return nil, exchange.fail(classConnect, nil)
+		return nil, exchange.fail(ClassConnect, nil)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -283,7 +282,7 @@ func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint
 	}
 	if err := exchange.bound.authenticate(ctx, req, body); err != nil {
 		if ctx.Err() != nil {
-			return nil, exchange.fail(classCancelled, nil)
+			return nil, exchange.fail(ClassCancelled, nil)
 		}
 		return nil, exchange.fail(classCredential, nil)
 	}
@@ -295,7 +294,7 @@ func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint
 	return s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)
 }
 
-func UpstreamError(f *attemptFailure) *fault.Error {
+func UpstreamError(f *AttemptFailure) *fault.Error {
 	if f.upstream != nil && f.upstream.Message != "" {
 		return &fault.Error{Status: f.Status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
 	}
@@ -313,7 +312,7 @@ func (s *Server) StateDeadline(ctx context.Context, route *routing.Route) (conte
 }
 
 func (s *Server) reserveState(ctx context.Context, x *Call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
-	if e := x.checkBody(x.Route); e != nil {
+	if e := x.CheckBody(x.Route); e != nil {
 		return e
 	}
 	var e *fault.Error
@@ -385,7 +384,7 @@ func (s *Server) ResourceSettle(ctx context.Context, x *Call, p *Pin) {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
 	s.settleCaps(ctx, x)
-	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.Log)
 }
 
 func upstreamString(body json.RawMessage, name string) (string, bool) {
@@ -520,7 +519,7 @@ func managedGeminiFilePath(res *resources.Resource) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := geminiFileID(name)
+	id, err := GeminiFileID(name)
 	if err != nil {
 		return "", err
 	}
@@ -723,18 +722,18 @@ func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resourc
 func gateError(gate gateResult) *fault.Error {
 	switch gate.verdict {
 	case gateRejected:
-		return gate.rejection.toError()
+		return gate.rejection.Fault()
 	case gateExpired:
-		return (&attemptFailure{class: classTimeout}).toError()
+		return (&AttemptFailure{class: ClassTimeout}).Fault()
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
 }
 
-func (s *Server) WriteStateJSON(w http.ResponseWriter, x *Call, body []byte, exchanges ...*pinnedExchange) {
-	s.writeStateJSONStatus(w, x, body, http.StatusOK, exchanges...)
+func (s *Server) WriteStateJSON(w http.ResponseWriter, x *Call, body []byte, exchanges ...*PinnedExchange) {
+	s.WriteStateJSONStatus(w, x, body, http.StatusOK, exchanges...)
 }
 
-func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *Call, body []byte, status int, exchanges ...*pinnedExchange) {
+func (s *Server) WriteStateJSONStatus(w http.ResponseWriter, x *Call, body []byte, status int, exchanges ...*PinnedExchange) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if body != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -814,7 +813,7 @@ func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage
 	if adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
 		return metadata, nil
 	}
-	return managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
+	return managedFileMetadata(metadata, nil, adapter, BatchManifest{}, role)
 }
 
 type refreshedFile struct {
@@ -846,7 +845,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	}
 	base := metadata
 	if adapter.Managed() {
-		managed, err := managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, prior.Role)
+		managed, err := managedFileMetadata(res.Metadata, body, adapter, BatchManifest{}, prior.Role)
 		if err != nil {
 			return nil, err
 		}
@@ -862,7 +861,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	return json.Marshal(fields)
 }
 
-func (e *pinnedExchange) completeRetainedControl() {
+func (e *PinnedExchange) completeRetainedControl() {
 	if e.request.retainedAdmission != nil {
 		_ = observeRetainedUsage(e, oif.Document{}, false)
 	}
