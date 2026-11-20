@@ -65,13 +65,12 @@ func (s surface) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	t := sessionTurn{surface: s, w: w, r: r, x: x, end: &sessionEnd{}}
-	authority, token, e := t.admitCaller()
+	authority, token, e := s.admitRealtimeCaller(x, r)
 	if e != nil {
-		t.refuse(e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
-	t.authority, t.token = authority, token
+	t := sessionTurn{surface: s, w: w, r: r, x: x, authority: authority, token: token, end: &sessionEnd{}}
 	route, e := t.route()
 	if e != nil {
 		t.refuse(e)
@@ -93,27 +92,27 @@ func (s surface) realtime(w http.ResponseWriter, r *http.Request) {
 	t.connectAndRelay(ctx, route, pin)
 }
 
-func (t sessionTurn) admitCaller() (keyauthority.Authority, string, *fault.Error) {
-	if !t.kernel.BrowserOriginAllowed(t.r) {
+func (s surface) admitRealtimeCaller(x *kernel.Call, r *http.Request) (keyauthority.Authority, string, *fault.Error) {
+	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions.")
 	}
-	if !kernel.RealtimeUpgrade(t.r) {
+	if !kernel.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "This endpoint requires a WebSocket upgrade request.", nil)
 	}
-	token := ingress.BearerToken(t.r)
+	token := ingress.BearerToken(r)
 	if token == "" {
 		return keyauthority.Authority{}, "", fault.AuthenticationError("missing_authorization", "Provide an Authorization bearer API key.")
 	}
-	authority, e := t.kernel.Gate.AuthenticateRequest(t.r, token, "inference")
+	authority, e := s.kernel.Gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		return keyauthority.Authority{}, "", e
 	}
-	t.kernel.BindAuthority(t.x, authority)
-	values := t.r.Header.Values(attribution.Header)
+	s.kernel.BindAuthority(x, authority)
+	values := r.Header.Values(attribution.Header)
 	if len(values) == 0 {
-		values = t.r.URL.Query()["attribution"]
+		values = r.URL.Query()["attribution"]
 	}
-	if e := t.x.NoteAttributionValues(values, authority); e != nil {
+	if e := x.NoteAttributionValues(values, authority); e != nil {
 		return keyauthority.Authority{}, "", e
 	}
 	return authority, token, nil

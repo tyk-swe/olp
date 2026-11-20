@@ -54,7 +54,6 @@ type liveTurn struct {
 	x         *kernel.Call
 	authority keyauthority.Authority
 	token     string
-	cancel    context.CancelFunc
 	end       *liveEnd
 }
 
@@ -78,22 +77,25 @@ func (t liveTurn) failClose(client *websocket.Conn, ce *closeError) {
 
 func (s surface) live(w http.ResponseWriter, r *http.Request) {
 	x := s.kernel.SessionCall(w, r, wire.GeminiLive, "realtime")
-	t := liveTurn{surface: s, w: w, r: r, x: x, end: &liveEnd{status: http.StatusInternalServerError}}
-	defer func() { s.kernel.Finish(x, t.end.out, t.end.status) }()
+	end := &liveEnd{status: http.StatusInternalServerError}
+	defer func() { s.kernel.Finish(x, end.out, end.status) }()
+	fail := func(e *fault.Error) {
+		x.Failure, end.status = e, e.Status
+		fault.WriteSurfaceError(w, e, "gemini")
+	}
 	if !s.kernel.Gate.Admit(r.Context()) {
-		t.fail(fault.Overloaded)
+		fail(fault.Overloaded)
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	authority, token, e := t.admitCaller()
+	authority, token, e := s.admitLiveCaller(x, r)
 	if e != nil {
-		t.fail(e)
+		fail(e)
 		return
 	}
-	t.authority, t.token = authority, token
+	t := liveTurn{surface: s, w: w, r: r, x: x, authority: authority, token: token, end: end}
 	ctx, cancel := context.WithTimeout(r.Context(), liveSession)
 	defer cancel()
-	t.cancel = cancel
 	client, e := t.acceptClient()
 	if e != nil {
 		t.fail(e)
@@ -116,7 +118,7 @@ func (s surface) live(w http.ResponseWriter, r *http.Request) {
 		t.failClose(client, ce)
 		return
 	}
-	upstream, ce := t.dispatchSetup(ctx, client, pin, setup, limit)
+	upstream, ce := t.dispatchSetup(ctx, cancel, client, pin, setup, limit)
 	if upstream != nil {
 		defer upstream.Close(websocket.StatusNormalClosure, "")
 	}
@@ -128,23 +130,23 @@ func (s surface) live(w http.ResponseWriter, r *http.Request) {
 	t.finishRelay(usageRecord, complete, relayErr)
 }
 
-func (t liveTurn) admitCaller() (keyauthority.Authority, string, *fault.Error) {
-	if !t.kernel.BrowserOriginAllowed(t.r) {
+func (s surface) admitLiveCaller(x *kernel.Call, r *http.Request) (keyauthority.Authority, string, *fault.Error) {
+	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open Live sessions.")
 	}
-	if !kernel.RealtimeUpgrade(t.r) {
+	if !kernel.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "Gemini Live requires a WebSocket upgrade.", nil)
 	}
-	token, e := kernel.GeminiClientKey(t.r)
+	token, e := kernel.GeminiClientKey(r)
 	if e != nil {
 		return keyauthority.Authority{}, "", e
 	}
-	authority, e := t.kernel.Gate.AuthenticateRequest(t.r, token, "inference")
+	authority, e := s.kernel.Gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		return keyauthority.Authority{}, "", e
 	}
-	t.kernel.BindAuthority(t.x, authority)
-	if e := t.x.NoteAttribution(t.r, authority); e != nil {
+	s.kernel.BindAuthority(x, authority)
+	if e := x.NoteAttribution(r, authority); e != nil {
 		return keyauthority.Authority{}, "", e
 	}
 	return authority, token, nil
@@ -213,7 +215,7 @@ func (t liveTurn) pinAndReserve(ctx context.Context, route *routing.Route) (*ker
 	return p, nil
 }
 
-func (t liveTurn) dispatchSetup(ctx context.Context, client *websocket.Conn, p *kernel.Pin, setup geminilifecycle.LiveSetup, limit int64) (*websocket.Conn, *closeError) {
+func (t liveTurn) dispatchSetup(ctx context.Context, cancel context.CancelFunc, client *websocket.Conn, p *kernel.Pin, setup geminilifecycle.LiveSetup, limit int64) (*websocket.Conn, *closeError) {
 	endpoint, err := p.Provider.Connector().GeminiLiveURL()
 	if err != nil {
 		return nil, policyClose(fault.ServerError(http.StatusBadGateway, "upstream_error", "The Live profile cannot address this model."), "profile unavailable")
@@ -226,7 +228,7 @@ func (t liveTurn) dispatchSetup(ctx context.Context, client *websocket.Conn, p *
 	if err != nil || int64(len(bound)) > limit {
 		return nil, &closeError{fault: fault.InvalidRequest("invalid_live_setup", "Gemini Live setup could not be bound.", nil), code: websocket.StatusPolicyViolation, reason: "invalid setup"}
 	}
-	dialTimer := time.AfterFunc(p.Timeout(), t.cancel)
+	dialTimer := time.AfterFunc(p.Timeout(), cancel)
 	upstream, e := t.kernel.RealtimeDial(ctx, t.x, p, endpoint)
 	dialTimer.Stop()
 	if e != nil {

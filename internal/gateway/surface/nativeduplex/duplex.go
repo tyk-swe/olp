@@ -66,25 +66,28 @@ func (t turn) failClose(client *websocket.Conn, ce *closeError) {
 func (s surface) duplex(w http.ResponseWriter, r *http.Request) {
 	dialect, routeSlug := r.PathValue("dialect"), r.PathValue("route")
 	x := s.kernel.SessionCall(w, r, wire.NativeDuplex, "realtime")
-	t := turn{surface: s, w: w, r: r, x: x, family: fault.RequestSurface(r), end: &turnEnd{status: http.StatusInternalServerError}}
-	defer func() { s.kernel.Finish(x, t.end.out, t.end.status) }()
+	end := &turnEnd{status: http.StatusInternalServerError}
+	defer func() { s.kernel.Finish(x, end.out, end.status) }()
+	fail := func(e *fault.Error) {
+		x.Failure, end.status = e, e.Status
+		fault.WriteSurfaceError(w, e, fault.RequestSurface(r))
+	}
 	descriptor, known := duplexcontract.Lookup(dialect)
 	if !known {
-		t.fail(fault.NotFoundError("not_found", "Unknown native duplex dialect."))
+		fail(fault.NotFoundError("not_found", "Unknown native duplex dialect."))
 		return
 	}
-	t.descriptor = descriptor
 	if !s.kernel.Gate.Admit(r.Context()) {
-		t.fail(fault.Overloaded)
+		fail(fault.Overloaded)
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	authority, token, e := t.admitCaller()
+	authority, token, e := s.admitDuplexCaller(x, r)
 	if e != nil {
-		t.fail(e)
+		fail(e)
 		return
 	}
-	t.authority, t.token = authority, token
+	t := turn{surface: s, w: w, r: r, x: x, authority: authority, token: token, descriptor: descriptor, family: fault.RequestSurface(r), end: end}
 	route, e := t.routeFor(routeSlug)
 	if e != nil {
 		t.fail(e)
@@ -130,23 +133,23 @@ func (s surface) duplex(w http.ResponseWriter, r *http.Request) {
 	t.finishRelay(usageRecord, complete, relayErr)
 }
 
-func (t turn) admitCaller() (keyauthority.Authority, string, *fault.Error) {
-	if !t.kernel.BrowserOriginAllowed(t.r) {
+func (s surface) admitDuplexCaller(x *kernel.Call, r *http.Request) (keyauthority.Authority, string, *fault.Error) {
+	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open duplex sessions.")
 	}
-	if !kernel.RealtimeUpgrade(t.r) {
+	if !kernel.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "Native duplex sessions require a WebSocket upgrade.", nil)
 	}
-	token := ingress.BearerToken(t.r)
-	if len(t.r.Header.Values("Authorization")) != 1 || token == "" {
+	token := ingress.BearerToken(r)
+	if len(r.Header.Values("Authorization")) != 1 || token == "" {
 		return keyauthority.Authority{}, "", fault.AuthenticationError("invalid_api_key", "Provide one API key.")
 	}
-	authority, e := t.kernel.Gate.AuthenticateRequest(t.r, token, "inference")
+	authority, e := s.kernel.Gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		return keyauthority.Authority{}, "", e
 	}
-	t.kernel.BindAuthority(t.x, authority)
-	if e := t.x.NoteAttribution(t.r, authority); e != nil {
+	s.kernel.BindAuthority(x, authority)
+	if e := x.NoteAttribution(r, authority); e != nil {
 		return keyauthority.Authority{}, "", e
 	}
 	return authority, token, nil
