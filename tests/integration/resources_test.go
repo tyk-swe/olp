@@ -1120,6 +1120,9 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if first.ID == "" {
 		t.Fatal("stored response returned no identifier")
 	}
+	if first.Model != slug {
+		t.Fatalf("response creation model = %q, want route %q", first.Model, slug)
+	}
 	providerExpiry := time.Unix(4102444800, 0)
 	if kept := storedResponses(t, pool, g, "owner"); len(kept) != 1 || kept[0] != (storedResponse{"response", "completed", model, providerExpiry}) {
 		t.Fatalf("the gateway kept %+v, want the response with the provider's state, model and expiry", kept)
@@ -1128,8 +1131,8 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if len(created) != 1 || created[0].key != "listed-secret" || created[0].authorization != "" || !strings.Contains(created[0].body, `"model":"`+model+`"`) {
 		t.Fatalf("response reached the provider as %+v, want the provider model and credential only", created)
 	}
-	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 200); got.ID != first.ID {
-		t.Fatalf("response read returned %q, want %q", got.ID, first.ID)
+	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID, "", "", 200); got.ID != first.ID || got.Model != first.Model {
+		t.Fatalf("response read returned %q of model %q, want %q of model %q", got.ID, got.Model, first.ID, first.Model)
 	}
 	if got := g.call(t, "owner", "GET", "/v1/responses/"+first.ID+"/input_items", "", "", 200); len(got.Data) != 1 {
 		t.Fatalf("input items = %+v, want the provider's one item", got)
