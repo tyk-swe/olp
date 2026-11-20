@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import {
@@ -60,9 +61,9 @@
       {wizard.errorMessage}
       <ProviderValidationIssues issues={wizard.validationIssues} />
     </div>{/if}
-  {#if wizard.notice}<div class="success-banner" role="status">
+  {#if wizard.notice}<Callout tone="success">
       {wizard.notice}
-    </div>{/if}
+    </Callout>{/if}
   <p class="sr-only" role="status">
     {wizard.busy ? 'Operation in progress. Please wait.' : ''}
   </p>

@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-func CurrentTargetIDs(ctx context.Context, q access.Queryer, slug, projectID, providerID, providerModel string) ([]string, error) {
+func CurrentTargetIDs(ctx context.Context, q database.Queryer, slug, projectID, providerID, providerModel string) ([]string, error) {
 	rows, err := q.Query(ctx, `SELECT DISTINCT t->>'id' FROM (
  SELECT d.targets,0 AS priority FROM olp.route_drafts d WHERE d.slug=$1 AND d.project_id=$2 AND d.state='draft'
  UNION ALL SELECT v.targets,1 AS priority FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1 AND r.project_id=$2 AND r.state='active'

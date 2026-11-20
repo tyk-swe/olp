@@ -1,0 +1,201 @@
+// Package secrets owns secret input, domain-separated digests, and record-bound
+// encryption. Errors deliberately contain no input or cryptographic material.
+package secrets
+
+import (
+	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
+	"golang.org/x/sys/unix"
+)
+
+func ReadFile(path string) ([]byte, error) {
+	data, err := ReadRawFile(path)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, errors.New("secret file must contain 1–65536 bytes")
+	}
+	return trimmed, nil
+}
+
+func ReadRawFile(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("cannot read secret file: %w", os.ErrNotExist)
+		}
+		return nil, errors.New("cannot read secret file")
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || (info.Mode().Perm() != 0400 && info.Mode().Perm() != 0440 && info.Mode().Perm() != 0600 && info.Mode().Perm() != 0640) {
+		return nil, errors.New("secret file must be regular with mode 0400, 0440, 0600, or 0640")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 65537))
+	if err != nil || len(data) == 0 || len(data) > 65536 {
+		return nil, errors.New("secret file must contain 1–65536 bytes")
+	}
+	return data, nil
+}
+
+func ReadBootstrapToken(path string) (string, bool) {
+	data, err := ReadFile(path)
+	if err != nil || len(data) < 32 || len(data) > 256 {
+		return "", false
+	}
+	return string(data), true
+}
+
+func DecodeKey(raw string) ([]byte, error) {
+	if b, err := hex.DecodeString(raw); err == nil && len(b) == 32 {
+		return b, nil
+	}
+	if b, err := base64.StdEncoding.DecodeString(raw); err == nil && len(b) == 32 {
+		return b, nil
+	}
+	return nil, errors.New("key must encode exactly 32 bytes as hex or base64")
+}
+
+type KeyRing struct {
+	Active int
+	keys   map[int][]byte
+}
+
+func (k *KeyRing) String() string { return "KeyRing([REDACTED])" }
+
+type KeyUnwrapper interface {
+	Unwrap(context.Context, secretstore.WrappedKey) ([]byte, error)
+}
+
+func LoadRingWithUnwrapper(ctx context.Context, path string, unwrapper KeyUnwrapper) (*KeyRing, error) {
+	data, err := ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(data)
+	return ParseRingWithUnwrapper(ctx, data, unwrapper)
+}
+
+func ParseRingWithUnwrapper(ctx context.Context, data []byte, unwrapper KeyUnwrapper) (_ *KeyRing, resultErr error) {
+	var doc struct {
+		Active int `json:"active_version"`
+		Keys   []struct {
+			Version int                     `json:"version"`
+			Key     *string                 `json:"key,omitempty"`
+			Wrapped *secretstore.WrappedKey `json:"wrapped,omitempty"`
+		} `json:"keys"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&doc) != nil || decoder.Decode(new(any)) != io.EOF || doc.Active < 1 || len(doc.Keys) < 1 || len(doc.Keys) > 32 {
+		return nil, errors.New("invalid master key ring")
+	}
+	ring := &KeyRing{Active: doc.Active, keys: map[int][]byte{}}
+	defer func() {
+		if resultErr != nil {
+			for _, key := range ring.keys {
+				clear(key)
+			}
+		}
+	}()
+	for _, entry := range doc.Keys {
+		if ctx.Err() != nil || entry.Version < 1 || ring.keys[entry.Version] != nil || (entry.Key == nil) == (entry.Wrapped == nil) {
+			return nil, errors.New("invalid master key entry")
+		}
+		var key []byte
+		var err error
+		if entry.Wrapped != nil && entry.Wrapped.Validate() != nil {
+			return nil, errors.New("invalid master key entry")
+		}
+		if entry.Key != nil {
+			key, err = DecodeKey(*entry.Key)
+		} else if unwrapper != nil {
+			key, err = unwrapper.Unwrap(ctx, *entry.Wrapped)
+		} else {
+			err = errors.New("wrapped master key requires a workload identity unwrapper")
+		}
+		if err != nil || len(key) != 32 {
+			clear(key)
+			return nil, errors.New("invalid master key entry")
+		}
+		ring.keys[entry.Version] = key
+	}
+	if ring.keys[ring.Active] == nil {
+		return nil, errors.New("missing active master key")
+	}
+	return ring, nil
+}
+func (k *KeyRing) Has(version int) bool { return k.keys[version] != nil }
+func (k *KeyRing) aead(version int) (cipher.AEAD, error) {
+	b := k.keys[version]
+	if b == nil {
+		return nil, errors.New("required master key is missing")
+	}
+	block, err := aes.NewCipher(b)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+func aad(installation string, purpose SealPurpose, id string) []byte {
+	b, _ := json.Marshal([]string{"olp-secret-v1", installation, purpose.name, id})
+	return b
+}
+func (k *KeyRing) Seal(installation string, purpose SealPurpose, id string, data []byte) ([]byte, error) {
+	a, err := k.aead(k.Active)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, a.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return a.Seal(nonce, nonce, data, aad(installation, purpose, id)), nil
+}
+func (k *KeyRing) Open(installation string, purpose SealPurpose, id string, version int, data []byte) ([]byte, error) {
+	a, err := k.aead(version)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) < a.NonceSize()+a.Overhead() {
+		return nil, errors.New("invalid encrypted secret")
+	}
+	out, err := a.Open(nil, data[:a.NonceSize()], data[a.NonceSize():], aad(installation, purpose, id))
+	if err != nil {
+		return nil, errors.New("encrypted secret authentication failed")
+	}
+	return out, nil
+}
+
+type AuthKey struct {
+	key          []byte
+	installation string
+}
+
+func (a *AuthKey) String() string { return "AuthKey([REDACTED])" }
+func NewAuthKey(key []byte, installation string) *AuthKey {
+	return &AuthKey{key: append([]byte(nil), key...), installation: installation}
+}
+func (a *AuthKey) Digest(purpose DigestPurpose, value string) []byte {
+	h := hmac.New(sha256.New, a.key)
+	b, _ := json.Marshal([]string{"olp-auth-v1", a.installation, purpose.name, value})
+	h.Write(b)
+	return h.Sum(nil)
+}
+func Token() string { return rand.Text() }

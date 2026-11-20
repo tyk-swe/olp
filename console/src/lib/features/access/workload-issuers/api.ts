@@ -1,22 +1,23 @@
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import {
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch
+} from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Issuer = components['schemas']['WorkloadIssuer'];
 export type IssuerWrite = components['schemas']['WorkloadIssuerWrite'];
 export async function listIssuers(signal?: AbortSignal) {
-  const items: Issuer[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/workload-issuers', {
         params: { query: { cursor } },
         signal
       })
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function saveIssuer(
   body: IssuerWrite,
@@ -28,14 +29,14 @@ export async function saveIssuer(
       await apiClient.PUT('/api/v1/workload-issuers/{issuer_id}', {
         params: {
           path: { issuer_id: current.id },
-          header: { 'If-Match': `"${current.etag}"` }
+          header: ifMatch(current.etag)
         },
         body
       })
     );
   return unwrap(
     await apiClient.POST('/api/v1/workload-issuers', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body
     })
   );

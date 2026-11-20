@@ -8,16 +8,16 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const (
@@ -27,13 +27,13 @@ const (
 )
 
 type Drafts interface {
-	ConnectionPolicy(q access.Queryer) connection.Policy
+	ConnectionPolicy(q database.Queryer) connection.Policy
 	CreateDraft(ctx context.Context, tx pgx.Tx, draft providers.Draft) (providers.CreatedDraft, error)
 	StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared connection.Prepared) error
 	StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []providers.DraftModel, slots []providers.DraftSlot) error
 	BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID, slotID, credentialID string) error
-	CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error)
-	ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
+	CredentialEquals(ctx context.Context, q database.Queryer, credentialID, secret string) (bool, error)
+	ExternalCredentialEquals(ctx context.Context, q database.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
 	StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error)
 	StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error)
 	StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)

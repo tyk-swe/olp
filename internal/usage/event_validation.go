@@ -10,12 +10,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // ErrInvalidEvent marks an event that decoded but cannot be accounted for. The
@@ -270,20 +270,23 @@ func validateUsageDimensions(q UsageQuantities) error {
 	if count(cachedImage) > count(image) {
 		return errors.New("cached image exceeds the image input total")
 	}
-	if count(cachedAudio)+count(cachedImage) > count(read) {
+	if count(cachedAudio) > count(read) || count(cachedImage) > count(read)-count(cachedAudio) {
 		return errors.New("cached modality tokens exceed the cached input total")
 	}
 	// Counts are non-negative, so subtracting cannot underflow where adding could overflow.
 	if input != nil {
-		shares := count(read) + count(write) + count(audio) - count(cachedAudio) + count(image) - count(cachedImage)
-		if count(read) > *input || shares-count(read) > *input-count(read) {
-			return errors.New("usage shares exceed the input total")
+		remaining := *input
+		for _, share := range [...]int64{count(read), count(write), count(audio) - count(cachedAudio), count(image) - count(cachedImage)} {
+			if share > remaining {
+				return errors.New("usage shares exceed the input total")
+			}
+			remaining -= share
 		}
 	}
 	if count(write5m) > count(write) || count(write1h) > count(write)-count(write5m) {
 		return errors.New("cache write detail exceeds the cache write total")
 	}
-	if output != nil && count(audioOut)+count(imageOut) > *output {
+	if output != nil && (count(audioOut) > *output || count(imageOut) > *output-count(audioOut)) {
 		return errors.New("modality shares exceed the output total")
 	}
 	return nil

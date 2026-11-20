@@ -8,11 +8,11 @@ import (
 	"slices"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
-	"github.com/tyk-swe/olp/internal/oif"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type MCPTool struct {

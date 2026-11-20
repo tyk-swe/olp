@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func (s *Store) PutGeminiUploadSession(ctx context.Context, resource *Resource, uploadURL string) (*Resource, error) {

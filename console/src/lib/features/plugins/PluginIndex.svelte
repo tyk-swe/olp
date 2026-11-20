@@ -89,7 +89,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
   }
   .section-heading p {
     color: var(--foreground-muted);

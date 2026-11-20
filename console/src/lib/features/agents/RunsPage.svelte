@@ -1,12 +1,15 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import {
+    listProjectMemberships,
+    projectKeys
+  } from '#lib/features/access/index.js';
   import { listRuns } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -29,7 +32,7 @@
   }));
 </script>
 
-<svelte:head><title>Runs · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Runs" />
 <form
   class="filter-bar"
   onsubmit={(event) => {

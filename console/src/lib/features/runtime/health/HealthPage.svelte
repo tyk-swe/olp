@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
 
@@ -15,12 +17,12 @@
   } from '#lib/features/runtime/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { listRuntimeGenerations } from '#lib/features/runtime/api.js';
-  import { usageCompleteness } from '#lib/features/usage/usage.js';
+  import { usageCompleteness } from '#lib/features/usage/index.js';
   import { formatDate, formatTime } from '#lib/format.js';
   import GatewayEpochsPanel from '#lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '#lib/features/runtime/health/ProviderHealthPanel.svelte';
   import ReadinessPanels from '#lib/features/runtime/health/ReadinessPanels.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
   // Runtime generations and unresolved gateway epochs are installation-wide
   // reads, so they run only for principals the contract admits.
@@ -92,7 +94,7 @@
   }
 </script>
 
-<svelte:head><title>Health · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Health" />
 
 <PageHeader
   title="Health"
@@ -161,13 +163,7 @@
         Loading runtime generations…
       </div>
     {:else}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Runtime generation history"
-      >
+      <ScrollTable label="Runtime generation history">
         <table class="data-table">
           <caption class="sr-only"
             >Recently published immutable runtime generations</caption
@@ -192,7 +188,7 @@
               >{/each}</tbody
           >
         </table>
-      </div>
+      </ScrollTable>
       <CursorPagination
         {...cursorPaginationProps(
           generationPagination,

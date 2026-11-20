@@ -1,12 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
 </script>
 
 <main class="error-shell">
   <section class="card card-light error-card">
-    <BrandMark size={28} />
+    <InstallationMark size={28} />
     <p class="eyebrow">{page.status}</p>
     <h1>This page could not be loaded.</h1>
     <p>
@@ -36,7 +36,7 @@
     background:
       radial-gradient(
         40rem 22rem at 50% 58%,
-        color-mix(in srgb, var(--color-blue-500) 16%, transparent),
+        color-mix(in srgb, var(--color-accent-500) 16%, transparent),
         transparent 70%
       ),
       var(--canvas);

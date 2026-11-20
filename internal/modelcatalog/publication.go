@@ -5,8 +5,8 @@ import (
 	"maps"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routes"
 )
 
@@ -15,7 +15,7 @@ type projectPublication struct {
 	publication Publication
 }
 
-func ReadPublications(ctx context.Context, q access.Queryer) (map[string]Publication, error) {
+func ReadPublications(ctx context.Context, q database.Queryer) (map[string]Publication, error) {
 	rows, err := q.Query(ctx, `SELECT p.id::text,COALESCE(c.enabled,false),COALESCE(c.prices_public,false),COALESCE(c.etag,p.etag)::text FROM olp.projects p LEFT JOIN olp.model_catalog_project_settings c ON c.project_id=p.id`)
 	if err != nil {
 		return nil, err

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward/coderesearch"
 )
 

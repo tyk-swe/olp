@@ -14,10 +14,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/prompts"
+	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
-	"github.com/tyk-swe/olp/internal/pricingpolicy"
-	"github.com/tyk-swe/olp/internal/prompts"
-	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type Tool struct {

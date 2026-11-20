@@ -60,7 +60,7 @@
 
   .dots {
     color: var(--foreground-muted);
-    font-size: 1rem;
+    font-size: var(--text-body);
     line-height: 1;
   }
 

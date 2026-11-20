@@ -1,6 +1,13 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 import {
   ROUTE_PAGE_SIZE,
   ROUTE_REVISION_PAGE_SIZE
@@ -37,6 +44,10 @@ export async function listRoutes(signal?: AbortSignal): Promise<ActiveRoute[]> {
   return collectCursorPages((cursor) => listRoutePage(cursor, signal));
 }
 
+export function selectActiveRoutes(routes: ActiveRoute[]): ActiveRoute[] {
+  return routes.filter((route) => route.state === 'active');
+}
+
 export async function listRoutePage(
   cursor?: string,
   signal?: AbortSignal
@@ -64,7 +75,7 @@ export async function createRouteDraft(
   requestId: string
 ): Promise<RouteDraftValidation> {
   const response = await apiClient.POST('/api/v1/route-drafts', {
-    params: { header: { 'Idempotency-Key': requestId } },
+    params: { header: createHeaders(requestId) },
     body: input
   });
   return unwrap(response);
@@ -76,7 +87,7 @@ export async function replaceRouteDraft(
   input: ReplaceRouteDraftInput
 ): Promise<RouteDraft> {
   const response = await apiClient.PUT('/api/v1/route-drafts/{draft_id}', {
-    params: { path: { draft_id: id }, header: { 'If-Match': etag } },
+    params: { path: { draft_id: id }, header: ifMatch(etag) },
     body: input
   });
   return unwrap(response);
@@ -87,7 +98,7 @@ export async function deleteRouteDraft(
   etag: string
 ): Promise<void> {
   const response = await apiClient.DELETE('/api/v1/route-drafts/{draft_id}', {
-    params: { path: { draft_id: id }, header: { 'If-Match': etag } }
+    params: { path: { draft_id: id }, header: ifMatch(etag) }
   });
   ensureOk(response);
 }
@@ -136,7 +147,7 @@ export async function replaceRoutingPolicy(
     await apiClient.PUT('/api/v1/routing-policies/{scope}/{id}', {
       params: {
         path: { scope, id },
-        header: { 'If-Match': etag, 'Idempotency-Key': requestId }
+        header: mutationHeaders(etag, requestId)
       },
       body
     })
@@ -211,7 +222,7 @@ export async function validateRoute(
     {
       params: {
         path: { draft_id: draft.id },
-        header: { 'If-Match': draft.etag }
+        header: ifMatch(draft.etag)
       }
     }
   );
@@ -227,10 +238,7 @@ export async function activateRoute(
     {
       params: {
         path: { draft_id: draft.id },
-        header: {
-          'If-Match': draft.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(draft.etag, requestId)
       }
     }
   );
@@ -245,10 +253,7 @@ export async function retireRoute(
   const response = await apiClient.POST('/api/v1/routes/{route_id}/retire', {
     params: {
       path: { route_id: routeID },
-      header: {
-        'If-Match': etag,
-        'Idempotency-Key': requestId
-      }
+      header: mutationHeaders(etag, requestId)
     }
   });
   return unwrap(response);
@@ -304,7 +309,7 @@ export async function restoreRouteRevision(
     {
       params: {
         path: { route_id: routeId, revision_id: revisionId },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     }
   );
@@ -339,7 +344,7 @@ export async function saveTemplate(
     return unwrap(
       await apiClient.POST('/api/v1/route-templates', {
         body,
-        params: { header: { 'Idempotency-Key': requestId } }
+        params: { header: createHeaders(requestId) }
       })
     );
   return unwrap(
@@ -347,7 +352,7 @@ export async function saveTemplate(
       body,
       params: {
         path: { template_id: current.id },
-        header: { 'If-Match': `"${current.etag}"` }
+        header: ifMatch(current.etag)
       }
     })
   );
@@ -357,7 +362,7 @@ export const deleteTemplate = async (value: RouteTemplate) =>
     await apiClient.DELETE('/api/v1/route-templates/{template_id}', {
       params: {
         path: { template_id: value.id },
-        header: { 'If-Match': `"${value.etag}"` }
+        header: ifMatch(value.etag)
       }
     })
   );
@@ -366,7 +371,7 @@ export const applyTemplate = async (id: string, requestId: string) =>
     await apiClient.POST('/api/v1/route-templates/{template_id}/apply', {
       params: {
         path: { template_id: id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     })
   );

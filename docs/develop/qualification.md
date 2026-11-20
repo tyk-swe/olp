@@ -10,8 +10,9 @@ that produced them.
 Pre-merge validation is now the unit, integration and end-to-end tiers in
 [testing](../../tests/README.md) plus formatting, vet, lint, type checks,
 contract generation, and a full build. Release qualification still builds
-the candidate image and runs the image mode and service smokes and the
-vulnerability scan. The code-mode fixture lanes below also run again as a
+the candidate image and runs the image mode and service smokes, the
+vulnerability scan, and a Compose quickstart smoke that creates the first owner
+through `olp setup-token` and checks it survives a restart. The code-mode fixture lanes below also run again as a
 release gate. Nothing else in this page describes a check that still runs.
 Each section below records what its lane used to establish and what, if
 anything, still covers part of it. Performance claims follow

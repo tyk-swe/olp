@@ -1,10 +1,11 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import type { SessionUser } from '#lib/features/access/session/api.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import InstallationSwitcher from '#lib/features/fleet/InstallationSwitcher.svelte';
+  import type { SessionUser } from '#lib/session/api.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import InstallationSwitcher from '#lib/shell/installations/InstallationSwitcher.svelte';
   import Menu from '#lib/components/Menu.svelte';
-  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
+  import { productName, useBranding } from '#lib/shell/branding/branding.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     OVERVIEW,
@@ -19,16 +20,12 @@
 
   let {
     user,
-    installationName,
-    installationLogo,
     signingOut,
     onSignOut,
     onSearch,
     onNavigate = () => {}
   }: {
     user: SessionUser;
-    installationName: string;
-    installationLogo: string;
     signingOut: boolean;
     onSignOut: () => void;
     onSearch: () => void;
@@ -36,6 +33,7 @@
   } = $props();
 
   const services = useServiceCapabilities();
+  const branding = useBranding();
   const sections = $derived(visibleSections(user, services.gatewayAvailable));
   const pinned = $derived(
     [OVERVIEW, PLAYGROUND]
@@ -73,12 +71,8 @@
 
 <div class="sidebar">
   <div class="identity">
-    {#if installationLogo}<img
-        class="logo"
-        src={installationLogo}
-        alt=""
-      />{:else}<BrandMark size={22} />{/if}
-    <InstallationSwitcher name={installationName} />
+    <InstallationMark size={22} />
+    <InstallationSwitcher name={branding.data?.name ?? productName} />
   </div>
 
   <button class="search" type="button" onclick={onSearch}>
@@ -148,13 +142,6 @@
     align-items: center;
     gap: 0.55rem;
     padding: 0 0.35rem;
-  }
-  .logo {
-    width: 22px;
-    height: 22px;
-    flex: none;
-    border-radius: 5px;
-    object-fit: contain;
   }
   .search {
     display: flex;

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
   import { onDestroy, onMount } from 'svelte';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import { retryQuery } from '#lib/management/http.js';
   import '../app.css';
+  import Toaster from '#lib/components/Toaster.svelte';
   import MFAConfirmationHost from '#lib/features/access/mfa/MFAConfirmationHost.svelte';
 
   let { children } = $props();
@@ -31,4 +32,5 @@
 <QueryClientProvider client={queryClient}>
   {@render children()}
   <MFAConfirmationHost />
+  <Toaster />
 </QueryClientProvider>

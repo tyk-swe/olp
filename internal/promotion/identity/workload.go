@@ -9,9 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -53,11 +55,11 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	if err != nil {
 		return err
 	}
-	return access.ValidateWorkloadConfig(config)
+	return apikeys.ValidateWorkloadConfig(config)
 }
 
-func readWorkload(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
-	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
+func readWorkload(ctx context.Context, q database.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
+	configs, err := apikeys.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func renderWorkload(issuers []contract.ConfigurationWorkloadIssuer) []contract.C
 	})
 }
 
-func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion.Item, error) {
+func planWorkload(ctx context.Context, q database.Queryer, d Desired) ([]promotion.Item, error) {
 	if len(d.issuers) == 0 {
 		return nil, nil
 	}
@@ -102,15 +104,15 @@ func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion
 	})
 }
 
-func planIssuer(ctx context.Context, q access.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
-	current, exists, err := access.FindWorkloadIssuer(ctx, q, issuer.Issuer)
+func planIssuer(ctx context.Context, q database.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
+	current, exists, err := apikeys.FindWorkloadIssuer(ctx, q, issuer.Issuer)
 	if err != nil {
 		return promotion.Item{}, err
 	}
 	if !exists {
 		return issuerItem(issuer, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	if err := access.ValidateWorkloadBindings(ctx, q, current.ID, config); err != nil {
+	if err := apikeys.ValidateWorkloadBindings(ctx, q, current.ID, config); err != nil {
 		return promotion.Item{}, err
 	}
 	return issuerItem(issuer, action(true, sameConfig(current.Config, config))), nil
@@ -165,7 +167,7 @@ func effective(stored catalog, entry contract.ConfigurationProjectEntry, declare
 	return catalog{templates: slices.Collect(maps.Keys(templates)), groups: groups}
 }
 
-func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, error) {
+func readCatalogs(ctx context.Context, q database.Queryer) (map[string]catalog, error) {
 	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return nil, err
@@ -180,7 +182,7 @@ func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, er
 
 func (d Desired) NeedsPrepare() bool { return len(d.issuers) > 0 }
 
-func Prepare(ctx context.Context, desired Desired, principal access.Principal, deps Deps) (Prepared, error) {
+func Prepare(ctx context.Context, desired Desired, principal authz.Principal, deps Deps) (Prepared, error) {
 	if err := Authorize(desired, principal); err != nil {
 		return Prepared{}, err
 	}
@@ -194,7 +196,7 @@ func Prepare(ctx context.Context, desired Desired, principal access.Principal, d
 }
 
 func prepareIssuer(ctx context.Context, deps Deps, issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
-	current, exists, err := access.FindWorkloadIssuer(ctx, deps.Access.Pool, issuer.Issuer)
+	current, exists, err := apikeys.FindWorkloadIssuer(ctx, deps.Access.Pool, issuer.Issuer)
 	if err != nil {
 		return preparedIssuer{}, err
 	}
@@ -209,7 +211,7 @@ func prepareIssuer(ctx context.Context, deps Deps, issuer contract.Configuration
 }
 
 func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if len(desired.issuers) == 0 {
 			return nil
 		}
@@ -224,8 +226,8 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 	}
 }
 
-func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
-	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
+func applyIssuer(ctx context.Context, tx pgx.Tx, p authz.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
+	current, exists, err := apikeys.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err
 	}
@@ -245,11 +247,11 @@ func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, 
 	if exists && sameConfig(current.Config, config) {
 		return nil
 	}
-	_, stored := deps.Access.StoreWorkloadIssuer(ctx, tx, p, issuerID(current, exists), config, !exists)
+	_, stored := apikeys.StoreWorkloadIssuer(ctx, deps.Access, tx, p, issuerID(current, exists), config, !exists)
 	return stored
 }
 
-func issuerID(current access.StoredWorkloadIssuer, exists bool) string {
+func issuerID(current apikeys.StoredWorkloadIssuer, exists bool) string {
 	if exists {
 		return current.ID
 	}

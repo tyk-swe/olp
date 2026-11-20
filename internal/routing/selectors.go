@@ -3,9 +3,9 @@ package routing
 import (
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 )
 
 // PredicateResult is the verdict of a classifier or plugin predicate. A

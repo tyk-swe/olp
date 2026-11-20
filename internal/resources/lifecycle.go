@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
@@ -132,7 +132,19 @@ func (l *Lifecycle) AcceptMutation(ctx context.Context) error {
 	return l.store.acceptRetainedMutation(ctx, l.resource.UUID, l.submission.Key, l.submission.Operation)
 }
 
-func (l *Lifecycle) AcceptCreated(ctx context.Context, result CreationResult) (*Resource, error) {
+type PreparedCreation struct {
+	resource *Resource
+	children []*Resource
+	store    *Store
+}
+
+func (p *PreparedCreation) Resource() *Resource { return p.resource }
+
+func (p *PreparedCreation) Commit(ctx context.Context) error {
+	return p.store.completeLifecycleChildren(ctx, p.resource, p.children)
+}
+
+func (l *Lifecycle) PrepareCreated(result CreationResult) (*PreparedCreation, error) {
 	if l == nil || l.action != lifecycleCreate {
 		return nil, ErrSubmissionConflict
 	}
@@ -155,10 +167,7 @@ func (l *Lifecycle) AcceptCreated(ctx context.Context, result CreationResult) (*
 			return nil, fmt.Errorf("%w: %w", ErrRetainedMetadata, err)
 		}
 	}
-	if err := l.store.completeLifecycleChildren(ctx, &resource, children); err != nil {
-		return nil, err
-	}
-	return &resource, nil
+	return &PreparedCreation{resource: &resource, children: children, store: l.store}, nil
 }
 
 // LookupLifecycle resolves the caller's original submission before any fresh

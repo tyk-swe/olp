@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
@@ -20,23 +22,24 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Server serves the route management surface.
 type Server struct {
-	Region            string
-	Access            *access.Server
-	Inputs            func() *routinginputs.Inputs
-	WorkflowTools     func() mcp.WorkflowResolver
-	WorkflowRelease   func() *release.Release
-	WorkflowAvailable func() bool
+	Region          string
+	Access          *access.Server
+	Inputs          func() *routinginputs.Inputs
+	Workflows       mcp.WorkflowResolver
+	WorkflowRelease func() *release.Release
+	InlineMedia     protocols.InlineMediaLimits
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.
 	Catalog *catalog.Signed
@@ -52,7 +55,6 @@ type Server struct {
 }
 
 // New prepares the route surface.
-func New(a *access.Server) *Server { return &Server{Access: a} }
 
 const (
 	maxTargets      = 64
@@ -108,7 +110,7 @@ func scanDraft(row pgx.Row) (*draft, error) {
 	return &d, nil
 }
 
-func loadDraft(ctx context.Context, q access.Queryer, id string, lock bool) (*draft, error) {
+func loadDraft(ctx context.Context, q database.Queryer, id string, lock bool) (*draft, error) {
 	query := "SELECT " + draftColumns + draftFrom + " WHERE d.id=$1"
 	if lock {
 		query += " FOR UPDATE OF d"
@@ -137,7 +139,7 @@ func (r *resolved) available() bool {
 // resolve looks up every provider model referenced by the targets against the
 // providers' activated revisions, which is what the gateway will serve, and
 // the reference catalog's documented lifecycle of each.
-func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []routing.PublishedTarget) (map[string]*resolved, error) {
+func (s *Server) resolve(ctx context.Context, q database.Queryer, targets []routing.PublishedTarget) (map[string]*resolved, error) {
 	ids := make([]string, 0, len(targets))
 	for _, t := range targets {
 		ids = append(ids, t.ProviderModelID)
@@ -259,7 +261,7 @@ func (d *draft) detail(live map[string]*resolved) map[string]any {
 	return behaviorJSON(map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}, d.Behavior)
 }
 
-func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (httpkit.Reply, error) {
+func (s *Server) draftDetail(ctx context.Context, q database.Queryer, d *draft) (httpkit.Reply, error) {
 	live, err := s.resolve(ctx, q, d.Targets)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -297,7 +299,7 @@ func sameProject(a, b *string) bool {
 	return *a == *b
 }
 
-func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
+func ValidateAndNormalizeDraftInput(ctx context.Context, q database.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
 	if !routeidentity.ValidSlug(in.Slug) {
 		return nil, httpkit.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
@@ -442,7 +444,7 @@ func sortedTags(tags []string) []string {
 	return slices.Sorted(slices.Values(tags))
 }
 
-func reserveOrdinarySlug(ctx context.Context, q access.Queryer, slug string) error {
+func reserveOrdinarySlug(ctx context.Context, q database.Queryer, slug string) error {
 	var conflict bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_routes WHERE slug=$1)`, slug).Scan(&conflict); err != nil {
 		return err
@@ -453,7 +455,7 @@ func reserveOrdinarySlug(ctx context.Context, q access.Queryer, slug string) err
 	return nil
 }
 
-func (s *Server) drafts(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) drafts(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -488,7 +490,7 @@ func (s *Server) drafts(r *http.Request, p access.Principal) (httpkit.Reply, err
 	return httpkit.ListReply(items, page), nil
 }
 
-func (s *Server) draft(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) draft(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -497,57 +499,37 @@ func (s *Server) draft(r *http.Request, p access.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(d.ProjectID, access.View); err != nil {
+	if err := p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
 
-func (s *Server) createDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	var input DraftInput
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created draft, so the caller must
-		// still reach its project to receive it.
-		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(a, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		// The stored reply carries what was created, so the caller must reach
+		// its project before a replay is served.
+		return struct{}{}, a.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
-	if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.create", "route_draft", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		id, etag := httpkit.NewID(), httpkit.NewID()
+		if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
+		return result, access.Event{Action: "route_draft.create", Resource: "route_draft", ID: id}, nil
+	})
 }
 
-func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
@@ -557,74 +539,62 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (httpkit.Repl
 	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadDraft(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
-		return httpkit.Reply{}, httpkit.Invalid("project_id", "The draft's project is set at creation and cannot change.")
-	}
-	targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	etag := httpkit.NewID()
-	if err = StageDraft(r.Context(), tx, ExistingDraft{ID: id}, etag, input.Content(targets, nil)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.update", "route_draft", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	updated, err := loadDraft(r.Context(), tx, id, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	result, err := s.draftDetail(r.Context(), tx, updated)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Transact(a, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := loadDraft(r.Context(), tx, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
+			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The draft's project is set at creation and cannot change.")
+		}
+		targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		etag := httpkit.NewID()
+		if err = StageDraft(r.Context(), tx, ExistingDraft{ID: id}, etag, input.Content(targets, nil)); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		updated, err := loadDraft(r.Context(), tx, id, false)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		result, err := s.draftDetail(r.Context(), tx, updated)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return result, access.Event{Action: "route_draft.update", Resource: "route_draft", ID: id}, nil
+	})
 }
 
-func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) deleteDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.Access
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadDraft(r.Context(), tx, id, true)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, current.ETag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_drafts WHERE id=$1", id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.delete", "route_draft", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 204}, tx.Commit(r.Context())
+	return access.Transact(a, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		current, err := loadDraft(r.Context(), tx, id, true)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, current.ETag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_drafts WHERE id=$1", id); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Reply{Status: 204}, access.Event{Action: "route_draft.delete", Resource: "route_draft", ID: id}, nil
+	})
 }
 
 func registeredOperation(operation string) bool {

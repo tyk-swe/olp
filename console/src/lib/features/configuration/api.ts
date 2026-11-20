@@ -1,7 +1,7 @@
 import { requestNative } from '#lib/management/transport.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap } from '#lib/management/http.js';
+import { unwrap, createHeaders } from '#lib/management/http.js';
 
 export type CodeBindings = components['schemas']['ConfigurationCodeBindings'];
 
@@ -77,7 +77,7 @@ export async function applyConfiguration(
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/apply',
     {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: {
         document,
         secret_bindings: secretBindings,

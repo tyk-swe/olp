@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/harness"
 )
@@ -44,7 +44,7 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0137_code_allowance_observation.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0137_code_allowance_observation.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
 		)`); err != nil {
 		t.Fatal(err)
 	}
-	directory := "../../internal/database/migrations"
+	directory := "../../internal/platform/database/migrations"
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		t.Fatal(err)
@@ -179,17 +179,22 @@ func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
 		if applied {
 			continue
 		}
-		sql, err := os.ReadFile(filepath.Join(directory, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		checksum := sha256.Sum256(sql)
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)`, name, checksum[:]); err != nil {
-			t.Fatal(err)
-		}
+		applyHistoricalMigration(t, pool, name)
+	}
+}
+
+func applyHistoricalMigration(t *testing.T, pool *pgxpool.Pool, name string) {
+	t.Helper()
+	sql, err := os.ReadFile(filepath.Join("../../internal/platform/database/migrations", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	checksum := sha256.Sum256(sql)
+	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -307,6 +312,17 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	if err != nil || first != second {
 		t.Fatalf("installation identity changed from %s to %s: %v", first, second, err)
 	}
+	var checksum []byte
+	const missing = "0018_code_count_observations.sql"
+	if err := pool.QueryRow(t.Context(), "DELETE FROM olp.migrations WHERE version=$1 RETURNING checksum", missing).Scan(&checksum); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("expected migration to reject the unsafe gap at %s, got %v", missing, err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", missing, checksum); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = pool.Exec(t.Context(), "UPDATE olp.migrations SET checksum='changed'"); err != nil {
 		t.Fatal(err)
 	}
@@ -315,20 +331,106 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	}
 }
 
-func TestMigrationsIgnoreTheSessionStatementTimeout(t *testing.T) {
+func TestMigrationsBackfillDelegationAfterCodeMigrations(t *testing.T) {
 	t.Parallel()
-	_, address := harness.EmptyDatabase(t)
+	pool, _ := harness.EmptyDatabase(t)
+	migrateBefore(t, pool, "0104_agent_delegation.sql")
+	for _, name := range []string{
+		"0104_code_pool_weights.sql", "0105_code_health_observations.sql", "0106_code_initial_recovery.sql",
+		"0107_code_alias_pins.sql", "0108_code_reference_owners.sql", "0109_code_portable_recovery.sql",
+		"0110_code_model_pools.sql", "0111_code_paid_targets.sql", "0112_code_paid_fallback.sql", "0113_code_definite_availability.sql",
+	} {
+		applyHistoricalMigration(t, pool, name)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Installation(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrationsKeepGoogleBillingWhenAWSHistoryIsMissing(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.EmptyDatabase(t)
+	migrateBefore(t, pool, "0124_aws_cur.sql")
+	applyHistoricalMigration(t, pool, "0125_google_billing.sql")
+	provider := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `WITH owner AS (
+		INSERT INTO olp.users(id,email,display_name,role,etag)
+		VALUES($1,'billing@example.invalid','Owner','owner',$2) RETURNING id
+	), connection AS (
+		INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
+		SELECT $3,'historical-billing','plugin','active','{}',$4,$5,id FROM owner RETURNING id,created_by
+	)
+	INSERT INTO olp.provider_billing_imports(provider_id,source,scope,etag,created_by)
+	SELECT id,'google_bigquery','{}',$6,created_by FROM connection`,
+		uuid.NewString(), uuid.NewString(), provider, uuid.NewString(), uuid.NewString(), uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Installation(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	var source string
+	if err := pool.QueryRow(t.Context(), "SELECT source FROM olp.provider_billing_imports WHERE provider_id=$1", provider).Scan(&source); err != nil || source != "google_bigquery" {
+		t.Fatalf("Google billing import after upgrade = %q, %v", source, err)
+	}
+}
+
+func TestMigrationsIgnoreSessionStatementAndLockTimeouts(t *testing.T) {
+	t.Parallel()
+	const statementTimeout = time.Second
+	const lockTimeout = 100 * time.Millisecond
+	holder, address := harness.EmptyDatabase(t)
 	config, err := database.Configuration(address, 2, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.ConnConfig.RuntimeParams["statement_timeout"] = "1"
+	config.ConnConfig.RuntimeParams["statement_timeout"] = statementTimeout.String()
+	config.ConnConfig.RuntimeParams["lock_timeout"] = lockTimeout.String()
 	pool, err := database.Open(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if err := database.Migrate(t.Context(), pool); err != nil {
+	tx, err := holder.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- database.Migrate(ctx, pool) }()
+	holderPID := int32(tx.Conn().PgConn().PID())
+	harness.Eventually(t, "migration waiting for the advisory lock", 5*time.Second, func() (bool, string) {
+		select {
+		case err := <-result:
+			t.Fatalf("migration returned before its lock wait was observed: %v", err)
+		default:
+		}
+		var blocked bool
+		if err := holder.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)))`, holderPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		return blocked, "PostgreSQL has not reported the migration blocked by the lock holder"
+	})
+	select {
+	case err := <-result:
+		t.Fatalf("migration returned while the advisory lock was held: %v", err)
+	case <-time.After(statementTimeout + lockTimeout):
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -417,7 +519,7 @@ func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0142_batch_submission.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0142_batch_submission.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +599,7 @@ func TestCommitmentObservedDayMigrationRestatesExistingOutliers(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT version FROM olp.focus_dirty_days WHERE day=$1`, day).Scan(&bucketBefore); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0144_focus_observed_commitment_days.sql")
+	migration, err := os.ReadFile("../../internal/platform/database/migrations/0144_focus_observed_commitment_days.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

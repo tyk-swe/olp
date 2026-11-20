@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -32,6 +33,15 @@ func Invalid(field, detail string) error {
 }
 func Forbidden() error {
 	return Fail(403, "permission_denied", "The current role cannot perform this operation.")
+}
+
+var NotFound = Fail(404, "not_found", "The resource was not found.")
+
+func NotFoundOr(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotFound
+	}
+	return err
 }
 
 func ProblemFor(err error) (*Problem, bool) {
@@ -86,13 +96,14 @@ func RenderProblem(w http.ResponseWriter, p *Problem) {
 }
 
 type Reply struct {
-	Status         int             `json:"status"`
-	Body           any             `json:"body"`
-	ETag           string          `json:"etag,omitempty"`
-	Location       string          `json:"location,omitempty"`
-	Cookies        []*http.Cookie  `json:"-"`
-	CSRF           string          `json:"-"`
-	ParentMutation *ParentMutation `json:"parent_mutation,omitempty"`
+	Status              int             `json:"status"`
+	Body                any             `json:"body"`
+	ETag                string          `json:"etag,omitempty"`
+	Location            string          `json:"location,omitempty"`
+	Cookies             []*http.Cookie  `json:"-"`
+	CSRF                string          `json:"-"`
+	DisableHTMLEscaping bool            `json:"-"`
+	ParentMutation      *ParentMutation `json:"parent_mutation,omitempty"`
 }
 
 // ParentMutation records the atomic parent transition caused by a child edit.
@@ -105,9 +116,17 @@ type ParentMutation struct {
 func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
 func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
 
-func Decode(r *http.Request, v any) error {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+func requireJSONContentType(r *http.Request) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
 		return Fail(415, "unsupported_media_type", "Send an application/json request.")
+	}
+	return nil
+}
+
+func Decode(r *http.Request, v any) error {
+	if err := requireJSONContentType(r); err != nil {
+		return err
 	}
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
@@ -277,4 +296,18 @@ func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ParseProjectID canonicalises an optional project_id, so project lookups,
+// ownership comparisons and idempotency fingerprints see one spelling.
+func ParseProjectID(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*value)
+	if err != nil {
+		return nil, Invalid("project_id", "Use a valid UUID.")
+	}
+	canonical := id.String()
+	return &canonical, nil
 }

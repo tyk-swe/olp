@@ -70,6 +70,28 @@ func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 	}
 }
 
+func TestSpendCapWithoutSlotCheckLeavesAttemptSlotsUnset(t *testing.T) {
+	s, slug, ids := planningFixture()
+	capped := s.Providers[ids[0]]
+	capped.Limits = &Limits{Supply: Supply{DailyCostLimit: ptr("10")}}
+	s.Providers[capped.ID] = capped
+	options := Options{CheckSlots: false, Supply: supplyFunc(func(SupplyQuery) *SupplyState {
+		return &SupplyState{Spend: map[string]Spend{capped.ID: SpendAvailable}}
+	})}
+	plan, err := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Attempts) != 3 {
+		t.Fatalf("attempts: %+v", plan.Attempts)
+	}
+	for _, attempt := range plan.Attempts {
+		if attempt.Slots != nil {
+			t.Fatalf("attempt %s slots = %q, want nil so execution orders slots itself", attempt.ProviderID, attempt.Slots)
+		}
+	}
+}
+
 func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	s, slug, ids := planningFixture()
 	headroom := map[string]float64{}

@@ -11,8 +11,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -142,7 +143,7 @@ func expire(ctx context.Context, tx pgx.Tx, providerID, id, principal string) (b
 
 // stands reads where a device authorization stands when no poll is due. One
 // that a failed poll ended is refused as used.
-func stands(ctx context.Context, q access.Queryer, providerID, id, principal string) (Standing, error) {
+func stands(ctx context.Context, q database.Queryer, providerID, id, principal string) (Standing, error) {
 	var (
 		s         Standing
 		interval  int64

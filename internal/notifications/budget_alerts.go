@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const dueAlertSQL = `WITH current_windows(window_kind,window_id) AS (
@@ -89,7 +89,7 @@ func (w *deliveryWorker) claimBudgetAlerts(ctx context.Context, tx pgx.Tx) (int,
 	return claimed, nil
 }
 
-func (w *deliveryWorker) currency(ctx context.Context, q access.Queryer) *string {
+func (w *deliveryWorker) currency(ctx context.Context, q database.Queryer) *string {
 	var currency string
 	err := q.QueryRow(ctx, notificationCurrencySQL).Scan(&currency)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {

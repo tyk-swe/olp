@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type destinationInput struct {
@@ -132,7 +132,7 @@ func (s *Server) checkBinding(d destination, secret []byte) error {
 	return nil
 }
 
-func (s *Server) createNotificationDestination(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createNotificationDestination(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input destinationInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -148,7 +148,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 			}
 			return target, nil
 		},
-		insert: func(tx pgx.Tx, p access.Principal, projectID *string, target destinationTarget, id, etag string) error {
+		insert: func(tx pgx.Tx, p authz.Principal, projectID *string, target destinationTarget, id, etag string) error {
 			if _, err := tx.Exec(r.Context(), createChannelDestinationSQL,
 				id, target.name, target.URL, projectID, etag, p.UserID(), target.enabled, target.Type, target.Configuration); err != nil {
 				return err
@@ -157,7 +157,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 		}})
 }
 
-func (s *Server) updateNotificationDestination(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateNotificationDestination(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	patch, err := decodePatch(r, "destination", "Unknown destination field.", destinationPatchFields)
 	if err != nil {
 		return httpkit.Reply{}, err

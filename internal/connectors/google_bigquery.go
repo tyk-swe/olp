@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/connectors/cloudidentity"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func NewBillingAuth(policy *egress.Policy, client *http.Client, getenv func(string) string) *Auth {

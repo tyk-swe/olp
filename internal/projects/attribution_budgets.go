@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -23,12 +24,12 @@ func EnsureAttributionBudgetAccounts(ctx context.Context, tx pgx.Tx, project str
 	return nil
 }
 
-func (s *Server) projectAttributionBudgets(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) projectAttributionBudgets(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&id, access.View); err != nil {
+	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return readAttributionBudgets(r, s.access.Pool, id)
@@ -45,7 +46,7 @@ func readAttributionBudgets(r *http.Request, q interface {
 	return httpkit.Detail(map[string]any{"budgets": budgets, "usage": usage, "etag": etag}, etag), nil
 }
 
-func (s *Server) putProjectAttributionBudgets(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) putProjectAttributionBudgets(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "project_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -62,34 +63,28 @@ func (s *Server) putProjectAttributionBudgets(r *http.Request, _ access.Principa
 	if err = input.Budgets.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Project(&id, access.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	current, etag, err := ReadPolicies(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = httpkit.Match(r, etag); err != nil {
-		return httpkit.Reply{}, err
-	}
-	_, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: input.Budgets})
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "project.attribution_budgets.update", "project", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	reply, err := readAttributionBudgets(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		if err = p.Project(&id, authz.Change); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		current, etag, err := ReadPolicies(r.Context(), tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if err = httpkit.Match(r, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		_, err = WritePolicies(r.Context(), tx, id, Policies{EndUser: current.EndUser, Attribution: current.Attribution, RouteGroups: current.RouteGroups, Budget: current.Budget, Templates: current.Templates, AttributionBudgets: input.Budgets})
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply, err := readAttributionBudgets(r, tx, id)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return reply, access.Event{Action: "project.attribution_budgets.update", Resource: "project", ID: id}, nil
+	})
 }

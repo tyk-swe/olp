@@ -5,8 +5,8 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { activeTab, owningItem, visibleItem } from '#lib/shell/navigation.js';
 
   let { children, actions }: { children: Snippet; actions?: Snippet } =

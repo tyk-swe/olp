@@ -8,10 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Definition struct {
@@ -43,7 +43,7 @@ func scan(row pgx.Row) (Definition, error) {
 	return value, json.Unmarshal(policy, &value.Policy)
 }
 
-func load(ctx context.Context, q access.Queryer, id string) (Definition, error) {
+func load(ctx context.Context, q database.Queryer, id string) (Definition, error) {
 	return scan(q.QueryRow(ctx, selected+" WHERE g.id=$1", id))
 }
 
@@ -51,7 +51,7 @@ func lock(ctx context.Context, tx pgx.Tx, id string) (Definition, error) {
 	return scan(tx.QueryRow(ctx, selected+" WHERE g.id=$1 FOR UPDATE OF g", id))
 }
 
-func FindActive(ctx context.Context, q access.Queryer, projectID, name string) (*Definition, error) {
+func FindActive(ctx context.Context, q database.Queryer, projectID, name string) (*Definition, error) {
 	value, err := scan(q.QueryRow(ctx, selected+" WHERE g.project_id IS NOT DISTINCT FROM $1::uuid AND lower(g.name)=lower($2) AND g.retired_at IS NULL", guardrails.ProjectPointer(projectID), name))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

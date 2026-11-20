@@ -7,19 +7,29 @@ import (
 	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/identity"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/auditlog"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/budgets"
+	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
+	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
+	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/settings"
+
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/surface/playground"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
-	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 	"github.com/tyk-swe/olp/internal/usage/reports"
-	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -39,21 +49,21 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/management"
-	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -76,10 +86,11 @@ type Management struct {
 	AgentGrants    *personal.Store
 	IdentityClient *http.Client
 	Access         *access.Server
+	Identity       *identity.Server
 	Egress         *egress.Policy
 	Limits         *sharedLimits
 	Runtime        *release.Manager
-	Gateway        *gateway.Server
+	Gateway        *kernel.Server
 	ResponseCache  *cache.Store
 	Media          *jobs.Service
 	Spool          *staging.Spool
@@ -97,27 +108,31 @@ type Management struct {
 	PluginIndex *pluginindex.Signed
 }
 
+func (m Management) registerGuardrails(mux *http.ServeMux) {
+	publish := func(ctx context.Context, tx pgx.Tx, actor string) error {
+		_, err := release.Publish(ctx, tx, actor)
+		return err
+	}
+	credential.NewAPI(m.Access).Register(mux)
+	definition.NewAPI(m.Access, publish).Register(mux)
+	policy.NewAPI(m.Access, publish, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
+	}).Register(mux)
+	attachment.NewAPI(m.Access, publish).Register(mux)
+}
+
 // Register mounts the whole management API: the published contract, every
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
 	management.NewMCP(m.Access, mux).Register(mux)
-	m.Access.Register(mux)
+	m.Identity.Register(mux)
 	projects.New(m.Access).Register(mux)
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
-	(&gateway.CacheManagement{Access: m.Access, Cache: m.ResponseCache}).Register(mux)
-	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
-		_, err := release.Publish(ctx, tx, actor)
-		return err
-	}
-	credential.NewAPI(m.Access).Register(mux)
-	definition.NewAPI(m.Access, publishGuardrails).Register(mux)
-	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
-	}).Register(mux)
-	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)
+	cacheadmin.NewAPI(m.Access, m.ResponseCache).Register(mux)
+	m.registerGuardrails(mux)
 	a2a.NewManagement(m.Access, m.AgentTasks, agents.NewTaskOperations(m.AgentTasks, m.AgentPeers, m.AgentGrants)).Register(mux)
 	publications.New(m.Access, m.Egress, m.AgentPeers.ValidateCard).Register(mux)
 	runs.NewManagement(m.Access).Register(mux)
@@ -129,23 +144,12 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
-	routeServer := routes.New(m.Access)
-	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
-		if m.Gateway == nil {
-			return nil
-		}
-		return m.Gateway.WorkflowResolver()
+	routeServer := &routes.Server{
+		Access: m.Access, InlineMedia: m.Gateway.InlineMediaLimits(),
+		Workflows: m.Gateway.WorkflowResolver(), WorkflowRelease: m.Runtime.Release,
+		Inputs: m.Runtime.RoutingInputs, Region: m.Runtime.Region(),
+		UnconfinedPlugins: m.Unconfined != nil, Catalog: m.Catalog,
 	}
-	routeServer.WorkflowRelease = m.Runtime.Release
-	routeServer.WorkflowAvailable = func() bool {
-		return m.Gateway.WorkflowResolver() != nil
-	}
-	routeServer.Inputs = m.Runtime.RoutingInputs
-	if m.Runtime != nil {
-		routeServer.Region = m.Runtime.Region()
-	}
-	routeServer.UnconfinedPlugins = m.Unconfined != nil
-	routeServer.Catalog = m.Catalog
 	if m.Limits != nil {
 		routeServer.Supply = quota.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet
@@ -163,8 +167,16 @@ func (m Management) Register(mux *http.ServeMux) {
 	})
 	providerServer.Register(mux)
 	codeaccounts.NewAPI(m.Access).Register(mux)
+	codeadmin.NewAPI(m.Access).Register(mux)
+	settings.NewAPI(m.Access).Register(mux)
+	budgets.NewAPI(m.Access).Register(mux)
+	apikeys.NewAPI(m.Access).Register(mux)
+	auditlog.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
+	playgroundAPI := playground.NewAPI(m.Gateway)
+	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
+	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
+	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
@@ -188,6 +200,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	reconciliation.NewAPI(m.Access, time.Now).Register(mux)
 	promotionserve.Register(mux, promotionserve.Deps{
 		Access:     m.Access,
+		SignIn:     m.Identity,
 		Egress:     m.Egress,
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
@@ -211,7 +224,7 @@ type managementInputs struct {
 	core         runtimeCore
 	limiter      *admission.Limiter
 	shared       *sharedLimits
-	gateway      *gateway.Server
+	gateway      *kernel.Server
 	agentTasks   *tasks.Store
 	agentPeers   *a2a.Peers
 	agentGrants  *personal.Store
@@ -231,15 +244,19 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	}
 	identityClient := access.IdentityHTTPClient()
 	control := access.New(access.Config{
-		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Bootstrap: core.bootstrap, Egress: core.policy, Log: log,
+		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Egress: core.policy, Log: log,
 		OIDCClient: identityClient,
 		RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
 			_, err := release.Publish(ctx, tx, actor)
 			return err
 		},
 		ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
-		LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
-		LimitsEnforced: in.limiter != nil, ResponseCacheConfigured: core.responseCache != nil,
+		LocalLoginDisabled: !c.LocalLoginEnabled, LimitsEnforced: in.limiter != nil,
+	})
+	signIn := identity.New(control, identity.Config{
+		Bootstrap:                   func() (string, bool) { return secrets.ReadBootstrapToken(c.BootstrapTokenFile) },
+		ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
+		ResponseCacheConfigured:     core.responseCache != nil,
 	})
 	// Installing reads a module's manifest once, which the
 	// interpreter is ready to do several times sooner.
@@ -249,7 +266,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	}
 	return Management{
 		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants,
-		Access: control, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
+		Access: control, Identity: signIn, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
 		Gateway: in.gateway, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
 		Log: log, PluginRuntime: pluginRuntime, PluginHost: core.pluginHost, Unconfined: core.unconfined,
 		Catalog: in.catalog, CatalogKeys: in.catalogKeys, PluginIndex: in.pluginIndex,

@@ -1,7 +1,12 @@
 import { requestNative } from '#lib/management/transport.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { type CursorPage, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  type CursorPage,
+  unwrap,
+  unwrapPage,
+  mutationHeaders
+} from '#lib/management/http.js';
 import { PROVIDER_REVISION_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import type { Provider } from '#lib/features/providers/providers.js';
 import type { ProviderModel } from '#lib/features/providers/models.js';
@@ -101,10 +106,7 @@ export async function restoreProviderRevision(
     {
       params: {
         path: { provider_id: provider.id, revision_id: revisionId },
-        header: {
-          'If-Match': provider.etag,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(provider.etag, requestId)
       }
     },
     [['provider', 'configuration']]

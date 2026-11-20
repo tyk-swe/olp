@@ -6,7 +6,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '#lib/features/routes/api.js';
+  import { listRoutes } from '#lib/features/routes/index.js';
   import { providerKeys } from './providerKeys';
   import {
     activateProvider,
@@ -250,7 +250,7 @@
       </p>
       {#if routes.isPending}<p class="inline-status" role="status">
           Checking affected routes…
-        </p>{:else if routes.isError}<p role="alert">
+        </p>{:else if routes.isError}<p class="inline-problem" role="alert">
           Route preview unavailable. <button onclick={() => routes.refetch()}
             >Retry</button
           >

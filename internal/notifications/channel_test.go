@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func loopbackPolicy() egress.Policy {

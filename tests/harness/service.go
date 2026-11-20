@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -20,12 +21,13 @@ import (
 )
 
 const (
-	accessPassword = "a long service test password"
-	StartupLimit   = 30 * time.Second
+	Password     = "a long service test password"
+	StartupLimit = 30 * time.Second
 )
 
 type Environment struct {
 	Values    map[string]string
+	Mode      string
 	Bootstrap string
 	Master    string
 	label     string
@@ -132,7 +134,7 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(Required(t, "OLP_TEST_BINARY"), "all")
+	command := exec.Command(Required(t, "OLP_TEST_BINARY"), cmp.Or(env.Mode, "all"))
 	command.Env = env.List(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin, "OLP_LOG_LEVEL": "info"})
 	command.Stdout, command.Stderr = logFile, logFile
 	if err = command.Start(); err != nil {
@@ -154,7 +156,10 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 		}
 		_ = command.Process.Signal(syscall.SIGTERM)
 		select {
-		case <-exited:
+		case err := <-exited:
+			if err != nil {
+				t.Errorf("olp did not exit cleanly: %v\n%s", err, dumpLog())
+			}
 		case <-time.After(10 * time.Second):
 			_ = command.Process.Kill()
 			<-exited
@@ -304,14 +309,14 @@ func ETag(record map[string]any) map[string]string {
 func (s *Service) Owner() *Caller {
 	s.T.Helper()
 	owner := &Caller{Name: "owner"}
-	s.Want(owner, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword, "installation_name": s.Env.label}, map[string]string{"X-OLP-Setup-Token": s.Env.Bootstrap}, http.StatusCreated)
+	s.Want(owner, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": Password, "installation_name": s.Env.label}, map[string]string{"X-OLP-Setup-Token": s.Env.Bootstrap}, http.StatusCreated)
 	return owner
 }
 
 func (s *Service) Login(email string) *Caller {
 	s.T.Helper()
 	member := &Caller{Name: email}
-	s.Want(member, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": accessPassword}, nil, http.StatusCreated)
+	s.Want(member, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": Password}, nil, http.StatusCreated)
 	return member
 }
 
@@ -319,7 +324,7 @@ func (s *Service) Invite(owner *Caller, email, role string) *Caller {
 	s.T.Helper()
 	invitation := s.Want(owner, "POST", "/api/v1/invitations", map[string]any{"email": email, "role": role}, Idempotent(), http.StatusCreated)
 	member := &Caller{Name: email}
-	s.Want(member, "POST", "/api/v1/invitations/accept", map[string]any{"token": invitation["token"], "display_name": role, "password": accessPassword}, nil, http.StatusCreated)
+	s.Want(member, "POST", "/api/v1/invitations/accept", map[string]any{"token": invitation["token"], "display_name": role, "password": Password}, nil, http.StatusCreated)
 	return member
 }
 

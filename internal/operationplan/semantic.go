@@ -10,7 +10,7 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func (t *Template) bindSemantic(context Context, native bool) (connectors.Config, []oif.Disposition, error) {

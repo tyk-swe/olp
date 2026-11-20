@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { formatDate } from '#lib/format.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { routeKeys, listRoutes } from '#lib/features/routes/index.js';
 
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { listRoutes } from '#lib/features/routes/api.js';
   import type { ApiKeySecret } from '#lib/features/access/api-keys/api.js';
   import { copyText } from '#lib/clipboard.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
@@ -134,9 +134,9 @@
     {#if 'overlap_expires_at' in secret && secret.overlap_expires_at}<p
         class="section-help"
       >
-        The previous secret remains valid until {new Date(
+        The previous secret remains valid until {formatDate(
           secret.overlap_expires_at
-        ).toLocaleString()}.
+        )}.
       </p>{/if}
     {#if copyError}<div class="inline-problem" role="alert">
         {copyError}

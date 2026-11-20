@@ -1,11 +1,13 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,
@@ -25,7 +27,6 @@
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const policyIntent = useMutationIntent();
   let {
     canManageInstallation,
@@ -153,13 +154,13 @@
   const captureOwner = usePrincipalLifetime(() => {
     resetPolicyForm();
     policyBusy = false;
-    error = notice = '';
+    error = '';
   });
 
   async function toggleMaster() {
     if (!ownerOnly || !captureConfig.data) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateCaptureConfiguration(captureConfig.data, {
         enabled: !captureConfig.data.enabled
@@ -195,7 +196,7 @@
     }
     const isCurrent = captureOwner();
     policyBusy = true;
-    error = notice = '';
+    error = '';
     let committed = false;
     const fields = {
       ...(!editing ||
@@ -249,7 +250,7 @@
     } catch (cause) {
       if (!isCurrent()) return;
       error = committed
-        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
         : errorMessage(
             cause,
             editing
@@ -264,7 +265,7 @@
   async function togglePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateCapturePolicy(policy, { enabled: !policy.enabled });
       if (!isCurrent()) return;
@@ -279,12 +280,21 @@
 
   async function removePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
+    if (
+      !(await confirmAction({
+        title: 'Delete capture policy?',
+        body: 'Matching prompts and responses stop being captured to this sink.',
+        confirmLabel: 'Delete policy',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await deleteCapturePolicy(policy);
       if (!isCurrent()) return;
-      notice = 'Capture policy deleted.';
+      notify('Capture policy deleted.');
       await queryClient.invalidateQueries({
         queryKey: observabilityKeys.capturePolicies()
       });
@@ -303,7 +313,7 @@
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 <div class="capture-warning" role="note">
   Capture is opt-in and delivered from memory to an installation-owned sink.
   Policies without redactors capture <strong>unredacted</strong> content. Configured
@@ -562,7 +572,7 @@
     >Prompts and responses are not stored unless a policy turns capture on.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Capture policies">
     <table class="data-table">
       <thead
         ><tr
@@ -615,5 +625,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

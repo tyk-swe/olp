@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-func RevisionDefinitions(ctx context.Context, q access.Queryer, publicationID string) ([]agentcontract.Draft, error) {
+func RevisionDefinitions(ctx context.Context, q database.Queryer, publicationID string) ([]agentcontract.Draft, error) {
 	rows, err := q.Query(ctx, `SELECT definition FROM olp.agent_publication_revisions WHERE publication_id=$1`, publicationID)
 	if err != nil {
 		return nil, err
@@ -17,7 +17,7 @@ func RevisionDefinitions(ctx context.Context, q access.Queryer, publicationID st
 	return pgx.CollectRows(rows, pgx.RowTo[agentcontract.Draft])
 }
 
-func RevisionIDByDigest(ctx context.Context, q access.Queryer, publicationID, digest string) (string, bool, error) {
+func RevisionIDByDigest(ctx context.Context, q database.Queryer, publicationID, digest string) (string, bool, error) {
 	var id string
 	err := q.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, publicationID, digest).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

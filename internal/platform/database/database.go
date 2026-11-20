@@ -1,0 +1,46 @@
+// Package database owns PostgreSQL connection lifecycle. Feature packages own SQL.
+package database
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Queryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func Configuration(rawURL string, maxConnections int, timeout time.Duration) (*pgxpool.Config, error) {
+	c, err := pgxpool.ParseConfig(rawURL)
+	if err != nil {
+		return nil, errors.New("invalid OLP_DATABASE_URL")
+	}
+	c.MaxConns = int32(maxConnections)
+	c.ConnConfig.ConnectTimeout = timeout
+	c.ConnConfig.RuntimeParams["application_name"] = "olp"
+	c.ConnConfig.RuntimeParams["statement_timeout"] = "10000"
+	c.ConnConfig.RuntimeParams["lock_timeout"] = "10000"
+	c.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "15000"
+	// Calendar-unit interval arithmetic on timestamptz (retention cutoffs, the
+	// replay horizon) follows the session time zone; pin it so every session
+	// computes the same UTC instants regardless of the server default.
+	c.ConnConfig.RuntimeParams["TimeZone"] = "UTC"
+	return c, nil
+}
+
+func Open(ctx context.Context, c *pgxpool.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.NewWithConfig(ctx, c)
+	if err != nil {
+		return nil, errors.New("cannot create PostgreSQL pool")
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, errors.New("PostgreSQL connection failed")
+	}
+	return pool, nil
+}

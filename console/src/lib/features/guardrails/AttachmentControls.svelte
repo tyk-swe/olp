@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import {

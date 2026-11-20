@@ -33,7 +33,7 @@
     font-family: var(--font-mono);
   }
   p {
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     line-height: 1.5;
   }
 </style>

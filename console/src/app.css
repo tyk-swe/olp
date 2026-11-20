@@ -6,9 +6,10 @@
 }
 
 /* Signal palette. The console is dark-only: a near-black canvas, cool
-   carbon surfaces, hairline greys and frost text, with electric blue as the
-   single brand accent (primary actions, focus, live status, indicators and
-   charts). Status colours are functional only: green for success, amber for
+   carbon surfaces, hairline greys and frost text, with one brand accent
+   (primary actions, focus, live status, indicators and charts). The accent
+   defaults to electric blue, and an installation brand color replaces the
+   --color-accent-* steps at runtime. Status colours are functional only: green for success, amber for
    warnings, red for failures. Components consume the semantic tokens below,
    never the raw colours, so paper cards can re-map them for their
    descendants. Every text pair clears WCAG AA on every surface it sits on. */
@@ -28,11 +29,11 @@
   --color-white: #f8f9fb;
   --color-paper: #eceff4;
   --color-paper-shade: #dde2ea;
-  --color-blue-300: #8fb3ff;
-  --color-blue-400: #5c8dff;
-  --color-blue-500: #2f64ee;
-  --color-blue-600: #2656d9;
-  --color-blue-700: #1f4fd1;
+  --color-accent-300: #8fb3ff;
+  --color-accent-400: #5c8dff;
+  --color-accent-500: #2f64ee;
+  --color-accent-600: #2656d9;
+  --color-accent-700: #1f4fd1;
   --color-green: #86d19b;
   --color-amber: #f0b34a;
   --color-red: #f07a6e;
@@ -50,26 +51,26 @@
   --border: var(--color-stroke);
   --border-hairline: var(--color-hairline);
   --border-strong: var(--color-graphite);
-  --accent: var(--color-blue-400);
-  --accent-strong: var(--color-blue-300);
-  --accent-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
-  --signal: var(--color-blue-400);
-  --signal-soft: color-mix(in srgb, var(--color-blue-400) 16%, transparent);
+  --accent: var(--color-accent-400);
+  --accent-strong: var(--color-accent-300);
+  --accent-soft: color-mix(in srgb, var(--color-accent-500) 14%, transparent);
+  --signal: var(--color-accent-400);
+  --signal-soft: color-mix(in srgb, var(--color-accent-400) 16%, transparent);
   --metric: var(--color-green);
   --caution: var(--color-amber);
-  --chart: var(--color-blue-400);
+  --chart: var(--color-accent-400);
   --success: var(--color-green);
   --success-soft: color-mix(in srgb, var(--color-green) 10%, var(--color-void));
   --warning: var(--color-amber);
   --warning-soft: color-mix(in srgb, var(--color-amber) 10%, var(--color-void));
   --danger: var(--color-red);
   --danger-soft: color-mix(in srgb, var(--color-red) 10%, var(--color-void));
-  --focus: var(--color-blue-400);
-  --ring: color-mix(in srgb, var(--color-blue-400) 28%, transparent);
+  --focus: var(--color-accent-400);
+  --ring: color-mix(in srgb, var(--color-accent-400) 28%, transparent);
   --code-bg: var(--color-carbon);
   --code-foreground: var(--color-frost);
-  --button-fill: var(--color-blue-500);
-  --button-fill-hover: var(--color-blue-600);
+  --button-fill: var(--color-accent-500);
+  --button-fill-hover: var(--color-accent-600);
   --button-fill-text: #ffffff;
   --backdrop: rgb(2 3 6 / 72%);
   --shadow-overlay:
@@ -160,14 +161,14 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.43;
 }
 
 /* Paper cards are the only bright objects on the canvas. Re-mapping the
    semantic tokens here restyles every descendant (inputs, buttons, banners)
-   for the paper surface without per-component overrides. Blue text uses the
+   for the paper surface without per-component overrides. Accent text uses the
    deeper 700 step, and green and amber stay non-text inside: neither clears
    4.5:1 on paper. */
 .card-light {
@@ -183,11 +184,11 @@ body {
   --border: #bfc6d2;
   --border-hairline: #d3d9e3;
   --border-strong: #6b7485;
-  --accent: var(--color-blue-700);
-  --accent-strong: var(--color-blue-700);
-  --accent-soft: color-mix(in srgb, var(--color-blue-500) 10%, transparent);
-  --signal: var(--color-blue-700);
-  --signal-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
+  --accent: var(--color-accent-700);
+  --accent-strong: var(--color-accent-700);
+  --accent-soft: color-mix(in srgb, var(--color-accent-500) 10%, transparent);
+  --signal: var(--color-accent-700);
+  --signal-soft: color-mix(in srgb, var(--color-accent-500) 14%, transparent);
   --success: var(--color-void);
   --success-soft: color-mix(
     in srgb,
@@ -206,12 +207,12 @@ body {
     var(--color-red-ink) 10%,
     var(--color-paper)
   );
-  --focus: var(--color-blue-700);
-  --ring: color-mix(in srgb, var(--color-blue-500) 22%, transparent);
+  --focus: var(--color-accent-700);
+  --ring: color-mix(in srgb, var(--color-accent-500) 22%, transparent);
   --code-bg: var(--color-void);
   --code-foreground: var(--color-frost);
-  --button-fill: var(--color-blue-500);
-  --button-fill-hover: var(--color-blue-700);
+  --button-fill: var(--color-accent-500);
+  --button-fill-hover: var(--color-accent-700);
   --button-fill-text: #ffffff;
   border-color: var(--border-hairline);
   background: var(--color-paper);
@@ -246,7 +247,8 @@ body {
   background: var(--color-paper);
   box-shadow:
     0 1px 0 0 rgb(255 255 255 / 60%) inset,
-    0 24px 60px -28px rgb(47 100 238 / 35%);
+    0 24px 60px -28px
+      color-mix(in srgb, var(--color-accent-500) 35%, transparent);
 }
 
 .table-shell {
@@ -280,7 +282,7 @@ body {
   background: color-mix(in srgb, var(--canvas) 40%, var(--surface));
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 500;
   letter-spacing: -0.24px;
   text-transform: uppercase;
@@ -348,7 +350,7 @@ body {
   background: color-mix(in srgb, var(--foreground-muted) 10%, transparent);
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -584,7 +586,7 @@ input[type='file']::file-selector-button:hover {
   margin: 0;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   letter-spacing: -0.24px;
   line-height: 1;
   text-transform: uppercase;
@@ -615,7 +617,8 @@ input[type='file']::file-selector-button:hover {
   color: var(--foreground-muted);
 }
 
-.inline-problem {
+/* Doubled here and on .field-error to beat component-scoped rules like `p.svelte-x`. */
+.inline-problem.inline-problem {
   margin: 1rem 0;
   padding: 0.75rem 1rem;
   border: 1px solid var(--danger);
@@ -644,9 +647,30 @@ input[type='file']::file-selector-button:hover {
 
 .section h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--foreground-muted);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.field-error.field-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.section-help {
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
 }
 
 /* A button that reads as a link: used for refresh and reveal affordances that
@@ -691,7 +715,7 @@ input[type='file']::file-selector-button:hover {
 
 @media (forced-colors: active) {
   .badge,
-  .inline-problem {
+  .inline-problem.inline-problem {
     border: 1px solid CanvasText;
   }
 }
@@ -727,7 +751,7 @@ button:not(:disabled),
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-blue-500) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent-500) 55%, transparent);
   color: var(--foreground-hover);
 }
 
@@ -751,7 +775,7 @@ button:not(:disabled),
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
   border-radius: var(--radius-control);
-  background: var(--color-blue-500);
+  background: var(--color-accent-500);
   color: #ffffff;
   transform: translateY(-160%);
   transition: transform var(--motion);
@@ -778,7 +802,7 @@ button:not(:disabled),
   padding: 0.5rem 0.875rem;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 0.875rem;
+  font-size: var(--text-body-sm);
   font-weight: 400;
   line-height: 1.2;
   text-decoration: none;
@@ -824,7 +848,7 @@ button:not(:disabled),
 }
 
 .button-primary {
-  --hatch: rgb(255 255 255 / 20%);
+  --hatch: rgb(255 255 255 / 10%);
   border-color: var(--button-fill);
   background: var(--button-fill);
   color: var(--button-fill-text);
@@ -836,7 +860,7 @@ button:not(:disabled),
   background: var(--button-fill-hover);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 14%),
-    0 10px 28px -14px var(--color-blue-500);
+    0 10px 28px -14px var(--color-accent-500);
 }
 
 .button-secondary {
@@ -851,13 +875,24 @@ button:not(:disabled),
   color: var(--foreground-hover);
 }
 
-.button-danger,
-.button-danger:hover:not(:disabled) {
+.button-danger {
   color: var(--danger);
 }
 
 .button-danger:hover:not(:disabled) {
   border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--foreground-muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground-hover);
 }
 
 /* Rows driven by the `slidingIndicator` action: one signal bar glides to the
@@ -903,7 +938,7 @@ button:not(:disabled),
   margin: 0 0 0.5rem;
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: -0.24px;
   line-height: 1;
@@ -946,7 +981,7 @@ button:not(:disabled),
 .wordmark {
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -966,7 +1001,7 @@ button:not(:disabled),
   max-width: 44rem;
   margin: 0.75rem 0 0;
   color: var(--foreground-muted);
-  font-size: 1rem;
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
@@ -1265,7 +1300,7 @@ button:not(:disabled),
 .empty-state h2 {
   margin: 0;
   color: var(--foreground);
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -1300,19 +1335,6 @@ button:not(:disabled),
 
 :is(.provider-table, .key-table, .route-section, .recent-table) .data-table {
   min-width: 42rem;
-}
-
-.success-banner {
-  margin: 1rem 0;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--success);
-  border-radius: var(--radius-control);
-  background: var(--success-soft);
-  color: var(--foreground);
-}
-
-.success-banner strong {
-  color: var(--success);
 }
 
 @media (max-width: 62rem), (pointer: coarse) {
@@ -1449,7 +1471,7 @@ button:not(:disabled),
 }
 
 :is(.stack-card, .form-card) > h2 {
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 500;
   letter-spacing: -0.02em;
 }

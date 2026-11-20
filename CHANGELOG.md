@@ -7,8 +7,40 @@ semantic versioning and take their source from root `package.json`. The
 
 ## [Unreleased]
 
+### Added
+
+- Installation branding now covers a brand color. The General settings tab
+  takes a `#rrggbb` color with at least 4.5:1 contrast for white button text,
+  and the console derives readable shades of it for every surface. The
+  installation name and logo now also appear on the sign-in page, in browser
+  tab titles and as the favicon. Migration 0149 adds the `accent` column.
+- `olp init-secrets` creates the master-key ring, authentication HMAC key,
+  setup token, database password and `pgpass` without replacing existing
+  files. `olp setup-token` prints the first-owner setup link and token.
+- The Helm chart generates a setup token Secret when
+  `config.bootstrapTokenSecretName` is empty and prints the `olp setup-token`
+  command after install.
+- `GET /api/v1/setup/status` reports `bootstrap_token_configured`, and the
+  console explains a missing token instead of showing a form that cannot
+  succeed.
+
 ### Changed
 
+- `GET /api/v1/branding` no longer requires a session, so signed-out pages can
+  show the installation identity. `PUT /api/v1/branding` now requires an
+  `accent` field. The session response drops `installation_name` and
+  `installation_logo`, which clients should read from the branding endpoint.
+- Compose generates its secrets into the `olp-secrets` and
+  `olp-database-secret` volumes on first start, so
+  `docker compose -f deploy/compose.yaml up` needs no preparation step. The
+  bootstrap overlay, `deploy/secrets`, the secret preparation and retirement
+  scripts, `POSTGRES_PASSWORD`, `OLP_UID` and `OLP_GID` are gone. Existing
+  Compose installations must copy their keys and database password into the
+  volumes first, see
+  [Deployment](docs/operate/deployment.md#upgrading-an-older-compose-installation).
+- The server reads `OLP_BOOTSTRAP_TOKEN_FILE` on every setup attempt instead of
+  at startup, so a token mounted after start works and a missing one no longer
+  needs special handling.
 - Google BigQuery billing imports share the month walker that AWS and Azure
   use. A pass reads at most three months, newest first, and an unfinished
   backfill resumes a minute later. A closed month is not read again once its
@@ -247,8 +279,7 @@ Code-mode diagnostics now represent paid API ownership separately. Paid attempts
   consumers on HTTPS sinks and Stripe Billing meter events on `stripe_meter`
   sinks with idempotent identifiers and per-sink project-to-customer maps.
 - Daily FOCUS 1.4 gzip-CSV datasets on object sinks in provider-cost or charge
-  basis, with revisioned restatement and in-repo conformance checking; see
-  [finops](docs/operate/finops.md).
+  basis, with revisioned restatement. See [finops](docs/operate/finops.md).
 - Per-attempt price lines (`cost_lines`, `charge_lines`) recording each
   billed component's quantity, unit and unit prices.
 - OpenAI, Anthropic, Bedrock, Vertex AI and Azure OpenAI billing imports and a

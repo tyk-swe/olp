@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -25,7 +25,11 @@ func protocol(detail string) *Failure {
 
 func decodeFailure(err *media.Error) *Failure {
 	if err.Status >= 400 && err.Status < 500 {
-		return &Failure{Class: upstream.ClientError, Status: err.Status,
+		class := upstream.ClientError
+		if err.Code == string(upstream.ContentFilter) {
+			class = upstream.ContentFilter
+		}
+		return &Failure{Class: class, Status: err.Status,
 			Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
 	}
 	return protocol(err.Message)

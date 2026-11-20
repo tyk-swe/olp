@@ -57,6 +57,7 @@ check-console: ## Prepare console types and check formatting, types, and lint
 	pnpm --dir console api:generate
 	pnpm --dir console format:check
 	pnpm --dir console check
+	./scripts/check-exemptions.sh
 
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh
@@ -116,7 +117,7 @@ build-go: ## Build the native Go binary from generated contracts
 	CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags='$(LDFLAGS)' -o .local/bin/olp ./cmd/olp
 
 catalog: ## Rewrite the reference catalog and plugin index in canonical form
-	go run ./internal/signing/cmd/olpsign fmt $(SIGNED_DOCUMENTS)
+	go run ./cmd/olpsign fmt $(SIGNED_DOCUMENTS)
 
 catalog-sign: catalog ## Sign the reference catalog and plugin index with the development key
-	go run ./internal/signing/cmd/olpsign sign -key-id dev-2026a -seed-file internal/signing/devkey/dev-2026a.seed $(SIGNED_DOCUMENTS)
+	go run ./cmd/olpsign sign -key-id dev-2026a -seed-file internal/signing/devkey/dev-2026a.seed $(SIGNED_DOCUMENTS)

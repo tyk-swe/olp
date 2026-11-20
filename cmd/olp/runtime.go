@@ -9,18 +9,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
+	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
-	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 type namedCloser struct {
@@ -31,7 +31,6 @@ type namedCloser struct {
 type runtimeCore struct {
 	auth          *secrets.AuthKey
 	keys          *secrets.KeyRing
-	bootstrap     string
 	policy        *egress.Policy
 	business      *telemetry.BusinessMetrics
 	responseCache *cache.Store
@@ -46,17 +45,16 @@ type runtimeCore struct {
 }
 
 func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.Pool, installation string, vk *coordination.Client, deadline *time.Time, log *slog.Logger) (runtimeCore, error) {
-	auth, keys, bootstrap, err := loadSecrets(startup, pool, c, installation)
+	auth, keys, err := loadSecrets(startup, c, installation)
 	if err != nil {
 		return runtimeCore{}, err
 	}
 	policy := &egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 	core := runtimeCore{
-		auth:      auth,
-		keys:      keys,
-		bootstrap: bootstrap,
-		policy:    policy,
-		business:  telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels),
+		auth:     auth,
+		keys:     keys,
+		policy:   policy,
+		business: telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels),
 	}
 	fail := func(err error) (runtimeCore, error) {
 		for i := len(core.closers) - 1; i >= 0; i-- {

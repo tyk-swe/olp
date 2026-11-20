@@ -23,6 +23,19 @@ type Delivery struct {
 	counters *completeness.LossCounters
 	log      *slog.Logger
 
+	recordLoss func(ctx context.Context) error
+
+	lossGeneration atomic.Uint64
+	checkpointMu   sync.Mutex
+	// checkpointRunning is closed when the in-flight checkpoint finishes.
+	// checkpointCovered is the newest generation a completed checkpoint
+	// attempt snapshotted, so waiters it already included do not each queue
+	// behind the PostgreSQL advisory lock, and a generation past it runs
+	// exactly one follow-up. A failed attempt still covers its waiters
+	// because the periodic reporter recovers a failed write.
+	checkpointRunning chan struct{}
+	checkpointCovered uint64
+
 	events chan usage.Event
 
 	// intake guards the transition from open to closed. A reader is one
@@ -46,12 +59,16 @@ type Delivery struct {
 }
 
 func NewDelivery(pool *pgxpool.Pool, instance string, capacity int, counters *completeness.LossCounters, log *slog.Logger) *Delivery {
-	return &Delivery{
+	d := &Delivery{
 		pool: pool, instance: instance, counters: counters, log: log,
 		events:       make(chan usage.Event, max(capacity, 1)),
 		processEpoch: uuid.Must(uuid.NewV7()).String(),
 		startedAt:    time.Now().UTC(),
 	}
+	d.recordLoss = func(ctx context.Context) error {
+		return completeness.RecordBudgetLoss(ctx, d.pool, d, d.instance, d.counters)
+	}
+	return d
 }
 
 func (d *Delivery) Emit(event usage.Event) error {
@@ -74,10 +91,37 @@ func (d *Delivery) Reject(requestID string, cause error) {
 }
 
 func (d *Delivery) checkpointLoss(requestID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := completeness.RecordBudgetLoss(ctx, d.pool, d, d.instance, d.counters); err != nil {
-		d.log.Error("accounting loss checkpoint failed", "request_id", requestID, "error", err)
+	generation := d.lossGeneration.Add(1)
+	for {
+		d.checkpointMu.Lock()
+		if d.checkpointCovered >= generation {
+			d.checkpointMu.Unlock()
+			return
+		}
+		if d.checkpointRunning != nil {
+			running := d.checkpointRunning
+			d.checkpointMu.Unlock()
+			<-running
+			continue
+		}
+		running := make(chan struct{})
+		d.checkpointRunning = running
+		covered := d.lossGeneration.Load()
+		d.checkpointMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := d.recordLoss(ctx)
+		cancel()
+
+		d.checkpointMu.Lock()
+		d.checkpointCovered = max(d.checkpointCovered, covered)
+		d.checkpointRunning = nil
+		close(running)
+		d.checkpointMu.Unlock()
+		if err != nil {
+			d.log.Error("accounting loss checkpoint failed", "request_id", requestID, "error", err)
+		}
+		return
 	}
 }
 

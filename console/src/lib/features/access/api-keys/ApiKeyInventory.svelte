@@ -1,5 +1,6 @@
 <script lang="ts">
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { personOptions } from '#lib/features/access/entityOptions.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import {
@@ -8,10 +9,10 @@
   } from '#lib/editing/mutationIntent.svelte.js';
 
   import { currentBudgetLimit } from './budgetPresentation';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -191,7 +192,7 @@
   <label for="key-issuer"
     >Created by <EntityPicker
       id="key-issuer"
-      kind="person"
+      source={personOptions}
       bind:value={issuer}
       emptyLabel="Anyone"
       onchange={filterIssuer}

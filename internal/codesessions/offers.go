@@ -6,12 +6,12 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -28,7 +28,7 @@ func (s *Store) Models(ctx context.Context, route codemode.Route, key string) (c
 	return Offers(ctx, tx, route.RevisionID, key)
 }
 
-func Offers(ctx context.Context, db access.Queryer, revision string, keys ...string) (codeclient.Offers, error) {
+func Offers(ctx context.Context, db database.Queryer, revision string, keys ...string) (codeclient.Offers, error) {
 	rows, err := db.Query(ctx, `SELECT DISTINCT (SELECT coalesce(jsonb_agg(m.model ORDER BY m.ordinal),'[]'::jsonb) FROM jsonb_array_elements_text(a.models) WITH ORDINALITY AS m(model,ordinal)
  WHERE NOT EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=m.model))),`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`,CASE WHEN v.document->>'paid_participation'='true' THEN jsonb_build_object('route',v.document,'connections',v.paid_connections) ELSE NULL END
  FROM olp.code_route_revisions v LEFT JOIN LATERAL(

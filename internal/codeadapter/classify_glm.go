@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func classifyGLM(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {

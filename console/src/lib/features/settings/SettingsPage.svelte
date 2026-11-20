@@ -1,12 +1,13 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import BrandingPanel from './BrandingPanel.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
+  import { sessionKeys } from '#lib/session/sessionKeys.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listSettings,
     updateSetting,
@@ -145,6 +146,8 @@
       );
       if (drafts[setting.key]?.value === draft.value)
         delete drafts[setting.key];
+      else if (drafts[setting.key])
+        drafts[setting.key] = { ...drafts[setting.key], etag: updated.etag };
       if (setting.key === 'auth.local_login_enabled')
         await queryClient.invalidateQueries({
           queryKey: sessionKeys.serviceCapabilities
@@ -164,7 +167,7 @@
   }
 </script>
 
-<svelte:head><title>Settings · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Settings" />
 
 {#if view === 'general'}<BrandingPanel />{/if}
 
@@ -361,9 +364,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-  }
-  .field-error {
-    color: var(--danger);
   }
   @media (max-width: 48rem) {
     .row {

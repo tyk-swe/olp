@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {

@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
+  import { RoutingPolicyEditor } from '#lib/features/routes/index.js';
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
-  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createApiKey,
     getApiKey,
@@ -160,7 +161,7 @@
   }
 </script>
 
-<svelte:head><title>API keys · OpenLLMProxy</title></svelte:head>
+<PageTitle title="API keys" />
 
 {#if secret}
   <ApiKeySecretDialog

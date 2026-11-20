@@ -13,3 +13,10 @@ export const isChat = (type: DestinationType) =>
   type === 'slack' || type === 'msteams' || type === 'discord';
 export const secretRequired = (type: DestinationType) =>
   isChat(type) || type === 'pagerduty';
+
+export function canChangeNotification(
+  projectId: string | null | undefined,
+  permissions: { project: boolean; installation: boolean }
+): boolean {
+  return projectId == null ? permissions.installation : permissions.project;
+}

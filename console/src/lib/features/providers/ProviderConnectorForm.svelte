@@ -4,7 +4,7 @@
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import { stateLabel } from '#lib/format.js';
   import type { FieldIssue } from '#lib/management/http.js';
@@ -343,7 +343,7 @@
   }
   legend {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

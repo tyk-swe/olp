@@ -123,7 +123,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -178,7 +178,7 @@
     background: var(--button-fill);
     box-shadow: 0 0 0 6px var(--signal-soft);
     color: var(--button-fill-text);
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     animation: complete-pop 560ms var(--ease-out) 120ms backwards;
   }

@@ -5,10 +5,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func RegisterGenerations(a *access.Server, mux *http.ServeMux) {
-	a.Route(mux, "GET /api/v1/runtime-generations", func(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+	a.Route(mux, "GET /api/v1/runtime-generations", func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		page, err := httpkit.Page(r)
 		if err != nil {
 			return httpkit.Reply{}, err

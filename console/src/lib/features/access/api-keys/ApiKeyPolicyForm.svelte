@@ -1,22 +1,21 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import RunLimits from '#lib/features/workflows/RunLimits.svelte';
+  import { RunLimits } from '#lib/features/workflows/index.js';
   import { currentBudgetLimit } from './budgetPresentation';
-  import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
+  import NamedLimitFields from '../budgets/NamedLimitFields.svelte';
   import AttributionFields from '../attribution/AttributionFields.svelte';
   import PolicyFields from '../end-users/PolicyFields.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import {
     focusFormError,
     focusErrorSummary
   } from '#lib/editing/focusError.js';
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { routeKeys, listRoutes } from '#lib/features/routes/index.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
-  import { listRoutes } from '#lib/features/routes/api.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
@@ -241,7 +240,7 @@
     </fieldset>
     <fieldset class="checks routes">
       <legend>Routes</legend>
-      <p>
+      <p class="section-help">
         {services.gatewayAvailable
           ? 'Leave every route unchecked to allow all current and future routes.'
           : 'Leave blank to allow all current and future routes.'}
@@ -456,7 +455,8 @@
             inline limit applies. Manage templates in Project policies.</small
           >
         </div>
-        <RouteLimitFields
+        <NamedLimitFields
+          kind="route"
           bind:form={form.routeLimits}
           disabled={!canManage || Boolean(busy) || publicationBlocked}
         />
@@ -808,7 +808,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -849,12 +849,6 @@
     border-radius: var(--radius-control);
     background: var(--surface-raised);
   }
-  .checks.routes p,
-  .section-help {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
-  }
   .limits {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -894,9 +888,6 @@
     font-size: var(--text-caption);
   }
   .budget-detail .danger-text {
-    color: var(--danger);
-  }
-  .field-error {
     color: var(--danger);
   }
   .scope-label {

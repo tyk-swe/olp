@@ -3,9 +3,11 @@
 package integration_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -84,7 +87,7 @@ func TestConcurrencyLimitAdmitsExactlyItsCapacityUnderContention(t *testing.T) {
 	}
 	for _, lease := range first {
 		for range 2 {
-			if err := lease.Release(t.Context()); err != nil {
+			if err := lease.Settle(t.Context(), nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -267,7 +270,7 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 		t.Fatalf("got %v for 0.60 on top of a held 0.60 under a 1.00 budget, want a daily cost refusal of the estimate", err)
 	}
 	first.SetActualCost("0.10", "0.10")
-	if err := first.SettleCost(t.Context()); err != nil {
+	if err := first.Settle(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
 	second, err := holding("0.60")
@@ -282,5 +285,59 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 	}
 	if _, err := holding("0.40"); err != nil {
 		t.Errorf("got %v for 0.40 after the held 0.60 was refunded", err)
+	}
+}
+
+type stubLedgerInstaller struct{}
+
+func (stubLedgerInstaller) InstallSnapshot(context.Context, limits.Snapshot) (limits.Installed, error) {
+	return limits.Installed{}, nil
+}
+
+func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
+	t.Parallel()
+	const poolTimeout = 100 * time.Millisecond
+	owner, address := harness.Database(t)
+	config, err := database.Configuration(address, 2, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(poolTimeout.Milliseconds(), 10)
+	pool, err := database.Open(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	leader, err := ledger.TryAcquireLeader(t.Context(), pool, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leader == nil {
+		t.Fatal("got no leader on a fresh database, want the reconciliation leader")
+	}
+	defer leader.Close(t.Context())
+	blocker, err := owner.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.WithoutCancel(t.Context()))
+	if _, err := blocker.Exec(t.Context(), `LOCK TABLE olp.api_keys IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	reconciled := make(chan error, 1)
+	go func() {
+		_, err := leader.Reconcile(context.WithoutCancel(t.Context()), stubLedgerInstaller{}, time.Now())
+		reconciled <- err
+	}()
+	select {
+	case err := <-reconciled:
+		t.Fatalf("got %v from a pass that waits behind a table lock, want it still waiting after the pool's %s statement timeout", err, poolTimeout)
+	case <-time.After(3 * poolTimeout):
+	}
+	if err := blocker.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reconciled; err != nil {
+		t.Fatalf("got %v from a pass that outlasted the pool's %s statement timeout, want the leader pass to run under its own budget", err, poolTimeout)
 	}
 }

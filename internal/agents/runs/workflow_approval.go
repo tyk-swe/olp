@@ -13,7 +13,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type WorkflowApprovalCall struct {

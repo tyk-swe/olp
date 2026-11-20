@@ -1,17 +1,19 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '#lib/features/access/session/api.js';
+  import { logout } from '#lib/session/api.js';
   import {
     listSessionPage,
     revokeSession
   } from '#lib/features/access/sessions/api.js';
   import { listUsers } from '#lib/features/access/users/api.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
@@ -27,7 +29,6 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
 
   const users = createQuery(() => ({
     queryKey: userKeys.roster,
@@ -61,7 +62,7 @@
     )
       return;
     busy = `session-${id}`;
-    error = notice = '';
+    error = '';
     try {
       if (current) {
         await authLifecycle.endCurrentSession((signal) => logout(signal));
@@ -69,7 +70,7 @@
       }
       await revokeSession(id);
       await sessions.refetch();
-      notice = 'Session revoked.';
+      notify('Session revoked.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -79,7 +80,6 @@
 </script>
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 <div class="toolbar">
   <div>
@@ -113,7 +113,7 @@
     >Nobody is signed in that matches this view.</EmptyState
   >
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Sessions">
     <table class="data-table">
       <thead
         ><tr
@@ -150,7 +150,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(pagination, sessions.data?.nextCursor)}
     label="Session pages"
@@ -160,7 +160,7 @@
 <style>
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

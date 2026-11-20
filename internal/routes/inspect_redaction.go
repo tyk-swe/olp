@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // Inspection is a deliberately lossy presentation of a prepared invocation.

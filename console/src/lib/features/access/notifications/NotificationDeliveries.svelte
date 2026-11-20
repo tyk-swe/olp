@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { notificationEvents } from './ruleDraft';
   import { createQuery } from '@tanstack/svelte-query';
   import { listNotificationDeliveries } from './api';
@@ -29,7 +30,7 @@
     No deliveries recorded yet.
   </p>
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Notification deliveries">
     <table class="data-table">
       <thead
         ><tr
@@ -49,9 +50,7 @@
               >{notificationEvents[delivery.event]
                 .label}{#if delivery.event === 'key.expiring'}<small
                   >{delivery.api_key_name} · {delivery.reason}
-                  {delivery.due_at
-                    ? new Date(delivery.due_at).toLocaleString()
-                    : ''}</small
+                  {delivery.due_at ? formatDate(delivery.due_at) : ''}</small
                 >{/if}
               {#if delivery.provider_name}<br /><small
                   >{delivery.provider_name} · credential v{delivery.credential_version}</small
@@ -83,5 +82,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

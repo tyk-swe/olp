@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 func Valkey(t *testing.T) *coordination.Client {
