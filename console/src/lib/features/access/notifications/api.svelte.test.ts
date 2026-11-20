@@ -13,14 +13,15 @@ import {
 } from './ruleDraft';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getAllContexts, mount, unmount } from 'svelte';
+import { useQueryClient } from '@tanstack/svelte-query';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import NotificationDeliveries from './NotificationDeliveries.svelte';
 import NotificationsPanel from './NotificationsPanel.svelte';
 import {
   createNotificationDestination,
   createNotificationRule,
-  listNotificationDeliveries,
   listNotificationDestinations,
   listNotificationRules,
   updateNotificationDestination,
@@ -89,6 +90,109 @@ const delivery: NotificationDelivery = {
   threshold_percent: null,
   window_id: null
 };
+
+function renderDeliveries() {
+  const target = document.createElement('div');
+  const setup = vi.fn(() => {
+    useQueryClient().setDefaultOptions({ queries: { retry: false } });
+    return mount(NotificationDeliveries, { target, context: getAllContexts() });
+  });
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+    vi.unstubAllGlobals();
+  });
+  return {
+    target,
+    button: (label: string) =>
+      [...target.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === label
+      )
+  };
+}
+
+describe('notification delivery history', () => {
+  it('shows one page at a time even when the history exceeds 10,000 deliveries', async () => {
+    const total = 10_001;
+    const requestPage = vi.fn((request: Request) => {
+      route(request, 'GET', '/api/v1/notifications/deliveries');
+      const query = new URL(request.url).searchParams;
+      const cursor = query.get('cursor');
+      const offset = cursor ? Number(cursor.replace('after:', '')) : 0;
+      const length = Math.min(Number(query.get('limit')), total - offset);
+      const items = Array.from({ length }, (_, index) => {
+        const number = total - offset - index;
+        return {
+          ...delivery,
+          id: `id-${number}`,
+          rule_name: `Delivery ${number}`
+        };
+      });
+      return json({
+        items,
+        next_cursor: offset + length < total ? `after:${offset + length}` : null
+      });
+    });
+    serve(requestPage);
+    const { target, button } = renderDeliveries();
+    const names = () =>
+      [...target.querySelectorAll('tbody td:first-child')].map(
+        (cell) => cell.textContent
+      );
+
+    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 10001'));
+    expect(requestPage).toHaveBeenCalledTimes(1);
+    expect(names()).toHaveLength(50);
+    expect(button('Previous')?.disabled).toBe(true);
+    expect(button('Next')?.disabled).toBe(false);
+
+    button('Next')?.click();
+    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 9951'));
+    expect(requestPage).toHaveBeenCalledTimes(2);
+    expect(names()).toHaveLength(50);
+    expect(target.textContent).toContain('Page 2');
+    expect(button('Previous')?.disabled).toBe(false);
+
+    button('Previous')?.click();
+    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 10001'));
+    expect(target.textContent).toContain('Page 1');
+  });
+
+  it('can retry a failed page and go back from the last page', async () => {
+    const olderPage = vi
+      .fn(() => json({ items: [{ ...delivery, rule_name: 'Older delivery' }] }))
+      .mockReturnValueOnce(json({ title: 'Unavailable', status: 503 }, 503));
+    serve((request) =>
+      new URL(request.url).searchParams.get('cursor') === 'older-page'
+        ? olderPage()
+        : json({ items: [delivery], next_cursor: 'older-page' })
+    );
+    const { target, button } = renderDeliveries();
+
+    await vi.waitFor(() => expect(button('Next')?.disabled).toBe(false));
+    button('Next')?.click();
+    await vi.waitFor(() =>
+      expect(target.querySelector('[role="alert"]')?.textContent).toContain(
+        'Deliveries are unavailable.'
+      )
+    );
+    expect(button('Previous')?.disabled).toBe(false);
+    expect(button('Next')?.disabled).toBe(true);
+
+    button('Retry')?.click();
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Older delivery')
+    );
+    expect(button('Next')?.disabled).toBe(true);
+    expect(button('Previous')?.disabled).toBe(false);
+    button('Previous')?.click();
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain(delivery.rule_name)
+    );
+    expect(target.textContent).not.toContain('Older delivery');
+  });
+});
 
 describe.each([
   { view: 'destinations', deletion: 'Delete destination' },
@@ -191,12 +295,7 @@ describe('notification API', () => {
       item: destination,
       list: () => listNotificationDestinations()
     },
-    { path: 'rules', item: rule, list: () => listNotificationRules() },
-    {
-      path: 'deliveries',
-      item: delivery,
-      list: () => listNotificationDeliveries(rule.id)
-    }
+    { path: 'rules', item: rule, list: () => listNotificationRules() }
   ])('collects every page of $path', async ({ path, item, list }) => {
     const cursors = vi.fn<(cursor: string | null) => void>();
     serve(async (request) => {
@@ -205,8 +304,6 @@ describe('notification API', () => {
       const cursor = url.searchParams.get('cursor');
       cursors(cursor);
       expect(url.searchParams.get('limit')).toBe('50');
-      if (path === 'deliveries')
-        expect(url.searchParams.get('rule_id')).toBe(rule.id);
       return json(
         cursor
           ? { items: [{ ...item, id: 'second' }] }
