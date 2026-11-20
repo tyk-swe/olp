@@ -714,7 +714,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use RetainedUs
 			return
 		}
 		x.operationOverride = operation
-		if res.State == "submitting" || res.State == "submission_unknown" || res.State == "not_accepted" {
+		if retainedUnsettled(res.State) {
 			s.Refuse(x, w, fault.ServerError(http.StatusConflict, "submission_unknown", "The file upload has no reconciled native identity yet."))
 			return
 		}
