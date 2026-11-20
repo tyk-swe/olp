@@ -31,9 +31,12 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 			chatUsage = protocols.AddChatWorkflowUsage(chatUsage, out.Completion.Usage)
 		}
 		if len(out.Completion.ToolCalls) == 0 {
-			if failure := s.finalAnswer(x, out.Completion, frames, iteration > first, chatUsage); failure != nil {
-				return &Outcome{Err: failure}
+			answer, err := s.finalAnswer(x, out.Completion.Body, frames, iteration > first, chatUsage)
+			if err != nil {
+				return &Outcome{Err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
 			}
+			x.workflow.finalFrames = answer.frames
+			out.Completion.Body = answer.body
 			return out
 		}
 		paused, failure := s.toolTurn(ctx, x, out.Completion, iteration)
@@ -45,19 +48,6 @@ func (s *Server) executeToolLoop(ctx context.Context, x *Call) *Outcome {
 		}
 	}
 	return &Outcome{Err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
-}
-
-func (s *Server) projectChatUsage(x *Call, turn *wire.Completion, frames []byte, usage *wire.Usage) ([]byte, error) {
-	maxBytes := int(s.Config.MaxResponseBytes)
-	if !x.generation.parsed.Stream {
-		body, err := protocols.ProjectChatWorkflowUsage(turn.Body, usage, maxBytes)
-		turn.Body = body
-		return frames, err
-	}
-	if !x.generation.parsed.IncludeUsage {
-		return frames, nil
-	}
-	return protocols.ProjectChatWorkflowStreamUsage(frames, usage, int(s.Config.MaxEventBytes), maxBytes)
 }
 
 func (s *Server) resumeToolLoop(ctx context.Context, x *Call) (int, *fault.Error) {
@@ -148,35 +138,34 @@ func (s *Server) readStreamedTurn(x *Call, turn *wire.Completion, frames []byte)
 	return nil
 }
 
-func (s *Server) finalAnswer(x *Call, turn *wire.Completion, frames []byte, multiTurn bool, chatUsage *wire.Usage) *fault.Error {
-	unprepared := fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")
-	if multiTurn && x.family == wire.Chat {
-		projected, err := s.projectChatUsage(x, turn, frames, chatUsage)
-		if err != nil {
-			return unprepared
-		}
-		frames = projected
-	}
-	if !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
-		body, err := projectResponseMCPItems(turn.Body, x.workflow.responseItems, s.Config.MaxResponseBytes)
-		if err != nil {
-			return unprepared
-		}
-		turn.Body = body
-	}
+type workflowAnswer struct {
+	body   []byte
+	frames []byte
+}
+
+func (s *Server) finalAnswer(x *Call, body, frames []byte, multiTurn bool, chatUsage *wire.Usage) (workflowAnswer, error) {
+	maxBytes, maxEvent := s.Config.MaxResponseBytes, int(s.Config.MaxEventBytes)
+	projectUsage := multiTurn && x.family == wire.Chat
 	if !x.generation.parsed.Stream {
-		return nil
+		if projectUsage {
+			projected, err := protocols.ProjectChatWorkflowUsage(body, chatUsage, int(maxBytes))
+			return workflowAnswer{body: projected}, err
+		}
+		if len(x.workflow.responseItems) > 0 {
+			projected, err := projectResponseMCPItems(body, x.workflow.responseItems, maxBytes)
+			return workflowAnswer{body: projected}, err
+		}
+		return workflowAnswer{body: body}, nil
+	}
+	if projectUsage && x.generation.parsed.IncludeUsage {
+		projected, err := protocols.ProjectChatWorkflowStreamUsage(frames, chatUsage, maxEvent, int(maxBytes))
+		return workflowAnswer{body: body, frames: projected}, err
 	}
 	if len(x.workflow.responseItems) == 0 {
-		x.workflow.finalFrames = slices.Clone(frames)
-		return nil
+		return workflowAnswer{body: body, frames: slices.Clone(frames)}, nil
 	}
-	projected, err := projectResponseMCPFrames(frames, x.workflow.responseItems, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
-	if err != nil {
-		return unprepared
-	}
-	x.workflow.finalFrames = projected
-	return nil
+	projected, err := projectResponseMCPFrames(frames, x.workflow.responseItems, maxEvent, maxBytes)
+	return workflowAnswer{body: body, frames: projected}, err
 }
 
 func (s *Server) toolTurn(ctx context.Context, x *Call, completion *wire.Completion, iteration int) (*Outcome, *fault.Error) {
