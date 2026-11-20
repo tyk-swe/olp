@@ -3,7 +3,7 @@ run:
   build-tags: [integration, e2e, qualification, qualificationlive]
 linters:
   default: none
-  enable: [depguard, errorlint, forbidigo, funlen, ineffassign, revive, staticcheck, unconvert, unused, wastedassign]
+  enable: [depguard, errorlint, funlen, ineffassign, revive, staticcheck, unconvert, unused, wastedassign]
   settings:
     staticcheck:
       checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1019, ST1023]
@@ -22,12 +22,6 @@ linters:
           fun: (*github.com/tyk-swe/olp/internal/domain/protocols/sse.RawDecoder).Next
         - err: bufio.ErrBufferFull
           fun: (*bufio.Reader).ReadSlice
-    forbidigo:
-      analyze-types: true
-      forbid:
-        - pattern: \.(BeginMutation|CompleteReplay)$
-          pkg: ^github\.com/tyk-swe/olp/internal/access$
-          msg: Return access.Mutate, access.Remove or access.Transact instead of opening the management transaction by hand.
     funlen:
       lines: 100
       statements: -1
@@ -85,10 +79,6 @@ linters:
         linters: [funlen, revive]
       - path: \.gen\.go$
         linters: [funlen, revive]
-      - path: (^|/)internal/access/
-        linters: [forbidigo]
-      - path: _test\.go$
-        linters: [forbidigo]
       - path: _test\.go$
         linters: [errorlint]
 issues:

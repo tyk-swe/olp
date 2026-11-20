@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -54,14 +55,17 @@ func scoped(r *http.Request, store *Store, p authz.Principal, need authz.Need) (
 	return record, nil
 }
 
+type admittedJob struct {
+	principal authz.Principal
+	record    Record
+}
+
 func (m *API) reauthorize(r *http.Request) (authz.Principal, Record, error) {
-	tx, p, err := m.Access.BeginMutation(r)
-	if err != nil {
-		return authz.Principal{}, Record{}, err
-	}
-	defer tx.Rollback(r.Context())
-	record, err := scoped(r, NewStore(tx), p, authz.Change)
-	return p, record, err
+	admitted, err := access.Run(m.Access, r, func(tx pgx.Tx, p authz.Principal) (admittedJob, access.Event, error) {
+		record, err := scoped(r, NewStore(tx), p, authz.Change)
+		return admittedJob{principal: p, record: record}, access.Event{}, err
+	})
+	return admitted.principal, admitted.record, err
 }
 
 func (m *API) audit(r *http.Request, p authz.Principal, action, id string) error {

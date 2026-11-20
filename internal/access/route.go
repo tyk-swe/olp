@@ -202,7 +202,7 @@ func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error
 	return p, req.Admits(p)
 }
 
-func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, authz.Principal, error) {
+func (s *Server) beginMutation(r *http.Request) (pgx.Tx, authz.Principal, error) {
 	tx, err := s.Begin(r)
 	if err != nil {
 		return nil, authz.Principal{}, err

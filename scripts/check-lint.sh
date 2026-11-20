@@ -20,8 +20,6 @@ problems=$(jq -r --slurpfile legacy "$legacy" '
       {list: "functionOverMaxLines", name: "\(.Pos.Filename) \(.SourceLines[0] | capture("^func (\\((\\w+ )?\\*?(?<receiver>\\w+)[^)]*\\) )?(?<name>\\w+)") | [.receiver // empty, .name] | join("."))"}
     elif .FromLinter == "revive" and (.Text | startswith("file-length-limit")) then
       {list: "fileOverMaxLines", name: .Pos.Filename}
-    elif .FromLinter == "forbidigo" then
-      {list: "handRolledTransaction", name: .Pos.Filename}
     else null end;
   [.Issues[] | {issue: ., entry: entry}] as $found
   | ($found | map(select(.entry as $entry

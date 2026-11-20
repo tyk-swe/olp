@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
-type ReplayClaim struct {
+type replayClaim struct {
 	Key         string
 	Fingerprint []byte
 	Actor       string
@@ -22,8 +22,8 @@ type ReplayClaim struct {
 // Call only after current authorization, inside the feature's mutation
 // transaction. The actor, operation, target, precondition, and canonical input
 // bind a replay; its encrypted response lives for at most 24 hours.
-func (s *Server) Replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any) (ReplayClaim, *httpkit.Reply, error) {
-	c := ReplayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
+func (s *Server) replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any) (replayClaim, *httpkit.Reply, error) {
+	c := replayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
 	if len(c.Key) < 1 || len(c.Key) > 200 {
 		return c, nil, httpkit.Fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")
 	}
@@ -70,7 +70,7 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any
 	}
 	return c, &result, nil
 }
-func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, result httpkit.Reply) error {
+func (s *Server) completeReplay(r *http.Request, tx pgx.Tx, c replayClaim, result httpkit.Reply) error {
 	data, err := json.Marshal(result)
 	if err != nil {
 		return err

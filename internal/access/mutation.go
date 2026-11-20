@@ -41,7 +41,7 @@ func Unlocked(pgx.Tx, authz.Principal) (struct{}, error) { return struct{}{}, ni
 // authorizes the current state, a completed request replays its stored reply,
 // and otherwise apply makes the change.
 func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error), apply Apply[T]) (httpkit.Reply, error) {
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.beginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -50,7 +50,7 @@ func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	claim, replayed, err := s.Replay(r, tx, p, input)
+	claim, replayed, err := s.replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -61,7 +61,7 @@ func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.CompleteReplay(r, tx, claim, reply); err != nil {
+	if err = s.completeReplay(r, tx, claim, reply); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
@@ -69,12 +69,12 @@ func Mutate[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 
 // Remove replays before locking because a completed removal leaves nothing to lock.
 func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error), apply Apply[T]) (httpkit.Reply, error) {
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.beginMutation(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	claim, replayed, err := s.Replay(r, tx, p, input)
+	claim, replayed, err := s.replay(r, tx, p, input)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -89,7 +89,7 @@ func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.CompleteReplay(r, tx, claim, reply); err != nil {
+	if err = s.completeReplay(r, tx, claim, reply); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return reply, tx.Commit(r.Context())
@@ -97,20 +97,32 @@ func Remove[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, auth
 
 // Transact is Mutate for a change that carries no Idempotency-Key.
 func Transact[T any](s *Server, r *http.Request, lock func(pgx.Tx, authz.Principal) (T, error), apply Apply[T]) (httpkit.Reply, error) {
-	tx, p, err := s.BeginMutation(r)
+	return Run(s, r, func(tx pgx.Tx, p authz.Principal) (httpkit.Reply, Event, error) {
+		current, err := lock(tx, p)
+		if err != nil {
+			return httpkit.Reply{}, Event{}, err
+		}
+		return apply(tx, p, current)
+	})
+}
+
+// Run commits a step whose result is a value and not a reply, such as the
+// half of a change that an upstream call follows.
+func Run[T any](s *Server, r *http.Request, step func(pgx.Tx, authz.Principal) (T, Event, error)) (T, error) {
+	var none T
+	tx, p, err := s.beginMutation(r)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return none, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	current, err := lock(tx, p)
+	result, event, err := step(tx, p)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return none, err
 	}
-	reply, err := applied(s, r, tx, p, current, apply)
-	if err != nil {
-		return httpkit.Reply{}, err
+	if err = s.record(r, tx, p, event); err != nil {
+		return none, err
 	}
-	return reply, tx.Commit(r.Context())
+	return result, tx.Commit(r.Context())
 }
 
 func applied[T any](s *Server, r *http.Request, tx pgx.Tx, p authz.Principal, current T, apply Apply[T]) (httpkit.Reply, error) {
@@ -127,7 +139,7 @@ func applied[T any](s *Server, r *http.Request, tx pgx.Tx, p authz.Principal, cu
 // follows locks and checks the replay again.
 func Preflight[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error)) (T, *httpkit.Reply, error) {
 	var none T
-	tx, p, err := s.BeginMutation(r)
+	tx, p, err := s.beginMutation(r)
 	if err != nil {
 		return none, nil, err
 	}
@@ -136,7 +148,7 @@ func Preflight[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, a
 	if err != nil {
 		return none, nil, err
 	}
-	_, replayed, err := s.Replay(r, tx, p, input)
+	_, replayed, err := s.replay(r, tx, p, input)
 	if err != nil {
 		return none, nil, err
 	}
