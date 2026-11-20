@@ -94,7 +94,7 @@ func multipliers(discounts []Discount) map[scope]string {
 
 func discountAction(discount Discount, inForce map[scope]string) contract.ConfigurationPlanItemAction {
 	multiplier, ok := inForce[discount.scope()]
-	if ok && decimalEqual(multiplier, discount.Multiplier) || !ok && decimalEqual(discount.Multiplier, "1") {
+	if ok && decimalEqual(multiplier, discount.Multiplier) {
 		return contract.ConfigurationPlanItemActionNoop
 	}
 	return contract.ConfigurationPlanItemActionCreate
