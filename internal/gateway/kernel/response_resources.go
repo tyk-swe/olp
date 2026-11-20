@@ -57,6 +57,18 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use Retain
 	}
 }
 
+func (s *Server) storedResponseUpstreamError(ctx context.Context, localID string, failure *AttemptFailure) *fault.Error {
+	if failure.Status != http.StatusNotFound {
+		return UpstreamError(failure)
+	}
+	commitCtx, stopCommit := ResourceCommitContext(ctx)
+	defer stopCommit()
+	if err := s.Deps.Resources.Tombstone(commitCtx, localID); err != nil && !errors.Is(err, resources.ErrNotFound) {
+		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The missing response state could not be recorded.")
+	}
+	return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
+}
+
 func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.Resource, p *Pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *fault.Error {
 	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), suffix), query)
 	if err != nil {
@@ -64,10 +76,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.R
 	}
 	resp, failure := s.PinnedDo(ctx, x, p, method, endpoint, body, "application/json")
 	if failure != nil {
-		if failure.Status == http.StatusNotFound {
-			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-		}
-		return UpstreamError(failure)
+		return s.storedResponseUpstreamError(ctx, res.ID, failure)
 	}
 	defer resp.Body.Close()
 
@@ -231,10 +240,7 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			if failure.Status == http.StatusNotFound {
-				return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-			}
-			return UpstreamError(failure)
+			return s.storedResponseUpstreamError(ctx, res.ID, failure)
 		}
 		defer resp.Body.Close()
 

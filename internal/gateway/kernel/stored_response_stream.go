@@ -49,15 +49,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	x.mode = "streaming"
 	resp, failure := s.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 	if failure != nil {
-		if failure.Status == http.StatusNotFound {
-			commitCtx, stopCommit := ResourceCommitContext(ctx)
-			defer stopCommit()
-			if err := s.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil && !errors.Is(err, resources.ErrNotFound) {
-				return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The missing response state could not be recorded.")
-			}
-			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-		}
-		return UpstreamError(failure)
+		return s.storedResponseUpstreamError(ctx, res.ID, failure)
 	}
 	defer resp.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
