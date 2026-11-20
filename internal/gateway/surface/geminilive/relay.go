@@ -248,7 +248,8 @@ func (st *liveRelay) reauthorize() (relayEnd, bool) {
 	return relayEnd{}, true
 }
 
-func (st *liveRelay) converge(first relayEnd, remaining int, done chan relayEnd) (*wire.Usage, bool, error) {
+func (st *liveRelay) converge(initial relayEnd, pendingResults int, done chan relayEnd) (*wire.Usage, bool, error) {
+	first, remaining := initial, pendingResults
 	st.mu.Lock()
 	pending := st.inFlight
 	st.mu.Unlock()

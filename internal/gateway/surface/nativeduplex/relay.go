@@ -203,7 +203,8 @@ func (st *duplexRelay) reauthorize() (relayEnd, bool) {
 	return relayEnd{}, true
 }
 
-func (st *duplexRelay) converge(first relayEnd, remaining int, done chan relayEnd) (*wire.Usage, bool, error) {
+func (st *duplexRelay) converge(initial relayEnd, pending int, done chan relayEnd) (*wire.Usage, bool, error) {
+	first, remaining := initial, pending
 	code := websocket.CloseStatus(first.err)
 	if st.transport == duplexcontract.TransportBedrockBidi && !first.client && st.observer.PendingResponse() && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		first.err = fmt.Errorf("%w: %v", errDuplexIncomplete, first.err)

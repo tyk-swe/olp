@@ -150,7 +150,8 @@ func (st *relayState) watch(done chan relayEnd) (error, bool, bool, websocket.St
 	}
 }
 
-func (st *relayState) converge(first error, clientClosed, clientDeliveryFailed bool, closeCode websocket.StatusCode, remaining int, done chan relayEnd) (*wire.Usage, bool, error) {
+func (st *relayState) converge(initial error, wasClientClosed, initialDeliveryFailed bool, initialCloseCode websocket.StatusCode, pending int, done chan relayEnd) (*wire.Usage, bool, error) {
+	first, clientClosed, clientDeliveryFailed, closeCode, remaining := initial, wasClientClosed, initialDeliveryFailed, initialCloseCode, pending
 	code := websocket.CloseStatus(first)
 	if closeCode != 0 {
 		code = closeCode
@@ -158,9 +159,9 @@ func (st *relayState) converge(first error, clientClosed, clientDeliveryFailed b
 		code = websocket.StatusInternalError
 	}
 	st.usageMu.Lock()
-	pending := st.x.Strict() && st.responses.Pending()
+	pendingResponse := st.x.Strict() && st.responses.Pending()
 	st.usageMu.Unlock()
-	if !clientClosed && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+	if !clientClosed && pendingResponse && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		// The provider closed a socket while a native response still owed
 		// its response.done terminal event. Never mirror its 1000/1001 as
 		// a successful client-visible session end.
@@ -180,11 +181,11 @@ func (st *relayState) converge(first error, clientClosed, clientDeliveryFailed b
 	if st.have {
 		observedUsage = st.usage
 	}
-	pending = st.x.Strict() && st.responses.Pending()
-	if clientClosed && (pending || clientDeliveryFailed) {
+	pendingResponse = st.x.Strict() && st.responses.Pending()
+	if clientClosed && (pendingResponse || clientDeliveryFailed) {
 		return observedUsage, st.observed, fmt.Errorf("%w: %v", errRealtimeClientClosed, first)
 	}
-	if !clientClosed && pending && (websocket.CloseStatus(first) == websocket.StatusNormalClosure || websocket.CloseStatus(first) == websocket.StatusGoingAway) {
+	if !clientClosed && pendingResponse && (websocket.CloseStatus(first) == websocket.StatusNormalClosure || websocket.CloseStatus(first) == websocket.StatusGoingAway) {
 		return observedUsage, st.observed, fmt.Errorf("%w: %v", errRealtimeResponseIncomplete, first)
 	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
