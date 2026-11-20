@@ -123,8 +123,6 @@ export async function checkRouteFixtures(
   id: string,
   file: File
 ): Promise<RouteFixtureReport> {
-  if (file.size > 256 * 1024)
-    throw new Error('Use a JSON file of at most 256 KiB.');
   const serialized = await file.text();
   return unwrap(
     await apiClient.POST('/api/v1/route-drafts/{draft_id}/check-fixtures', {

@@ -28,6 +28,17 @@
   const numberOrUnknown = (count: number | null) =>
     count === null ? 'Unknown' : formatInteger(count);
 
+  function selectFile(selected: File | null) {
+    report = null;
+    if (selected && selected.size > 256 * 1024) {
+      file = null;
+      action.error = 'Use a JSON file of at most 256 KiB.';
+      return;
+    }
+    file = selected;
+    action.error = '';
+  }
+
   function compare() {
     if (!file || disabled || action.busy) return;
     const selected = file;
@@ -67,11 +78,7 @@
         accept=".json,application/json"
         aria-describedby="fixture-file-help"
         disabled={action.busy}
-        onchange={(event) => {
-          file = event.currentTarget.files?.[0] ?? null;
-          report = null;
-          action.error = '';
-        }}
+        onchange={(event) => selectFile(event.currentTarget.files?.[0] ?? null)}
       />
     </div>
     <button
