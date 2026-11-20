@@ -16,7 +16,7 @@ import (
 )
 
 type attemptAdapter[Result any] struct {
-	estimate func(routing.Attempt, *routing.Provider) int64
+	demand   func(routing.Attempt, *routing.Provider) quota.TokenDemand
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure)
 }
 
@@ -181,8 +181,8 @@ func (r routeRun[Result]) target(attempt routing.Attempt, provider *routing.Prov
 }
 
 func (r routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int) routeStep[Result] {
-	estimate := r.adapter.estimate(attempt, provider)
-	gate := r.server.gateAttempt(r.ctx, r.call, attempt, provider, &slot, estimate, r.deadline)
+	demand := r.adapter.demand(attempt, provider)
+	gate := r.server.gateAttempt(r.ctx, r.call, attempt, provider, &slot, demand, r.deadline)
 	switch gate.verdict {
 	case gateExpired:
 		return r.finish(attemptOutcome[Result]{err: (&AttemptFailure{class: ClassTimeout}).Fault()})
@@ -193,7 +193,7 @@ func (r routeRun[Result]) slot(attempt routing.Attempt, provider *routing.Provid
 	case gateUnmeterable:
 		return routeStep[Result]{then: afterQuota(gate.quota), seen: routeEvidence{unmeterable: true}}
 	case gateAdmitted:
-		return r.dispatch(attempt, provider, slot, retry, estimate, gate.hold)
+		return r.dispatch(attempt, provider, slot, retry, gate.hold)
 	}
 	return routeStep[Result]{then: tryNextSlot}
 }
@@ -217,7 +217,7 @@ func (r routeRun[Result]) rejected(attempt routing.Attempt, slot routing.Slot, r
 	return routeStep[Result]{then: afterQuota(rejection.quota), seen: refusedBy(rejection)}
 }
 
-func (r routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int, estimate int64, hold *dispatchHold) routeStep[Result] {
+func (r routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, retry int, hold *dispatchHold) routeStep[Result] {
 	s, x := r.server, r.call
 	ready, admissionErr := hold.begin(r.ctx, s, x, attempt, provider, slot)
 	if admissionErr != nil {
@@ -240,7 +240,7 @@ func (r routeRun[Result]) dispatch(attempt routing.Attempt, provider *routing.Pr
 	if x.guard.engine != nil {
 		fact.GuardrailDecisions = x.guard.ledger.finishAttempt()
 	}
-	if completionErr, cancelled := hold.complete(r.ctx, s, x, attemptCompletion{fact: fact, failure: failure, authority: authorityErr, attempt: attempt, estimate: estimate, finishLease: finishLease}); completionErr != nil {
+	if completionErr, cancelled := hold.complete(r.ctx, s, x, attemptCompletion{fact: fact, failure: failure, authority: authorityErr, attempt: attempt, finishLease: finishLease}); completionErr != nil {
 		return r.finish(attemptOutcome[Result]{err: completionErr, cancelled: cancelled})
 	}
 	if failure == nil {

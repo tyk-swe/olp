@@ -9,10 +9,12 @@ import (
 )
 
 type QuotaProbe struct {
-	Lookup            string
-	RequestsPerMinute *int64
-	TokensPerMinute   *int64
-	MaxConcurrency    *int64
+	Lookup                string
+	RequestsPerMinute     *int64
+	TokensPerMinute       *int64
+	InputTokensPerMinute  *int64
+	OutputTokensPerMinute *int64
+	MaxConcurrency        *int64
 }
 
 type CapProbe struct {
@@ -79,6 +81,8 @@ func (q QuotaProbe) headroom(usage scripts.Usage) float64 {
 	}{
 		{q.RequestsPerMinute, usage.RequestsThisMinute},
 		{q.TokensPerMinute, usage.TokensThisMinute},
+		{q.InputTokensPerMinute, usage.InputTokensThisMinute},
+		{q.OutputTokensPerMinute, usage.OutputTokensThisMinute},
 		{q.MaxConcurrency, usage.ConcurrentRequests},
 	} {
 		if dimension.limit != nil && *dimension.limit > 0 {

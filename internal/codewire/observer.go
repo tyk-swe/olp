@@ -56,6 +56,7 @@ func classify(body []byte, headers http.Header, operation string, caps ...string
 	request.Estimate = max(1, int64(len(body))/4)
 	for _, name := range caps {
 		if cap, err := strconv.ParseInt(field(root, name).Raw(), 10, 64); err == nil && cap > 0 && cap <= 1<<32 {
+			request.OutputCap = cap
 			request.Estimate += cap
 			break
 		}

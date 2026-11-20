@@ -9,6 +9,12 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Added
 
+- Provider connections and credential slots take optional
+  `input_tokens_per_minute` and `output_tokens_per_minute` limits beside the
+  combined `tokens_per_minute`. Each configured dimension is reserved
+  atomically across replicas before dispatch and settles to the usage the
+  upstream reports, and a refusal names the exhausted dimension. Combined-only
+  configurations behave as before.
 - Project notification rules can subscribe to `spend.spike`. The rule fires
   once per rule and day when the last complete UTC day of priced spend clears
   both a percentage and an absolute increase over the mean of its complete

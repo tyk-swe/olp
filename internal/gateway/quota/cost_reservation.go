@@ -35,10 +35,9 @@ func (r CostReservation) On(request admission.Request) admission.Request {
 }
 
 func reporting(rate admission.RateLimits, report bool) admission.RateLimits {
-	return admission.RateLimits{
-		RequestsPerMinute: rate.RequestsPerMinute, TokensPerMinute: rate.TokensPerMinute, MaxConcurrency: rate.MaxConcurrency,
-		TrackConcurrency: rate.TrackConcurrency, Tokens: rate.Tokens, Report: report, Share: rate.Share,
-	}
+	reported := rate
+	reported.Report = report
+	return reported
 }
 
 // The quotas that can reject an attempt before it is dispatched.

@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -395,6 +396,14 @@ func (x *Call) attemptEstimate(provider *routing.Provider, targetID, model strin
 		return admittedEstimate{}, err
 	}
 	return prepared.admitted, nil
+}
+
+func (x *Call) attemptDemand(a routing.Attempt, provider *routing.Provider) quota.TokenDemand {
+	admitted, err := x.attemptEstimate(provider, a.TargetID, a.UpstreamModel)
+	if err != nil {
+		return quota.CombinedDemand(limits.MaxCounter)
+	}
+	return quota.TokenDemand{Input: admitted.input, Output: admitted.reply, Total: max(admitted.reserve, 1)}
 }
 
 // attemptReservation is what the gate holds for one attempt.

@@ -112,7 +112,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.estimate = int64(len(encoded))
-	p, pinErr := s.selectBoundPinSurface(r.Context(), x, &route, "retrieval", "openai", "unary", nil, func(provider *routing.Provider, model string) bool {
+	p, pinErr := s.selectBoundPinSurface(r.Context(), x, &route, "retrieval", "openai", "unary", resourceDemand(x), nil, func(provider *routing.Provider, model string) bool {
 		return provider.ID == binding.ProviderID && provider.CredentialSource != "caller" && provider.Connector().RetrievalBackend() == binding.Backend && provider.Connector().Model(model) == binding.Resource && provider.Connector().Supports("retrieval", "openai", "unary")
 	})
 	if pinErr != nil {

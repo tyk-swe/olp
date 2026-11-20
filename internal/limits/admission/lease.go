@@ -28,10 +28,25 @@ type Lease struct {
 type rateHold struct {
 	hold             scripts.RateHold
 	tokens           int64
+	inputTokens      int64
+	outputTokens     int64
 	countsTokens     bool
+	countsInput      bool
+	countsOutput     bool
 	countsRequest    bool
 	holdsConcurrency bool
 	reported         *rateAnswer
+}
+
+func (h *rateHold) countsAnyTokens() bool {
+	return h.countsTokens || h.countsInput || h.countsOutput
+}
+
+type TokenUsage struct {
+	Input  int64
+	Output int64
+	Total  int64
+	Credit bool
 }
 
 type rateAnswer struct {
@@ -188,29 +203,62 @@ func (le *Lease) refund(ctx context.Context) error {
 	if rate == nil {
 		return err
 	}
-	tokens := int64(0)
-	if rate.countsTokens {
-		tokens = rate.tokens
-	}
+	tokens, input, output := rate.refundAmounts()
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
-		return le.limiter.scripts.RefundRate(ctx, rate.hold, rate.countsRequest, tokens)
+		return le.limiter.scripts.RefundRate(ctx, rate.hold, rate.countsRequest, tokens, input, output)
 	}))
 }
 
+func (h *rateHold) refundAmounts() (tokens, input, output int64) {
+	if h.countsTokens {
+		tokens = h.tokens
+	}
+	if h.countsInput {
+		input = h.inputTokens
+	}
+	if h.countsOutput {
+		output = h.outputTokens
+	}
+	return tokens, input, output
+}
+
 func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
+	return le.reconcileUsage(ctx, TokenUsage{Total: actualTokens})
+}
+
+func tokenAdjustment(counts, credit bool, actual, reserved int64) int64 {
+	if !counts {
+		return 0
+	}
+	if credit {
+		return actual - reserved
+	}
+	return max(int64(0), actual-reserved)
+}
+
+func (h *rateHold) adjustments(usage TokenUsage) (combined, input, output int64) {
+	return tokenAdjustment(h.countsTokens, false, usage.Total, h.tokens),
+		tokenAdjustment(h.countsInput, usage.Credit, usage.Input, h.inputTokens),
+		tokenAdjustment(h.countsOutput, usage.Credit, usage.Output, h.outputTokens)
+}
+
+func (le *Lease) reconcileUsage(ctx context.Context, usage TokenUsage) error {
 	if le == nil {
 		return nil
 	}
-	err := le.joined.Reconcile(ctx, actualTokens)
+	err := le.joined.reconcileUsage(ctx, usage)
 	rate := le.rate
-	if rate == nil || !rate.countsTokens {
+	if rate == nil || !rate.countsAnyTokens() {
 		return err
 	}
-	if actualTokens < 0 || actualTokens > limits.MaxCounter {
-		return errors.Join(err, invalid("actual tokens must be a non-negative Lua-safe integer"))
+	for _, actual := range [...]int64{usage.Input, usage.Output, usage.Total} {
+		if actual < 0 || actual > limits.MaxCounter {
+			return errors.Join(err, invalid("actual tokens must be a non-negative Lua-safe integer"))
+		}
 	}
+	combined, input, output := rate.adjustments(usage)
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
-		return le.limiter.scripts.AddTokens(ctx, rate.hold, max(int64(0), actualTokens-rate.tokens))
+		return le.limiter.scripts.AdjustTokens(ctx, rate.hold, combined, input, output)
 	}))
 }
 
@@ -243,12 +291,19 @@ func (le *Lease) Refund(ctx context.Context) error {
 // since a lost settle only leaves the reservation to lapse and be removed
 // by the request's spend accounting records.
 func (le *Lease) Settle(ctx context.Context, actualTokens *int64) error {
+	if actualTokens == nil {
+		return le.SettleUsage(ctx, nil)
+	}
+	return le.SettleUsage(ctx, &TokenUsage{Total: *actualTokens})
+}
+
+func (le *Lease) SettleUsage(ctx context.Context, usage *TokenUsage) error {
 	if le == nil {
 		return nil
 	}
 	var err error
-	if actualTokens != nil {
-		if e := le.Reconcile(ctx, *actualTokens); e != nil {
+	if usage != nil {
+		if e := le.reconcileUsage(ctx, *usage); e != nil {
 			err = errors.Join(err, fmt.Errorf("reconcile limit reservation: %w", e))
 		}
 	}

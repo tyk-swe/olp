@@ -59,12 +59,14 @@ func (f *Forwarder) prepareResearch(r *http.Request, release *release.Release, r
 	if limited.Options.Limits != nil {
 		copy := *limited.Options.Limits
 		copy.TokensPerMinute = nil
+		copy.InputTokensPerMinute = nil
+		copy.OutputTokensPerMinute = nil
 		if control {
 			copy.MaxConcurrency = nil
 		}
 		limited.Options.Limits = &copy
 	}
-	a.providerLease, failure = f.admission.ReserveCodeProvider(ctx, account.ProviderID, limited, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = f.admission.ReserveCodeProvider(ctx, account.ProviderID, limited, quota.TokenDemand{}, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}

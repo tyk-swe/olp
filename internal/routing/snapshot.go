@@ -48,19 +48,21 @@ type Capability struct {
 
 // Slot is a credential slot pinned to an exact credential version.
 type Slot struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	Enabled           bool     `json:"enabled"`
-	Priority          int      `json:"priority"`
-	Weight            int64    `json:"weight"`
-	CredentialID      *string  `json:"credential_id"`
-	CredentialVersion *int     `json:"credential_version"`
-	AllowedModels     []string `json:"allowed_models,omitempty"`
-	AllowedRoutes     []string `json:"allowed_routes,omitempty"`
-	AllowedAPIKeys    []string `json:"allowed_api_keys,omitempty"`
-	RequestsPerMinute *int64   `json:"requests_per_minute,omitempty"`
-	TokensPerMinute   *int64   `json:"tokens_per_minute,omitempty"`
-	MaxConcurrency    *int64   `json:"max_concurrency,omitempty"`
+	ID                    string   `json:"id"`
+	Name                  string   `json:"name"`
+	Enabled               bool     `json:"enabled"`
+	Priority              int      `json:"priority"`
+	Weight                int64    `json:"weight"`
+	CredentialID          *string  `json:"credential_id"`
+	CredentialVersion     *int     `json:"credential_version"`
+	AllowedModels         []string `json:"allowed_models,omitempty"`
+	AllowedRoutes         []string `json:"allowed_routes,omitempty"`
+	AllowedAPIKeys        []string `json:"allowed_api_keys,omitempty"`
+	RequestsPerMinute     *int64   `json:"requests_per_minute,omitempty"`
+	TokensPerMinute       *int64   `json:"tokens_per_minute,omitempty"`
+	InputTokensPerMinute  *int64   `json:"input_tokens_per_minute,omitempty"`
+	OutputTokensPerMinute *int64   `json:"output_tokens_per_minute,omitempty"`
+	MaxConcurrency        *int64   `json:"max_concurrency,omitempty"`
 	Supply
 }
 
@@ -83,9 +85,11 @@ func (s *Slot) AllowsModelRoute(model, route string) bool {
 // Every member is omitted from the serving JSON when unset so a snapshot
 // published before connection quotas existed keeps its digest.
 type Limits struct {
-	RequestsPerMinute *int64 `json:"requests_per_minute,omitempty"`
-	TokensPerMinute   *int64 `json:"tokens_per_minute,omitempty"`
-	MaxConcurrency    *int64 `json:"max_concurrency,omitempty"`
+	RequestsPerMinute     *int64 `json:"requests_per_minute,omitempty"`
+	TokensPerMinute       *int64 `json:"tokens_per_minute,omitempty"`
+	InputTokensPerMinute  *int64 `json:"input_tokens_per_minute,omitempty"`
+	OutputTokensPerMinute *int64 `json:"output_tokens_per_minute,omitempty"`
+	MaxConcurrency        *int64 `json:"max_concurrency,omitempty"`
 	Supply
 }
 

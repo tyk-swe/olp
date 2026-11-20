@@ -15,16 +15,20 @@ type Share struct {
 }
 
 type RateReservation struct {
-	Lookup            string
-	LeaseID           string
-	RequestsPerMinute int64
-	TokensPerMinute   int64
-	MaxConcurrency    int64
-	TrackConcurrency  bool
-	Tokens            int64
-	TTL               time.Duration
-	Stated            bool
-	Share             *Share
+	Lookup                string
+	LeaseID               string
+	RequestsPerMinute     int64
+	TokensPerMinute       int64
+	InputTokensPerMinute  int64
+	OutputTokensPerMinute int64
+	MaxConcurrency        int64
+	TrackConcurrency      bool
+	Tokens                int64
+	InputTokens           int64
+	OutputTokens          int64
+	TTL                   time.Duration
+	Stated                bool
+	Share                 *Share
 }
 
 type RateGrant struct {
@@ -49,6 +53,8 @@ func (q RateReservation) args() []string {
 		strconv.FormatInt(q.RequestsPerMinute, 10), strconv.FormatInt(q.TokensPerMinute, 10),
 		strconv.FormatInt(q.Tokens, 10), strconv.FormatInt(q.MaxConcurrency, 10),
 		q.LeaseID, strconv.FormatInt(q.TTL.Milliseconds(), 10), switchArg(q.Stated),
+		strconv.FormatInt(q.InputTokensPerMinute, 10), strconv.FormatInt(q.OutputTokensPerMinute, 10),
+		strconv.FormatInt(q.InputTokens, 10), strconv.FormatInt(q.OutputTokens, 10),
 	}
 	shared := base
 	if q.Share != nil {
@@ -119,6 +125,10 @@ func rateDimension(h head) (limits.Dimension, bool) {
 		return limits.DimensionRequests, true
 	case rejected && h.detail == "tpm" && h.retry <= fixedWindowMS:
 		return limits.DimensionTokens, true
+	case rejected && h.detail == "itpm" && h.retry <= fixedWindowMS:
+		return limits.DimensionInputTokens, true
+	case rejected && h.detail == "otpm" && h.retry <= fixedWindowMS:
+		return limits.DimensionOutputTokens, true
 	case rejected && h.detail == "concurrency":
 		return limits.DimensionConcurrency, true
 	default:
@@ -184,15 +194,17 @@ func (h RateHold) classed(args ...string) []string {
 	return args
 }
 
-func (r Runner) RefundRate(ctx context.Context, h RateHold, request bool, tokens int64) error {
+func (r Runner) RefundRate(ctx context.Context, h RateHold, request bool, tokens, input, output int64) error {
 	_, err := r.run(ctx, call{script: refundLimits, keys: r.rateKeys(h.Lookup),
-		args: h.classed(strconv.FormatInt(h.WindowID, 10), switchArg(request), strconv.FormatInt(tokens, 10), h.LeaseID)})
+		args: h.classed(strconv.FormatInt(h.WindowID, 10), switchArg(request),
+			strconv.FormatInt(tokens, 10), strconv.FormatInt(input, 10), strconv.FormatInt(output, 10), h.LeaseID)})
 	return err
 }
 
-func (r Runner) AddTokens(ctx context.Context, h RateHold, adjustment int64) error {
+func (r Runner) AdjustTokens(ctx context.Context, h RateHold, combined, input, output int64) error {
 	_, err := r.run(ctx, call{script: reconcileLimits, keys: r.rateKeys(h.Lookup)[:1],
-		args: h.classed(strconv.FormatInt(h.WindowID, 10), strconv.FormatInt(adjustment, 10), h.LeaseID)})
+		args: h.classed(strconv.FormatInt(h.WindowID, 10), strconv.FormatInt(combined, 10),
+			strconv.FormatInt(input, 10), strconv.FormatInt(output, 10), h.LeaseID)})
 	return err
 }
 
@@ -202,9 +214,11 @@ func (r Runner) ReleaseConcurrency(ctx context.Context, h RateHold) error {
 }
 
 type Usage struct {
-	RequestsThisMinute int64
-	TokensThisMinute   int64
-	ConcurrentRequests int64
+	RequestsThisMinute     int64
+	TokensThisMinute       int64
+	InputTokensThisMinute  int64
+	OutputTokensThisMinute int64
+	ConcurrentRequests     int64
 }
 
 func (r Runner) usageCall(lookup string) call {
@@ -221,10 +235,10 @@ func (r Runner) Usage(ctx context.Context, lookup string) (Usage, error) {
 
 func decodeUsage(value any) (Usage, error) {
 	items, ok := value.([]any)
-	if !ok || len(items) != 3 {
+	if !ok || len(items) != 5 {
 		return Usage{}, limits.ErrUnexpectedResponse
 	}
-	var counters [3]int64
+	var counters [5]int64
 	for index := range counters {
 		counter, ok := replyInt(items[index])
 		if !ok || !luaSafe(counter) {
@@ -232,7 +246,10 @@ func decodeUsage(value any) (Usage, error) {
 		}
 		counters[index] = counter
 	}
-	return Usage{RequestsThisMinute: counters[0], TokensThisMinute: counters[1], ConcurrentRequests: counters[2]}, nil
+	return Usage{
+		RequestsThisMinute: counters[0], TokensThisMinute: counters[1], ConcurrentRequests: counters[2],
+		InputTokensThisMinute: counters[3], OutputTokensThisMinute: counters[4],
+	}, nil
 }
 
 func (r Runner) Cooldown(ctx context.Context, key string, d time.Duration) error {

@@ -41,6 +41,7 @@ type paidCodeAttempt struct {
 	release       *release.Release
 	authority     keyauthority.Authority
 	targetLease   *quota.TargetReservation
+	demand        quota.TokenDemand
 	supplyLeases  []*admission.Lease
 	price         *rates.RoutingPrice
 	discount      *rates.RoutingDiscount
@@ -158,7 +159,8 @@ func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, r
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
 	a.lease = lease
-	targetLease, rejection, skip := f.admission.ReserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
+	a.paid.demand = quota.DemandOf(demand)
+	targetLease, rejection, skip := f.admission.ReserveTarget(r.Context(), &provider, &slot, a.paid.demand, codeGenerationTimeout+time.Minute, "code")
 	if rejection != nil {
 		return nil, codemode.Refuse(429, "code_paid_target_rate_limited")
 	}
@@ -306,7 +308,7 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		return "failure"
 	}()
 	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.forwarder.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
-	p.targetLease.Settle(ctx, a.dispatched, a.usage.Total)
+	p.targetLease.Settle(ctx, a.dispatched, quota.SettledAttemptUsage(&fact, p.demand))
 	for _, lease := range p.supplyLeases {
 		quota.SettleKey(ctx, lease, a.dispatched, a.usage.Total, a.forwarder.log)
 	}

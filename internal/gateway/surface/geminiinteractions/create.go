@@ -131,7 +131,7 @@ func (t turn) admitGeneration(input geminilifecycle.InteractionRequest) (*routin
 
 func (t turn) pinGeneration(ctx context.Context, input geminilifecycle.InteractionRequest, route *routing.Route) (*kernel.Pin, previous, *fault.Error) {
 	if input.Previous == "" {
-		pin, e := t.kernel.SelectPinSurface(ctx, t.x, route, "generation", "gemini", t.x.Mode(), func(provider *routing.Provider, model string) bool {
+		pin, e := t.kernel.SelectGenerationPin(ctx, t.x, route, "gemini", t.x.Mode(), input.MaxOutputTokens, func(provider *routing.Provider, model string) bool {
 			return provider.ProfileID == profile && provider.Connector().Supports("generation", "gemini", t.x.Mode()) && provider.Supports(model, "generation", "gemini", t.x.Mode())
 		})
 		return pin, previous{}, e
@@ -147,7 +147,7 @@ func (t turn) pinGeneration(ctx context.Context, input geminilifecycle.Interacti
 	if e != nil || retained == nil || retained.Slug != route.Slug || !t.supports(&pin.Provider, pin.Model) {
 		return pin, previous{}, kernel.PinUnavailable()
 	}
-	if e := t.kernel.GatePinnedGeneration(ctx, t.x, pin, "generation"); e != nil {
+	if e := t.kernel.GatePinnedGeneration(ctx, t.x, pin, "generation", input.MaxOutputTokens); e != nil {
 		return pin, previous{}, e
 	}
 	return pin, previous{resource: parent, upstream: upstream}, nil

@@ -62,8 +62,8 @@ func codeEndUserPolicy(policy *keyauthority.EndUserPolicy) *keyauthority.EndUser
 	return &copy
 }
 
-func (a *Admission) ReserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*admission.Lease, *fault.Error) {
-	request := connectionRequest(&routing.Provider{ID: providerID, Limits: configuration.Options.Limits}, estimate, ttl, "")
+func (a *Admission) ReserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, demand TokenDemand, ttl time.Duration) (*admission.Lease, *fault.Error) {
+	request := connectionRequest(&routing.Provider{ID: providerID, Limits: configuration.Options.Limits}, demand, ttl, "")
 	if !request.HasHardLimits() {
 		return nil, nil
 	}

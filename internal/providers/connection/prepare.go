@@ -363,14 +363,15 @@ func ValidLimits(field string, q Limits) error {
 	if err := q.Supply.Validate(field); err != nil {
 		return err
 	}
-	if q.Shared() && q.RequestsPerMinute == nil && q.TokensPerMinute == nil && q.MaxConcurrency == nil {
+	if q.Shared() && q.RequestsPerMinute == nil && q.TokensPerMinute == nil && q.InputTokensPerMinute == nil && q.OutputTokensPerMinute == nil && q.MaxConcurrency == nil {
 		return invalid(field+".priority_shares", "Priority shares divide a quota; declare a request, token or concurrency limit.")
 	}
 	return nil
 }
 
 func validQuota(q Limits) bool {
-	return limits.ValidRequestLimit(q.RequestsPerMinute) && limits.ValidRequestLimit(q.MaxConcurrency) && limits.ValidTokenLimit(q.TokensPerMinute)
+	return limits.ValidRequestLimit(q.RequestsPerMinute) && limits.ValidRequestLimit(q.MaxConcurrency) &&
+		limits.ValidTokenLimit(q.TokensPerMinute) && limits.ValidTokenLimit(q.InputTokensPerMinute) && limits.ValidTokenLimit(q.OutputTokensPerMinute)
 }
 
 func ValidModelName(field, value string) error {

@@ -40,12 +40,14 @@ func (b Basis) Pick(cost, charge string) string {
 type Dimension string
 
 const (
-	DimensionRequests    Dimension = "requests"
-	DimensionTokens      Dimension = "tokens"
-	DimensionConcurrency Dimension = "concurrency"
-	DimensionDailyCost   Dimension = "daily_cost"
-	DimensionWeeklyCost  Dimension = "weekly_cost"
-	DimensionMonthlyCost Dimension = "monthly_cost"
+	DimensionRequests     Dimension = "requests"
+	DimensionTokens       Dimension = "tokens"
+	DimensionInputTokens  Dimension = "input_tokens"
+	DimensionOutputTokens Dimension = "output_tokens"
+	DimensionConcurrency  Dimension = "concurrency"
+	DimensionDailyCost    Dimension = "daily_cost"
+	DimensionWeeklyCost   Dimension = "weekly_cost"
+	DimensionMonthlyCost  Dimension = "monthly_cost"
 )
 
 var (

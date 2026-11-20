@@ -119,7 +119,7 @@ func (q agentRequest) create() {
 		q.reply.fail(err)
 		return
 	}
-	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", base, func(provider *routing.Provider, model string) bool {
+	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", resourceDemand(q.x), base, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 	})
 	end.pin = pin

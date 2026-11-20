@@ -17,9 +17,11 @@ import (
 )
 
 type Limits struct {
-	MaxConcurrency    *int64 `json:"max_concurrency"`
-	RequestsPerMinute *int64 `json:"requests_per_minute"`
-	TokensPerMinute   *int64 `json:"tokens_per_minute"`
+	MaxConcurrency        *int64 `json:"max_concurrency"`
+	RequestsPerMinute     *int64 `json:"requests_per_minute"`
+	TokensPerMinute       *int64 `json:"tokens_per_minute"`
+	InputTokensPerMinute  *int64 `json:"input_tokens_per_minute,omitempty"`
+	OutputTokensPerMinute *int64 `json:"output_tokens_per_minute,omitempty"`
 	routing.Supply
 }
 
@@ -215,7 +217,7 @@ func limitsOf(limits *routing.Limits) *Limits {
 	if limits == nil {
 		return nil
 	}
-	return &Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, Supply: limits.Supply}
+	return &Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, InputTokensPerMinute: limits.InputTokensPerMinute, OutputTokensPerMinute: limits.OutputTokensPerMinute, Supply: limits.Supply}
 }
 
 func optional(value string) *string {
