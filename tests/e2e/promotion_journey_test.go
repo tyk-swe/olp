@@ -31,7 +31,9 @@ const legacyRouteSlug = "legacy-content-policy-for-a-route-whose-slug-is-long-en
 
 func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller, fixture canaryFixture) {
 	s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
-	operator := s.seedPromotion(owner, fixture)
+	operator, templateID := s.seedPromotion(owner, fixture)
+	templatePath := "/api/v1/route-templates/" + templateID
+	templateBefore := s.Want(operator, "GET", templatePath, nil, nil, http.StatusOK)
 
 	exported := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	document := exported["document"].(map[string]any)
@@ -49,6 +51,10 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller
 	testPromotionRejectsUnusableTemplateProviders(t, s, operator, document)
 
 	s.Want(operator, "POST", "/api/v1/configuration/apply", request, harness.Idempotent(), http.StatusOK)
+	templateAfter := s.Want(operator, "GET", templatePath, nil, nil, http.StatusOK)
+	if templateAfter["etag"].(string) != templateBefore["etag"].(string) {
+		t.Errorf("applying an unchanged template moved its ETag from %v to %v", templateBefore["etag"], templateAfter["etag"])
+	}
 
 	reexported := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	if reexported["digest"] != exported["digest"] {
@@ -145,7 +151,7 @@ func (s *service) installationToken(owner *harness.Caller, name string) *harness
 	return &harness.Caller{Name: name + " token", Token: token["secret"].(string)}
 }
 
-func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) *harness.Caller {
+func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) (*harness.Caller, string) {
 	s.T.Helper()
 	operator := s.installationToken(owner, "promotion")
 
@@ -158,7 +164,7 @@ func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) *h
 	s.Want(operator, "GET", missingProjects, nil, nil, http.StatusNotFound)
 	s.Want(operator, "POST", missingProjects, map[string]any{"name": "Missing parent"}, harness.Idempotent(), http.StatusNotFound)
 	second := s.Want(operator, "POST", "/api/v1/organizations/"+organization+"/projects", map[string]any{"name": "Promotion-Second"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
-	s.Want(operator, "POST", "/api/v1/route-templates", map[string]any{
+	template := s.Want(operator, "POST", "/api/v1/route-templates", map[string]any{
 		"name": "promotion-template", "provider_selector": "provider:" + fixture.ids["provider_id"], "model_filter": "*",
 		"slug_pattern": "templated-{model}", "overall_timeout_ms": 5000, "max_attempts": 1, "project_id": fixture.project,
 	}, harness.Idempotent(), http.StatusCreated)
@@ -197,7 +203,7 @@ func (s *service) seedPromotion(owner *harness.Caller, fixture canaryFixture) *h
 	group("alpha", fixture.project)
 	mfa := s.Want(operator, "GET", "/api/v1/settings/auth.mfa_required", nil, nil, http.StatusOK)
 	s.Want(operator, "PUT", "/api/v1/settings/auth.mfa_required", map[string]any{"value": "true"}, harness.ETag(mfa), http.StatusOK)
-	return operator
+	return operator, template["id"].(string)
 }
 
 func assertSettledPlan(t *testing.T, plan map[string]any) {

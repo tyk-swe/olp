@@ -68,6 +68,9 @@ func DecodeImageResponse(body []byte, stage StageImage) (*ImageResult, *Error) {
 	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
+	if len(encodedWire.Data) == 0 {
+		return nil, ProtocolError("The provider image response contains no images.")
+	}
 	extra := diffFields(doc, "created", "data", "usage")
 	result := &ImageResult{CreatedAt: encodedWire.Created, Extra: extra}
 	if data, ok := doc["data"].([]any); ok {
@@ -524,7 +527,7 @@ func TranscriptionFormatIsText(format string) bool {
 
 func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	var encodedWire struct {
-		Text     string   `json:"text"`
+		Text     *string  `json:"text"`
 		Language *string  `json:"language"`
 		Duration *float64 `json:"duration"`
 		Segments []struct {
@@ -553,6 +556,9 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	if err := decoder.Decode(&encodedWire); err != nil {
 		return nil, ProtocolError("The provider transcription is not valid JSON.")
 	}
+	if encodedWire.Text == nil {
+		return nil, ProtocolError("The provider transcription is missing text.")
+	}
 	for _, segment := range encodedWire.Segments {
 		if len(segment.ID) == 0 || string(segment.ID) == "null" {
 			continue
@@ -567,7 +573,7 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 		}
 	}
 	result := &TranscriptionResult{
-		Text: encodedWire.Text, Language: encodedWire.Language, DurationSeconds: encodedWire.Duration,
+		Text: *encodedWire.Text, Language: encodedWire.Language, DurationSeconds: encodedWire.Duration,
 		Extra: diffFields(doc, "text", "language", "duration", "segments"),
 	}
 	if encodedWire.Usage != nil && (encodedWire.Usage.Type == "" || encodedWire.Usage.Type == "tokens") {

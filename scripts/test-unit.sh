@@ -5,7 +5,7 @@ source scripts/lib/test.sh
 
 console_tests() {
   pnpm --dir console test --project unit --project svelte &&
-    node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
+    node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs scripts/dev.test.mjs
 }
 
 case ${1:-} in

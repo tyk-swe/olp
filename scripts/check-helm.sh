@@ -1,6 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+awk '
+  /^helm (install|upgrade)[[:space:]]/ {
+    command = $0
+    while (command ~ /\\$/ && getline > 0) {
+      sub(/\\$/, "", command)
+      command = command " " $0
+    }
+    if (command ~ /^helm install[[:space:]]/) {
+      install = 1
+      if (command ~ /[[:space:]]--(wait(-for-jobs)?|atomic|rollback-on-failure)([[:space:]=]|$)/) {
+        print "First install must return the setup notes without waiting for workloads" > "/dev/stderr"
+        failed = 1
+      }
+    } else {
+      upgrade = 1
+      if (command ~ /[[:space:]](--install|-i)([[:space:]=]|$)/ ||
+          command !~ /[[:space:]]--wait(=(true|watcher|legacy))?([[:space:]]|$)/) {
+        print "Use a separate upgrade command with --wait and without --install" > "/dev/stderr"
+        failed = 1
+      }
+    }
+  }
+  END {
+    if (!install || !upgrade) {
+      print "Document both first install and upgrade commands" > "/dev/stderr"
+      failed = 1
+    }
+    exit failed
+  }' docs/operate/deployment.md
 version=1.27.0
 bash scripts/check-helm-egress.sh
 helm lint deploy/helm

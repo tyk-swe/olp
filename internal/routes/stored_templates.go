@@ -9,9 +9,9 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-type TemplateOwner struct {
-	ID        string
-	ProjectID *string
+type StoredTemplate struct {
+	TemplateInput
+	ID string
 }
 
 func ReadTemplateInputs(ctx context.Context, q database.Queryer) ([]TemplateInput, error) {
@@ -28,11 +28,13 @@ func ReadTemplateInputs(ctx context.Context, q database.Queryer) ([]TemplateInpu
 	}), nil
 }
 
-func LockTemplateNamed(ctx context.Context, tx pgx.Tx, name string) (TemplateOwner, bool, error) {
-	var owner TemplateOwner
-	err := tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.route_templates WHERE name=$1 FOR UPDATE", name).Scan(&owner.ID, &owner.ProjectID)
+func LockTemplateNamed(ctx context.Context, tx pgx.Tx, name string) (StoredTemplate, bool, error) {
+	stored, err := scanTemplate(tx.QueryRow(ctx, "SELECT "+templateColumns+" FROM olp.route_templates WHERE name=$1 FOR UPDATE", name))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return TemplateOwner{}, false, nil
+		return StoredTemplate{}, false, nil
 	}
-	return owner, err == nil, err
+	if err != nil {
+		return StoredTemplate{}, false, err
+	}
+	return StoredTemplate{TemplateInput: stored.TemplateInput, ID: stored.ID}, true, nil
 }

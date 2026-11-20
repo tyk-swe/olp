@@ -141,7 +141,7 @@ type contentBlock struct {
 
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	c := &wire.Completion{}
-	started, finished, done := false, false, false
+	started, sawMessageDelta, done := false, false, false
 	blocks := map[int64]*contentBlock{}
 	next := int64(0)
 	usage := Object{}
@@ -196,7 +196,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 			f["message"] = raw(m)
 		case "content_block_start":
 			index, ok := count(f["index"])
-			if !started || finished || !ok || index != next {
+			if !started || sawMessageDelta || !ok || index != next {
 				return protocolError("invalid content block start sequence")
 			}
 			if len(blocks) >= max(1, limit/32) {
@@ -231,7 +231,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 		case "content_block_delta":
 			index, ok := count(f["index"])
 			block := blocks[index]
-			if !started || finished || !ok || block == nil {
+			if !started || sawMessageDelta || !ok || block == nil {
 				return protocolError("delta outside an active content block")
 			}
 			delta, e := object(f["delta"])
@@ -264,7 +264,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 		case "content_block_stop":
 			index, ok := count(f["index"])
 			block := blocks[index]
-			if !ok || block == nil || finished {
+			if !ok || block == nil || sawMessageDelta {
 				return protocolError("stop outside an active content block")
 			}
 			if block.kind == "tool_use" && block.args.Len() != 0 {
@@ -275,31 +275,37 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 			retained -= block.args.Len()
 			delete(blocks, index)
 		case "message_delta":
-			if !started || finished || len(blocks) > 0 {
+			if !started || len(blocks) > 0 {
 				return protocolError("message delta before blocks finish")
 			}
 			delta, e := object(f["delta"])
 			if e != nil {
 				return protocolError("invalid message delta")
 			}
-			reason := str(delta["stop_reason"])
-			if reason == "" {
-				return protocolError("missing stop reason")
+			if reason := str(delta["stop_reason"]); reason != "" {
+				c.FinishReason = anthropicFinish(reason)
+			} else if present(delta["stop_reason"]) {
+				return protocolError("invalid stop reason")
 			}
-			c.FinishReason = anthropicFinish(reason)
-			finished = true
-			if u, e := optionalObject(f["usage"]); e != nil {
+			u, e := optionalObject(f["usage"])
+			if e != nil {
 				return e
-			} else {
+			}
+			if !sawMessageDelta {
 				delete(usage, "output_tokens")
-				maps.Copy(usage, u)
+			}
+			sawMessageDelta = true
+			for _, key := range [...]string{"input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "cache_creation", "server_tool_use"} {
+				if value, exists := u[key]; exists {
+					usage[key] = value
+				}
 			}
 			c.Usage, e = nativeUsage(usage, "anthropic")
 			if e != nil {
 				return e
 			}
 		case "message_stop":
-			if !finished || len(blocks) > 0 {
+			if c.FinishReason == "" || len(blocks) > 0 {
 				return protocolError("message stopped before completion")
 			}
 			done = true
