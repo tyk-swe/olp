@@ -23,6 +23,8 @@ export type CreateRouteDraftInput = Schemas['CreateRouteDraftRequest'];
 export type ReplaceRouteDraftInput = Schemas['ReplaceRouteDraftRequest'];
 export type RouteSimulation = Schemas['RouteSimulationResponse'];
 export type RouteSimulationInput = Schemas['SimulateRouteRequest'];
+export type RouteFixtureReport = Schemas['RouteFixtureReport'];
+export type RouteFixturePlan = Schemas['RouteFixturePlan'];
 export type RouteRevision = Schemas['RouteRevisionResponse'];
 export type RouteRevisionDiff = Schemas['RouteRevisionDiffResponse'];
 export type RouteActivation = Schemas['RouteActivationResponse'];
@@ -115,6 +117,22 @@ export async function simulateRoute(
     }
   );
   return unwrap(response);
+}
+
+export async function checkRouteFixtures(
+  id: string,
+  file: File
+): Promise<RouteFixtureReport> {
+  if (file.size > 256 * 1024)
+    throw new Error('Use a JSON file of at most 256 KiB.');
+  const serialized = await file.text();
+  return unwrap(
+    await apiClient.POST('/api/v1/route-drafts/{draft_id}/check-fixtures', {
+      params: { path: { draft_id: id } },
+      body: { synthetic: true, fixtures: [] },
+      bodySerializer: () => serialized
+    })
+  );
 }
 
 export type RoutingDecision = Schemas['RoutingDecision'];

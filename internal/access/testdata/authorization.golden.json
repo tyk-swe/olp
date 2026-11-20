@@ -357,6 +357,7 @@
     "POST /api/v1/retrieval-bindings": "YYYY----YYYY",
     "POST /api/v1/route-drafts": "YYYY----YYYY",
     "POST /api/v1/route-drafts/{draft_id}/activate": "YYYY----YYYY",
+    "POST /api/v1/route-drafts/{draft_id}/check-fixtures": "YYYYYYYYYYYY",
     "POST /api/v1/route-drafts/{draft_id}/simulate": "YYYYYYYYYYYY",
     "POST /api/v1/route-drafts/{draft_id}/validate": "YYYY----YYYY",
     "POST /api/v1/route-templates": "YYYY----YYYY",

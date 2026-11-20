@@ -134,7 +134,6 @@
     "internal/routes/inspect.go inspectionAccept",
     "internal/routes/inspect_structure.go inspectStructure",
     "internal/routes/server.go ValidateAndNormalizeDraftInput",
-    "internal/routes/simulate.go Server.simulateDraft",
     "internal/routing/capabilities.go EffectiveCapabilities",
     "internal/routing/plan.go evaluateCandidates",
     "internal/scim/patch.go Patch",

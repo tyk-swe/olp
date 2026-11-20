@@ -6436,6 +6436,60 @@ func (e RouteFidelityMode) Valid() bool {
 	}
 }
 
+// Defines values for RouteFixtureFileSynthetic.
+const (
+	True RouteFixtureFileSynthetic = true
+)
+
+// Valid indicates whether the value is a known member of the RouteFixtureFileSynthetic enum.
+func (e RouteFixtureFileSynthetic) Valid() bool {
+	switch e {
+	case True:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteFixtureReportLiveSupply.
+const (
+	NotSimulated RouteFixtureReportLiveSupply = "not_simulated"
+)
+
+// Valid indicates whether the value is a known member of the RouteFixtureReportLiveSupply enum.
+func (e RouteFixtureReportLiveSupply) Valid() bool {
+	switch e {
+	case NotSimulated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteFixtureResultChanges.
+const (
+	RouteFixtureResultChangesEligibility RouteFixtureResultChanges = "eligibility"
+	RouteFixtureResultChangesReason      RouteFixtureResultChanges = "reason"
+	RouteFixtureResultChangesSelector    RouteFixtureResultChanges = "selector"
+	RouteFixtureResultChangesWinner      RouteFixtureResultChanges = "winner"
+)
+
+// Valid indicates whether the value is a known member of the RouteFixtureResultChanges enum.
+func (e RouteFixtureResultChanges) Valid() bool {
+	switch e {
+	case RouteFixtureResultChangesEligibility:
+		return true
+	case RouteFixtureResultChangesReason:
+		return true
+	case RouteFixtureResultChangesSelector:
+		return true
+	case RouteFixtureResultChangesWinner:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteLegVia.
 const (
 	RouteLegViaFallback RouteLegVia = "fallback"
@@ -15721,6 +15775,111 @@ type RouteFidelity struct {
 // RouteFidelityMode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
 type RouteFidelityMode string
 
+// RouteFixture defines model for RouteFixture.
+type RouteFixture struct {
+	// ClassifierLabels Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run.
+	ClassifierLabels *map[string]string `json:"classifier_labels,omitempty"`
+	Dialect          *string            `json:"dialect,omitempty"`
+
+	// ExpectEligible Assert whether the draft can plan a serving attempt.
+	ExpectEligible *bool  `json:"expect_eligible,omitempty"`
+	Mode           string `json:"mode"`
+	Name           string `json:"name"`
+	Operation      string `json:"operation"`
+
+	// Request Synthetic native request for this operation, surface and mode.
+	Request map[string]interface{} `json:"request"`
+	Seed    string                 `json:"seed"`
+	Surface string                 `json:"surface"`
+}
+
+// RouteFixtureDecision A redacted target decision. Multiple rows may describe a target if its credential slots differed.
+type RouteFixtureDecision struct {
+	ContextLength nullable.Nullable[int64] `json:"context_length"`
+
+	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
+	ContextWindow         *RouteContextWindowPreview `json:"context_window,omitempty"`
+	Eligible              bool                       `json:"eligible"`
+	EstimateProvenance    nullable.Nullable[string]  `json:"estimate_provenance"`
+	EstimatedInputTokens  nullable.Nullable[int64]   `json:"estimated_input_tokens"`
+	Model                 string                     `json:"model"`
+	ProviderId            openapi_types.UUID         `json:"provider_id"`
+	ProviderName          string                     `json:"provider_name"`
+	Reason                nullable.Nullable[string]  `json:"reason"`
+	RequestedOutputTokens nullable.Nullable[int64]   `json:"requested_output_tokens"`
+	Route                 string                     `json:"route"`
+	Shadow                bool                       `json:"shadow"`
+}
+
+// RouteFixtureFile A local synthetic fixture set. The complete JSON file must not exceed 256 KiB.
+type RouteFixtureFile struct {
+	Fixtures []RouteFixture `json:"fixtures"`
+
+	// Synthetic Attest that every request, fixture name and classifier label is synthetic.
+	Synthetic RouteFixtureFileSynthetic `json:"synthetic"`
+}
+
+// RouteFixtureFileSynthetic Attest that every request, fixture name and classifier label is synthetic.
+type RouteFixtureFileSynthetic bool
+
+// RouteFixturePlan defines model for RouteFixturePlan.
+type RouteFixturePlan struct {
+	Fallbacks []FallbackStep                        `json:"fallbacks"`
+	Reason    nullable.Nullable[string]             `json:"reason"`
+	Selectors []RouteFixtureSelector                `json:"selectors"`
+	Targets   []RouteFixtureDecision                `json:"targets"`
+	Winner    nullable.Nullable[RouteFixtureTarget] `json:"winner"`
+}
+
+// RouteFixtureReport defines model for RouteFixtureReport.
+type RouteFixtureReport struct {
+	DraftEtag string `json:"draft_etag"`
+
+	// LiveSupply Live capacity, spend and circuit state were not read. Configured caps without a spend reading remain unknown.
+	LiveSupply RouteFixtureReportLiveSupply `json:"live_supply"`
+
+	// Passed True when all specified draft assertions pass, even if an unasserted fixture changed.
+	Passed              bool                 `json:"passed"`
+	PlanningTime        time.Time            `json:"planning_time"`
+	PublishedRevision   int                  `json:"published_revision"`
+	PublishedRevisionId openapi_types.UUID   `json:"published_revision_id"`
+	Results             []RouteFixtureResult `json:"results"`
+}
+
+// RouteFixtureReportLiveSupply Live capacity, spend and circuit state were not read. Configured caps without a spend reading remain unknown.
+type RouteFixtureReportLiveSupply string
+
+// RouteFixtureResult defines model for RouteFixtureResult.
+type RouteFixtureResult struct {
+	Changes        []RouteFixtureResultChanges `json:"changes"`
+	Draft          RouteFixturePlan            `json:"draft"`
+	ExpectEligible nullable.Nullable[bool]     `json:"expect_eligible"`
+	Name           string                      `json:"name"`
+	Passed         bool                        `json:"passed"`
+	Published      RouteFixturePlan            `json:"published"`
+}
+
+// RouteFixtureResultChanges defines model for RouteFixtureResult.Changes.
+type RouteFixtureResultChanges string
+
+// RouteFixtureSelector defines model for RouteFixtureSelector.
+type RouteFixtureSelector struct {
+	Id      string `json:"id"`
+	Matched bool   `json:"matched"`
+
+	// Outcome Includes classifier_not_simulated for a missing verdict and plugin_not_simulated for a plugin predicate.
+	Outcome string `json:"outcome"`
+	Route   string `json:"route"`
+}
+
+// RouteFixtureTarget defines model for RouteFixtureTarget.
+type RouteFixtureTarget struct {
+	Model        string             `json:"model"`
+	ProviderId   openapi_types.UUID `json:"provider_id"`
+	ProviderName string             `json:"provider_name"`
+	Route        string             `json:"route"`
+}
+
 // RouteGroups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
 type RouteGroups map[string][]string
 
@@ -20129,6 +20288,9 @@ type CreateRouteDraftJSONRequestBody = CreateRouteDraftRequest
 
 // ReplaceRouteDraftJSONRequestBody defines body for ReplaceRouteDraft for application/json ContentType.
 type ReplaceRouteDraftJSONRequestBody = ReplaceRouteDraftRequest
+
+// CheckRouteDraftFixturesJSONRequestBody defines body for CheckRouteDraftFixtures for application/json ContentType.
+type CheckRouteDraftFixturesJSONRequestBody = RouteFixtureFile
 
 // SimulateRouteDraftJSONRequestBody defines body for SimulateRouteDraft for application/json ContentType.
 type SimulateRouteDraftJSONRequestBody = SimulateRouteRequest

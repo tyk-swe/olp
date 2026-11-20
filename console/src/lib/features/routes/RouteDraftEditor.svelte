@@ -18,6 +18,7 @@
   import { RouteCacheEditor } from '#lib/features/caching/index.js';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
+  import RouteFixtureChecks from './RouteFixtureChecks.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -223,6 +224,15 @@
     <RoutePublishPanel {editor} />
   </form>
   <RouteSimulation {editor} />
+  {#if editor.draft.data}
+    {#key `${editor.draft.data.id}:${editor.draft.data.etag}`}
+      <RouteFixtureChecks
+        draftId={editor.draft.data.id}
+        draftEtag={editor.draft.data.etag}
+        disabled={editor.publicationBlocked}
+      />
+    {/key}
+  {/if}
 {/if}
 
 {#if editor.draft.data}<RoutingPolicyEditor

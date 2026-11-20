@@ -43,6 +43,7 @@
   {#if !editor.isNew && editor.draft.data}
     {@const draft = editor.draft.data}
     <hr />
+    <p><a href="#route-fixtures">Check saved request fixtures</a></p>
     <label for="simulation-operation">Dry-run operation</label>
 
     <select id="simulation-operation" bind:value={editor.simulationOperation}>
