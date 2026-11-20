@@ -115,7 +115,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		}
 		c = &wire.Completion{Body: raw(out), FinishReason: "stop", Usage: &wire.Usage{InputTokens: n, TotalTokens: n}}
 	case wire.Embeddings:
-		c, err = decodeEmbeddings(body, route, encoding)
+		c, err = decodeEmbeddings(body, route, encoding, request)
 	case wire.GeminiEmbeddings:
 		c, err = decodeGeminiEmbedding(body, route, encoding)
 	case wire.GeminiEmbeddingsBatch:
@@ -923,11 +923,11 @@ func validateEmbeddingCount(request *wire.Request, actual int) error {
 	expected := 0
 	switch request.Family {
 	case wire.Embeddings:
-		inputs, err := textInputs(request.Field("input"))
-		if err != nil {
-			return protocolError("embedding count does not match input count")
+		count, ok := embeddingInputCount(request.Field("input"))
+		if !ok {
+			return nil
 		}
-		expected = len(inputs)
+		expected = count
 	case wire.GeminiEmbeddingsBatch:
 		if len(request.Field("requests")) == 0 {
 			return nil
@@ -1102,7 +1102,7 @@ func decodeBedrockEmbedding(body []byte, route, encoding string) (*wire.Completi
 	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, usage)
 }
 
-func decodeEmbeddings(body []byte, route, encoding string) (*wire.Completion, error) {
+func decodeEmbeddings(body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -1110,6 +1110,9 @@ func decodeEmbeddings(body []byte, route, encoding string) (*wire.Completion, er
 	data := arr(f["data"])
 	if len(data) == 0 {
 		return nil, protocolError("missing embeddings")
+	}
+	if err := validateEmbeddingCount(request, len(data)); err != nil {
+		return nil, err
 	}
 	data, err := embeddingItems(data, encoding)
 	if err != nil {
