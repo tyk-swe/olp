@@ -250,6 +250,7 @@ func TestExactCacheUsesEffectiveChatChoiceCount(t *testing.T) {
 				if got := response.Header.Get("X-OLP-Cache"); response.StatusCode != http.StatusOK || got != want || err != nil || len(reply.Choices) != tc.choices {
 					t.Errorf("request %d: status=%d cache=%q choices=%d decode error=%v, want status=200 cache=%q choices=%d", i+1, response.StatusCode, got, len(reply.Choices), err, want, tc.choices)
 				}
+				h.sink.await(t, i+1)
 			}
 			if got := h.mock.count("a"); got != tc.calls {
 				t.Errorf("provider calls = %d, want %d", got, tc.calls)
