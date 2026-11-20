@@ -27,7 +27,7 @@ var groups = map[string]string{"keys": "api-keys", "config": "configuration"}
 
 // Handles identifies client command groups without loading process configuration.
 func Handles(command string) bool {
-	if command == "client-env" || command == "api" {
+	if command == "client-env" || command == "code-setup" || command == "api" {
 		return true
 	}
 	if _, ok := groups[command]; ok {
@@ -43,6 +43,9 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 	}
 	if args[0] == "client-env" {
 		return runner.clientEnv(args[1:])
+	}
+	if args[0] == "code-setup" {
+		return runner.codeSetup(ctx, args[1:])
 	}
 	if len(args) < 2 || args[1] == "help" || args[1] == "--help" {
 		return runner.help(args[0])

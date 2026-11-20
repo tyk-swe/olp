@@ -166,7 +166,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 				}
 			}
 		}),
-		RouteSlug: route.Slug, BaseURL: baseURL, NativeModels: native, Adapters: append([]codemode.Adapter{}, adapters...),
+		RouteSlug: route.Slug, RevisionID: route.RevisionID, Revision: route.Revision, BaseURL: baseURL, NativeModels: native, Adapters: append([]codemode.Adapter{}, adapters...),
 		Client: client, Platform: platform, File: file, Instructions: instructions, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
 		ClientVersion: version, Format: format, Configuration: configuration,
 		QualificationGaps: append(qualificationGaps(adapters, client), "Generated configuration is not evidence of native platform startup or live subscription qualification."),

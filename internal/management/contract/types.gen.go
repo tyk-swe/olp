@@ -9202,7 +9202,13 @@ type CodeClientConfiguration struct {
 	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
 	Platform          CodeClientPlatform `json:"platform"`
 	QualificationGaps []string           `json:"qualification_gaps"`
-	RouteSlug         string             `json:"route_slug"`
+
+	// Revision The published Code Mode route revision number.
+	Revision int `json:"revision"`
+
+	// RevisionId The ID of the published route revision used to generate the configuration.
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	RouteSlug  string             `json:"route_slug"`
 
 	// SmallModel The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
