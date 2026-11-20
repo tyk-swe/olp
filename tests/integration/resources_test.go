@@ -1228,6 +1228,59 @@ func TestAStoredResponseKeepsItsCitedFileWhenTheProviderReusesTheFileID(t *testi
 	}
 }
 
+func TestAFineTuningJobKeepsItsTrainingFileWhenTheProviderReusesTheFileID(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const (
+		slug  = "tuned-files"
+		model = "tuning-model"
+	)
+	upstream := &retainedUpstream{replies: func(request string, _ int) map[string]string {
+		replies := openAIReplies(request, 1)
+		replies["GET /fine_tuning/jobs/ftjob-reused"] = `{"id":"ftjob-reused","object":"fine_tuning.job","created_at":1,"status":"running","model":"` + model + `","training_file":"file-` + providerOwned + `"}`
+		return replies
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"batch", "fine_tuning"}, upstream: upstream,
+	})
+	keyID := g.key(t, "owner")
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" +
+		`{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}` + "\n\r\n--b--\r\n"
+
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	seeded := g.fixture.resource("fine_tuning_job", keyID, "ftjob-reused")
+	seeded.RouteSlug, seeded.ProviderRevisionID, seeded.RouteRevisionID = slug, g.providerRevisionID, g.routeRevisionID
+	seeded.SlotID, seeded.TargetID, seeded.CredentialID = g.slotID, g.targetID, &g.credentialID
+	seeded.State, seeded.ContractVersion = "running", new(retainedapi.Revision)
+	seeded.Metadata = json.RawMessage(`{"upstream_model":"` + model + `"}`)
+	job, err := g.store.Put(t.Context(), seeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		t.Helper()
+		_, raw := g.send(t, "GET", "/v1/fine_tuning/jobs/"+job.ID, map[string]string{"Authorization": "Bearer owner"}, "", 200)
+		var decoded struct {
+			TrainingFile string `json:"training_file"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("job read returned %s: %v", raw, err)
+		}
+		return decoded.TrainingFile
+	}
+	if got := read(); file.ID == "" || got != file.ID {
+		t.Fatalf("the job names training file %q, want the uploaded file %q", got, file.ID)
+	}
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
+	if got := read(); got != file.ID {
+		t.Fatalf("the job now names training file %q, want the file it was created with %q", got, file.ID)
+	}
+}
+
 func TestStrictBatchKeepsItsOriginalInputWhenTheProviderReusesAFileID(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

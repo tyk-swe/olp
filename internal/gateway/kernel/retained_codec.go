@@ -683,13 +683,13 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			}
 			return parent.ID, nil
 		}
-		bound, findErr := s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		bound, findErr := s.Deps.Resources.GetByUpstreamAsOf(ctx, identity, resource.CreatedAt)
 		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
 			// An echoed file reference may name the strict durable
 			// kind under the same serving identity.
 			strictIdentity := identity
 			strictIdentity.Kind = resources.KindStrictFile
-			bound, findErr = s.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
+			bound, findErr = s.Deps.Resources.GetByUpstreamAsOf(ctx, strictIdentity, resource.CreatedAt)
 		}
 		resultFile := kind == resources.KindFile && resultFiles[id]
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {

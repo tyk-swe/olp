@@ -260,7 +260,7 @@ func batchUpstream(batchID uuid.UUID) upstreamChoice {
 }
 
 func upstreamAsOf(at time.Time) upstreamChoice {
-	return upstreamChoice{` ORDER BY (CASE WHEN created_at<=$13::timestamptz THEN created_at END) DESC NULLS LAST,
+	return upstreamChoice{` ORDER BY (created_at<=$13::timestamptz AND (state<>'deleted' OR updated_at>$13::timestamptz)) DESC,
  (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`, []any{at}}
 }
 
