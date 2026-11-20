@@ -854,8 +854,12 @@ func TestCodeAccountDrainAcrossReplicas(t *testing.T) {
 	exec(`UPDATE olp.code_accounts SET draining=false,max_concurrency=NULL WHERE id=$1`, home.first)
 	admit(remote.store, fresh, home.first)
 	exec(`UPDATE olp.code_accounts SET draining=true WHERE id=$1`, home.first)
-	exec(`UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1`, initial.Account.CredentialID)
 	pinned.Route = revision
+	exec(`UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, home.first)
+	_, err = remote.store.Admit(t.Context(), pinned)
+	refused(err, "code_account_unavailable", 503)
+	exec(`UPDATE olp.code_accounts SET enabled=true WHERE id=$1`, home.first)
+	exec(`UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1`, initial.Account.CredentialID)
 	_, err = remote.store.Admit(t.Context(), pinned)
 	refused(err, "code_account_unavailable", 503)
 	exec(`UPDATE olp.code_accounts SET draining=false WHERE id=$1`, home.first)
@@ -924,7 +928,8 @@ func TestCodeRecoverySkipsDrainingAccounts(t *testing.T) {
 	exec(`UPDATE olp.code_accounts SET draining=true,health='unavailable',unavailable_until=now() WHERE id=$1`, j.first)
 	exec(`UPDATE olp.provider_grants SET generation=2 WHERE credential_id=$1`, first.Account.CredentialID)
 	exec(`UPDATE olp.code_accounts SET enabled=true,draining=true WHERE id=$1`, j.second)
-	request.Recovery = &codesessions.Recovery{From: first.Attempt.ID, Envelope: "codex_invalid_token", Number: 1}
+	alternate := &codesessions.Recovery{From: first.Attempt.ID, Envelope: "codex_invalid_token", Number: 1}
+	request.Recovery = alternate
 	_, err = j.store.Admit(t.Context(), request)
 	if refusal, ok := errors.AsType[*codemode.Refusal](err); !ok || refusal.Code != "code_account_unavailable" {
 		t.Fatalf("recovery with only draining accounts = %v, want code_account_unavailable", err)
@@ -934,9 +939,14 @@ func TestCodeRecoverySkipsDrainingAccounts(t *testing.T) {
 		From: first.Attempt.ID, Envelope: "codex_invalid_token", Number: 1, AccountID: j.first,
 		CredentialID: first.Account.CredentialID, GrantGeneration: 1, RejectedUntil: time.Now().Add(time.Minute),
 	}
+	_, err = j.store.Admit(t.Context(), request)
+	if refusal, ok := errors.AsType[*codemode.Refusal](err); !ok || refusal.Code != "code_account_unavailable" {
+		t.Fatalf("same-account recovery on a draining account = %v, want code_account_unavailable", err)
+	}
+	request.Recovery = alternate
 	recovered, err := j.store.Admit(t.Context(), request)
 	if err != nil || recovered.Account.ID != j.second {
-		t.Fatalf("recovery with a refreshed but draining grant = %s, %v, want sibling %s", recovered.Account.ID, err, j.second)
+		t.Fatalf("recovery with a draining source account = %s, %v, want sibling %s", recovered.Account.ID, err, j.second)
 	}
 }
 

@@ -63,10 +63,7 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in Admission) (*codeSele
 		if in.Recovery.AccountID != account || in.Recovery.GrantGeneration < 1 {
 			return nil, codemode.Refuse(409, "code_recovery_unsafe")
 		}
-		resumed, err := recoverCodeGrant(ctx, tx, in.Recovery, account, principal)
-		if resumed || err != nil {
-			return nil, err
-		}
+		return nil, recoverCodeGrant(ctx, tx, in.Recovery, account, principal)
 	}
 	pins, pinsErr := codePins(ctx, tx, root)
 	if pinsErr != nil {
@@ -93,24 +90,24 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in Admission) (*codeSele
 	return &selection, nil
 }
 
-func recoverCodeGrant(ctx context.Context, tx pgx.Tx, recovery *Recovery, account, principal string) (bool, error) {
+func recoverCodeGrant(ctx context.Context, tx pgx.Tx, recovery *Recovery, account, principal string) error {
 	var draining bool
 	if err := tx.QueryRow(ctx, `SELECT a.draining FROM olp.code_accounts a JOIN olp.provider_grants g ON g.credential_id=a.credential_id
 		WHERE a.id=$1 AND a.principal=$2 AND a.credential_id=$3 AND g.generation>$4 AND g.lapsed_at IS NULL`,
 		account, principal, recovery.CredentialID, recovery.GrantGeneration).Scan(&draining); err != nil {
-		return false, codemode.Refuse(409, "code_recovery_unsafe")
+		return codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	if draining {
-		return false, nil
+		return codemode.Refuse(503, "code_account_unavailable")
 	}
 	updated, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET health='healthy',unavailable_until=NULL WHERE id=$1 AND health='unavailable' AND unavailable_until<=$2`, account, recovery.RejectedUntil)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if updated.RowsAffected() != 1 {
-		return false, codemode.Refuse(503, "code_account_unavailable")
+		return codemode.Refuse(503, "code_account_unavailable")
 	}
-	return true, nil
+	return nil
 }
 
 func (s *Store) ConfirmNonexecution(ctx context.Context, attempt string, status int) error {
