@@ -24,15 +24,30 @@ type unaryRun struct {
 	target   routing.Attempt
 	provider *routing.Provider
 	slot     routing.Slot
-	fact     events.AttemptFact
 	state    *attemptState
 	traced   context.Context
 	trace    *telemetry.AttemptTrace
-	plan     *operationplan.Plan
+}
 
+type unarySent struct {
+	fact     events.AttemptFact
+	plan     *operationplan.Plan
+	raw      []byte
 	cancel   context.CancelFunc
 	timer    *time.Timer
 	parallel *parallelGuardrail
+}
+
+func (sent unarySent) release() {
+	if sent.parallel != nil {
+		sent.parallel.cancel()
+	}
+	if sent.timer != nil {
+		sent.timer.Stop()
+	}
+	if sent.cancel != nil {
+		sent.cancel()
+	}
 }
 
 func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
@@ -40,118 +55,103 @@ func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, p
 		x.guard.ctx = ctx
 	}
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true, Declared: provider.Connector().Classification()}}
-	run := &unaryRun{server: s, ctx: ctx, x: x, target: a, provider: provider, slot: slot, fact: fact, state: state}
-	run.traced, run.trace = x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
-	defer run.close()
-	result, end := run.exchange()
+	traced, trace := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
+	run := unaryRun{server: s, ctx: ctx, x: x, target: a, provider: provider, slot: slot, state: state, traced: traced, trace: trace}
+	sent, end := run.send(fact)
+	defer sent.release()
 	if end != nil {
-		return run.fail(end.class, end.failure)
+		return run.fail(sent.fact, sent.parallel, end)
 	}
-	return run.succeed(result)
+	result, measured, end := run.decode(sent)
+	if end != nil {
+		return run.fail(measured, sent.parallel, end)
+	}
+	if end := run.inspect(sent, result); end != nil {
+		return run.fail(measured, sent.parallel, end)
+	}
+	return run.succeed(measured, result)
 }
 
-func (run *unaryRun) exchange() (operationplan.Result, *attemptEnd) {
-	raw, end := run.send()
-	if end != nil {
-		return operationplan.Result{}, end
-	}
-	result, end := run.decode(raw)
-	if end != nil {
-		return operationplan.Result{}, end
-	}
-	return result, run.inspect(result)
-}
-
-func (run *unaryRun) close() {
-	if run.parallel != nil {
-		run.parallel.cancel()
-	}
-	if run.timer != nil {
-		run.timer.Stop()
-	}
-	if run.cancel != nil {
-		run.cancel()
-	}
-}
-
-func (run *unaryRun) send() ([]byte, *attemptEnd) {
+func (run unaryRun) send(fact events.AttemptFact) (unarySent, *attemptEnd) {
 	s, x, state := run.server, run.x, run.state
 	plan, err := x.unaryPlan(run.provider, run.target.TargetID, run.target.UpstreamModel)
 	if err != nil {
-		return nil, ended(ClassProtocol, nil)
+		return unarySent{fact: fact}, ended(ClassProtocol, nil)
 	}
-	run.plan = plan
 	submit, err := plan.RequestURL()
 	if err != nil {
-		return nil, ended(ClassProtocol, nil)
+		return unarySent{fact: fact, plan: plan}, ended(ClassProtocol, nil)
 	}
 	bound := s.bindExchange(x, run.provider, run.slot, run.target.UpstreamModel, plan.Config(), state)
 	if err := bound.validateEndpoint(submit); err != nil {
-		return nil, ended(ClassConnect, nil)
+		return unarySent{fact: fact, plan: plan}, ended(ClassConnect, nil)
 	}
 	deadline, _ := run.ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return nil, ended(ClassTimeout, &AttemptFailure{overall: true})
+		return unarySent{fact: fact, plan: plan}, ended(ClassTimeout, &AttemptFailure{overall: true})
 	}
 	sending, cancel := context.WithCancel(run.traced)
-	run.cancel = cancel
-	run.timer = time.AfterFunc(min(run.target.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
+	timer := time.AfterFunc(min(run.target.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
 	client, err := bound.client(sending)
 	if err != nil {
-		return nil, ended(classCredential, nil)
+		return unarySent{fact: fact, plan: plan, cancel: cancel, timer: timer}, ended(classCredential, nil)
 	}
-	run.parallel = s.startParallel(sending, x, cancel)
-	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &run.fact, bodyCap: run.replyLimit(), inject: run.trace.InjectUpstream}
+	parallel := s.startParallel(sending, x, cancel)
+	// The exchange stamps the status and first byte on the fact as they arrive.
+	observed := fact
+	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &observed, bodyCap: run.replyLimit(plan), inject: run.trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
+	sent := unarySent{fact: observed, plan: plan, raw: raw, cancel: cancel, timer: timer, parallel: parallel}
 	if failure != nil {
-		return nil, ended(failure.class, failure.failure)
+		return sent, ended(failure.class, failure.failure)
 	}
-	return raw, nil
+	return sent, nil
 }
 
-func (run *unaryRun) replyLimit() int {
-	limit := run.plan.Receipt().Obligations.MaxBodyBytes
+func (run unaryRun) replyLimit(plan *operationplan.Plan) int {
+	limit := plan.Receipt().Obligations.MaxBodyBytes
 	if run.server.Config.MaxResponseBytes > 0 {
 		return min(limit, int(run.server.Config.MaxResponseBytes))
 	}
 	return limit
 }
 
-func (run *unaryRun) decode(raw []byte) (operationplan.Result, *attemptEnd) {
+func (run unaryRun) decode(sent unarySent) (operationplan.Result, events.AttemptFact, *attemptEnd) {
 	run.state.settled = true
-	result, err := run.plan.Decode(raw)
-	run.fact.Usage = accountingUsage(result.Usage)
+	result, err := sent.plan.Decode(sent.raw)
+	measured := sent.fact
+	measured.Usage = accountingUsage(result.Usage)
 	for _, decision := range result.Decisions {
 		recordDecision(run.x, decision)
 	}
 	if err == nil {
-		return result, nil
+		return result, measured, nil
 	}
 	var incompatible *oif.Incompatibility
 	if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
-		return result, ended(classPolicy, &AttemptFailure{policyCode: incompatible.Code})
+		return result, measured, ended(classPolicy, &AttemptFailure{policyCode: incompatible.Code})
 	}
-	return result, ended(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})
+	return result, measured, ended(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})
 }
 
-func (run *unaryRun) inspect(result operationplan.Result) *attemptEnd {
+func (run unaryRun) inspect(sent unarySent, result operationplan.Result) *attemptEnd {
 	x := run.x
-	if guardErr := run.parallel.join(x, true); guardErr != nil {
+	if guardErr := sent.parallel.join(x, true); guardErr != nil {
 		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 	}
 	if !x.guard.engine.HasPhase(guardrails.Output) {
 		return nil
 	}
-	if guardErr := run.inspectOutput(result); guardErr != nil {
+	if guardErr := run.inspectOutput(sent.plan, result); guardErr != nil {
 		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 	}
 	return nil
 }
 
-func (run *unaryRun) inspectOutput(result operationplan.Result) error {
+func (run unaryRun) inspectOutput(plan *operationplan.Plan, result operationplan.Result) error {
 	x := run.x
-	texts, err := run.plan.GuardrailOutput(result)
+	texts, err := plan.GuardrailOutput(result)
 	if err != nil {
 		unavailable, unavailableErr := x.guard.engine.Unavailable(guardrails.Output)
 		x.guard.record(unavailable.Decisions)
@@ -160,56 +160,63 @@ func (run *unaryRun) inspectOutput(result operationplan.Result) error {
 	return x.inspectOperationOutput(texts)
 }
 
-func (run *unaryRun) finishTrace() {
+func (run unaryRun) finishTrace(fact events.AttemptFact) {
 	if run.trace == nil {
 		return
 	}
-	if u := run.fact.Usage; u != nil {
+	if u := fact.Usage; u != nil {
 		run.trace.RecordUsage(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}
-	run.trace.Finish(run.fact.Class, run.fact.Status)
+	run.trace.Finish(fact.Class, fact.Status)
 }
 
-func (run *unaryRun) fail(reported string, failure *AttemptFailure) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
-	state := run.state
-	class, f := reported, failure
-	if f == nil {
-		f = &AttemptFailure{}
+func (run unaryRun) fail(fact events.AttemptFact, parallel *parallelGuardrail, end *attemptEnd) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	f := run.failure(parallel, end)
+	failed := fact
+	failed.Class = f.class
+	failed.Duration = run.server.Now().Sub(fact.StartedAt)
+	if f.retryAfter > 0 {
+		wait := f.retryAfter
+		failed.RetryAfter = &wait
 	}
-	if err := run.parallel.join(run.x, true); err != nil {
-		class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
+	if failed.Interaction != nil {
+		failed.Interaction.UpstreamState = f.Acceptance
+	}
+	failed.RecordEvidence(f.billingUncertain())
+	run.finishTrace(failed)
+	return failed, operationplan.Result{}, f
+}
+
+func (run unaryRun) failure(parallel *parallelGuardrail, end *attemptEnd) *AttemptFailure {
+	state := run.state
+	f := AttemptFailure{class: end.class}
+	if end.failure != nil {
+		f = *end.failure
+		f.class = end.class
+	}
+	if err := parallel.join(run.x, true); err != nil {
+		f.class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
 	}
 	f.dispatched = state.dispatched.Load()
 	f.Acceptance = state.evidence().Acceptance()
 	f.accepted = state.accepted
 	f.noRetry = f.noRetry || f.dispatched
-	f.class = class
-	run.fact.Class = class
-	run.fact.Duration = run.server.Now().Sub(run.fact.StartedAt)
-	if f.retryAfter > 0 {
-		wait := f.retryAfter
-		run.fact.RetryAfter = &wait
-	}
-	if run.fact.Interaction != nil {
-		run.fact.Interaction.UpstreamState = f.Acceptance
-	}
-	run.fact.RecordEvidence(f.billingUncertain())
-	run.finishTrace()
-	return run.fact, operationplan.Result{}, f
+	return &f
 }
 
-func (run *unaryRun) succeed(result operationplan.Result) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
-	run.fact.Class = ClassSuccess
-	run.fact.Duration = run.server.Now().Sub(run.fact.StartedAt)
-	if run.fact.Interaction != nil {
-		run.fact.Interaction.UpstreamState = upstream.Terminal
+func (run unaryRun) succeed(fact events.AttemptFact, result operationplan.Result) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	done := fact
+	done.Class = ClassSuccess
+	done.Duration = run.server.Now().Sub(fact.StartedAt)
+	if done.Interaction != nil {
+		done.Interaction.UpstreamState = upstream.Terminal
 	}
 	// Moderation and search have no usage counters; a validated result
 	// completes their evidence.
 	operation := run.x.operationName()
-	run.fact.RecordEvidence(operation != "moderation" && operation != "search")
-	run.finishTrace()
-	return run.fact, result, nil
+	done.RecordEvidence(operation != "moderation" && operation != "search")
+	run.finishTrace(done)
+	return done, result, nil
 }
 
 // accountingUsage converts operation usage into the usage an accounting fact
