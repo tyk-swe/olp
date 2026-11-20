@@ -224,16 +224,20 @@ func (r *Resource) NativeIdentity() NativeIdentity {
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, false)
+	return s.getByUpstream(ctx, s.pool, identity, false, nil)
 }
 
 // GetByUpstreamIncludingDeleted preserves an identifier mapping during
 // projection. User access still goes through Get, which rejects tombstones.
 func (s *Store) GetByUpstreamIncludingDeleted(ctx context.Context, identity NativeIdentity) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, true)
+	return s.getByUpstream(ctx, s.pool, identity, true, nil)
 }
 
-func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool) (*Resource, error) {
+func (s *Store) GetBatchFileByUpstream(ctx context.Context, identity NativeIdentity, batchID uuid.UUID) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, true, &batchID)
+}
+
+func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool, preferredParent *uuid.UUID) (*Resource, error) {
 	if identity.TargetID == "" {
 		return nil, ErrContract
 	}
@@ -244,8 +248,12 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 		AND (NOT $12::boolean OR parent_id IS NOT DISTINCT FROM $11::uuid)`
 	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
 		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}
-	if includeDeleted {
-		statement += ` ORDER BY (state='deleted') ASC,updated_at DESC LIMIT 1`
+	if preferredParent != nil {
+		statement += ` AND (parent_id=$13 OR (state<>$14 AND (expires_at IS NULL OR expires_at>now())))
+ ORDER BY (parent_id IS NOT DISTINCT FROM $13::uuid) DESC,(state=$14) ASC,updated_at DESC,id DESC LIMIT 1`
+		args = append(args, *preferredParent, StateDeleted)
+	} else if includeDeleted {
+		statement += ` ORDER BY (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`
 	} else {
 		statement += ` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`
 		args = append(args, StateDeleted)

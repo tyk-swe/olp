@@ -999,6 +999,7 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 type retainedObject struct {
 	ID, Status, Model  string
 	InputFileID        string `json:"input_file_id"`
+	OutputFileID       string `json:"output_file_id"`
 	ProcessingStatus   string `json:"processing_status"`
 	VectorStoreID      string `json:"vector_store_id"`
 	PreviousResponseID string `json:"previous_response_id"`
@@ -1053,7 +1054,19 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	const slug, model = "stored-batch", "batch-model"
-	upstream := &retainedUpstream{replies: openAIReplies}
+	const output = "file-" + providerOwned + "-output"
+	upstream := &retainedUpstream{replies: func(request string, nth int) map[string]string {
+		replies := openAIReplies(request, nth)
+		const read = "GET /batches/batch_provider-owned"
+		if request == read && nth > 1 {
+			batch := strings.Replace(replies[read], "in_progress", "completed", 1)
+			replies[read] = strings.TrimSuffix(batch, "}") + `,"output_file_id":"` + output + `"}`
+		}
+		if request == "POST /files" && nth == 3 {
+			replies[request] = strings.Replace(replies[request], "file-"+providerOwned, output, 1)
+		}
+		return replies
+	}}
 	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
 		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
 	})
@@ -1127,6 +1140,50 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 404)
 	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
 		t.Fatalf("owner lists files %v, want only %s", got, replacement.ID)
+	}
+
+	batchPath := "/v1/batches/" + batch.ID
+	finished := g.call(t, "owner", "GET", batchPath, "", "", 200)
+	if finished.OutputFileID == "" {
+		t.Fatal("completed batch returned no output file identifier")
+	}
+	if err := g.store.Tombstone(t.Context(), finished.OutputFileID); err != nil {
+		t.Fatal(err)
+	}
+	g.call(t, "owner", "GET", "/v1/batches", "", "", 200)
+	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("reading batch history recreated its deleted output, listed files %v", got)
+	}
+	newUpload := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if newUpload.ID == "" || newUpload.ID == finished.OutputFileID {
+		t.Fatalf("upload with the batch output's old provider ID returned %q, want a new gateway ID", newUpload.ID)
+	}
+	if got := g.call(t, "owner", "GET", batchPath, "", "", 200); got.OutputFileID != finished.OutputFileID {
+		t.Fatalf("batch output changed to %q, want the original gateway ID %q", got.OutputFileID, finished.OutputFileID)
+	}
+}
+
+func TestStrictBatchKeepsItsOriginalInputWhenTheProviderReusesAFileID(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "strict-batch", "batch-model"
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", profile: "azure-v1-chat", version: "/openai/v1", fidelity: routing.FidelityStrict,
+		operations: []string{"generation", "batch"}, upstream: http.StripPrefix("/openai", &retainedUpstream{replies: openAIReplies}),
+	})
+	g.key(t, "owner")
+	line := `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + model + `","messages":[{"role":"user","content":"hi"}]}}`
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" + line + "\n\r\n--b--\r\n"
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	submission := `{"input_file_id":"` + file.ID + `","endpoint":"/v1/chat/completions","completion_window":"24h"}`
+	batch := g.call(t, "owner", "POST", "/v1/batches", "application/json", submission, 200)
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("replacement ID = %q, want a new gateway ID", replacement.ID)
+	}
+	if got := g.call(t, "owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.InputFileID != file.ID {
+		t.Fatalf("batch input changed to %q, want the original gateway ID %q", got.InputFileID, file.ID)
 	}
 }
 

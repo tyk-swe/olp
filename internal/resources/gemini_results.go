@@ -39,7 +39,7 @@ func (s *Store) EnsureGeminiResultViews(ctx context.Context, fileName string, ou
 	}
 	views := []*Resource{output, errorView}
 	for i, view := range views {
-		mapped, readErr := s.getByUpstream(ctx, tx, view.NativeIdentity(), true)
+		mapped, readErr := s.getByUpstream(ctx, tx, view.NativeIdentity(), true, nil)
 		if errors.Is(readErr, ErrNotFound) {
 			mapped, readErr = s.PutTx(ctx, tx, view)
 		}

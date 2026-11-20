@@ -308,7 +308,7 @@ func (s *Store) BindDiscovered(ctx context.Context, child *Resource, submission 
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, child.APIKeyID+":"+child.ParentID.String()+":"+child.Kind+":"+child.UpstreamID); err != nil {
 		return nil, err
 	}
-	bound, err := s.getByUpstream(ctx, tx, child.NativeIdentity(), true)
+	bound, err := s.getByUpstream(ctx, tx, child.NativeIdentity(), true, nil)
 	if err == nil {
 		return bound, nil
 	}
