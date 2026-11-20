@@ -1,8 +1,12 @@
 package protocols
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
+	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -13,6 +17,165 @@ import (
 type WorkflowResult struct {
 	CallID  string
 	Content string
+}
+
+func AddChatWorkflowUsage(total, turn *wire.Usage) *wire.Usage {
+	if total == nil || turn == nil ||
+		turn.InputTokens > math.MaxInt64-total.InputTokens ||
+		turn.OutputTokens > math.MaxInt64-total.OutputTokens ||
+		turn.TotalTokens > math.MaxInt64-total.TotalTokens {
+		return nil
+	}
+	cached, cachedOK := addReportedTokens(total.CachedInputTokens, turn.CachedInputTokens)
+	cacheWrite, cacheWriteOK := addReportedTokens(total.CacheWriteInputTokens, turn.CacheWriteInputTokens)
+	audioIn, audioInOK := addReportedTokens(total.AudioInputTokens, turn.AudioInputTokens)
+	audioOut, audioOutOK := addReportedTokens(total.AudioOutputTokens, turn.AudioOutputTokens)
+	reasoning, reasoningOK := addReportedTokens(total.ReasoningTokens, turn.ReasoningTokens)
+	if !cachedOK || !cacheWriteOK || !audioInOK || !audioOutOK || !reasoningOK {
+		return nil
+	}
+	return &wire.Usage{
+		InputTokens:           total.InputTokens + turn.InputTokens,
+		OutputTokens:          total.OutputTokens + turn.OutputTokens,
+		TotalTokens:           total.TotalTokens + turn.TotalTokens,
+		CachedInputTokens:     cached,
+		CacheWriteInputTokens: cacheWrite,
+		AudioInputTokens:      audioIn,
+		AudioOutputTokens:     audioOut,
+		ReasoningTokens:       reasoning,
+	}
+}
+
+func addReportedTokens(total, turn *int64) (*int64, bool) {
+	switch {
+	case total == nil:
+		return turn, true
+	case turn == nil:
+		return total, true
+	case *turn > math.MaxInt64-*total:
+		return nil, false
+	default:
+		return new(*total + *turn), true
+	}
+}
+
+func ProjectChatWorkflowUsage(body []byte, usage *wire.Usage, maxBytes int) ([]byte, error) {
+	fields, err := object(body)
+	if err != nil {
+		return nil, err
+	}
+	if !present(fields["usage"]) {
+		return body, nil
+	}
+	return replaceChatWorkflowUsage(fields, chatWorkflowUsageFields(usage), maxBytes)
+}
+
+func ProjectChatWorkflowStreamUsage(frames []byte, usage *wire.Usage, maxEvent, maxBytes int) ([]byte, error) {
+	replacement := chatWorkflowUsageFields(usage)
+	decoder := sse.NewRawDecoder(bytes.NewReader(frames), maxEvent)
+	var out bytes.Buffer
+	for {
+		frame, err := decoder.Next()
+		if errors.Is(err, io.EOF) {
+			return out.Bytes(), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		projected, err := projectChatWorkflowFrame(frame, replacement, maxEvent)
+		if err != nil {
+			return nil, err
+		}
+		if len(projected) > maxBytes-out.Len() {
+			return nil, wire.ErrAggregateTooLarge
+		}
+		out.Write(projected)
+	}
+}
+
+func projectChatWorkflowFrame(frame sse.RawFrame, usage Object, maxEvent int) ([]byte, error) {
+	if !frame.HasData || bytes.Equal(frame.Data, []byte("[DONE]")) {
+		return frame.Bytes, nil
+	}
+	fields, err := object(frame.Data)
+	if err != nil {
+		return nil, err
+	}
+	if !present(fields["usage"]) {
+		return frame.Bytes, nil
+	}
+	if usage == nil && len(arr(fields["choices"])) == 0 {
+		return nil, nil
+	}
+	body, err := replaceChatWorkflowUsage(fields, usage, maxEvent)
+	if err != nil {
+		return nil, err
+	}
+	projected, err := frame.ReplaceData(0, len(frame.Data), body)
+	if len(projected) > maxEvent {
+		return nil, wire.ErrEventTooLarge
+	}
+	return projected, err
+}
+
+func replaceChatWorkflowUsage(fields, usage Object, maxBytes int) ([]byte, error) {
+	replacement, err := mergeChatWorkflowUsage(fields["usage"], usage)
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(overlayChatWorkflowFields(fields, Object{"usage": raw(replacement)}))
+	if len(body) > maxBytes {
+		return nil, wire.ErrAggregateTooLarge
+	}
+	return body, err
+}
+
+func mergeChatWorkflowUsage(final json.RawMessage, usage Object) (Object, error) {
+	if usage == nil {
+		return nil, nil
+	}
+	fields, err := object(final)
+	if err != nil {
+		return nil, err
+	}
+	updates := maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for key, value := range usage {
+			if !yield(key, mergeChatWorkflowDetail(key, fields[key], value)) {
+				return
+			}
+		}
+	})
+	return overlayChatWorkflowFields(fields, updates), nil
+}
+
+func mergeChatWorkflowDetail(key string, final, projected json.RawMessage) json.RawMessage {
+	if key != "prompt_tokens_details" && key != "completion_tokens_details" || !present(final) {
+		return projected
+	}
+	details, err := object(final)
+	if err != nil {
+		return projected
+	}
+	counters, _ := object(projected)
+	return raw(overlayChatWorkflowFields(details, counters))
+}
+
+func overlayChatWorkflowFields(base, updates Object) Object {
+	return maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for key, value := range base {
+			if _, replaced := updates[key]; !replaced && !yield(key, value) {
+				return
+			}
+		}
+		maps.All(updates)(yield)
+	})
+}
+
+func chatWorkflowUsageFields(usage *wire.Usage) Object {
+	if usage == nil {
+		return nil
+	}
+	return chatUsage(usage)
 }
 
 func WorkflowSingleCandidate(body []byte) bool {
