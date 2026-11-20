@@ -64,7 +64,7 @@ func TestGuardrailMaskRestoresBeforeOutputAndRecordsOnlyMetadata(t *testing.T) {
 	})
 	resp, body := h.chat(fullKey, map[string]string{"X-OLP-Guardrails": "true"}, `,"messages":[{"role":"user","content":"email alice@example.com"}]`)
 	encoded, _ := json.Marshal(body)
-	if resp.StatusCode != 200 || !strings.Contains(string(encoded), "alice@example.com") || strings.Contains(string(encoded), "[OLP_") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(encoded), "alice@example.com") || strings.Contains(string(encoded), "[OLP_") {
 		t.Fatalf("restoration failed: %d %s", resp.StatusCode, encoded)
 	}
 	env := h.sink.last(t)
@@ -108,7 +108,7 @@ func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 	}
 	close(release)
 	rest, _ := io.ReadAll(reader)
-	if resp.StatusCode != 200 || !strings.Contains(string(rest), "guardrail_blocked") || strings.Contains(string(rest), "[DONE]") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(rest), "guardrail_blocked") || strings.Contains(string(rest), "[DONE]") {
 		t.Fatalf("late refusal: %d %s", resp.StatusCode, rest)
 	}
 }
@@ -144,10 +144,10 @@ func TestNativeOperationOutputUnavailableIsExplicit(t *testing.T) {
 		resp := h.do(t.Context(), "POST", "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":"safe"}`), nil)
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if phase == guardrails.Input && resp.StatusCode != 200 {
+		if phase == guardrails.Input && resp.StatusCode != http.StatusOK {
 			t.Fatalf("inspectable input refused: %s", raw)
 		}
-		if phase == guardrails.Output && (resp.StatusCode != 422 || !strings.Contains(string(raw), "guardrail_surface_unavailable")) {
+		if phase == guardrails.Output && (resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "guardrail_surface_unavailable")) {
 			t.Fatalf("opaque output not refused: %d %s", resp.StatusCode, raw)
 		}
 	}
@@ -308,7 +308,7 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	raw, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	text := streamedText(t, raw)
-	if resp.StatusCode != 200 || strings.Contains(string(raw), "forbidden") || strings.Contains(text, "bidden") ||
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(raw), "forbidden") || strings.Contains(text, "bidden") ||
 		!strings.HasPrefix(text, "this is ") || !strings.HasSuffix(text, " text and more") || !strings.HasSuffix(string(raw), "data: [DONE]\n\n") {
 		t.Fatalf("redacted stream: %d %s", resp.StatusCode, raw)
 	}
@@ -347,7 +347,7 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	resp = masking.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("email alice@example.com"), nil)
 	raw, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if text := streamedText(t, raw); resp.StatusCode != 200 || text != "email alice@example.com" || strings.Contains(string(raw), "[OLP_") {
+	if text := streamedText(t, raw); resp.StatusCode != http.StatusOK || text != "email alice@example.com" || strings.Contains(string(raw), "[OLP_") {
 		t.Fatalf("unmasked stream: %d %s", resp.StatusCode, raw)
 	}
 }

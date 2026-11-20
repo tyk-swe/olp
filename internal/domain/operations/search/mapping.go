@@ -34,7 +34,7 @@ func rootDomain(entry string) bool {
 	if strings.HasPrefix(entry, ".") || strings.ContainsAny(entry, "/ :\\@") {
 		return false
 	}
-	for _, label := range strings.Split(entry, ".") {
+	for label := range strings.SplitSeq(entry, ".") {
 		if label == "" {
 			return false
 		}

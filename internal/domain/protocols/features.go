@@ -83,12 +83,12 @@ func RequestText(r *wire.Request, limit int) string {
 	if err != nil {
 		return ""
 	}
-	for i := len(c.Messages) - 1; i >= 0; i-- {
-		if c.Messages[i].Role != "user" {
+	for _, v := range slices.Backward(c.Messages) {
+		if v.Role != "user" {
 			continue
 		}
 		var texts []string
-		for _, part := range c.Messages[i].Parts {
+		for _, part := range v.Parts {
 			if part.Text != "" {
 				texts = append(texts, part.Text)
 			}

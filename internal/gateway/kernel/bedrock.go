@@ -287,10 +287,8 @@ func validateTitanImage(body []byte) error {
 	if len(encodedWire.Images) == 0 {
 		return errors.New("missing images")
 	}
-	for _, image := range encodedWire.Images {
-		if image == "" {
-			return errors.New("empty image payload")
-		}
+	if slices.Contains(encodedWire.Images, "") {
+		return errors.New("empty image payload")
 	}
 	return nil
 }

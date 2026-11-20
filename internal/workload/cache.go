@@ -42,7 +42,7 @@ func Fetch(ctx context.Context, client *http.Client, url string) (map[string]jos
 		return nil, ErrKeys
 	}
 	defer response.Body.Close()
-	if response.StatusCode != 200 {
+	if response.StatusCode != http.StatusOK {
 		return nil, ErrKeys
 	}
 	body, e := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))

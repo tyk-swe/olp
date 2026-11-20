@@ -168,8 +168,7 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCallBodyBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeRPCFailure(w, nil, rpcFailure{status: http.StatusRequestEntityTooLarge, code: rpcInvalidRequest, message: "The message exceeds the 1 MiB bound.", data: rpcErrorData{Code: "request_too_large"}})
 			return
 		}

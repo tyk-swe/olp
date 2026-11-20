@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/batches"
@@ -248,8 +249,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
 			response.Exchange.Interrupt(ClassProtocol, !errors.Is(err, ErrGeminiBatchFidelity))
-			var tooLarge *staging.TooLargeError
-			if errors.As(err, &tooLarge) {
+			if _, ok := errors.AsType[*staging.TooLargeError](err); ok {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
 			}
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini batch results could not be translated.")
@@ -462,10 +462,8 @@ func GeminiBatchHasFileReference(request oif.Value) bool {
 				return true
 			}
 		case "contents":
-			for _, item := range field.Value.Elements() {
-				if content(item) {
-					return true
-				}
+			if slices.ContainsFunc(field.Value.Elements(), content) {
+				return true
 			}
 		}
 	}

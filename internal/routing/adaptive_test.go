@@ -98,7 +98,7 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	for i, id := range ids {
 		p := s.Providers[id]
 		p.AuthMode = "api_key"
-		for j := 0; j < 2; j++ {
+		for j := range 2 {
 			credential := uuid.NewString()
 			slot := Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}
 			p.Slots = append(p.Slots, slot)

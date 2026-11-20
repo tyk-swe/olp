@@ -147,8 +147,7 @@ func canonicalFields(root reflect.Type) map[string]reflect.Type {
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for i := 0; i < current.shape.NumField(); i++ {
-			field := current.shape.Field(i)
+		for field := range current.shape.Fields() {
 			nested := field.Type
 			if nested.Kind() == reflect.Pointer {
 				nested = nested.Elem()
@@ -156,7 +155,7 @@ func canonicalFields(root reflect.Type) map[string]reflect.Type {
 			if field.PkgPath != "" && (!field.Anonymous || nested.Kind() != reflect.Struct) {
 				continue
 			}
-			tag := strings.Split(field.Tag.Get("json"), ",")[0]
+			tag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 			if tag == "-" {
 				continue
 			}

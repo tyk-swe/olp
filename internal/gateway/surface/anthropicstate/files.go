@@ -287,7 +287,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 func validateFilesBeta(header http.Header) *fault.Error {
 	param := "anthropic-beta"
 	for _, line := range header.Values("Anthropic-Beta") {
-		for _, beta := range strings.Split(line, ",") {
+		for beta := range strings.SplitSeq(line, ",") {
 			if beta = strings.TrimSpace(beta); beta != "" && beta != "files-api-2025-04-14" {
 				return fault.InvalidRequest("invalid_request", "Anthropic-Beta may contain only files-api-2025-04-14 for these endpoints.", &param)
 			}

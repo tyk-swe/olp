@@ -410,7 +410,7 @@ func parseResult(request oif.Request, source oif.Result) (oif.View, error) {
 				if ps.Kind() != oif.Object || len(ps.Members()) != n {
 					return fail()
 				}
-				for j := 0; j < n; j++ {
+				for j := range n {
 					key := strconv.Itoa(j)
 					if kind == "choice" {
 						key = q.Labels[j]

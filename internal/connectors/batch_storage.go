@@ -99,7 +99,7 @@ func parseBatchStorageURI(uri string) (scheme, bucket, object string, ok bool) {
 		if !gcsStorageBucket.MatchString(bucket) || strings.Contains(bucket, "..") || net.ParseIP(bucket) != nil {
 			return "", "", "", false
 		}
-		for _, component := range strings.Split(bucket, ".") {
+		for component := range strings.SplitSeq(bucket, ".") {
 			if len(component) > 63 {
 				return "", "", "", false
 			}
@@ -112,7 +112,7 @@ func parseBatchStorageURI(uri string) (scheme, bucket, object string, ok bool) {
 	if trimmed == "" {
 		return scheme, bucket, "", true
 	}
-	for _, segment := range strings.Split(trimmed, "/") {
+	for segment := range strings.SplitSeq(trimmed, "/") {
 		if segment == "" || segment == "." || segment == ".." {
 			return "", "", "", false
 		}

@@ -249,9 +249,7 @@ func legacyDocument(t *testing.T, exported map[string]any) map[string]any {
 	routes := items(document["routes"])
 	canary := routes[slices.IndexFunc(routes, func(r map[string]any) bool { return r["slug"] == "canary-route" })]
 	legacy := map[string]any{}
-	for field, value := range canary {
-		legacy[field] = value
-	}
+	maps.Copy(legacy, canary)
 	legacy["slug"] = legacyRouteSlug
 	legacy["content_policy"] = map[string]any{"rules": []any{map[string]any{"id": "secret", "phase": "input", "pattern": "sk-[a-z]+", "action": "block"}}}
 	document["api_version"] = "openllmproxy.dev/config/v1"

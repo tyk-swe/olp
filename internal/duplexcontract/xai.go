@@ -248,7 +248,7 @@ func decimalField(parent oif.Value, name string) (string, bool) {
 		return "", false
 	}
 	for _, part := range [2]string{integer, fraction} {
-		for i := 0; i < len(part); i++ {
+		for i := range len(part) {
 			if part[i] < '0' || part[i] > '9' {
 				return "", false
 			}

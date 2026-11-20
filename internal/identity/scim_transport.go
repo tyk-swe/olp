@@ -41,7 +41,7 @@ func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h access.Handler)
 		r, p, cancel, err := admit(w, r)
 		defer cancel()
 		var reply httpkit.Reply
-		if err == nil && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") {
+		if err == nil && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
 			typ, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			if e != nil || typ != "application/scim+json" && typ != "application/json" {
 				err = scim.Fail(415, "", "Send application/scim+json or application/json.")

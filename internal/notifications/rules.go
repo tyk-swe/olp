@@ -293,8 +293,7 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 		return ruleInput{}, err
 	}
 	if err := json.Unmarshal(overlay, &next); err != nil {
-		var mismatch *json.UnmarshalTypeError
-		if errors.As(err, &mismatch) {
+		if mismatch, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 			return ruleInput{}, httpkit.Invalid(mismatch.Field, rulePatchFields[mismatch.Field])
 		}
 		return ruleInput{}, err

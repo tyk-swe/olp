@@ -129,7 +129,7 @@ func (s *Server) checkBrowser(r *http.Request, policy browserPolicy) error {
 	if err := checkCookies(r); err != nil {
 		return err
 	}
-	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("Origin") != s.Origin {
 		return httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && policy != crossSiteNavigation {

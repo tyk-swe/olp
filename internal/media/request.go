@@ -234,7 +234,7 @@ func validRouteSlug(value string) bool {
 	if value == "" || len(value) > 100 {
 		return false
 	}
-	for i := 0; i < len(value); i++ {
+	for i := range len(value) {
 		c := value[i]
 		ok := c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-'
 		if !ok {

@@ -2,6 +2,7 @@ package destination
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -35,7 +36,7 @@ func TestObjectStoreSigningRegion(t *testing.T) {
 				return ""
 			}, "installation")
 			endpoint, _ := url.Parse("https://" + tc.host)
-			req := httptest.NewRequest("PUT", endpoint.String()+"/part.jsonl", strings.NewReader("fixture"))
+			req := httptest.NewRequest(http.MethodPut, endpoint.String()+"/part.jsonl", strings.NewReader("fixture"))
 			if err := sender.authorize(t.Context(), req, store, endpoint, []byte("fixture")); err != nil {
 				t.Fatal(err)
 			}

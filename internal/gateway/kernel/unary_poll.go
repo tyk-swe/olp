@@ -161,7 +161,7 @@ func (e *unaryExchange) terminal(raw []byte) ([]byte, *unaryFailure) {
 
 func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 	var waitHeader http.Header
-	for polls := 0; polls < maxUnaryPolls; polls++ {
+	for polls := range maxUnaryPolls {
 		if polls > 0 {
 			if failure := e.wait(location, waitHeader); failure != nil {
 				return nil, failure

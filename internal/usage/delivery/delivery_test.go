@@ -71,11 +71,9 @@ func newTestDelivery(fake *fakeLossCheckpoint) *Delivery {
 func rejectConcurrently(d *Delivery, losses int) {
 	var wg sync.WaitGroup
 	for i := range losses {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			d.Reject(fmt.Sprintf("request-%d", i), errors.New("lost"))
-		}()
+		})
 	}
 	wg.Wait()
 }

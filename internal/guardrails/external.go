@@ -312,7 +312,7 @@ func ModelVerdict(raw []byte, rule ModelRule) (Verdict, error) {
 		if !strings.HasPrefix(rule.Pointer, "/") {
 			return Verdict{}, errEvaluation
 		}
-		for _, part := range strings.Split(rule.Pointer[1:], "/") {
+		for part := range strings.SplitSeq(rule.Pointer[1:], "/") {
 			part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
 			switch v := value.(type) {
 			case map[string]any:

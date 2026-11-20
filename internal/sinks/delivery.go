@@ -214,7 +214,7 @@ func (w *Worker) send(ctx context.Context, d *delivery) string {
 	}
 	bounded, cancel := context.WithTimeout(ctx, deliveryTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(bounded, "POST", target.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(bounded, http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
 		return "destination_refused"
 	}

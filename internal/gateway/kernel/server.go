@@ -442,8 +442,7 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *fault.Error) {
 	return p, nil
 }
 func RequestError(err error) *fault.Error {
-	var guard guardrails.Failure
-	if errors.As(err, &guard) {
+	if guard, ok := errors.AsType[guardrails.Failure](err); ok {
 		return guardrailError(guard)
 	}
 	if gatewayError, ok := errors.AsType[*fault.Error](err); ok {

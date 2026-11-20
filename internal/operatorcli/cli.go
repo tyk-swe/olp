@@ -161,8 +161,8 @@ func (runner Runner) client() (*management.Client, error) {
 func commandName(operation management.Operation) string {
 	name := strings.ReplaceAll(operation.Name, "_", "-")
 	group := strings.TrimSuffix(operation.Group, "s")
-	if strings.HasSuffix(name, "-"+group+"s") {
-		name = strings.TrimSuffix(name, "-"+group+"s")
+	if before, ok := strings.CutSuffix(name, "-"+group+"s"); ok {
+		name = before
 	}
 	name = strings.TrimSuffix(name, "-"+group)
 	if operation.Group == "usage" {

@@ -1151,7 +1151,7 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if sent := upstream.sent("POST /responses"); len(sent) != 2 || !strings.Contains(sent[1].body, `"previous_response_id":"resp_provider-owned-1"`) {
 		t.Fatalf("continuation reached the provider as %+v, want the provider's identifier of the first response", sent)
 	}
-	unkept, err := http.NewRequestWithContext(t.Context(), "POST", g.server.URL+"/v1/responses", strings.NewReader(`{"model":"`+slug+`","input":"once more","previous_response_id":"`+first.ID+`","store":false}`))
+	unkept, err := http.NewRequestWithContext(t.Context(), http.MethodPost, g.server.URL+"/v1/responses", strings.NewReader(`{"model":"`+slug+`","input":"once more","previous_response_id":"`+first.ID+`","store":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1162,7 +1162,7 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 		t.Fatal(err)
 	}
 	_ = answered.Body.Close()
-	if kept := storedResponses(t, pool, g, "owner"); answered.StatusCode != 200 || len(kept) != 2 {
+	if kept := storedResponses(t, pool, g, "owner"); answered.StatusCode != http.StatusOK || len(kept) != 2 {
 		t.Fatalf("a response the caller asked not to store answered %d and left %d stored, want 200 and the two stored before", answered.StatusCode, len(kept))
 	}
 
@@ -1882,7 +1882,7 @@ func TestGeminiInteractionStreamsBindTheirResourceResumeFromACursorCancelAndRefu
 	pool, _ := harness.Database(t)
 	const slug, native = "gemini-streams", "interaction-" + providerOwned + "-1"
 	upstream := &retainedUpstream{replies: interactionStreamReplies, headers: func(r *http.Request) map[string]string {
-		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/interactions") || r.URL.Query().Get("stream") == "true" {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/interactions") || r.URL.Query().Get("stream") == "true" {
 			return map[string]string{"Content-Type": "text/event-stream"}
 		}
 		return nil
@@ -3035,7 +3035,7 @@ func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWor
 	unasked := func(path, route, want string) {
 		t.Helper()
 		asked := len(upstream.sent(searched)) + len(upstream.sent(compacted))
-		request, err := http.NewRequest("POST", g.server.URL+path, strings.NewReader(text))
+		request, err := http.NewRequest(http.MethodPost, g.server.URL+path, strings.NewReader(text))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3326,7 +3326,7 @@ func TestABatchFileUploadIsCheckedBeforeTheProviderKeptOnlyWhenTheProviderNamesI
 	}
 	upload := func(name, key, route, form string, status int, code string, classes ...string) retainedObject {
 		t.Helper()
-		request, err := http.NewRequestWithContext(t.Context(), "POST", g.server.URL+"/v1/files", strings.NewReader(form+"--b--\r\n"))
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, g.server.URL+"/v1/files", strings.NewReader(form+"--b--\r\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3444,7 +3444,7 @@ func (p *responseStreams) asked() []string {
 }
 
 func (p *responseStreams) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" || r.URL.Query().Get("stream") != "true" {
+	if r.Method != http.MethodGet || r.URL.Query().Get("stream") != "true" {
 		p.retainedUpstream.ServeHTTP(w, r)
 		return
 	}

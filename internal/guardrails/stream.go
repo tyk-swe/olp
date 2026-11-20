@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -160,9 +161,7 @@ func (s *Stream) inspect(ctx context.Context) error {
 			return ErrSurface
 		}
 		remaining := make(map[string]string, len(changed))
-		for id, text := range changed {
-			remaining[id] = text
-		}
+		maps.Copy(remaining, changed)
 		total := 0
 		for i := range s.frames {
 			fields := map[string]string{}
@@ -186,9 +185,7 @@ func (s *Stream) inspect(ctx context.Context) error {
 			return ErrSurface
 		}
 		s.bytes = total
-		for id, text := range changed {
-			s.texts[id] = text
-		}
+		maps.Copy(s.texts, changed)
 	}
 	return err
 }

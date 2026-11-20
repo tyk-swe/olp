@@ -100,8 +100,7 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *Call) (*admission.Le
 	if err == nil {
 		return lease, nil
 	}
-	var exceeded *limits.ExceededError
-	if errors.As(err, &exceeded) {
+	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		return nil, quota.RateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
 	return nil, s.Deps.Admission.Outage(x.keyID, false, err)

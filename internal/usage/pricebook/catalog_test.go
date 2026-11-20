@@ -309,8 +309,7 @@ func signedCatalog(t *testing.T, published time.Time) ([]byte, []byte, signing.K
 }
 
 func problemCode(err error) string {
-	var problem *httpkit.Problem
-	if errors.As(err, &problem) {
+	if problem, ok := errors.AsType[*httpkit.Problem](err); ok {
 		return problem.Code
 	}
 	return ""

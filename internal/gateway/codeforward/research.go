@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"strings"
@@ -168,9 +169,7 @@ func (f *Forwarder) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	if upstreamSession != "" {
 		request.Header.Set("Mcp-Session-Id", upstreamSession)
 	}
-	for name, values := range attempt.auth.Headers {
-		request.Header[name] = values
-	}
+	maps.Copy(request.Header, attempt.auth.Headers)
 	attempt.dispatched = true
 	response, err := client.Do(request)
 	if err != nil {

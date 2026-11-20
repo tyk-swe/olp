@@ -398,7 +398,7 @@ func quotientScale(charge *big.Int) int {
 
 func atoi(digits string) int {
 	value := 0
-	for index := 0; index < len(digits); index++ {
+	for index := range len(digits) {
 		value = value*10 + int(digits[index]-'0')
 	}
 	return value

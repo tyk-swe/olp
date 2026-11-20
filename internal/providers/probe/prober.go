@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -144,9 +145,7 @@ func (p *Prober) do(ctx context.Context, t Target, r request) (response, error) 
 	if r.body != nil {
 		req.Header.Set("Content-Type", cmp.Or(r.contentType, "application/json"))
 	}
-	for name, values := range r.header {
-		req.Header[name] = values
-	}
+	maps.Copy(req.Header, r.header)
 	transport := t.Connection.Transport()
 	transport.SigningService = r.signingService
 	sensitive, err := p.auth.Apply(ctx, req, transport, t.Credential, r.body)

@@ -210,7 +210,7 @@ func (m *mock) set(provider string, h http.HandlerFunc) {
 func (m *mock) count(provider string) int { m.mu.Lock(); defer m.mu.Unlock(); return m.calls[provider] }
 
 func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	provider := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)[0]
+	provider, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	m.mu.Lock()
 	h := m.handlers[provider]
 	m.calls[provider]++
@@ -1163,7 +1163,7 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			pool := admission.NewPool(1).Queue(2, 2*time.Second)
 			management := admission.NewPool(1)
-			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(http.StatusServiceUnavailable) }}
 			h := newHarnessWrapped(t, Config{}, outer.Wrap)
 			critical := "critical"
 			authority := h.rt.keys[fullKey]
@@ -1194,7 +1194,7 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 			}
 			holder := pool.Enter()
 			defer holder.Release()
-			req, e := http.NewRequest("POST", h.server.URL+"/v1/realtime/calls?model="+routeSlug, strings.NewReader("v=0\r\n"))
+			req, e := http.NewRequest(http.MethodPost, h.server.URL+"/v1/realtime/calls?model="+routeSlug, strings.NewReader("v=0\r\n"))
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -1875,7 +1875,7 @@ func TestResourceListsRejectInvalidCursor(t *testing.T) {
 			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if response.StatusCode != 400 || body.Error.Code != "invalid_value" || body.Error.Param != "limit" {
+			if response.StatusCode != http.StatusBadRequest || body.Error.Code != "invalid_value" || body.Error.Param != "limit" {
 				t.Errorf("limit response = %d %#v, want 400 invalid_value at limit", response.StatusCode, body)
 			}
 		})

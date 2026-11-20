@@ -152,14 +152,14 @@ func Handler(directory string) (http.Handler, func() error, error) {
 // the wildcard's; zero is a refusal.
 func acceptedCoding(header string, hasBr, hasGzip bool) string {
 	qualities := map[string]float64{}
-	for _, entry := range strings.Split(header, ",") {
+	for entry := range strings.SplitSeq(header, ",") {
 		coding, parameters, _ := strings.Cut(entry, ";")
 		coding = strings.ToLower(strings.TrimSpace(coding))
 		if coding == "" {
 			continue
 		}
 		quality := 1.0
-		for _, parameter := range strings.Split(parameters, ";") {
+		for parameter := range strings.SplitSeq(parameters, ";") {
 			key, value, found := strings.Cut(parameter, "=")
 			if !found || !strings.EqualFold(strings.TrimSpace(key), "q") {
 				continue

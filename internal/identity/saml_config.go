@@ -284,7 +284,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	if err := access.CheckIdentityURL(input.URL); err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Use a safe identity metadata URL.")
 	}
-	req, err := http.NewRequestWithContext(r.Context(), "GET", input.URL, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, input.URL, nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -294,7 +294,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, samlidentity.MaxXML+1))
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint did not return a valid document.")
 	}
 	m, err := samlidentity.ParseMetadata(b)

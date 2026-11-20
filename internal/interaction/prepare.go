@@ -436,12 +436,7 @@ func declaredClientTools(root oif.Value, encodedWire wire.Format, context Contex
 				return true
 			}
 		}
-		for _, element := range value.Elements() {
-			if history(element) {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(value.Elements(), history)
 	}
 	for _, name := range []string{"messages", "contents", "input"} {
 		if history(member(root, name)) {

@@ -31,7 +31,7 @@ func TestPresentedInferenceKeyShapes(t *testing.T) {
 		{"hollow middle", "Bearer a..b", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := http.NewRequest("GET", "https://example.test/", nil)
+			r, _ := http.NewRequest(http.MethodGet, "https://example.test/", nil)
 			if tc.header != "" {
 				r.Header.Set("Authorization", tc.header)
 			}

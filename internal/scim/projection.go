@@ -45,7 +45,7 @@ func ParseProjection(attributes, excluded, schema string) (Projection, error) {
 		raw = attributes
 	}
 	tree := &selection{}
-	for _, text := range strings.Split(raw, ",") {
+	for text := range strings.SplitSeq(raw, ",") {
 		parts, err := SortPath(strings.TrimSpace(text), schema)
 		if err != nil {
 			return Projection{}, err

@@ -47,7 +47,7 @@ func (s *Server) Authenticate(r *http.Request, q database.Queryer) (authz.Princi
 	if err = loadProjects(r.Context(), q, &p); err != nil {
 		return p, err
 	}
-	if r.Method != "GET" && r.Method != "HEAD" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.CSRF(p.Token))) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.CSRF(p.Token))) {
 		return p, httpkit.Fail(403, "csrf_invalid", "Reload the console before trying again.")
 	}
 	return p, nil

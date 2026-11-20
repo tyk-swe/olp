@@ -171,7 +171,7 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 		r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, headers)
 		defer r.Body.Close()
 		b, _ := io.ReadAll(r.Body)
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Fatalf("%d %s", r.StatusCode, b)
 		}
 		if r.Header.Get("X-OLP-Cache") == "hit" && (r.Header.Get("X-OLP-Cost") != "0" || r.Header.Get("X-OLP-Attempts") != "0") {
@@ -286,7 +286,7 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 						if i == 1 {
 							want = "hit"
 						}
-						if response.StatusCode != 200 || response.Header.Get("X-OLP-Cache") != want {
+						if response.StatusCode != http.StatusOK || response.Header.Get("X-OLP-Cache") != want {
 							t.Fatalf("%d: status=%d cache=%s body=%s", i, response.StatusCode, response.Header.Get("X-OLP-Cache"), got)
 						}
 						if i == 0 {

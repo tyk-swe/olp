@@ -58,8 +58,7 @@ func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
 			if err == nil {
 				t.Fatal("the entry was accepted")
 			}
-			var problem *authority.ValidationError
-			if !errors.As(err, &problem) {
+			if _, ok := errors.AsType[*authority.ValidationError](err); !ok {
 				t.Fatalf("error = %v, want a validation failure", err)
 			}
 		})
@@ -134,8 +133,7 @@ func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 				}
 				return
 			}
-			var problem *authority.ValidationError
-			if !errors.As(err, &problem) {
+			if problem, ok := errors.AsType[*authority.ValidationError](err); !ok {
 				t.Fatalf("currency conflict = %v", problem)
 			}
 		})

@@ -224,8 +224,7 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *Call, toolsetI
 }
 
 func workflowError(err error) *fault.Error {
-	var failure *mcp.WorkflowError
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*mcp.WorkflowError](err); ok {
 		return &fault.Error{Status: failure.Status, Type: "invalid_request_error", Code: failure.Code, Message: failure.Message}
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow tool service is unavailable.")

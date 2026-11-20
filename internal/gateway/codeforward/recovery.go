@@ -49,7 +49,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	ordinal := recoveryOrdinal(previous)
-	if route.InitialRecoveryAttempts < 1 || response.StatusCode != 401 && response.StatusCode != 429 || ctx.Err() != nil {
+	if route.InitialRecoveryAttempts < 1 || response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusTooManyRequests || ctx.Err() != nil {
 		return nil, nil
 	}
 	body, err := func() ([]byte, error) {

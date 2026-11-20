@@ -774,16 +774,16 @@ func (m *Manager) Authenticate(secret string) (*keyauthority.Authority, error) {
 		return m.authenticateWorkload(secret)
 	}
 	presented := secret[len("olp_"):]
-	separator := strings.IndexByte(presented, '_')
-	if separator < 0 {
+	before, after, ok0 := strings.Cut(presented, "_")
+	if !ok0 {
 		return nil, ErrInvalidKey
 	}
-	record, ok := keys[presented[:separator]]
+	record, ok := keys[before]
 	if !ok {
 		return nil, ErrInvalidKey
 	}
 	// Only a known lookup needs its secret suffix inspected and authenticated.
-	if strings.IndexByte(presented[separator+1:], '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
+	if strings.IndexByte(after, '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return nil, ErrInvalidKey
 	}
 	return &record.authority, nil

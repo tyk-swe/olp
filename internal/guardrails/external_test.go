@@ -118,7 +118,7 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 				}
 				if json.NewDecoder(r.Body).Decode(&request) != nil || len(request.Texts) != 1 {
 					t.Error("invalid request")
-					w.WriteHeader(400)
+					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
 				if request.Texts[0] == "private first" {

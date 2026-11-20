@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -216,10 +217,8 @@ func bindRetainedModel(source oif.Document, e retainedapi.Endpoint, p *Pin) (oif
 func hasItemReference(v oif.Value) bool {
 	switch v.Kind() {
 	case oif.Array:
-		for _, child := range v.Elements() {
-			if hasItemReference(child) {
-				return true
-			}
+		if slices.ContainsFunc(v.Elements(), hasItemReference) {
+			return true
 		}
 	case oif.Object:
 		// Item references permit type to be omitted or null; an
@@ -446,7 +445,7 @@ func (s *Server) retainedQuery(ctx context.Context, x *Call, e retainedapi.Endpo
 			if e.Kind != "context_cache" || e.Action != "patch" {
 				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
 			}
-			for _, field := range strings.Split(v, ",") {
+			for field := range strings.SplitSeq(v, ",") {
 				if field != "ttl" && field != "expire_time" && field != "expireTime" {
 					return nil, fault.InvalidRequest("invalid_parameter", "Only cache expiration can be updated.", &name)
 				}

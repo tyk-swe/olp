@@ -144,7 +144,7 @@ func TestReadWritesActiveAllowanceFromUpstream(t *testing.T) {
 	var seen *http.Request
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen = r
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := readFixture(t.Context(), reader(store, &fakeAuthorizer{}, fakeLocker{}, transport), store.due[0])
 	if outcome != workerhealth.OutcomeSuccess || !progress {
@@ -172,7 +172,7 @@ func TestPassSkipsAccountAnotherWorkerHolds(t *testing.T) {
 	calls := 0
 	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := reader(store, authorizer, fakeLocker{held: map[string]bool{"account-1": true}}, transport).Pass(t.Context())
 	if outcome != workerhealth.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.completed) != 0 {
@@ -183,10 +183,10 @@ func TestPassSkipsAccountAnotherWorkerHolds(t *testing.T) {
 func TestReadMalformedOrFailedReadInvalidatesActiveEvidence(t *testing.T) {
 	for name, transport := range map[string]http.RoundTripper{
 		"malformed": roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"plan_type": 4}`))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"plan_type": 4}`))}, nil
 		}),
 		"upstream error": roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 		}),
 		"transport error": roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("connection refused")
@@ -236,7 +236,7 @@ func TestReadWritesActiveAllowanceFromMiniMaxRemains(t *testing.T) {
 		var seen *http.Request
 		transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			seen = r
-			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(minimaxBody(minimaxBucket("MiniMax-M3", ""))))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(minimaxBody(minimaxBucket("MiniMax-M3", ""))))}, nil
 		})
 		outcome, progress := readFixture(t.Context(), reader(store, &fakeAuthorizer{}, fakeLocker{}, transport), store.due[0])
 		if outcome != workerhealth.OutcomeSuccess || !progress {
@@ -281,7 +281,7 @@ func assertPassSkipsProfile(t *testing.T, profile string) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
 		t.Errorf("profile %q must not call %s", profile, r.URL)
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := reader(store, authorizer, fakeLocker{}, transport).Pass(t.Context())
 	if outcome != workerhealth.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.observed) != 0 || len(store.completed) != 0 {

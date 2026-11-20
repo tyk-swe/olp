@@ -97,8 +97,8 @@ func (g *Stream) Push(ctx context.Context, frame []byte) ([][]byte, error) {
 		}
 		restoreChanged := false
 		for _, segment := range segments {
-			if strings.HasPrefix(segment.ID, "tool_") {
-				original := g.calls[strings.TrimPrefix(segment.ID, "tool_")].arguments
+			if after, ok := strings.CutPrefix(segment.ID, "tool_"); ok {
+				original := g.calls[after].arguments
 				restoreChanged = restoreChanged || g.config.Masks.Restore(original) != original
 			}
 		}

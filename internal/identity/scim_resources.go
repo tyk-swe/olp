@@ -63,7 +63,7 @@ func scimResourceSchema(group bool) string {
 
 func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	values := r.URL.Query()
-	if r.Method == "POST" {
+	if r.Method == http.MethodPost {
 		body, e := scim.Decode(r.Body)
 		if e != nil {
 			return httpkit.Reply{}, e

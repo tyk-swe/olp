@@ -55,7 +55,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *Call, authority 
 		return uuid.NewSHA1(runID, []byte("olp-recovery:"+strconv.Itoa(ordinal)+":"+callID)).String()
 	}
 	previousIDs := slices.Collect(func(yield func(string) bool) {
-		for ordinal := 0; ordinal < x.workflow.ordinal; ordinal++ {
+		for ordinal := range x.workflow.ordinal {
 			if !yield(recoveryID(ordinal)) {
 				return
 			}

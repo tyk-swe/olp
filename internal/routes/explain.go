@@ -479,8 +479,7 @@ func (w *walk) adopt(slug string, via usage.LegVia) string {
 	leg, plan, permitted, err := w.s.leg(w.m, slug, via)
 	if err != nil {
 		w.conditions = nil
-		var refusal *routing.SelectionError
-		if errors.As(err, &refusal) {
+		if refusal, ok := errors.AsType[*routing.SelectionError](err); ok {
 			return refusal.Code
 		}
 		return routing.NoEligibleTargets

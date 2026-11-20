@@ -44,7 +44,7 @@ func CertifyCatalog(ctx context.Context, upstream Upstream, credential []byte) (
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
 	cursor := ""
-	for page := 0; page < 16; page++ {
+	for range 16 {
 		listing, listErr := upstream.ListTools(ctx, cursor)
 		if listErr != nil || listing.Tools == nil {
 			return nil, ErrCertification

@@ -88,8 +88,7 @@ func sendError(code string, err error) error {
 }
 
 func DeliveryErrorCode(err error) string {
-	var send *SendError
-	if errors.As(err, &send) {
+	if send, ok := errors.AsType[*SendError](err); ok {
 		return send.Code
 	}
 	return "network"

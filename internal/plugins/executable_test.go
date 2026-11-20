@@ -116,7 +116,7 @@ func TestReceiveBoundsConcurrentCapabilityRequests(t *testing.T) {
 		t.Fatalf("got %d concurrent capability requests at the test server, want at most %d", got, limit)
 	}
 	unblock()
-	for answered := 0; answered < int(limit); answered++ {
+	for answered := range limit {
 		select {
 		case frame := <-responses:
 			if frame.Response == nil || frame.Response.Error != nil {

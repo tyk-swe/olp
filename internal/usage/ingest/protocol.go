@@ -60,7 +60,7 @@ func ParseStreamID(id string) (uint64, uint64, error) {
 }
 
 func asciiDigits(value string) bool {
-	for index := 0; index < len(value); index++ {
+	for index := range len(value) {
 		if value[index] < '0' || value[index] > '9' {
 			return false
 		}

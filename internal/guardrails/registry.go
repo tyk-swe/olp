@@ -3,6 +3,7 @@ package guardrails
 import (
 	"cmp"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -221,9 +222,7 @@ func (r *Registry) Clone() *Registry {
 	}
 	out := *r
 	out.MigratedRoutes = make(map[string]bool, len(r.MigratedRoutes))
-	for id, v := range r.MigratedRoutes {
-		out.MigratedRoutes[id] = v
-	}
+	maps.Copy(out.MigratedRoutes, r.MigratedRoutes)
 	out.Definitions = make(map[string]Revision, len(r.Definitions))
 	for id, d := range r.Definitions {
 		d.Configuration = slices.Clone(d.Configuration)
@@ -236,8 +235,6 @@ func (r *Registry) Clone() *Registry {
 	}
 	out.Attachments = slices.Clone(r.Attachments)
 	out.ProjectOrganizations = make(map[string]string, len(r.ProjectOrganizations))
-	for p, o := range r.ProjectOrganizations {
-		out.ProjectOrganizations[p] = o
-	}
+	maps.Copy(out.ProjectOrganizations, r.ProjectOrganizations)
 	return &out
 }

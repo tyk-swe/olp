@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"maps"
 	"net/http"
 	"testing"
 
@@ -49,9 +50,7 @@ func TestValidateAcceptsAConfigurationThatFitsItsProfile(t *testing.T) {
 			c.QuerySettings = map[string]string{"api-version": c.APIVersion}
 		}),
 	}
-	for name, config := range valid {
-		cases[name] = config
-	}
+	maps.Copy(cases, valid)
 	for name, config := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

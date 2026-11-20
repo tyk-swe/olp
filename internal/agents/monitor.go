@@ -95,12 +95,10 @@ func (m *TaskMonitor) pollPage(ctx context.Context, workers chan struct{}, outst
 			}
 			continue
 		}
-		outstanding.Add(1)
-		go func() {
-			defer outstanding.Done()
+		outstanding.Go(func() {
 			defer func() { <-workers }()
 			m.cancel(ctx, task)
-		}()
+		})
 	}
 	if len(page) < 128 {
 		m.cursor = ""

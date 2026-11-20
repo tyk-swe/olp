@@ -18,7 +18,7 @@ func NextMonthlyReset(anchor string, now time.Time) (time.Time, bool) {
 	anchorDay := parsed.Day()
 	utcNow := now.UTC()
 	monthStart := time.Date(utcNow.Year(), utcNow.Month(), 1, 0, 0, 0, 0, time.UTC)
-	for offset := 0; offset <= 1; offset++ {
+	for offset := range 2 {
 		target := monthStart.AddDate(0, offset, 0)
 		candidate := time.Date(target.Year(), target.Month(), min(anchorDay, daysInMonth(target.Year(), target.Month())), 0, 0, 0, 0, time.UTC)
 		if candidate.After(utcNow) {

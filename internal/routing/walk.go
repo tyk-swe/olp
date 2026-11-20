@@ -68,8 +68,7 @@ func (w RouteWalk) Next() (RouteWalk, FallbackStep, bool) {
 func (w RouteWalk) Pending() []FallbackStep {
 	pending := w.Failed(nil)
 	return slices.Collect(func(yield func(FallbackStep) bool) {
-		for i := len(pending.frames) - 1; i >= 0; i-- {
-			frame := pending.frames[i]
+		for _, frame := range slices.Backward(pending.frames) {
 			for _, fallback := range frame.route.Fallbacks[frame.next:] {
 				if !yield(FallbackStep{From: frame.route.Slug, Route: fallback.Route, Conditions: slices.Clone(fallback.On)}) {
 					return

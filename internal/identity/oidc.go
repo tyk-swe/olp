@@ -76,7 +76,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 	if err := access.CheckIdentityURL(c.DiscoveryURL); err != nil {
 		return nil, nil, httpkit.Invalid("discovery_url", err.Error())
 	}
-	request, err := http.NewRequestWithContext(ctx, "GET", c.DiscoveryURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.DiscoveryURL, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,7 +89,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 		oidc.ProviderConfig
 		AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 	}
-	if response.StatusCode != 200 || json.NewDecoder(response.Body).Decode(&metadata) != nil {
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&metadata) != nil {
 		return nil, nil, httpkit.Invalid("discovery_url", "Invalid OIDC discovery document.")
 	}
 	if metadata.IssuerURL != c.Issuer {
@@ -291,7 +291,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (httpkit.Reply, error) 
 		Purpose    string `json:"purpose"`
 		ResourceID string `json:"resource_id"`
 	}
-	if r.Method == "GET" {
+	if r.Method == http.MethodGet {
 		input.ReturnTo = r.URL.Query().Get("return_to")
 	} else if r.ContentLength != 0 {
 		if err := httpkit.Decode(r, &input); err != nil {
@@ -383,7 +383,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (httpkit.Reply, error) 
 	if kind == "link" {
 		response.Cookies = append(response.Cookies, access.ClearCookie(access.RecentCookie))
 	}
-	if r.Method == "GET" {
+	if r.Method == http.MethodGet {
 		response.Status = 303
 		response.Body = nil
 		response.Location = authorizationURL
@@ -891,8 +891,7 @@ func syncFederatedAuthority(r *http.Request, tx pgx.Tx, userID, mapped, source s
 
 func oidcFailureRedirect(flow oidcFlow, err error) httpkit.Reply {
 	reason := "provider"
-	var problem *httpkit.Problem
-	if errors.As(err, &problem) {
+	if problem, ok := errors.AsType[*httpkit.Problem](err); ok {
 		switch problem.Code {
 		case "oidc_authorization_denied":
 			reason = "cancelled"

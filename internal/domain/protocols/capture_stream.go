@@ -158,7 +158,7 @@ func (s *CaptureStream) Push(frame []byte) error {
 		s.bedrock(kind.String(), f)
 	} else {
 		// SSE data lines form one JSON event. Multiple events can share a write.
-		for _, event := range bytes.Split(bytes.ReplaceAll(frame, []byte("\r\n"), []byte("\n")), []byte("\n\n")) {
+		for event := range bytes.SplitSeq(bytes.ReplaceAll(frame, []byte("\r\n"), []byte("\n")), []byte("\n\n")) {
 			var lines [][]byte
 			for line := range bytes.SplitSeq(event, []byte("\n")) {
 				if bytes.HasPrefix(line, []byte("data:")) {

@@ -35,7 +35,7 @@ func ForwardTrailers(source, headers http.Header, request bool) http.Header {
 
 func removeConnectionFields(result, headers http.Header) {
 	for _, connection := range headers.Values("Connection") {
-		for _, name := range strings.Split(connection, ",") {
+		for name := range strings.SplitSeq(connection, ",") {
 			result.Del(strings.TrimSpace(name))
 		}
 	}

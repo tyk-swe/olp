@@ -24,12 +24,10 @@ import (
 )
 
 func PassthroughAccessError(err error) error {
-	var refusal *routing.Refusal
-	if errors.As(err, &refusal) {
+	if refusal, ok := errors.AsType[*routing.Refusal](err); ok {
 		return httpkit.Fail(422, refusal.Code, refusal.Message)
 	}
-	var validation *routing.ValidationError
-	if errors.As(err, &validation) {
+	if validation, ok := errors.AsType[*routing.ValidationError](err); ok {
 		return httpkit.Invalid(validation.Field, validation.Message)
 	}
 	return err

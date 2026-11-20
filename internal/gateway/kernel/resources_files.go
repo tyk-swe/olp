@@ -257,8 +257,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		artifact, err := resp.StageBody(ctx, spool, "file-content", contentType, s.Config.MaxResponseBytes)
 		if err != nil {
-			var tooLarge *staging.TooLargeError
-			if errors.As(err, &tooLarge) {
+			if _, ok := errors.AsType[*staging.TooLargeError](err); ok {
 				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The provider file exceeded the configured response bound.")
 			}
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")

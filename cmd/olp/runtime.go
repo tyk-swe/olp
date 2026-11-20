@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,8 +58,7 @@ func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.P
 		business: telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels),
 	}
 	fail := func(err error) (runtimeCore, error) {
-		for i := len(core.closers) - 1; i >= 0; i-- {
-			closer := core.closers[i]
+		for _, closer := range slices.Backward(core.closers) {
 			closeDependency(deadline, c.ShutdownTimeout, log, closer.name, closer.close)
 		}
 		return runtimeCore{}, err

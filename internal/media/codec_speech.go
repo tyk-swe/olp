@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -145,9 +146,7 @@ func encodeDeepgramSpeech(r *Request, p Speech, _ connectors.Config, model strin
 		return nil, invalidMedia("Deepgram does not produce the requested speech format.")
 	}
 	query := url.Values{"model": {model}}
-	for name, values := range encoding {
-		query[name] = values
-	}
+	maps.Copy(query, encoding)
 	body, err := json.Marshal(map[string]string{"text": p.Input})
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")

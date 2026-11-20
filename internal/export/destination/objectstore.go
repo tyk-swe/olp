@@ -182,8 +182,7 @@ func (s *Sender) put(ctx context.Context, store Store, endpoint *url.URL, object
 		if errors.Is(err, connectors.ErrCredentialRejected) {
 			return sendError("credential", err)
 		}
-		var send *SendError
-		if errors.As(err, &send) {
+		if _, ok := errors.AsType[*SendError](err); ok {
 			return err
 		}
 		return sendError("authentication", err)

@@ -19,14 +19,14 @@ import (
 func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	var body scim.Document
 	var err error
-	if r.Method != "DELETE" {
+	if r.Method != http.MethodDelete {
 		body, err = scim.Decode(r.Body)
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		create := r.Method == "POST"
+		create := r.Method == http.MethodPost
 		id := httpkit.NewID()
 		var current scim.Document
 		var etag string
@@ -43,7 +43,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 				return httpkit.Reply{}, access.Event{}, scim.Fail(412, "invalidVers", "The resource changed; read its current version.")
 			}
 		}
-		if r.Method == "PUT" {
+		if r.Method == http.MethodPut {
 			extension := scim.UserExtension
 			if group {
 				extension = scim.GroupExtension
@@ -52,7 +52,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 				body[extension] = current[extension]
 			}
 		}
-		if r.Method == "PATCH" {
+		if r.Method == http.MethodPatch {
 			body, err = scim.Patch(current, body, group, scimSelector(r, tx))
 			if err != nil {
 				return httpkit.Reply{}, access.Event{}, err
@@ -90,7 +90,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		written := access.Event{Action: "scim." + kind + "." + strings.ToLower(r.Method), Resource: kind, ID: id}
-		if r.Method == "DELETE" {
+		if r.Method == http.MethodDelete {
 			return httpkit.Reply{Status: 204}, written, nil
 		}
 		resource, etag, err := s.scimRead(r, tx, group, id)

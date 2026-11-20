@@ -176,8 +176,7 @@ func (m mailer) bind(_ *egress.Policy, fields credentialFields) (channel, error)
 }
 
 func smtpError(err error) error {
-	var reply *textproto.Error
-	if errors.As(err, &reply) {
+	if reply, ok := errors.AsType[*textproto.Error](err); ok {
 		if reply.Code >= 500 {
 			return &sendError{smtp5xxCode, err}
 		}

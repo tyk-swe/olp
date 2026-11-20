@@ -3,7 +3,7 @@ run:
   build-tags: [integration, e2e, qualification, qualificationlive]
 linters:
   default: none
-  enable: [depguard, errorlint, funlen, ineffassign, revive, staticcheck, unconvert, unused, wastedassign]
+  enable: [depguard, errorlint, funlen, ineffassign, intrange, modernize, revive, staticcheck, unconvert, unused, usestdlibvars, wastedassign]
   settings:
     staticcheck:
       checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1019, ST1023]
@@ -22,6 +22,8 @@ linters:
           fun: (*github.com/tyk-swe/olp/internal/domain/protocols/sse.RawDecoder).Next
         - err: bufio.ErrBufferFull
           fun: (*bufio.Reader).ReadSlice
+    modernize:
+      disable: [newexpr, omitzero, stringsbuilder]
     funlen:
       lines: 100
       statements: -1
@@ -78,7 +80,7 @@ linters:
       - path: _test\.go$
         linters: [funlen, revive]
       - path: \.gen\.go$
-        linters: [funlen, revive]
+        linters: [funlen, revive, intrange, modernize, usestdlibvars]
       - path: _test\.go$
         linters: [errorlint]
 issues:

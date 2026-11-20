@@ -152,7 +152,7 @@ func (p *Prober) pollOperation(ctx context.Context, t Target, plan *operationpla
 		return nil, &Failure{Reason: ProviderProtocolError, Detail: "The upstream polling location is invalid."}
 	}
 	waitHeader := header
-	for polls := 0; polls < maxProbePolls; polls++ {
+	for polls := range maxProbePolls {
 		if polls > 0 {
 			wait := probePollWait
 			if waitHeader.Get("Retry-After") != "" {

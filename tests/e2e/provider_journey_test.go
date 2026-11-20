@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -27,9 +28,7 @@ func TestProviderLifecycleJourney(t *testing.T) {
 	upstream := newVendor(t).URL
 	configuration := func(extra map[string]any) map[string]any {
 		document := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": upstream + "/v1"}
-		for field, value := range extra {
-			document[field] = value
-		}
+		maps.Copy(document, extra)
 		return document
 	}
 	journey := func(t *testing.T) (*service, string) {

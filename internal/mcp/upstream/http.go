@@ -67,12 +67,12 @@ func (c *httpConnection) exchange(ctx context.Context, protocol string, id int, 
 	}
 	defer resp.Body.Close()
 	if id == 0 {
-		if resp.StatusCode != 202 && resp.StatusCode != 204 && resp.StatusCode != 200 {
+		if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 			return nil, ErrTransport
 		}
 		return nil, nil
 	}
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, ErrTransport
 	}
 	if method == "initialize" {

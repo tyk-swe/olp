@@ -62,7 +62,7 @@ func New(client Commander, namespace string) (*Store, error) {
 	if len(namespace) < 1 || len(namespace) > 128 {
 		return nil, errors.New("mcp: session namespace must be 1-128 characters")
 	}
-	for index := 0; index < len(namespace); index++ {
+	for index := range len(namespace) {
 		c := namespace[index]
 		switch {
 		case c >= '0' && c <= '9', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z',

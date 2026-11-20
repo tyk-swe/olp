@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -37,10 +38,8 @@ func policySurfaceGate(route *routing.Route) *fault.Error {
 }
 
 func recordDecision(x *Call, d contentpolicy.Decision) {
-	for _, existing := range x.policyDecisions {
-		if existing == d {
-			return
-		}
+	if slices.Contains(x.policyDecisions, d) {
+		return
 	}
 	x.policyDecisions = append(x.policyDecisions, d)
 }

@@ -154,7 +154,7 @@ func ParseControls(raw string) (Controls, error) {
 		return c, errors.New("X-OLP-Cache is too long")
 	}
 	seen := map[string]bool{}
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue

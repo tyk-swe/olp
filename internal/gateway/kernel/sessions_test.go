@@ -195,8 +195,7 @@ func runSessionCase(t *testing.T, surface sessionSurface, condition sessionCondi
 }
 
 func closeReason(err error) string {
-	var closed websocket.CloseError
-	if errors.As(err, &closed) {
+	if closed, ok := errors.AsType[websocket.CloseError](err); ok {
 		return closed.Reason
 	}
 	return ""

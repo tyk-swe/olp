@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,8 +30,7 @@ type datastores struct {
 func openDatastores(startup context.Context, c Config, pgConfig *pgxpool.Config, openValkey func(context.Context) (*coordination.Client, error), deadline *time.Time, log *slog.Logger) (datastores, error) {
 	var stores datastores
 	fail := func(err error) (datastores, error) {
-		for i := len(stores.closers) - 1; i >= 0; i-- {
-			closer := stores.closers[i]
+		for _, closer := range slices.Backward(stores.closers) {
 			closeDependency(deadline, c.ShutdownTimeout, log, closer.name, closer.close)
 		}
 		return datastores{}, err

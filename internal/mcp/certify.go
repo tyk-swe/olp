@@ -44,9 +44,7 @@ func (s *Server) certifyToolsetServers(ctx context.Context, authority keyauthori
 	slots := make(chan struct{}, maxConcurrentCertifies)
 	var pending sync.WaitGroup
 	for index, tool := range tools {
-		pending.Add(1)
-		go func() {
-			defer pending.Done()
+		pending.Go(func() {
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
@@ -55,7 +53,7 @@ func (s *Server) certifyToolsetServers(ctx context.Context, authority keyauthori
 				return
 			}
 			states[index] = s.executor.certifyServer(ctx, authority, tool)
-		}()
+		})
 	}
 	pending.Wait()
 	certified := make(map[string]sessions.Certification, len(tools))

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -295,9 +296,7 @@ func (s *Service) Want(c *Caller, method, path string, body any, headers map[str
 func Idempotent(headers ...map[string]string) map[string]string {
 	merged := map[string]string{"Idempotency-Key": uuid.NewString()}
 	for _, extra := range headers {
-		for name, value := range extra {
-			merged[name] = value
-		}
+		maps.Copy(merged, extra)
 	}
 	return merged
 }

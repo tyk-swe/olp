@@ -37,7 +37,7 @@ func serverID(v any) string {
 	if !ok {
 		return ""
 	}
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if id, ok := strings.CutPrefix(strings.TrimSpace(line), "run_id:"); ok {
 			return id
 		}

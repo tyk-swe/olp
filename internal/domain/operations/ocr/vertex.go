@@ -129,7 +129,7 @@ func gcsURI(s string) bool {
 	if !found || bucket == "" || object == "" {
 		return false
 	}
-	for _, segment := range strings.Split(rest, "/") {
+	for segment := range strings.SplitSeq(rest, "/") {
 		if segment == "" || segment == "." || segment == ".." {
 			return false
 		}

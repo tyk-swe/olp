@@ -2,6 +2,7 @@ package codeforward
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"time"
 
@@ -52,9 +53,7 @@ func (f *Forwarder) answerResearchPing(r *http.Request, release *release.Release
 	if protocol := r.Header.Get("Mcp-Protocol-Version"); protocol != "" {
 		request.Header.Set("Mcp-Protocol-Version", protocol)
 	}
-	for name, values := range auth.Headers {
-		request.Header[name] = values
-	}
+	maps.Copy(request.Header, auth.Headers)
 	response, err := client.Do(request)
 	if err != nil {
 		return codemode.Refuse(502, "code_research_upstream_unavailable")

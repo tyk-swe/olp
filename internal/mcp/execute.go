@@ -69,8 +69,7 @@ func (s *Executor) reserveToolRate(ctx context.Context, in CallRequest) ([]*admi
 		lease, err := limiter.Reserve(ctx, request)
 		if err != nil {
 			s.finishLeases(ctx, leases, false)
-			var exceeded *limits.ExceededError
-			if errors.As(err, &exceeded) {
+			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				return nil, refusal("tool_rate_limited", "The call exceeds a tool rate or concurrency limit, so it was not dispatched."), exceeded.RetryAfter
 			}
 			return nil, refusal("limits_unavailable", "Tool call limits are unavailable, so the call was not dispatched."), 0
@@ -150,8 +149,7 @@ func (s *Executor) reserveToolCall(ctx context.Context, in CallRequest) (*accoun
 		if errors.Is(err, accounting.ErrUnpricedToolCall) {
 			return nil, Execution{Outcome: Refused{Failure: refusal("tool_unpriced", "The tool has no price and an enforced budget needs a finite bound, so the call was not dispatched."), RetryAfter: 0}}
 		}
-		var exceeded *limits.ExceededError
-		if errors.As(err, &exceeded) {
+		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			return nil, Execution{Outcome: Refused{Failure: refusal("budget_exceeded", "The call exceeds an enforced budget, so it was not dispatched."), RetryAfter: exceeded.RetryAfter}}
 		}
 		return nil, Execution{Outcome: Refused{Failure: failureLedger, RetryAfter: 0}}

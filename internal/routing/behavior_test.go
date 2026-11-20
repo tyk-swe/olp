@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -221,9 +222,7 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 			b.Fallbacks = append([]Fallback(nil), valid.Fallbacks...)
 			b.Selectors = append([]Selector(nil), valid.Selectors...)
 			b.Retry = Retry{}
-			for class, rule := range valid.Retry {
-				b.Retry[class] = rule
-			}
+			maps.Copy(b.Retry, valid.Retry)
 			mutate(&b)
 			if err := b.Validate("assistant", tagged); err == nil {
 				t.Fatal("accepted")

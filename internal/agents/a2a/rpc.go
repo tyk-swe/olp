@@ -180,8 +180,7 @@ func rpcFailure(err error) *rpcError {
 	case errors.Is(err, tasks.ErrRateLimit):
 		return &rpcError{-32002, "Agent send rate exceeded"}
 	}
-	var failure agents.Failure
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[agents.Failure](err); ok {
 		return &rpcError{-32603, failure.Error()}
 	}
 	return &rpcError{-32603, "Internal error"}

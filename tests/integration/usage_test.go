@@ -1311,8 +1311,7 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 		stop()
 		return progress, err
 	}})
-	var sendErr *destination.SendError
-	if !errors.As(deliveryErr, &sendErr) {
+	if _, ok := errors.AsType[*destination.SendError](deliveryErr); !ok {
 		t.Errorf("failed destination lost delivery error: %v", deliveryErr)
 	}
 	var failures, successes int64
@@ -1419,7 +1418,7 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 			serverHTTP := httptest.NewServer(mux)
 			defer serverHTTP.Close()
 			for range 2 {
-				r, _ := http.NewRequest("POST", serverHTTP.URL+"/api/v1/mcp-tool-calls/"+call+"/resolve", strings.NewReader(`{"outcome":"settled","evidence_digest":"`+strings.Repeat("a", 64)+`","observed_cost":"0","observed_charge":"0"}`))
+				r, _ := http.NewRequest(http.MethodPost, serverHTTP.URL+"/api/v1/mcp-tool-calls/"+call+"/resolve", strings.NewReader(`{"outcome":"settled","evidence_digest":"`+strings.Repeat("a", 64)+`","observed_cost":"0","observed_charge":"0"}`))
 				r.Header.Set("Content-Type", "application/json")
 				r.Header.Set("Origin", "https://test.example")
 				r.Header.Set("Idempotency-Key", "audit")
@@ -1431,7 +1430,7 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 				}
 				defer w.Body.Close()
 				body, _ := io.ReadAll(w.Body)
-				if w.StatusCode != 200 {
+				if w.StatusCode != http.StatusOK {
 					t.Fatalf("resolve HTTP %d: %s", w.StatusCode, body)
 				}
 			}

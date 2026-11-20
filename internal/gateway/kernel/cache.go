@@ -150,10 +150,8 @@ func containsCacheReference(v oif.Value) bool {
 			}
 		}
 	case oif.Array:
-		for _, e := range v.Elements() {
-			if containsCacheReference(e) {
-				return true
-			}
+		if slices.ContainsFunc(v.Elements(), containsCacheReference) {
+			return true
 		}
 	}
 	return false

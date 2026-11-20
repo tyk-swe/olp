@@ -68,20 +68,20 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.Pr
 			if slices.Contains(positions, "last_user") && used < 4 {
 				var messages []map[string]json.RawMessage
 				if json.Unmarshal(root["messages"], &messages) == nil {
-					for i := len(messages) - 1; i >= 0; i-- {
-						if string(messages[i]["role"]) != `"user"` {
+					for _, message := range slices.Backward(messages) {
+						if string(message["role"]) != `"user"` {
 							continue
 						}
 						var blocks []map[string]json.RawMessage
 						var text string
-						if json.Unmarshal(messages[i]["content"], &text) == nil {
+						if json.Unmarshal(message["content"], &text) == nil {
 							raw, _ := json.Marshal(text)
 							blocks = []map[string]json.RawMessage{{"type": json.RawMessage(`"text"`), "text": raw}}
 						} else {
-							_ = json.Unmarshal(messages[i]["content"], &blocks)
+							_ = json.Unmarshal(message["content"], &blocks)
 						}
 						if markLast(blocks, control) {
-							messages[i]["content"], _ = json.Marshal(blocks)
+							message["content"], _ = json.Marshal(blocks)
 							root["messages"], _ = json.Marshal(messages)
 							changed = true
 						}

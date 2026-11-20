@@ -57,8 +57,7 @@ func decodeCall(w http.ResponseWriter, r *http.Request) (callRequest, *apiError)
 	var request callRequest
 	raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCallBodyBytes))
 	if readErr != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(readErr, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](readErr); ok {
 			return callRequest{}, fail(http.StatusRequestEntityTooLarge, "request_too_large", "invalid_request_error", "The call body exceeds the 1 MiB bound.")
 		}
 		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object.")
@@ -69,8 +68,7 @@ func decodeCall(w http.ResponseWriter, r *http.Request) (callRequest, *apiError)
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			return callRequest{}, fail(http.StatusRequestEntityTooLarge, "request_too_large", "invalid_request_error", "The call body exceeds the 1 MiB bound.")
 		}
 		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object.")

@@ -289,7 +289,7 @@ func (d Document) Lookup(pointer string) (Value, bool) {
 	if !strings.HasPrefix(pointer, "/") {
 		return Value{}, false
 	}
-	for _, part := range strings.Split(pointer[1:], "/") {
+	for part := range strings.SplitSeq(pointer[1:], "/") {
 		var b strings.Builder
 		for i := 0; i < len(part); i++ {
 			if part[i] != '~' {
@@ -311,7 +311,7 @@ func (d Document) Lookup(pointer string) (Value, bool) {
 			if name == "" || len(name) > 1 && name[0] == '0' {
 				return Value{}, false
 			}
-			for i := 0; i < len(name); i++ {
+			for i := range len(name) {
 				if name[i] < '0' || name[i] > '9' {
 					return Value{}, false
 				}

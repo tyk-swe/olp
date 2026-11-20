@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -172,9 +173,7 @@ func (m *Manager) refreshExternalCredentials(ctx context.Context) error {
 		references[id] = entry.reference
 	}
 	m.external.mu.Unlock()
-	for id, reference := range release.references {
-		references[id] = reference
-	}
+	maps.Copy(references, release.references)
 	var failures []error
 	for id, reference := range references {
 		value, err := m.external.read(ctx, m.externalSecrets, id, reference)

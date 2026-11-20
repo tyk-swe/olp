@@ -26,7 +26,7 @@ func TestCallerCredentialRefusalDoesNotPoisonProbeOrCrossTargets(t *testing.T) {
 	const secret = "rejected-caller-secret"
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "rejected " + secret, "type": "authentication_error"}})
 	})
 	response, body := h.chat(fullKey, map[string]string{callerCredentialHeader: secret})
@@ -36,7 +36,7 @@ func TestCallerCredentialRefusalDoesNotPoisonProbeOrCrossTargets(t *testing.T) {
 	}
 	h.mock.set("a", completion(modelA, answerText))
 	response, _ = h.chat(fullKey, map[string]string{callerCredentialHeader: "valid-new-caller"})
-	if response.StatusCode != 200 {
+	if response.StatusCode != http.StatusOK {
 		t.Fatalf("caller failure poisoned operator probe or pool: %d", response.StatusCode)
 	}
 }

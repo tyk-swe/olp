@@ -56,8 +56,8 @@ func readPasswordFile(path string) (string, error) {
 	if len(data) > 4097 {
 		return "", errors.New("password file exceeds the 4097 byte limit")
 	}
-	if bytes.HasSuffix(data, []byte("\n")) {
-		data = bytes.TrimSuffix(data, []byte("\n"))
+	if before, ok := bytes.CutSuffix(data, []byte("\n")); ok {
+		data = before
 		data = bytes.TrimSuffix(data, []byte("\r"))
 	}
 	if !utf8.Valid(data) {

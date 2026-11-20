@@ -87,8 +87,7 @@ func (i *Ingester) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	leases, err := i.store.reserve(r.Context(), authority)
 	if err != nil {
-		var exceeded *limits.ExceededError
-		if errors.As(err, &exceeded) {
+		if _, ok := errors.AsType[*limits.ExceededError](err); ok {
 			writeTraceError(w, http.StatusTooManyRequests, "Trace ingestion rate limit exceeded.")
 			return
 		}

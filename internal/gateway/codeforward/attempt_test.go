@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -152,7 +153,7 @@ func TestTranslatedIncompleteRateLimitFinishesClientResponse(t *testing.T) {
 	body := &stalledRejectionBody{prefix: strings.NewReader(`{"error":{"type":"rate_limit_error"`), waiting: make(chan struct{}), closed: make(chan struct{})}
 	finished := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: body}
+		response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: body}
 		attempt.response(r.Context(), response.StatusCode, response.Header)
 		attempt.translateResponse(r.Context(), w, r, response, "public-model", false, wire.Chat, false)
 		attempt.finish(context.WithoutCancel(r.Context()))
@@ -204,7 +205,7 @@ func TestWebSocketHandshakeRejectionStreamsBeforeReadingMore(t *testing.T) {
 	writer := &notifyingResponseWriter{ResponseRecorder: httptest.NewRecorder(), written: make(chan struct{})}
 	premature := make(chan struct{}, 1)
 	body := io.MultiReader(strings.NewReader("first"), afterResponseReader{ready: writer.written, premature: premature, reader: strings.NewReader("second")})
-	forwardCodeHandshakeRejection(t.Context(), writer, attempt, &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(body)})
+	forwardCodeHandshakeRejection(t.Context(), writer, attempt, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(body)})
 	select {
 	case <-premature:
 		t.Fatal("upstream body was read further before forwarding the first bytes")
@@ -234,9 +235,7 @@ func TestWebSocketHandshakeRejectionPreservesBodyAndQuota(t *testing.T) {
 				header.Set("Content-Encoding", "gzip")
 			}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				for name, values := range header {
-					w.Header()[name] = values
-				}
+				maps.Copy(w.Header(), header)
 				w.WriteHeader(http.StatusTooManyRequests)
 				_, _ = w.Write(body)
 			}))
@@ -273,7 +272,7 @@ func TestWebSocketHandshakeRejectionForwardsOversizedBody(t *testing.T) {
 	attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
 	attempt.permit.Attempt.ID = ""
 	writer := httptest.NewRecorder()
-	forwardCodeHandshakeRejection(t.Context(), writer, attempt, &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))})
+	forwardCodeHandshakeRejection(t.Context(), writer, attempt, &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))})
 	if writer.Code != 429 || !bytes.Equal(writer.Body.Bytes(), body) || len(ledger.cooldowns) != 0 {
 		t.Fatalf("forwarded status = %d, body length = %d, cooldowns = %+v", writer.Code, writer.Body.Len(), ledger.cooldowns)
 	}
@@ -379,7 +378,7 @@ func TestTranslatedRejectionRecordsModelCooldown(t *testing.T) {
 					body = encoded.Bytes()
 					header.Set("Content-Encoding", "gzip")
 				}
-				response := &http.Response{StatusCode: 429, Header: header, Body: io.NopCloser(bytes.NewReader(body))}
+				response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: header, Body: io.NopCloser(bytes.NewReader(body))}
 				attempt.response(t.Context(), response.StatusCode, response.Header)
 				writer := httptest.NewRecorder()
 				attempt.translateResponse(t.Context(), writer, httptest.NewRequest(http.MethodPost, "/", nil), response, "public-model", false, family, false)
@@ -618,7 +617,7 @@ func TestCodeAttemptRecoveryRecordsQuotaCooldown(t *testing.T) {
 			attempt := codexAttempt(t, ledger, now)
 			attempt.permit.InitialRecovery = true
 			attempt.dispatched = true
-			response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`))}
+			response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`))}
 			attempt.response(t.Context(), response.StatusCode, response.Header)
 			recovery, err := attempt.recover(t.Context(), response, codemode.Route{InitialRecoveryAttempts: 1}, nil, false)
 			if err != nil {
@@ -684,7 +683,7 @@ func TestTranslatedRecoveryKeepsProvenReplay(t *testing.T) {
 	attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
 	attempt.permit.InitialRecovery = true
 	attempt.dispatched = true
-	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`))}
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`))}
 	attempt.response(t.Context(), response.StatusCode, response.Header)
 	recovery, err := attempt.recover(t.Context(), response, codemode.Route{InitialRecoveryAttempts: 1}, nil, true)
 	if err != nil || recovery == nil || ledger.confirmations != 1 || len(ledger.cooldowns) != 1 || ledger.cooldowns[0].classification.Class != codeadapter.CooldownQuota {
@@ -699,7 +698,7 @@ func TestRecoveryPreservesUntranslatedRejectionBody(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
-	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: reader}
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: reader}
 	prefix := `{"error":{"type":"rate_limit_error",`
 	suffix := `"code":"unrecognized"}}`
 	written := make(chan struct{})
@@ -827,13 +826,13 @@ func TestCodeAttemptGLMQuotaDoesNotRecoverWithoutNonexecutionProof(t *testing.T)
 	reset := now.Add(2 * time.Hour)
 	route := codemode.Route{InitialRecoveryAttempts: 1}
 	proven := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"}}`))}
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"}}`))}
 	recovery, err := proven.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(quota) = %+v, %v, want no replay", recovery, err)
 	}
 	ambiguous := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"},"extra":1}`))}
+	response = &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"},"extra":1}`))}
 	recovery, err = ambiguous.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
@@ -1002,7 +1001,7 @@ func TestCodeAttemptMiniMaxStandaloneErrorCoolsOnlyTargetModel(t *testing.T) {
 					attempt.publicModel = "public-model"
 				}
 				body := `{"base_resp":{"status_code":2061,"status_msg":"your current token plan not support model"}}`
-				response := &http.Response{StatusCode: 429, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
+				response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
 				attempt.response(t.Context(), response.StatusCode, response.Header)
 				attempt.copyResponse(t.Context(), httptest.NewRecorder(), response)
 				attempt.finish(t.Context())
@@ -1053,7 +1052,7 @@ func TestCodeAttemptKimiQuotaDoesNotRecoverWithoutNonexecutionProof(t *testing.T
 		"extra member":                       {"v1/chat/completions", `{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","param":null}}`, ""},
 	} {
 		attempt := kimiAttempt(t, &fakeCodeLedger{}, now, tc.path)
-		response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
+		response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
 		recovery, err := attempt.recover(t.Context(), response, route, nil, false)
 		if err != nil || recovery != nil {
 			t.Fatalf("recover(%s) = %+v, %v, want no replay", name, recovery, err)
@@ -1066,13 +1065,13 @@ func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	route := codemode.Route{InitialRecoveryAttempts: 1}
 	proven := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`))}
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`))}
 	recovery, err := proven.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(proven) = %+v, %v, want no replay pending live envelope qualification", recovery, err)
 	}
 	ambiguous := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`))}
+	response = &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`))}
 	recovery, err = ambiguous.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)

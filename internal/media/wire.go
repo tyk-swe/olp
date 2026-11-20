@@ -169,7 +169,7 @@ func ValidUpstreamJobID(value string) bool {
 }
 
 func validJobIDChars(value string) bool {
-	for i := 0; i < len(value); i++ {
+	for i := range len(value) {
 		c := value[i]
 		if c < 0x20 || c == 0x7f {
 			return false
@@ -182,7 +182,7 @@ func VideoJobPath(jobID, suffix string) (string, *Error) {
 	if jobID == "" || len(jobID) > 256 {
 		return "", invalidMedia("The upstream video job ID is invalid.")
 	}
-	for i := 0; i < len(jobID); i++ {
+	for i := range len(jobID) {
 		c := jobID[i]
 		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
 		if !ok {

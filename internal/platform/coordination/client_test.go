@@ -166,7 +166,7 @@ func answerValkey(conn net.Conn, searchReply string) {
 			return
 		}
 		command := ""
-		for index := 0; index < count; index++ {
+		for index := range count {
 			lengthLine, err := reader.ReadString('\n')
 			if err != nil {
 				return

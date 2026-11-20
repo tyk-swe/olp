@@ -39,8 +39,7 @@ func canonical(t *testing.T, value any) string {
 }
 
 func problem(err error) string {
-	var failure *Error
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*Error](err); ok {
 		return failure.Type
 	}
 	return fmt.Sprint(err)

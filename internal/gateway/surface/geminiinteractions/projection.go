@@ -3,6 +3,7 @@ package geminiinteractions
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,10 +123,8 @@ func containsNativeResourceID(body []byte, ids ...string) bool {
 				}
 			}
 		case oif.Array:
-			for _, item := range value.Elements() {
-				if visit(item) {
-					return true
-				}
+			if slices.ContainsFunc(value.Elements(), visit) {
+				return true
 			}
 		}
 		return false

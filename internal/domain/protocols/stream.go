@@ -907,7 +907,7 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 		}
 		return t.emit([]byte("data: [DONE]\n\n"))
 	case wire.Anthropic:
-		for i := 0; i < t.nextBlock; i++ {
+		for i := range t.nextBlock {
 			if e := t.send("content_block_stop", Object{"type": raw("content_block_stop"), "index": raw(i)}); e != nil {
 				return e
 			}

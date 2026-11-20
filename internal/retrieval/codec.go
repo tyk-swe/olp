@@ -390,7 +390,7 @@ func fieldValue(item map[string]any, path string) any {
 		return nil
 	}
 	var value any = item
-	for _, key := range strings.Split(path, "/") {
+	for key := range strings.SplitSeq(path, "/") {
 		object, ok := value.(map[string]any)
 		if !ok {
 			return nil

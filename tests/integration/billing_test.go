@@ -465,7 +465,7 @@ func fakeCostReportBucket(t *testing.T, bucket, prefix, payer string, earliest, 
 			fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>%s</Name><Prefix>%s</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>%s</Key><LastModified>%s</LastModified><Size>1</Size></Contents></ListBucketResult>`,
 				bucket, listPrefix, listPrefix+"assembly-"+period+"/olp-Manifest.json", delivered.Format("2006-01-02T15:04:05.000Z"))
 		case ok && strings.HasSuffix(key, "-Manifest.json"):
-			period := strings.Split(strings.TrimPrefix(key, prefix+"/"), "/")[0]
+			period, _, _ := strings.Cut(strings.TrimPrefix(key, prefix+"/"), "/")
 			start, end := month(period)
 			json.NewEncoder(w).Encode(map[string]any{
 				"assemblyId":    "assembly-" + period,

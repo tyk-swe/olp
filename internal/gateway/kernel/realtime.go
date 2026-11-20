@@ -277,8 +277,7 @@ func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *ht
 			continue
 		}
 		if err := template.AdmitHandshake(r.URL.RawQuery, r.Header, route.Slug); err != nil {
-			var refusal *oif.Incompatibility
-			if errors.As(err, &refusal) {
+			if refusal, ok := errors.AsType[*oif.Incompatibility](err); ok {
 				parameter := refusal.Field
 				return fault.InvalidRequest(refusal.Code, refusal.Message, &parameter)
 			}

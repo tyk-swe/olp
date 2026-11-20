@@ -5,6 +5,7 @@ package qualification_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -217,9 +218,7 @@ func (s *service) liveJourney(owner, consumer *harness.Caller, project, ownerID,
 func (s *service) liveInference(consumer *harness.Caller, slug string, l liveLane) int {
 	_, model, _ := l.provided()
 	headers := map[string]string{"User-Agent": l.client.userAgent}
-	for name, value := range l.headers {
-		headers[name] = value
-	}
+	maps.Copy(headers, l.headers)
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		status, _ := s.Do(consumer, "POST", "/code/"+slug+"/"+l.path, liveBody(l.protocol, model), headers)

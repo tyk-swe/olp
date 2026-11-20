@@ -72,12 +72,10 @@ func guardrailError(err error) *fault.Error {
 	if err == nil {
 		return nil
 	}
-	var existing *fault.Error
-	if errors.As(err, &existing) {
+	if existing, ok := errors.AsType[*fault.Error](err); ok {
 		return existing
 	}
-	var failure guardrails.Failure
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[guardrails.Failure](err); ok {
 		return &fault.Error{Status: guardrailStatus(failure), Type: "invalid_request_error", Code: string(failure), Message: "The request could not satisfy the configured guardrails."}
 	}
 	return fault.ServerError(500, "guardrail_unavailable", "The guardrail could not be evaluated.")

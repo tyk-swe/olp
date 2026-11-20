@@ -64,9 +64,6 @@ func Score(routeID, targetID uuid.UUID, weight int64, operation, surface, mode s
 	}
 	raw := binary.BigEndian.Uint64(h.Sum(nil)[:8])
 	sample := (float64(raw>>11) + 1) / (float64(uint64(1)<<53) + 1)
-	effective := weight
-	if effective < 1 {
-		effective = 1
-	}
+	effective := max(weight, 1)
 	return float64(effective) / -math.Log(sample)
 }

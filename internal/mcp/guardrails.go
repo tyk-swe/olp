@@ -25,8 +25,7 @@ type toolGuardrailState struct {
 }
 
 func guardrailRefusal(err error) *Failure {
-	var policyFailure guardrails.Failure
-	if errors.As(err, &policyFailure) {
+	if policyFailure, ok := errors.AsType[guardrails.Failure](err); ok {
 		return &Failure{Code: string(policyFailure), Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
 	}
 	return refusal("guardrail_unavailable", "The guardrail could not be evaluated.")

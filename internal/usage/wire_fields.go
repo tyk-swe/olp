@@ -115,7 +115,7 @@ func parseWireDecimal(value string) (bool, error) {
 	}
 	nonZero := false
 	for _, part := range [2]string{integer, fraction} {
-		for index := 0; index < len(part); index++ {
+		for index := range len(part) {
 			if part[index] < '0' || part[index] > '9' {
 				return false, errors.New("decimal has a non-digit")
 			}

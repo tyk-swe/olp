@@ -276,7 +276,7 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 	}
 	var line managedBatchLine
 	if json.Unmarshal(raw, &line) != nil || line.CustomID == "" || len(line.CustomID) > managedCustomIDLimit(t.adapter) ||
-		line.Method != "POST" || len(line.Body) == 0 {
+		line.Method != http.MethodPost || len(line.Body) == 0 {
 		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported shape.", lineNumber)
 	}
 	classified := line.URL

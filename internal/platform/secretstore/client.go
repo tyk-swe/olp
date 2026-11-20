@@ -165,7 +165,7 @@ func vaultResource(raw string) (*url.URL, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || !strings.HasPrefix(u.Path, "/v1/") {
 		return nil, ErrUnavailable
 	}
-	for _, part := range strings.Split(strings.TrimPrefix(u.Path, "/v1/"), "/") {
+	for part := range strings.SplitSeq(strings.TrimPrefix(u.Path, "/v1/"), "/") {
 		if !component.MatchString(part) {
 			return nil, ErrUnavailable
 		}

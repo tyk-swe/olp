@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 
 	filter "github.com/scim2/filter-parser/v2"
@@ -128,9 +130,7 @@ func Patch(current, body Document, group bool, selectValues Select) (Document, e
 				if kind == "add" {
 					if object, ok := item.(map[string]any); ok {
 						if fields, ok := value.(map[string]any); ok {
-							for k, v := range fields {
-								object[k] = v
-							}
+							maps.Copy(object, fields)
 							out = append(out, object)
 							continue
 						}
@@ -252,9 +252,7 @@ func change(d map[string]any, parts []string, kind string, value any, group bool
 					a, aok := existing.(map[string]any)
 					b, bok := v.(map[string]any)
 					if aok && bok && a["value"] != nil && fmt.Sprint(a["value"]) == fmt.Sprint(b["value"]) {
-						for key, value := range b {
-							a[key] = value
-						}
+						maps.Copy(a, b)
 						duplicate = true
 						break
 					}
@@ -268,9 +266,7 @@ func change(d map[string]any, parts []string, kind string, value any, group bool
 		}
 		if old, ok := parent[key].(map[string]any); ok {
 			if fields, ok := value.(map[string]any); ok {
-				for k, v := range fields {
-					old[k] = v
-				}
+				maps.Copy(old, fields)
 				return nil
 			}
 		}
@@ -284,10 +280,8 @@ func hasPrimary(value any) bool {
 		return object["primary"] == true
 	}
 	if list, ok := value.([]any); ok {
-		for _, v := range list {
-			if hasPrimary(v) {
-				return true
-			}
+		if slices.ContainsFunc(list, hasPrimary) {
+			return true
 		}
 	}
 	return false

@@ -115,12 +115,7 @@ func hasOpaqueNative(value oif.Value) bool {
 			return true
 		}
 	}
-	for _, element := range value.Elements() {
-		if hasOpaqueNative(element) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(value.Elements(), hasOpaqueNative)
 }
 
 // CheckInput uses the same effective native input for runtime and no-inference

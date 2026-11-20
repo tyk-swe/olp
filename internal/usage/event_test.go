@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"maps"
 	"math"
 	"strings"
 	"testing"
@@ -442,9 +443,7 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			candidate := make(map[string]json.RawMessage, len(envelope))
-			for key, value := range envelope {
-				candidate[key] = value
-			}
+			maps.Copy(candidate, envelope)
 			tc.mutate(candidate)
 			event, err := Decode(marshalForTest(t, candidate))
 			if err == nil {

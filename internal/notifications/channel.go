@@ -162,8 +162,7 @@ func sendErrorCode(err error) Failure {
 	if err == nil {
 		return ""
 	}
-	var se *sendError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*sendError](err); ok {
 		return se.code
 	}
 	return networkCode

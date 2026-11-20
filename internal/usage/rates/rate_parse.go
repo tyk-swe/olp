@@ -210,7 +210,7 @@ func scaledDecimal(text string, digits int) (*big.Int, bool) {
 		return nil, false
 	}
 	whole := integer + fraction + strings.Repeat("0", digits-len(fraction))
-	for index := 0; index < len(whole); index++ {
+	for index := range len(whole) {
 		if whole[index] < '0' || whole[index] > '9' {
 			return nil, false
 		}

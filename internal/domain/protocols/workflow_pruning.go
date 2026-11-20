@@ -67,8 +67,7 @@ func WorkflowPruningTask(request *wire.Request, limit int) string {
 	if err != nil {
 		return ""
 	}
-	for index := len(generation.Messages) - 1; index >= 0; index-- {
-		message := generation.Messages[index]
+	for _, message := range slices.Backward(generation.Messages) {
 		if message.Role != "user" {
 			continue
 		}

@@ -62,7 +62,7 @@ func validCallID(callID string) bool {
 	if len(callID) < 1 || len(callID) > maxCallIDBytes || strings.TrimSpace(callID) == "" {
 		return false
 	}
-	for index := 0; index < len(callID); index++ {
+	for index := range len(callID) {
 		if callID[index] < 0x20 || callID[index] == 0x7f {
 			return false
 		}

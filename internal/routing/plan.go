@@ -561,7 +561,7 @@ func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 		if !checkSlots {
 			count = 1
 		}
-		for i := 0; i < count; i++ {
+		for i := range count {
 			decision := row.decision
 			if checkSlots {
 				id := row.slots[i].ID

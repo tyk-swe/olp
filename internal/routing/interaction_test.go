@@ -105,13 +105,11 @@ func TestToolContinuationPreservesUpstreamStreamErrors(t *testing.T) {
 				emitted = append(emitted, frames...)
 				return err
 			})
-			var violation *oif.Incompatibility
-			if errors.As(err, &violation) {
+			if _, ok := errors.AsType[*oif.Incompatibility](err); ok {
 				t.Fatalf("provider failure replaced by projection refusal: %v", err)
 			}
 			if tc.protocol {
-				var malformed *wire.ProtocolError
-				if !errors.As(err, &malformed) {
+				if _, ok := errors.AsType[*wire.ProtocolError](err); !ok {
 					t.Fatalf("malformed error = %T %v", err, err)
 				}
 			} else {
