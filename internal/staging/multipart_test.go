@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 const uploadKey = "key"
@@ -234,6 +235,18 @@ func TestParseMultipartRefusesAndCleansUpRequestsOutsideItsLimits(t *testing.T) 
 			mutate: func(r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				r.Body = io.NopCloser(bytes.NewReader(body[:len(body)-8]))
+			},
+			kind: Invalid,
+		},
+		"EOF before any multipart data": {
+			mutate: func(r *http.Request) {
+				r.Body = io.NopCloser(iotest.ErrReader(io.EOF))
+			},
+			kind: Invalid,
+		},
+		"a body read failure": {
+			mutate: func(r *http.Request) {
+				r.Body = io.NopCloser(iotest.ErrReader(io.ErrClosedPipe))
 			},
 			kind: Invalid,
 		},

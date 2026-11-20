@@ -164,7 +164,7 @@ func parseFields(ctx context.Context, spool *Spool, reader *multipart.Reader, ma
 			return errTimeout
 		}
 		part, err := reader.NextPart()
-		if errors.Is(err, io.EOF) {
+		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
