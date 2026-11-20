@@ -208,7 +208,7 @@ func (l retainedListing) advance(ctx context.Context, from retainedScan, target 
 
 func (l retainedListing) candidate(ctx context.Context, resource *resources.Resource) (retainedListEntry, bool, *fault.Error) {
 	s, x := l.server, l.x
-	if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+	if retainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 		return retainedListEntry{}, false, nil
 	}
 	p, route, resolveErr := s.ResolveResource(ctx, x, l.authority, resource, l.endpoint.Operation, RetainedRetrieval)

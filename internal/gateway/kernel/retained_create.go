@@ -95,19 +95,28 @@ func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	if err != nil {
 		return retainedSubmission{}, err
 	}
-	prior, lookupErr := q.server.Deps.Resources.LookupLifecycle(q.r.Context(), q.x.keyID, q.endpoint.Operation, key, digest)
-	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
-		return retainedSubmission{}, fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request.")
+	submission := retainedSubmission{slug: slug, key: key, digest: digest}
+	return submission, q.server.unsubmitted(q.r.Context(), q.reply, q.endpoint.Operation, submission)
+}
+
+func (s *Server) unsubmitted(ctx context.Context, reply retainedReply, operation string, submission retainedSubmission) *fault.Error {
+	prior, err := s.Deps.Resources.LookupLifecycle(ctx, reply.x.keyID, operation, submission.key, submission.digest)
+	if errors.Is(err, resources.ErrSubmissionConflict) {
+		return retainedSubmissionConflict()
 	}
-	if lookupErr == nil {
-		q.x.Route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
-		q.reply.w.Header().Set("X-OLP-Resource-ID", prior.ID)
-		return retainedSubmission{}, retainedSubmissionExists()
+	if err == nil {
+		reply.x.Route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
+		reply.w.Header().Set("X-OLP-Resource-ID", prior.ID)
+		return retainedSubmissionExists()
 	}
-	if !errors.Is(lookupErr, resources.ErrNotFound) {
-		return retainedSubmission{}, fault.ServerError(503, "provider_state_unavailable", "The submission could not be read.")
+	if !errors.Is(err, resources.ErrNotFound) {
+		return fault.ServerError(503, "provider_state_unavailable", "The submission could not be read.")
 	}
-	return retainedSubmission{slug: slug, key: key, digest: digest}, nil
+	return nil
+}
+
+func retainedSubmissionConflict() *fault.Error {
+	return fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request.")
 }
 
 func retainedSubmissionExists() *fault.Error {
@@ -196,7 +205,7 @@ func (q retainedRequest) beginCreation(ctx context.Context, p *Pin, route *routi
 	}
 	lifecycle, err := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
 	if errors.Is(err, resources.ErrSubmissionConflict) {
-		return nil, nil, fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request.")
+		return nil, nil, retainedSubmissionConflict()
 	}
 	if err != nil {
 		return nil, nil, fault.ServerError(503, "provider_state_unavailable", "The submission could not be persisted.")

@@ -109,7 +109,7 @@ func (q retainedRequest) resolve(resource *resources.Resource) (*Pin, *routing.R
 			return nil, nil, err
 		}
 	}
-	if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" {
+	if retainedUnsettled(resource.State) {
 		return nil, nil, fault.ServerError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted.")
 	}
 	return pin, route, nil
