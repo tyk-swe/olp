@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func csvHeaders(w http.ResponseWriter, name string) {
@@ -15,7 +15,7 @@ func csvHeaders(w http.ResponseWriter, name string) {
 	w.Header().Set("Cache-Control", "no-store")
 }
 
-func (s *API) exportRequestsCSV(w http.ResponseWriter, r *http.Request, p access.Principal) error {
+func (s *API) exportRequestsCSV(w http.ResponseWriter, r *http.Request, p authz.Principal) error {
 	filters, err := s.requestFilters(r, p)
 	if err != nil {
 		return err
@@ -41,7 +41,7 @@ func (s *API) exportRequestsCSV(w http.ResponseWriter, r *http.Request, p access
 	return err
 }
 
-func (s *API) exportUsageCSV(w http.ResponseWriter, r *http.Request, p access.Principal) error {
+func (s *API) exportUsageCSV(w http.ResponseWriter, r *http.Request, p authz.Principal) error {
 	filters, err := usageFilters(r, p)
 	if err != nil {
 		return err

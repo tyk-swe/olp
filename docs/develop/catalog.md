@@ -106,7 +106,7 @@ Two kinds of key verify catalogs:
   `catalog.json.sig` and `catalog.schema.json` with the release.
 
 To create the first release key, a maintainer runs
-`go run ./internal/signing/cmd/olpsign keygen` offline, commits the public key
+`go run ./cmd/olpsign keygen` offline, commits the public key
 to `releaseKeys`, and stores the seed as the `OLP_SIGNING_KEY` secret and the
 key identifier as the `OLP_SIGNING_KEY_ID` Actions variable of the repository.
 

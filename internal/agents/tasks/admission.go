@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func rateRequest(lookup string, requests, concurrency *int64) admission.Request {
@@ -77,9 +77,9 @@ func lowerLimit(a, b *int64) *int64 {
 func finishRate(ctx context.Context, leases []*admission.Lease, dispatched bool) {
 	for _, lease := range leases {
 		if dispatched {
-			_ = lease.Release(context.WithoutCancel(ctx))
+			_ = lease.Settle(ctx, nil)
 		} else {
-			_ = lease.Refund(context.WithoutCancel(ctx))
+			_ = lease.Refund(ctx)
 		}
 	}
 }

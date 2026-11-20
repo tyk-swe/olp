@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { pluginKeys } from './pluginKeys';
@@ -8,9 +9,9 @@
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
-    listOidcIdentities
-  } from '#lib/features/access/profile/api.js';
-  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+    listOidcIdentities,
+    reauthenticateWithPassword
+  } from '#lib/features/access/index.js';
   import {
     listMCPExecutables,
     reviewMCPExecutable,
@@ -205,7 +206,7 @@
           No executables are installed in the deployment directory
         </p>
       {:else}
-        <div class="table-shell">
+        <ScrollTable label="MCP executables">
           <table class="data-table">
             <thead
               ><tr
@@ -228,7 +229,7 @@
                 >{/each}
             </tbody>
           </table>
-        </div>
+        </ScrollTable>
       {/if}
       {#if $state.review}
         <section class="review">
@@ -287,7 +288,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
   }
   .review {
     display: grid;

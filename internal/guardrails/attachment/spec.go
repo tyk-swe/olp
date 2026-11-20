@@ -5,8 +5,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -51,15 +51,15 @@ func (t target) owned() bool {
 	return t.Scope == guardrails.RouteScope || t.Scope == guardrails.KeyScope || t.Scope == guardrails.ToolsetScope
 }
 
-var changeOperation = map[guardrails.Scope]access.Operation{
-	guardrails.InstallationScope: access.Settings,
-	guardrails.OrganizationScope: access.ManageOrganization,
-	guardrails.KeyScope:          access.Keys,
+var changeOperation = map[guardrails.Scope]authz.Operation{
+	guardrails.InstallationScope: authz.Settings,
+	guardrails.OrganizationScope: authz.ManageOrganization,
+	guardrails.KeyScope:          authz.Keys,
 }
 
-func authorize(p access.Principal, t target, need access.Need) error {
-	if need == access.Change {
-		if err := p.Authorize(cmp.Or(changeOperation[t.Scope], access.Configure)); err != nil {
+func authorize(p authz.Principal, t target, need authz.Need) error {
+	if need == authz.Change {
+		if err := p.Authorize(cmp.Or(changeOperation[t.Scope], authz.Configure)); err != nil {
 			return err
 		}
 	}

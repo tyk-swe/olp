@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,44 @@ func TestIntentIdentityAndOwners(t *testing.T) {
 		if _, err := normalizedOwners(refused); err == nil {
 			t.Fatalf("accepted %s", name)
 		}
+	}
+}
+
+func TestVersionCacheEvictsOneOwnerWhenFull(t *testing.T) {
+	cache := versionCache{seen: map[string]int64{}}
+	owner := func(i int) string { return fmt.Sprintf("owner-%d", i) }
+	for i := range versionCacheSize {
+		cache.record(owner(i), 1)
+	}
+	cache.record("owner-new", 1)
+	current := 0
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) {
+			current++
+		}
+	}
+	if current != versionCacheSize-1 || !cache.current("owner-new", 1) {
+		t.Fatalf("got %d of the original owners current after recording a new owner at capacity, want %d and the new owner", current, versionCacheSize-1)
+	}
+	existing := ""
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) {
+			existing = owner(i)
+			break
+		}
+	}
+	if existing == "" {
+		t.Fatal("no original owner stayed current at capacity")
+	}
+	cache.record(existing, 2)
+	current = 0
+	for i := range versionCacheSize {
+		if cache.current(owner(i), 1) || cache.current(owner(i), 2) {
+			current++
+		}
+	}
+	if current != versionCacheSize-1 || !cache.current(existing, 2) || !cache.current("owner-new", 1) {
+		t.Fatalf("got %d original owners current after re-recording %s at capacity, want %d with its new version", current, existing, versionCacheSize-1)
 	}
 }
 

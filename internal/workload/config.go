@@ -12,8 +12,8 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/consumerscope"
-	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/consumerscope"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
 const MaxTokenBytes = 32768

@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/codeadapter"

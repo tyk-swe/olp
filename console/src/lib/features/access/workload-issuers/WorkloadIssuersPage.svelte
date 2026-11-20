@@ -1,6 +1,7 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -183,7 +184,7 @@
   }
 </script>
 
-<svelte:head><title>Workload identity · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Workload identity" />
 <div class="toolbar">
   <p class="lede">
     Let workloads sign in with short-lived tokens from an issuer you trust, such

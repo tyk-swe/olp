@@ -5,7 +5,7 @@ speech and transcription endpoints on transformed routes. Those endpoints are
 `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` and
 `/v1/audio/translations`.
 
-Each vendor [contract](../../../internal/vendors/catalog.go) lists the media
+Each vendor [contract](../../../internal/domain/vendors/catalog.go) lists the media
 operations it serves. When a vendor API differs from OpenAI's media wire, its
 [media codec](../../../internal/media/vendor.go) performs the translation. Other
 reviewed vendors serve the OpenAI media wire directly.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -39,7 +39,7 @@ const usableRecheck = 30 * time.Second
 type Host struct {
 	runtime    *Runtime
 	unconfined *Unconfined
-	db         access.Queryer
+	db         database.Queryer
 	mu         sync.Mutex
 	hosted     map[string]*hosted
 	clock      uint64
@@ -70,7 +70,7 @@ type hosted struct {
 // NewHost returns a Host that runs confined plugins' modules on runtime and,
 // where unconfined is not nil, unconfined plugins' executables in that tier,
 // reading which plugins are installed from db.
-func NewHost(runtime *Runtime, unconfined *Unconfined, db access.Queryer) *Host {
+func NewHost(runtime *Runtime, unconfined *Unconfined, db database.Queryer) *Host {
 	return &Host{runtime: runtime, unconfined: unconfined, db: db, hosted: map[string]*hosted{}}
 }
 

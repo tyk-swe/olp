@@ -6,6 +6,18 @@ bash scripts/check-helm-egress.sh
 helm lint deploy/helm
 helm lint deploy/helm -f deploy/helm/values.production.yaml
 helm template olp deploy/helm --kube-version "$version" >/dev/null
+helm template olp deploy/helm --set-string config.bootstrapTokenSecretKey=yes |
+  awk '
+    /^kind: Secret$/ { secret = 1 }
+    /^---$/ { secret = 0 }
+    secret && /^  "yes":/ { data_key = 1 }
+    /- key: "yes"$/ { volume_key = 1 }
+    END {
+      if (!data_key || !volume_key) {
+        print "Expected the bootstrap Secret data and the volume item to use the same string key" > "/dev/stderr"
+        exit 1
+      }
+    }'
 helm template olp deploy/helm --kube-version "$version" \
   --set-json 'extraEnv=[{"name":"OLP_VAULT_ROLE","value":"olp"},{"name":"OLP_VAULT_JWT_FILE","value":"/run/identity/token"}]' \
   --set-json 'extraVolumes=[{"name":"workload-identity","projected":{"sources":[{"serviceAccountToken":{"path":"token","audience":"vault","expirationSeconds":3600}}]}}]' \

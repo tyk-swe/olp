@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 )
 
 func (s *Snapshot) CodeConnection(route codemode.Route, providerID string) (Configuration, bool) {

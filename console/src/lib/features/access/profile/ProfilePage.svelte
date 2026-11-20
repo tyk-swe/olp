@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
@@ -6,7 +8,7 @@
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
 
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
@@ -452,7 +454,7 @@
   }
 </script>
 
-<svelte:head><title>Your profile · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Your profile" />
 
 <PageHeader
   title="Your profile"
@@ -477,7 +479,7 @@
   />
 {/if}
 
-{#if message}<p class="success-banner" role="status">{message}</p>{/if}
+{#if message}<Callout tone="success">{message}</Callout>{/if}
 <ConflictNotice
   notice={profileConcurrentNotice}
   onReload={reloadProfile}

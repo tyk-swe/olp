@@ -25,7 +25,10 @@ export async function getSetupStatus(
     { signal }
   );
   const value = unwrap({ data, error, response });
-  if (typeof value?.setup_required !== 'boolean') {
+  if (
+    typeof value?.setup_required !== 'boolean' ||
+    typeof value.bootstrap_token_configured !== 'boolean'
+  ) {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
       title: 'The setup status response is invalid',

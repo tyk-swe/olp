@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Policy struct {
@@ -44,7 +44,7 @@ func scan(row pgx.Row) (Policy, error) {
 	return p, err
 }
 
-func load(ctx context.Context, q access.Queryer, id string) (Policy, error) {
+func load(ctx context.Context, q database.Queryer, id string) (Policy, error) {
 	return scan(q.QueryRow(ctx, selected+" WHERE p.id=$1", id))
 }
 
@@ -52,7 +52,7 @@ func lock(ctx context.Context, tx pgx.Tx, id string) (Policy, error) {
 	return scan(tx.QueryRow(ctx, selected+" WHERE p.id=$1 FOR UPDATE OF p", id))
 }
 
-func FindLatest(ctx context.Context, q access.Queryer, projectID *string, name string) (*Policy, error) {
+func FindLatest(ctx context.Context, q database.Queryer, projectID *string, name string) (*Policy, error) {
 	p, err := scan(q.QueryRow(ctx, selected+" WHERE p.project_id IS NOT DISTINCT FROM $1::uuid AND lower(p.name)=lower($2) AND p.retired_at IS NULL", projectID, name))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -104,14 +104,14 @@ func retire(ctx context.Context, tx pgx.Tx, id string) error {
 	return err
 }
 
-func revisionOf(ctx context.Context, q access.Queryer, revisionID string) (guardrails.PolicyRevision, error) {
+func revisionOf(ctx context.Context, q database.Queryer, revisionID string) (guardrails.PolicyRevision, error) {
 	var r guardrails.PolicyRevision
 	err := q.QueryRow(ctx, "SELECT v.id::text,p.id::text,COALESCE(p.project_id::text,'installation'),p.name,v.revision,v.entries FROM olp.guardrail_policy_revisions v JOIN olp.guardrail_policies p ON p.id=v.policy_id WHERE v.id=$1", revisionID).
 		Scan(&r.ID, &r.PolicyID, &r.ProjectID, &r.Name, &r.Revision, &r.Entries)
 	return r, err
 }
 
-func anyRetired(ctx context.Context, q access.Queryer, revisionIDs []string) (bool, error) {
+func anyRetired(ctx context.Context, q database.Queryer, revisionIDs []string) (bool, error) {
 	var retired bool
 	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_revisions v JOIN olp.guardrails g ON g.id=v.guardrail_id WHERE v.id=ANY($1::uuid[]) AND g.retired_at IS NOT NULL)", revisionIDs).Scan(&retired)
 	return retired, err

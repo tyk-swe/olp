@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 const Revision = "retained-resources-1"
@@ -148,11 +148,30 @@ func Endpoints() []Endpoint {
 	return out
 }
 
+type referenceBinding struct {
+	pointer string
+	kind    string
+	id      string
+}
+
+type PreparedRewrite struct {
+	source   oif.Document
+	bindings []referenceBinding
+}
+
 // Rewrite walks only documented resource-bearing fields. User metadata,
 // schemas and opaque values are deliberately not interpreted as references.
 // Every other id-shaped field must be declared by the codec or is refused.
 func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id string) (string, error)) (oif.Document, error) {
-	var changes []oif.Change
+	prepared, err := PrepareRewrite(source, refs)
+	if err != nil {
+		return oif.Document{}, err
+	}
+	return prepared.Bind(resolve)
+}
+
+func PrepareRewrite(source oif.Document, refs map[string]string) (PreparedRewrite, error) {
+	var bindings []referenceBinding
 	var walk func(oif.Value, string) error
 	walk = func(v oif.Value, path string) error {
 		switch v.Kind() {
@@ -206,15 +225,11 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 						if !ok || id == "" {
 							return errors.New("resource reference must be a nonempty string")
 						}
-						bound, err := resolve(kind, id)
-						if err != nil {
-							return err
-						}
 						pointer := p
 						if field.Value.Kind() == oif.Array {
 							pointer += "/" + strconv.Itoa(i)
 						}
-						changes = append(changes, oif.Change{Pointer: pointer, Value: strconv.Quote(bound), Origin: oif.ResourceBinding, Reason: "owner-scoped retained resource"})
+						bindings = append(bindings, referenceBinding{pointer: pointer, kind: kind, id: id})
 					}
 					continue
 				}
@@ -229,9 +244,21 @@ func Rewrite(source oif.Document, refs map[string]string, resolve func(kind, id 
 		return nil
 	}
 	if err := walk(source.Root(), ""); err != nil {
-		return oif.Document{}, err
+		return PreparedRewrite{}, err
 	}
-	return oif.Apply(source, changes)
+	return PreparedRewrite{source: source, bindings: bindings}, nil
+}
+
+func (p PreparedRewrite) Bind(resolve func(kind, id string) (string, error)) (oif.Document, error) {
+	changes := make([]oif.Change, 0, len(p.bindings))
+	for _, binding := range p.bindings {
+		bound, err := resolve(binding.kind, binding.id)
+		if err != nil {
+			return oif.Document{}, err
+		}
+		changes = append(changes, oif.Change{Pointer: binding.pointer, Value: strconv.Quote(bound), Origin: oif.ResourceBinding, Reason: "owner-scoped retained resource"})
+	}
+	return oif.Apply(p.source, changes)
 }
 
 // These dictionaries contain literal header names and values, not typed IDs.

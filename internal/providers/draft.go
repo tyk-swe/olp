@@ -11,14 +11,16 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 type createRequest struct {
@@ -36,7 +38,7 @@ type updateRequest struct {
 	Configuration connection.Configuration `json:"configuration"`
 }
 
-func (s *Server) createProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) createProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	var input createRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -46,39 +48,22 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (httpkit.Re
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = authorizeCredential(p, credential); err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created provider, so the caller must
-		// still reach its project to receive it.
-		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(a, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
+		if err := authorizeCredential(p, credential); err != nil {
+			return struct{}{}, err
 		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	created, err := s.createDraft(r.Context(), tx, p, input, credential)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	id, etag := created.ID, created.ETag
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	result := httpkit.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": stateDraft, "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		// The stored reply carries the created provider, so the caller must
+		// reach its project before a replay is served.
+		return struct{}{}, a.RequireProject(r.Context(), tx, p, input.ProjectID)
+	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		created, err := s.createDraft(r.Context(), tx, p, input, credential)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		id, etag := created.ID, created.ETag
+		result := httpkit.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": stateDraft, "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
+		return result, access.Event{Action: "provider.create", Resource: "provider", ID: id}, nil
+	})
 }
 
 // invalidateEvidence downgrades every certified capability after a transport
@@ -89,7 +74,7 @@ func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error
 	return err
 }
 
-func (s *Server) updateProvider(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) updateProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -101,21 +86,19 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (httpkit.Re
 	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		prepared, err := connection.Prepare(r.Context(), s.ConnectionPolicy(tx), input.Configuration)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = s.StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return s.detailReply(r.Context(), tx, id)
+		reply, err := s.detailReply(r.Context(), tx, id)
+		return reply, access.Event{Action: "provider.update", Resource: "provider", ID: id}, err
 	})
 }
 
@@ -186,8 +169,8 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	return etag, err
 }
 
-func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+func (s *Server) restoreActiveAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if current.ActiveRevisionID == nil {
 			return httpkit.Reply{}, httpkit.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
 		}
@@ -202,9 +185,9 @@ func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (http
 	})
 }
 
-func (s *Server) restoreRevisionAsDraft(r *http.Request, _ access.Principal) (httpkit.Reply, error) {
+func (s *Server) restoreRevisionAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ref := r.PathValue("revision_id")
-	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (httpkit.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpkit.Reply{}, httpkit.Fail(404, "not_found", "Unknown revision.")
@@ -228,7 +211,7 @@ type createdProvider struct {
 	Kind connectors.Kind
 }
 
-func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
+func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
 	var err error
 	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 		return createdProvider{}, err
@@ -366,7 +349,7 @@ func (s *Server) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, nam
 	return err
 }
 
-func preserveCredentialBoundary(ctx context.Context, q access.Queryer, providerID string, current, next connection.Configuration) error {
+func preserveCredentialBoundary(ctx context.Context, q database.Queryer, providerID string, current, next connection.Configuration) error {
 	move := connection.MoveCredentials(current, next)
 	if !move.Destination {
 		return nil
@@ -521,7 +504,7 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 }
 
 type installedPlugins struct {
-	q          access.Queryer
+	q          database.Queryer
 	unconfined *plugins.Unconfined
 }
 
@@ -540,6 +523,6 @@ func profileField(code string) string {
 	return "configuration.profile_revision"
 }
 
-func (s *Server) ConnectionPolicy(q access.Queryer) connection.Policy {
+func (s *Server) ConnectionPolicy(q database.Queryer) connection.Policy {
 	return connection.Policy{Egress: s.egress, Plugins: installedPlugins{q, s.unconfined}}
 }

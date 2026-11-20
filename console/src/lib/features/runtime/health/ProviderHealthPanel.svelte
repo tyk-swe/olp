@@ -130,14 +130,14 @@
 <style>
   h3 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
   .section-link {
     margin: 0.6rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .provider-heading {
     display: flex;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import { resolve } from '$app/paths';
@@ -17,7 +18,7 @@
   }));
 </script>
 
-<svelte:head><title>Investigation · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Investigation" />
 
 <a class="text-button" href={resolve('investigations')}>All investigations</a>
 

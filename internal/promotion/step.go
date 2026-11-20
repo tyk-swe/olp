@@ -11,19 +11,20 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Planner struct {
 	Claims    []Claim
-	Authorize func(context.Context, access.Queryer, access.Principal) error
-	Plan      func(context.Context, access.Queryer) ([]Item, error)
+	Authorize func(context.Context, database.Queryer, authz.Principal) error
+	Plan      func(context.Context, database.Queryer) ([]Item, error)
 }
 
-type Applier func(context.Context, pgx.Tx, access.Principal) error
+type Applier func(context.Context, pgx.Tx, authz.Principal) error
 
 type Names struct {
 	projects, providers, organizations map[string]bool

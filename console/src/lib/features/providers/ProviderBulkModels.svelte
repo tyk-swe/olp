@@ -421,7 +421,7 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -435,11 +435,6 @@
   }
   .status {
     margin-top: 1rem;
-  }
-  .form-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
   }
   .model-list {
     max-height: 20rem;

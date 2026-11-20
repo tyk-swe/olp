@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -49,8 +49,8 @@ func (r delegationRow) memberAuthorized() bool {
 	if r.MemberActive == nil || !*r.MemberActive || r.MemberOIDCAuthorized == nil || !*r.MemberOIDCAuthorized || r.MemberRole == nil || r.MemberScope == nil {
 		return false
 	}
-	principal := access.Principal{User: access.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
-	return principal.Authorize(access.Keys) == nil && principal.Project(&r.ProjectID, access.Change) == nil
+	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
+	return principal.Authorize(authz.Keys) == nil && principal.Project(&r.ProjectID, authz.Change) == nil
 }
 
 func (r delegationRow) record() DelegationRecord {
@@ -93,7 +93,7 @@ type delegationPairBudget struct {
 	Usage   *PairBudget                `db:"usage"`
 }
 
-func (s *DelegationManagement) listDelegations(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, pageErr := httpkit.Page(r)
 	if pageErr != nil {
 		return httpkit.Reply{}, pageErr
@@ -175,7 +175,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
 	return httpkit.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
 }
 
-func delegationProjectFilter(r *http.Request, p access.Principal) (string, error) {
+func delegationProjectFilter(r *http.Request, p authz.Principal) (string, error) {
 	project := r.URL.Query().Get("project_id")
 	if project == "" {
 		return "", nil
@@ -184,7 +184,7 @@ func delegationProjectFilter(r *http.Request, p access.Principal) (string, error
 	if err != nil || id == uuid.Nil || id.String() != project {
 		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
 	}
-	if err := p.Project(&project, access.View); err != nil {
+	if err := p.Project(&project, authz.View); err != nil {
 		return "", err
 	}
 	return project, nil

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import { useBranding } from '#lib/shell/branding/branding.js';
   import { beginSAMLLogin } from '../saml/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -7,12 +9,12 @@
     authenticationCapabilities,
     beginOidcLogin,
     type AuthenticationCapabilities
-  } from '#lib/features/access/session/api.js';
-  import { login } from '#lib/features/access/session/authentication.js';
+  } from '#lib/session/api.js';
+  import { login } from '#lib/session/authentication.js';
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { relativeReturnTo } from '#lib/features/access/session/relativeReturnTo.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { relativeReturnTo } from '#lib/session/relativeReturnTo.js';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
 
   let email = $state('');
@@ -128,19 +130,21 @@
     void loadCapabilities();
   });
 
+  const branding = useBranding();
+
   onDestroy(() => {
     publicAuthController.abort();
     authLifecycle.abortAuthenticationWork();
   });
 </script>
 
-<svelte:head><title>Sign in · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Sign in" />
 
 <SetupFrame>
   <div class="heading">
     <p class="eyebrow">Operator console</p>
     <h1>Sign in</h1>
-    <p>Sign in to manage this installation.</p>
+    <p>Sign in to manage {branding.data?.name ?? 'this installation'}.</p>
   </div>
 
   {#if sessionExpired}<p class="session-notice" role="status">

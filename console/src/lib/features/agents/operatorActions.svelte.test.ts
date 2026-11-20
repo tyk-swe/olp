@@ -1,5 +1,5 @@
 import { PersonalGrantEnrollment } from './grantEnrollment.svelte';
-import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { SvelteMap } from 'svelte/reactivity';
 import MCPServersPage from './MCPServersPage.svelte';

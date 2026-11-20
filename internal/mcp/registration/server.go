@@ -12,8 +12,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -120,7 +121,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	a.Route(mux, "PUT /api/v1/mcp-servers/{server_id}", s.update, access.Deadline(20*time.Second))
 	a.Route(mux, "DELETE /api/v1/mcp-servers/{server_id}", s.retire)
 }
-func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -142,7 +143,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (httpkit.Reply, error
 	}
 	return httpkit.ListReplyBy(items, page, func(item serverSummary) string { return item.ID }), nil
 }
-func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -151,7 +152,7 @@ func (s *Server) get(r *http.Request, p access.Principal) (httpkit.Reply, error)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(d, d.ETag), nil
@@ -175,7 +176,7 @@ type revisionResponse struct {
 	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
 }
 
-func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -188,7 +189,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&d.ProjectID, access.View); err != nil {
+	if err = p.Project(&d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var version int64
@@ -209,17 +210,17 @@ func (s *Server) revision(r *http.Request, p access.Principal) (httpkit.Reply, e
 	}
 	return httpkit.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
-func (s *Server) create(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) create(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.write(r, p, "", false)
 }
-func (s *Server) update(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) update(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	return s.write(r, p, id, false)
 }
-func (s *Server) retire(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) retire(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -346,7 +347,7 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 	return effective != routing.EffectiveToolLimits(previous.CallsPerMinute, previous.MaxConcurrency, previous.PerKeyCallsPerMinute, previous.PerKeyMaxConcurrency)
 }
 
-func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bool) (httpkit.Reply, error) {
+func (s *Server) write(r *http.Request, _ authz.Principal, id string, retire bool) (httpkit.Reply, error) {
 	in, err := s.prepareWrite(r, id, retire)
 	if err != nil {
 		return httpkit.Reply{}, err

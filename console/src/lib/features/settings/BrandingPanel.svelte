@@ -1,33 +1,40 @@
 <script lang="ts">
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { notify } from '#lib/components/toasts.svelte.js';
+  import { useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { getBranding, updateBranding } from './branding';
-  import { settingsKeys } from './settingsKeys';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import {
+    brandingKey,
+    updateBranding,
+    useBranding,
+    type Branding
+  } from '#lib/shell/branding/branding.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
 
+  const defaultAccent = '#2f64ee';
   const access = useRole();
   const queryClient = useQueryClient();
-  const identity = createQuery(() => ({
-    queryKey: settingsKeys.branding,
-    queryFn: getBranding
-  }));
+  const identity = useBranding();
   let name = $state('');
   let logo = $state('');
+  let accent = $state('');
   let etag = $state('');
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
+  const editable = $derived(access.can('settings.update') && !busy && !!etag);
+
+  function load(branding: Branding) {
+    name = branding.name;
+    logo = branding.logo;
+    accent = branding.accent;
+    etag = branding.etag;
+  }
+
   $effect(() => {
-    if (identity.data && !etag) {
-      name = identity.data.name;
-      logo = identity.data.logo;
-      etag = identity.data.etag;
-    }
+    if (identity.data && !etag) load(identity.data);
   });
 
   async function chooseLogo(file?: File) {
-    error = notice = '';
+    error = '';
     if (!file) return;
     if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 65536) {
       error = 'Choose a PNG or JPEG logo of at most 64 KiB.';
@@ -51,25 +58,20 @@
   async function reload() {
     const result = await identity.refetch();
     if (result.data) {
-      name = result.data.name;
-      logo = result.data.logo;
-      etag = result.data.etag;
-      error = notice = '';
+      load(result.data);
+      error = '';
     }
   }
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
-      const updated = await updateBranding({ name, logo, etag });
-      queryClient.setQueryData(settingsKeys.branding, updated);
-      name = updated.name;
-      logo = updated.logo;
-      etag = updated.etag;
-      await authLifecycle.validateSession();
-      notice = 'Installation branding saved.';
+      const updated = await updateBranding({ name, logo, accent }, etag);
+      queryClient.setQueryData(brandingKey, updated);
+      load(updated);
+      notify('Installation branding saved.');
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -80,9 +82,10 @@
 
 <section class="panel branding-panel" aria-labelledby="branding-title">
   <h2 id="branding-title">Installation identity</h2>
-  <p class="helper">
-    Name this installation and use an embedded logo in the console. Images stay
-    in this installation; the console keeps its dark theme and accessible text.
+  <p class="muted">
+    Name this installation, embed a logo and pick a brand color. They appear on
+    the sign-in page, in browser tabs and across the console. Images stay in
+    this installation.
   </p>
   {#if identity.isPending}<p role="status">
       Loading installation identity…
@@ -91,7 +94,7 @@
       {errorMessage(identity.error)}
     </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
+
   <form onsubmit={save}>
     <label
       >Installation name<input
@@ -99,7 +102,7 @@
         bind:value={name}
         maxlength="100"
         required
-        disabled={!access.can('settings.update') || busy || !etag}
+        disabled={!editable}
       /></label
     >
     <label
@@ -107,12 +110,42 @@
         type="file"
         accept="image/png,image/jpeg"
         onchange={(event) => chooseLogo(event.currentTarget.files?.[0])}
-        disabled={!access.can('settings.update') || busy || !etag}
+        disabled={!editable}
       /></label
     >
-    <p class="helper">
+    <p class="muted">
       PNG or JPEG, at most 64 KiB and 512 × 512 pixels. Leave the logo empty to
       use the default brand mark.
+    </p>
+    <fieldset class="accent">
+      <legend>Brand color</legend>
+      <input
+        type="color"
+        aria-label="Brand color picker"
+        value={accent || defaultAccent}
+        oninput={(event) => (accent = event.currentTarget.value)}
+        disabled={!editable}
+      />
+      <input
+        class="filter-control"
+        aria-label="Brand color hex"
+        bind:value={accent}
+        placeholder="Default"
+        pattern={'#[0-9a-fA-F]{6}'}
+        maxlength="7"
+        disabled={!editable}
+      />
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={() => (accent = '')}
+        disabled={!accent || !editable}>Use default color</button
+      >
+    </fieldset>
+    <p class="muted">
+      Primary buttons use this color with white text, so it needs at least 4.5:1
+      contrast against white. The console derives lighter and darker shades that
+      stay readable on every surface.
     </p>
     {#if logo}<img
         class="logo-preview"
@@ -159,6 +192,28 @@
     height: 4rem;
     object-fit: contain;
     border-radius: var(--radius-control);
+  }
+  .accent {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+  }
+  .accent legend {
+    margin-bottom: 0.4rem;
+    padding: 0;
+  }
+  .accent input[type='color'] {
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border-radius: var(--radius-control);
+    background: none;
+  }
+  .accent .filter-control {
+    width: 8rem;
   }
   .button-row {
     display: flex;

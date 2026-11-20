@@ -89,3 +89,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- $base := include "olp.fullname" .root | trunc $maxBaseLength | trimSuffix "-" -}}
 {{- printf "%s-%s-observability" $base .component -}}
 {{- end -}}
+
+{{- define "olp.bootstrapTokenSecretName" -}}
+{{- .Values.config.bootstrapTokenSecretName | default (printf "%s-bootstrap-token" (include "olp.fullname" .)) -}}
+{{- end -}}

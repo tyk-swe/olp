@@ -12928,9 +12928,6 @@
           "csrf_token": {
             "type": "string"
           },
-          "installation_name": {
-            "type": "string"
-          },
           "operations": {
             "description": "The management operations the signed-in member may perform now; the console shows only what the server would admit.",
             "items": {
@@ -12941,10 +12938,6 @@
           "user": {
             "$ref": "#/components/schemas/UserResponse"
           },
-          "installation_logo": {
-            "type": "string",
-            "description": "Embedded PNG/JPEG installation logo; empty uses the default brand mark."
-          },
           "session_id": {
             "type": "string",
             "format": "uuid",
@@ -12953,7 +12946,6 @@
         },
         "required": [
           "user",
-          "installation_name",
           "csrf_token",
           "operations"
         ],
@@ -13094,13 +13086,18 @@
         "type": "object"
       },
       "SetupStatus": {
-        "description": "Unauthenticated first-run probe. It deliberately carries nothing but the\nboolean: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
+        "description": "Unauthenticated first-run probe. It deliberately carries nothing but\nbooleans: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
         "properties": {
+          "bootstrap_token_configured": {
+            "description": "Whether the server can read a bootstrap token, without revealing it",
+            "type": "boolean"
+          },
           "setup_required": {
             "type": "boolean"
           }
         },
         "required": [
+          "bootstrap_token_configured",
           "setup_required"
         ],
         "type": "object"
@@ -15312,6 +15309,7 @@
           "openai-completions",
           "openai-decisions",
           "systemone",
+          "gemini-decisions",
           "mistral-ocr",
           "azure-document-intelligence-ocr",
           "vertex-document-processing-ocr",
@@ -22101,6 +22099,8 @@
         "required": [
           "name",
           "logo",
+          "accent",
+          "accent_scale",
           "etag"
         ],
         "properties": {
@@ -22114,6 +22114,48 @@
             "maxLength": 100000,
             "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
           },
+          "accent": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{6})?$",
+            "description": "Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text."
+          },
+          "accent_scale": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "300",
+              "400",
+              "500",
+              "600",
+              "700"
+            ],
+            "properties": {
+              "300": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "400": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "500": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "600": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "700": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              }
+            },
+            "description": "Accessible accent shades derived from accent, or null for the default palette."
+          },
           "etag": {
             "type": "string"
           }
@@ -22124,7 +22166,8 @@
         "additionalProperties": false,
         "required": [
           "name",
-          "logo"
+          "logo",
+          "accent"
         ],
         "properties": {
           "name": {
@@ -22136,6 +22179,11 @@
             "type": "string",
             "maxLength": 100000,
             "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          },
+          "accent": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{6})?$",
+            "description": "Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text."
           }
         }
       },
@@ -26506,7 +26554,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Exact decimal; null outside the imported range."
+                  "description": "Exact decimal when covered, or null for mixed invoice currencies or no coverage."
                 },
                 "invoiced_currency": {
                   "type": [
@@ -26616,7 +26664,8 @@
                   "type": [
                     "string",
                     "null"
-                  ]
+                  ],
+                  "description": "Exact decimal in the report currency, or null when there is no coverage or the invoices include a different currency."
                 },
                 "capture_rate": {
                   "type": [
@@ -45848,6 +45897,16 @@
             },
             "description": "Owner and session created"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bootstrap token missing, unreadable, or wrong"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -54401,6 +54460,16 @@
               }
             },
             "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Organization not found"
           }
         },
         "security": [
@@ -54460,7 +54529,7 @@
                 }
               }
             },
-            "description": "Project created; the creator is its first manager",
+            "description": "Project created with access inherited from its organization",
             "headers": {
               "Location": {
                 "description": "Path of the created resource",
@@ -54489,6 +54558,16 @@
               }
             },
             "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Organization not found"
           },
           "409": {
             "content": {
@@ -60966,22 +61045,11 @@
     "/api/v1/branding": {
       "get": {
         "operationId": "get_installation_branding",
-        "summary": "Read the installation name and logo",
+        "summary": "Read the installation name, logo and brand color",
         "tags": [
           "branding"
         ],
-        "security": [
-          {
-            "sessionCookie": [
-              "read"
-            ]
-          },
-          {
-            "managementToken": [
-              "read"
-            ]
-          }
-        ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Current installation branding",
@@ -70734,6 +70802,9 @@
           },
           "422": {
             "description": "Invalid enrollment"
+          },
+          "503": {
+            "description": "OAuth client setup is unavailable. The enrollment can be polled again."
           }
         },
         "parameters": [

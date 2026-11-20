@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

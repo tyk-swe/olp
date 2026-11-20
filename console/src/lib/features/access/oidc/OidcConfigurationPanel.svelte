@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import { oidcKeys } from '#lib/features/access/oidc/oidcKeys.js';
 
   import { onDestroy } from 'svelte';
@@ -15,8 +16,8 @@
     listOidcIdentities
   } from '#lib/features/access/profile/api.js';
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
-  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
@@ -211,7 +212,7 @@
 {/if}
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 {#if oidc.isPending}
   <div class="loading-state" role="status">Loading OIDC configuration…</div>
@@ -379,12 +380,9 @@
 <style>
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
-  }
-  .muted {
-    color: var(--foreground-muted);
   }
   .oidc-grid {
     display: grid;

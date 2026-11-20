@@ -1,7 +1,8 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ProviderWizard from '#lib/features/providers/ProviderWizard.svelte';
 </script>
 
-<svelte:head><title>Providers · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Providers" />
 
 <ProviderWizard />

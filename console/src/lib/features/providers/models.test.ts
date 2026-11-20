@@ -14,7 +14,7 @@ import {
   type ProviderModel
 } from './models';
 
-vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
+vi.mock('#lib/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })

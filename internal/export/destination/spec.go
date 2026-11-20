@@ -77,6 +77,19 @@ func ParseSpec(sinkType Type, format Format, settings json.RawMessage) (Spec, er
 	return k.parse(sinkType, settings)
 }
 
+func ValidateRecord(spec Spec, record Record) error {
+	switch spec := spec.(type) {
+	case StripeMeter:
+		_, err := spec.reading(record)
+		return err
+	case CloudEvents:
+		if _, err := readEnvelope(record); err != nil {
+			return sendError("endpoint", err)
+		}
+	}
+	return nil
+}
+
 func checkStreams(k kind, streams []Stream) error {
 	if len(streams) < 1 || len(streams) > 6 {
 		return httpkit.Invalid("streams", "streams must contain from 1 to 6 entries")

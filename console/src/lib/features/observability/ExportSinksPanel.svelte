@@ -1,18 +1,21 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { projectOptions } from '#lib/features/access/index.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
+  import type { ProjectMembership } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import type { ProjectMembership } from '#lib/features/access/projects/api.js';
   import { formatDate } from '#lib/format.js';
   import ExportSinkHistory from './ExportSinkHistory.svelte';
   import {
@@ -45,7 +48,6 @@
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
-  let notice = $state('');
   const sinkIntent = useMutationIntent();
   let {
     canManageInstallation,
@@ -175,7 +177,7 @@
       return;
     const isCurrent = captureOwner();
     sinkBusy = true;
-    error = notice = '';
+    error = '';
     let committed = false;
     try {
       const parsed = parseSinkSettings(delivery, {
@@ -250,7 +252,7 @@
     } catch (cause) {
       if (!isCurrent()) return;
       error = committed
-        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
         : errorMessage(
             cause,
             editing
@@ -265,7 +267,7 @@
   async function toggleSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await updateExportSink(sink, { enabled: !sink.enabled });
       if (!isCurrent()) return;
@@ -278,12 +280,21 @@
 
   async function removeSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
+    if (
+      !(await confirmAction({
+        title: `Delete ${sink.name}?`,
+        body: 'Records stop exporting to this destination.',
+        confirmLabel: 'Delete sink',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
-    error = notice = '';
+    error = '';
     try {
       await deleteExportSink(sink);
       if (!isCurrent()) return;
-      notice = 'Sink deleted.';
+      notify('Sink deleted.');
       await queryClient.invalidateQueries({ queryKey: observabilityKeys.root });
     } catch (cause) {
       if (!isCurrent()) return;
@@ -304,12 +315,12 @@
   const captureOwner = usePrincipalLifetime(() => {
     resetSinkForm();
     sinkBusy = false;
-    error = notice = '';
+    error = '';
   });
 </script>
 
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
-{#if notice}<p class="section-help" role="status">{notice}</p>{/if}
+
 {#if canManageInstallation || canManageProjects}<div class="toolbar">
     <p class="section-help">
       Send logs, traces and metrics to an OpenTelemetry collector or another
@@ -415,7 +426,7 @@
             <label for="sink-filter-project">Only for project</label
             ><EntityPicker
               id="sink-filter-project"
-              kind="project"
+              source={projectOptions}
               bind:value={sinkFilterProject}
               emptyLabel="All projects"
             />
@@ -604,7 +615,7 @@
     >Add a sink to send logs and traces to your own collector.</EmptyState
   >
 {:else}
-  <div class="table-scroll">
+  <ScrollTable label="Export sinks">
     <table class="data-table">
       <thead
         ><tr
@@ -695,5 +706,5 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}

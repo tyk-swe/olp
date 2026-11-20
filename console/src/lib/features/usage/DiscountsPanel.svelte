@@ -1,6 +1,9 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { providerOptions } from '#lib/features/providers/index.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -10,12 +13,14 @@
   } from '#lib/listing/pagination.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { listProviderKinds } from '#lib/features/providers/models.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import {
+    listProviderKinds,
+    listProviderVendors,
+    providerKeys
+  } from '#lib/features/providers/index.js';
   import {
     createDiscount,
     listDiscounts,
@@ -123,7 +128,7 @@
       >Your role can view discounts but not publish them.</ReadOnlyNote
     >{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if notice}<p class="inline-notice" role="status">{notice}</p>{/if}
+  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card discount-form" onsubmit={addDiscount}>
     <div class="form-grid">
       <div class="form-field">
@@ -152,7 +157,7 @@
       <div class="form-field">
         <label for="discount-provider">Provider</label><EntityPicker
           id="discount-provider"
-          kind="provider"
+          source={providerOptions}
           bind:value={providerId}
           emptyLabel="Every provider of this kind"
           disabled={!canEdit}
@@ -201,7 +206,7 @@
       >Add a discount to reflect negotiated provider pricing in cost reports.</EmptyState
     >
   {:else}
-    <div class="table-shell" role="region" aria-label="Discounts">
+    <ScrollTable label="Discounts">
       <table class="data-table">
         <caption class="sr-only">Discounts, newest first</caption>
         <thead
@@ -221,7 +226,7 @@
             >{/each}</tbody
         >
       </table>
-    </div>
+    </ScrollTable>
     <CursorPagination
       {...cursorPaginationProps(pagination, discounts.data?.nextCursor)}
       label="Discount pages"

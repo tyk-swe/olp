@@ -1,0 +1,382 @@
+package kernel
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+)
+
+// gateVerdict is the shared pre-dispatch decision for one candidate slot.
+type gateVerdict int
+
+const (
+	// gateSkip marks a slot unusable at dispatch time — a credential no longer
+	// eligible or cooled since the plan ranked it — so the sibling slot is tried.
+	gateSkip gateVerdict = iota
+	// gateDenied means the provider circuit refused its half-open probe, a
+	// decision every sibling credential on the endpoint shares.
+	gateDenied
+	// gateRejected carries a quota refusal the request budget pays for.
+	gateRejected
+	// gateUnmeterable marks a target whose mandatory quota cannot be
+	// consulted; it is passed over rather than served unmetered.
+	gateUnmeterable
+	// gateExpired reports the route deadline is spent; the request stops.
+	gateExpired
+	// gateAdmitted owns the quota reservation and any half-open probe the
+	// dispatch must settle.
+	gateAdmitted
+)
+
+// gateResult carries one candidate slot's verdict plus the resources or the
+// refusal attached to it.
+type gateResult struct {
+	verdict   gateVerdict
+	rejection *AttemptFailure // gateRejected: the refusing quota
+	hold      *dispatchHold   // gateAdmitted: the resources to settle
+	quota     string          // gateUnmeterable: the unreadable cap's scope
+}
+
+// dispatchHold owns what one admitted slot holds until its upstream attempt
+// settles: the target quota reservation and, while the provider circuit is
+// recovering, the exclusive half-open probe.
+type dispatchHold struct {
+	provider    string
+	reservation *quota.TargetReservation
+	probed      bool
+	settled     bool
+	budgets     []string
+	estimate    int64
+	pinned      []*PinnedExchange
+}
+
+// gateAttempt adds request spend caps to the shared slot admission boundary.
+// Its hold carries the owners that accounting and settlement must charge.
+func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
+	if x.workflow != nil {
+		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
+			for _, owner := range quota.AttemptCaps(x.Route, provider, slot) {
+				if owner.Limits != nil {
+					gate.hold.budgets = append(gate.hold.budgets, owner.ID)
+				}
+			}
+		}
+		return gate
+	}
+	caps := s.holdCaps(ctx, x, attempt, provider, slot, deadline)
+	if caps.quota != "" {
+		if caps.refusal != nil {
+			return gateResult{verdict: gateRejected, rejection: caps.refusal}
+		}
+		return gateResult{verdict: gateUnmeterable, quota: caps.quota}
+	}
+	gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+	if gate.hold != nil {
+		gate.hold.budgets = caps.owners
+	}
+	return gate
+}
+
+// settle reconciles and releases the quota reservation once the attempt has
+// ended. It runs at most once so a pre-dispatch release cannot double-refund.
+func (h *dispatchHold) settle(ctx context.Context, dispatched bool, actual *int64) {
+	if h == nil || h.settled {
+		return
+	}
+	h.settled = true
+	h.reservation.Settle(ctx, dispatched, actual)
+}
+
+// releaseHold abandons an admitted slot before its dispatch: the quota
+// reservation is refunded in full and a held half-open probe is released so
+// a sibling can still try the recovering endpoint.
+func (s *Server) ReleaseHold(ctx context.Context, hold *dispatchHold) {
+	if hold == nil {
+		return
+	}
+	hold.settle(ctx, false, nil)
+	if hold.probed {
+		hold.probed = false
+		s.health.ReleaseProbe(hold.provider)
+	}
+}
+
+func (s *Server) settleSession(ctx context.Context, x *Call, p *Pin) {
+	s.finishSessionDebit(ctx, x, x.Failure != nil)
+	settled := sessionSettlement(x)
+	if p != nil {
+		s.settleSessionHold(ctx, x, p.Hold, settled)
+	}
+	s.settleCaps(ctx, x)
+	s.recordCost(x)
+	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
+}
+
+func sessionSettlement(x *Call) *int64 {
+	if !x.dispatched {
+		return new(int64(0))
+	}
+	actual := quota.TotalTokens(x.usage())
+	if len(x.facts) == 0 || !x.facts[len(x.facts)-1].BillingUncertain {
+		return actual
+	}
+	if actual == nil {
+		return new(x.estimate)
+	}
+	return new(max(x.estimate, *actual))
+}
+
+func (s *Server) settleSessionHold(ctx context.Context, x *Call, hold *dispatchHold, actual *int64) {
+	if hold == nil {
+		return
+	}
+	hold.settle(ctx, x.dispatched, actual)
+	if !hold.probed {
+		return
+	}
+	hold.probed = false
+	if x.dispatched && len(x.facts) > 0 {
+		s.health.Record(hold.provider, x.facts[len(x.facts)-1], true)
+		return
+	}
+	s.health.ReleaseProbe(hold.provider)
+}
+
+type attemptCompletion struct {
+	fact        events.AttemptFact
+	failure     *AttemptFailure
+	authority   *fault.Error
+	attempt     routing.Attempt
+	estimate    int64
+	finishLease func() *fault.Error
+}
+
+func (h *dispatchHold) begin(ctx context.Context, s *Server, x *Call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *fault.Error) {
+	if !x.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
+		s.ReleaseHold(ctx, h)
+		return false, nil
+	}
+	if x.workflow == nil {
+		return true, nil
+	}
+	authority, err := s.workflowAuthority(ctx, x, x.Route, "")
+	if err != nil {
+		s.ReleaseHold(ctx, h)
+		return false, err
+	}
+	x.sessionDebit = nil
+	caps := quota.AttemptCaps(x.Route, provider, &slot)
+	if x.callerCostExempt() && provider.CredentialSource == "caller" {
+		caps = [3]quota.CappedOwner{}
+	}
+	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
+		s.ReleaseHold(ctx, h)
+		return false, err
+	}
+	return true, nil
+}
+
+func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *Call) (context.Context, func() *fault.Error, *fault.Error) {
+	if x.authority.TaskCapability != nil {
+		admitter := s.Deps.TaskAttemptAdmitter
+		ok := admitter != nil
+		var err error
+		if ok {
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.Route.Slug, x.Route.RevisionID, x.Route.ProjectID, x.request.accountingID())
+		}
+		if !ok || err != nil {
+			if errors.Is(err, release.ErrTaskAttemptLimit) {
+				return ctx, nil, &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+			}
+			return ctx, nil, fault.PermissionError("permission_denied", "The task capability is no longer authorized.")
+		}
+	}
+	if x.workflow == nil {
+		return ctx, func() *fault.Error { return nil }, nil
+	}
+	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
+	return dispatchCtx, finish, nil
+}
+
+func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *Call) (context.Context, func() *fault.Error) {
+	if x.workflow == nil {
+		return ctx, func() *fault.Error { return nil }
+	}
+	return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
+}
+
+func (h *dispatchHold) complete(ctx context.Context, s *Server, x *Call, completion attemptCompletion) (*fault.Error, bool) {
+	dispatched := completion.failure == nil || completion.failure.dispatched
+	x.dispatched = x.dispatched || dispatched
+	x.stepDispatched = x.stepDispatched || dispatched
+	h.settle(ctx, dispatched, quota.SettledAttemptTokens(&completion.fact, completion.estimate))
+	if dispatched {
+		x.spendCaps(h.budgets, completion.attempt)
+	}
+	x.facts = append(x.facts, completion.fact)
+	s.health.Record(h.provider, completion.fact, h.probed)
+	h.probed = false
+	if x.workflow == nil {
+		return completion.authority, false
+	}
+	if completion.failure == nil {
+		settlementErr := s.settleWorkflowModelAttempt(ctx, x, completion.fact)
+		leaseErr := completion.finishLease()
+		if settlementErr != nil {
+			return settlementErr, false
+		}
+		if leaseErr != nil {
+			return leaseErr, false
+		}
+		return completion.authority, false
+	}
+	var releaseErr *fault.Error
+	if completion.failure.dispatched {
+		s.markSessionUnknown(ctx, x)
+	} else {
+		releaseErr = s.abandonWorkflowDebit(ctx, x)
+	}
+	leaseErr := completion.finishLease()
+	if releaseErr != nil {
+		return releaseErr, false
+	}
+	if leaseErr != nil {
+		return leaseErr, false
+	}
+	if completion.authority != nil {
+		return completion.authority, false
+	}
+	if completion.failure.dispatched {
+		return completion.failure.Fault(), completion.failure.class == ClassCancelled
+	}
+	return nil, false
+}
+
+// cooling reports whether a candidate slot is parked: the shared credential
+// or slot cooldown when distributed coordination is configured, or this
+// replica's local cooldown when it is not.
+func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.Slot) bool {
+	generation := s.slotGrantGeneration(slot)
+	if s.Deps.Admission.Ready() {
+		return s.Deps.Admission.Cooling(ctx, providerID, slot, generation)
+	}
+	return s.health.CoolingDown(providerID, slot.ID) ||
+		s.health.CoolingDown(providerID, credentialHealthKey(slot, generation))
+}
+
+func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
+	if slot.CredentialID == nil {
+		return 0
+	}
+	return s.Deps.Runtime.GrantGeneration(*slot.CredentialID)
+}
+
+// gateSlot is the shared pre-dispatch boundary every new upstream attempt
+// crosses — ordinary inference, media, and durable video create alike. A slot
+// list filtered before an earlier call is not authority for a later sibling,
+// so each candidate is revalidated in slot order: live API and network
+// credential eligibility, the route deadline, the distributed or local cooldown,
+// connection and slot quota reservations, and the provider circuit's exclusive
+// half-open probe. An admitted slot's hold carries the reservation and the probe
+// until the attempt settles or releaseHold abandons them before dispatch.
+func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time, priority string) gateResult {
+	// Authority can change while an earlier credential attempt is pending.
+	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
+		return gateResult{verdict: gateSkip}
+	}
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.Deps.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
+		return gateResult{verdict: gateSkip}
+	}
+	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
+	// stream. Hold concurrency through the overall deadline.
+	ttl := time.Until(deadline)
+	if ttl <= 0 {
+		// The route deadline is spent, so there is no window left to reserve
+		// and nothing further to try.
+		return gateResult{verdict: gateExpired}
+	}
+	// A cooldown another replica recorded is read here rather than while the
+	// slots are ranked, so a limiter answering slowly costs one round trip
+	// per slot actually tried instead of one per candidate slot.
+	if s.cooling(ctx, provider.ID, slot) {
+		return gateResult{verdict: gateSkip}
+	}
+	return acquireDispatchHold(ctx, s, provider, slot, estimate, ttl, priority)
+}
+
+func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) gateResult {
+	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, estimate, ttl, priority)
+	if skip {
+		return gateResult{verdict: gateUnmeterable}
+	}
+	if rejection != nil {
+		return gateResult{verdict: gateRejected, rejection: rateLimitedTarget(rejection)}
+	}
+	probed, granted := s.health.Claim(provider.ID)
+	if !granted {
+		reservation.Settle(ctx, false, nil)
+		return gateResult{verdict: gateDenied}
+	}
+	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed, estimate: estimate}}
+}
+
+// cooldownFailure parks the credential or slot that produced a retryable
+// upstream failure and reports whether the provider's remaining slots should
+// be skipped: credential and rate-limit failures stay slot-scoped while every
+// other failure belongs to the endpoint the siblings share.
+func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *routing.Slot, generation int64, failure *AttemptFailure, caller ...bool) bool {
+	if len(caller) != 0 && caller[0] && (failure.class == classCredential || failure.class == classRateLimit || failure.credentialRefused) {
+		return true
+	}
+	if failure.dispatched && slot.CredentialID != nil &&
+		(failure.credentialRefused || failure.class == classCredential || failure.Status == http.StatusUnauthorized) {
+		// The upstream refused the credential, whatever rule classified the
+		// failure: a grant beneath it is refreshed early, which ends the
+		// cooldown (GrantRefreshed).
+		s.Deps.Runtime.CredentialRefused(*slot.CredentialID, generation)
+	}
+	switch failure.class {
+	case classCredential:
+		if generation != s.slotGrantGeneration(slot) {
+			return false
+		}
+		// The poll may install a replacement while the shared store is
+		// recording this cooldown. Its generation keeps that write scoped
+		// to the refused token, including across gateway replicas.
+		s.health.Cooldown(providerID, credentialHealthKey(slot, generation), health.CredentialCooldown)
+		s.Deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CredentialCooldown, true)
+	case classRateLimit:
+		s.health.Cooldown(providerID, slot.ID, failure.retryAfter)
+		s.Deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CooldownDuration(failure.retryAfter), false)
+	default:
+		return true
+	}
+	return false
+}
+
+// GrantRefreshed retires the previous token's cooldown. Serving uses the new
+// generation's scope immediately, so this cleanup may wait on the shared
+// store without holding up the refreshed token.
+func (s *Server) GrantRefreshed(providerID, credentialID string) {
+	// Cleanup is best-effort: older generations are already ineligible and
+	// their cooldowns expire. A delayed notifier must never clear a refusal
+	// of the newly served token.
+	generation := max(0, s.Deps.Runtime.GrantGeneration(credentialID)-1)
+	s.health.EndCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
+	s.Deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
+}
+
+func rateLimitedTarget(refusal *quota.TargetRefusal) *AttemptFailure {
+	return &AttemptFailure{class: classRateLimit, quota: refusal.Quota, retryAfter: refusal.RetryAfter}
+}

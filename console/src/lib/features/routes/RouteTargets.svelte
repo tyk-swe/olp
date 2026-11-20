@@ -14,7 +14,7 @@
     targetUnavailable
   } from '#lib/features/routes/routeEditor.js';
   import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
-  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import { lifecycleNotice } from '#lib/features/providers/index.js';
   import type { EditableTarget } from '#lib/features/routes/routeEditor.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 
@@ -214,7 +214,7 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -309,7 +309,7 @@
     border-radius: var(--radius-control);
     background: var(--warning-soft);
     color: var(--foreground);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .eligibility-warning strong {
     color: var(--warning);

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
@@ -17,11 +19,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // simulationInput is the draft request and the normalized input used by both
@@ -169,7 +171,7 @@ func validTuple(operation, surface, mode string) error {
 	return nil
 }
 
-func (s *Server) simulateDraft(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "draft_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -194,7 +196,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(d.ProjectID, access.View); err != nil {
+	if err := p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
@@ -307,7 +309,7 @@ type simulationRequest struct {
 
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
-func (s *Server) simulateRouting(r *http.Request, p access.Principal) (httpkit.Reply, error) {
+func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	var input simulationRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
@@ -362,7 +364,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (httpkit.R
 	}
 	route := snapshot.Routes[slug]
 	if _, ok := snapshot.Routes[slug]; ok {
-		if err := p.Project(route.ProjectID, access.View); err != nil {
+		if err := p.Project(route.ProjectID, authz.View); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -457,7 +459,7 @@ func simulationRoute(id, slug string, fidelity routing.RouteFidelity, operations
 	}
 	return r
 }
-func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*routinginputs.Inputs, error) {
+func (s *Server) routingInputs(r *http.Request, q database.Queryer) (*routinginputs.Inputs, error) {
 	if s.Inputs != nil {
 		return s.Inputs(), nil
 	}
@@ -467,7 +469,7 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*routinginput
 // Credential revocation and grant lapse are authoritative without publishing a
 // new route or provider revision. Apply them to previews just as the executor
 // does at dispatch.
-func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *routing.Snapshot, route routing.Route) (func(string) routing.Eligibility, error) {
+func routeCredentialEligibility(ctx context.Context, q database.Queryer, snapshot *routing.Snapshot, route routing.Route) (func(string) routing.Eligibility, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
 		provider := snapshot.Providers[target.ProviderID]

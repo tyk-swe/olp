@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import MFAFlow from './MFAFlow.svelte';
-  import { mfaPrompt } from './prompt.svelte';
+  import { mfaPrompt } from '#lib/session/mfaPrompt.svelte.js';
   function cancel() {
     mfaPrompt.current?.finish(
       undefined,

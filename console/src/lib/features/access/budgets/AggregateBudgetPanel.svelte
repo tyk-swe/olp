@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { projectKeys } from '../projects/projectKeys';
@@ -43,9 +45,7 @@
   let weekly = $state('');
   let etag = $state('');
   let saved = $state('');
-  let busy = $state(false);
-  let error = $state('');
-  let notice = $state('');
+  const action = useAction();
   function input(): BudgetPolicy | null {
     return daily || weekly || monthly
       ? {
@@ -75,13 +75,13 @@
     const result = await query.refetch();
     if (result.data) {
       load(result.data);
-      error = notice = '';
+      action.error = '';
     }
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !editable) return;
-    error = notice = '';
+    if (action.busy || !editable) return;
+    action.error = '';
     if (
       [daily, weekly, monthly].some(
         (value) =>
@@ -89,28 +89,25 @@
           (!/^\d{1,12}(\.\d{1,12})?$/.test(value) || Number(value) <= 0)
       )
     ) {
-      error =
+      action.error =
         'Budgets must be positive USD amounts with at most 12 digits before and after the decimal point.';
       return;
     }
-    busy = true;
-    try {
-      const value = await putBudget(projectId, etag, input(), organizationId);
-      client.setQueryData(budgetKey, value);
-      load(value);
-      await client.invalidateQueries({ queryKey: projectKeys.root });
-      notice = `${title} saved.`;
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    await action.run(
+      () => putBudget(projectId, etag, input(), organizationId),
+      async (value) => {
+        client.setQueryData(budgetKey, value);
+        load(value);
+        await client.invalidateQueries({ queryKey: projectKeys.root });
+        notify(`${title} saved.`);
+      }
+    );
   }
 </script>
 
-<section aria-label={title}>
+<section class="section" aria-label={title}>
   <h2>{title}</h2>
-  <p>
+  <p class="section-help">
     Caps total inference spend, including shadow traffic and probes. Every
     applicable budget must allow a request. Subscription token allowances remain
     separate.
@@ -124,7 +121,7 @@
     >
   {:else}
     <form onsubmit={submit}>
-      <fieldset disabled={busy || !editable}>
+      <fieldset disabled={action.busy || !editable}>
         <div class="form-field">
           <label for={`${prefix}-basis`}>Budget basis</label>
           <select id={`${prefix}-basis`} bind:value={basis}>
@@ -174,24 +171,26 @@
           >
         </div>
       </fieldset>
-      <p>
+      <p class="section-help">
         Blank limits remove the cap without resetting spend. Windows currently
         follow the installation budget time zone; weeks begin on Monday.
         Unpriced attempts accrue no USD; {query.data?.usage.unpriced_attempts ??
           0} this month.
       </p>
-      {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-      {#if notice}<p role="status">{notice}</p>{/if}
+      {#if action.error}<p class="inline-problem" role="alert">
+          {action.error}
+        </p>{/if}
+
       <div class="form-actions">
         {#if editable}<button
             class="button button-primary"
             type="submit"
-            disabled={busy}>Save {title.toLowerCase()}</button
+            disabled={action.busy}>Save {title.toLowerCase()}</button
           >{/if}
         <button
           class="button button-secondary"
           type="button"
-          disabled={busy}
+          disabled={action.busy}
           onclick={reload}>Reload budget</button
         >
       </div>
@@ -202,7 +201,6 @@
 <style>
   section {
     border-top: 1px solid var(--border);
-    margin-top: 1.5rem;
     padding-top: 1.5rem;
   }
   fieldset {

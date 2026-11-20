@@ -3,7 +3,7 @@
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { Readiness } from '#lib/features/runtime/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
-  import type { UsageCompleteness } from '#lib/features/usage/usage.js';
+  import type { UsageCompleteness } from '#lib/features/usage/index.js';
   import { formatDate, formatInteger, stateLabel } from '#lib/format.js';
   import { healthTone } from '#lib/features/runtime/health/presentation.js';
   import { spoolUsage } from '#lib/features/runtime/health/spool.js';
@@ -343,7 +343,7 @@
   }
   .persistence h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -360,7 +360,7 @@
   .section-link {
     margin: 0.6rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .facts {
     display: grid;

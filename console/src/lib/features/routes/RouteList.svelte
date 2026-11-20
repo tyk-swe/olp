@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
@@ -18,7 +20,7 @@
     type ActiveRoute
   } from '#lib/features/routes/api.js';
   import { cursorPaginationProps } from '#lib/listing/pagination.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import type { RouteListState } from '#lib/features/routes/routeListState.js';
 
@@ -75,7 +77,7 @@
   }
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <div class="toolbar">
   <div class="page-actions">
@@ -139,13 +141,9 @@
       {#if activeRoutes.isPlaceholderData}
         <p class="updating" role="status">Updating…</p>
       {/if}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Published routes table"
-        aria-busy={activeRoutes.isPlaceholderData}
+      <ScrollTable
+        label="Published routes table"
+        busy={activeRoutes.isPlaceholderData}
       >
         <table class="data-table">
           <thead
@@ -196,7 +194,7 @@
               >{/each}</tbody
           >
         </table>
-      </div>
+      </ScrollTable>
     {/if}
     {#if !activeRoutes.isError}<CursorPagination
         {...cursorPaginationProps(
@@ -232,14 +230,7 @@
       {#if drafts.isPlaceholderData}
         <p class="updating" role="status">Updating…</p>
       {/if}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Route drafts table"
-        aria-busy={drafts.isPlaceholderData}
-      >
+      <ScrollTable label="Route drafts table" busy={drafts.isPlaceholderData}>
         <table class="data-table">
           <thead>
             <tr>
@@ -293,7 +284,7 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
     {#if !drafts.isError}<CursorPagination
         {...cursorPaginationProps(
@@ -308,7 +299,7 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

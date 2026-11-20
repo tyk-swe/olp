@@ -106,16 +106,17 @@ describe('playground generation limits', () => {
   it.each([
     ['1', 1],
     [' 42 ', 42],
-    ['1000000', 1000000]
+    ['1000001', 1000001],
+    ['1048576', 1048576]
   ])('accepts an output token limit of %s', (value, expected) => {
     expect(parseMaxOutputTokens(value)).toBe(expected);
   });
 
-  it.each(['0', '-1', '1.5', '1000001', 'Infinity', 'invalid'])(
+  it.each(['0', '-1', '1.5', '1048577', 'Infinity', 'invalid'])(
     'rejects an invalid output token limit %s',
     (value) => {
       expect(() => parseMaxOutputTokens(value)).toThrow(
-        'Maximum output tokens must be from 1 through 1000000.'
+        'Maximum output tokens must be from 1 through 1048576.'
       );
     }
   );

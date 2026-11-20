@@ -1,8 +1,10 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -44,7 +46,7 @@
   }
 </script>
 
-<svelte:head><title>Tool call · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Tool call" />
 <a class="text-button" href={resolve('activity/tool-calls')}>All tool calls</a>
 <PageHeader title="Tool call" />
 {#if call.error}
@@ -105,5 +107,5 @@
     </form>
   {/if}
 {/if}
-{#if saved}<p class="success-banner" role="status">Resolution recorded</p>{/if}
+{#if saved}<Callout tone="success">Resolution recorded</Callout>{/if}
 {#if action.error}<p class="inline-problem" role="alert">{action.error}</p>{/if}

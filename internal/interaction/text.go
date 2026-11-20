@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
-	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 // prepareText is a qualified operation mapping, independent of the transformed

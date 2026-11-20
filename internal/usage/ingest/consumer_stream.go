@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { playgroundTemplates } from '#lib/features/inference/playground/templates.js';
+  import { playgroundTemplates } from '#lib/features/inference/index.js';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
   import { modesFor } from '#lib/features/routes/routeEditor.js';
@@ -192,7 +192,7 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }
@@ -239,7 +239,7 @@
     border-radius: var(--radius-control);
     background: var(--success-soft);
     color: var(--foreground);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .activation strong {
     color: var(--success);

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func TestPresentedInferenceKeyShapes(t *testing.T) {
@@ -40,16 +42,17 @@ func TestPresentedInferenceKeyShapes(t *testing.T) {
 	}
 }
 
-func goldenTokenScopes(t *testing.T, names []string) operationSet {
+func goldenTokenScopes(t *testing.T, names []string) []authz.Operation {
 	t.Helper()
-	if len(names) == 0 {
-		return 0
+	scopes := make([]authz.Operation, len(names))
+	for i, name := range names {
+		op, ok := authz.ParseOperation(name)
+		if !ok {
+			t.Fatalf("unknown token scope %q", name)
+		}
+		scopes[i] = op
 	}
-	op, ok := ParseOperation(names[0])
-	if !ok {
-		t.Fatalf("unknown token scope %q", names[0])
-	}
-	return 1<<op | goldenTokenScopes(t, names[1:])
+	return scopes
 }
 
 func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
@@ -82,8 +85,8 @@ func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
 		}
 		for index, caller := range matrix.Archetypes {
 			t.Run(caller.Name, func(t *testing.T) {
-				principal := Principal{User: User{Role: caller.Role}, Kind: caller.Kind, AllProjects: caller.Global,
-					creatorRole: caller.CreatorRole, scopes: goldenTokenScopes(t, caller.Scopes)}
+				principal := authz.Principal{User: authz.User{Role: caller.Role}, Kind: caller.Kind, AllProjects: caller.Global}.
+					Delegated(goldenTokenScopes(t, caller.Scopes), caller.CreatorRole)
 				if admitted := requirements[pattern].Admits(principal) == nil; admitted != (row[index] == 'Y') {
 					t.Fatalf("import authority disagrees with the canonical expectation, admitted=%t", admitted)
 				}

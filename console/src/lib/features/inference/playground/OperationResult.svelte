@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { stringifyNativeJSON } from '#lib/nativeJson.js';
   import { downloadBlob } from '#lib/download.js';
   import {
@@ -54,7 +55,7 @@
       are shown separately from observed storage; unknown dimensions stay
       unknown. No vector is converted to float for display.
     </p>
-    <div class="table-shell" role="region" aria-label="Vector shapes">
+    <ScrollTable label="Vector shapes">
       <table class="data-table">
         <thead
           ><tr
@@ -75,13 +76,13 @@
           {/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
   {:else if operation === 'rerank'}
     <p class="scope-note">
       Native rank order, input identity, scores, and ties are shown unchanged.
       Scores are not normalized or compared across models.
     </p>
-    <div class="table-shell" role="region" aria-label="Native ranked results">
+    <ScrollTable label="Native ranked results">
       <table class="data-table">
         <thead
           ><tr
@@ -101,7 +102,7 @@
           {/each}
         </tbody>
       </table>
-    </div>
+    </ScrollTable>
   {:else if operation === 'token_count'}
     <p class="scope-note">
       These are native counting-operation fields, separate from estimates and
@@ -172,10 +173,6 @@
   details {
     margin-top: 0.5rem;
     min-width: 0;
-  }
-  .table-shell {
-    min-width: 0;
-    max-width: 100%;
   }
   .data-table {
     table-layout: fixed;

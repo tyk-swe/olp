@@ -8,7 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
@@ -48,7 +49,7 @@ type daySpend struct {
 	ExcludedCallerAttempts int64
 }
 
-func visibleImports(ctx context.Context, q access.Queryer, p access.Principal, provider uuid.NullUUID) ([]providerImport, error) {
+func visibleImports(ctx context.Context, q database.Queryer, p authz.Principal, provider uuid.NullUUID) ([]providerImport, error) {
 	rows, err := q.Query(ctx, `SELECT pr.id,
 		CASE WHEN bi.provider_id IS NOT NULL THEN bi.last_success_at ELSE bc.last_success_at END,
 		bi.last_error_code, bi.provider_id IS NOT NULL
@@ -74,7 +75,7 @@ func importedProviders(imports []providerImport) []uuid.UUID {
 	return providers
 }
 
-func coveredDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, window Range) ([]coveredDay, error) {
+func coveredDays(ctx context.Context, q database.Queryer, providers []uuid.UUID, window Range) ([]coveredDay, error) {
 	rows, err := q.Query(ctx, `SELECT provider_id, day, last_success_at
 		FROM olp.provider_billing_days
 		WHERE provider_id=ANY($1::uuid[]) AND day>=$2::date AND day<$3::date`,
@@ -85,8 +86,8 @@ func coveredDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, w
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[coveredDay])
 }
 
-func invoicedDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, window Range) ([]invoicedDay, error) {
-	rows, err := q.Query(ctx, `SELECT provider_id, day, sum(amount),
+func invoicedDays(ctx context.Context, q database.Queryer, providers []uuid.UUID, window Range) ([]invoicedDay, error) {
+	rows, err := q.Query(ctx, `SELECT provider_id, day, CASE WHEN count(DISTINCT btrim(currency))=1 THEN sum(amount) ELSE 0 END,
 		array_agg(DISTINCT btrim(currency) ORDER BY btrim(currency))
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=ANY($1::uuid[]) AND day>=$2::date AND day<$3::date
@@ -98,7 +99,7 @@ func invoicedDays(ctx context.Context, q access.Queryer, providers []uuid.UUID, 
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[invoicedDay])
 }
 
-func attributedSpend(ctx context.Context, q access.Queryer, providers []uuid.UUID, window Range) ([]daySpend, error) {
+func attributedSpend(ctx context.Context, q database.Queryer, providers []uuid.UUID, window Range) ([]daySpend, error) {
 	ids := make([]string, len(providers))
 	for i, provider := range providers {
 		ids[i] = provider.String()

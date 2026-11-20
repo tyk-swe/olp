@@ -1,6 +1,12 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  createHeaders,
+  ifMatch,
+  mutationHeaders
+} from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 
@@ -35,7 +41,7 @@ export async function putBillingImport(
     {
       params: {
         path: { provider_id: providerId },
-        header: { 'If-Match': etag, 'Idempotency-Key': requestId }
+        header: mutationHeaders(etag, requestId)
       },
       body: input
     }
@@ -52,7 +58,7 @@ export async function deleteBillingImport(
     {
       params: {
         path: { provider_id: providerId },
-        header: { 'If-Match': etag }
+        header: ifMatch(etag)
       }
     }
   );
@@ -68,7 +74,7 @@ export async function runBillingImport(
     {
       params: {
         path: { provider_id: providerId },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     }
   );

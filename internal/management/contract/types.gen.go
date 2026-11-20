@@ -6764,6 +6764,7 @@ const (
 	SimulationDialectExaSearch                    SimulationDialect = "exa-search"
 	SimulationDialectGeminiBatchEmbeddings        SimulationDialect = "gemini-batch-embeddings"
 	SimulationDialectGeminiCountTokens            SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiDecisions              SimulationDialect = "gemini-decisions"
 	SimulationDialectGeminiEmbeddings             SimulationDialect = "gemini-embeddings"
 	SimulationDialectGeminiGenerateContent        SimulationDialect = "gemini-generate-content"
 	SimulationDialectMistralOcr                   SimulationDialect = "mistral-ocr"
@@ -6816,6 +6817,8 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectGeminiBatchEmbeddings:
 		return true
 	case SimulationDialectGeminiCountTokens:
+		return true
+	case SimulationDialectGeminiDecisions:
 		return true
 	case SimulationDialectGeminiEmbeddings:
 		return true
@@ -11732,6 +11735,17 @@ type InspectedTurnScope string
 
 // InstallationBrandingResponse defines model for InstallationBrandingResponse.
 type InstallationBrandingResponse struct {
+	// Accent Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text.
+	Accent string `json:"accent"`
+
+	// AccentScale Accessible accent shades derived from accent, or null for the default palette.
+	AccentScale nullable.Nullable[struct {
+		N300 string `json:"300"`
+		N400 string `json:"400"`
+		N500 string `json:"500"`
+		N600 string `json:"600"`
+		N700 string `json:"700"`
+	}] `json:"accent_scale"`
 	Etag string `json:"etag"`
 
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
@@ -14890,7 +14904,7 @@ type ReconciliationReport struct {
 		}] `json:"import"`
 		IncompleteAttempts int `json:"incomplete_attempts"`
 
-		// InvoicedCost Exact decimal; null outside the imported range.
+		// InvoicedCost Exact decimal when covered, or null for mixed invoice currencies or no coverage.
 		InvoicedCost     nullable.Nullable[string] `json:"invoiced_cost"`
 		InvoicedCurrency nullable.Nullable[string] `json:"invoiced_currency"`
 		PricedAttempts   int                       `json:"priced_attempts"`
@@ -14911,9 +14925,11 @@ type ReconciliationReport struct {
 		AttributedCostCovered        string                    `json:"attributed_cost_covered"`
 		CaptureRate                  nullable.Nullable[string] `json:"capture_rate"`
 		CaptureRateUnavailableReason nullable.Nullable[string] `json:"capture_rate_unavailable_reason"`
-		InvoicedCost                 nullable.Nullable[string] `json:"invoiced_cost"`
-		ProviderId                   openapi_types.UUID        `json:"provider_id"`
-		UnpricedShare                nullable.Nullable[string] `json:"unpriced_share"`
+
+		// InvoicedCost Exact decimal in the report currency, or null when there is no coverage or the invoices include a different currency.
+		InvoicedCost  nullable.Nullable[string] `json:"invoiced_cost"`
+		ProviderId    openapi_types.UUID        `json:"provider_id"`
+		UnpricedShare nullable.Nullable[string] `json:"unpriced_share"`
 	} `json:"totals"`
 }
 
@@ -16489,10 +16505,6 @@ type SessionListResponse struct {
 type SessionResponse struct {
 	CsrfToken string `json:"csrf_token"`
 
-	// InstallationLogo Embedded PNG/JPEG installation logo; empty uses the default brand mark.
-	InstallationLogo *string `json:"installation_logo,omitempty"`
-	InstallationName string  `json:"installation_name"`
-
 	// Operations The management operations the signed-in member may perform now; the console shows only what the server would admit.
 	Operations []ManagementOperation `json:"operations"`
 
@@ -16545,11 +16557,13 @@ type SetupRequest struct {
 	Password         *string `json:"password,omitempty"`
 }
 
-// SetupStatus Unauthenticated first-run probe. It deliberately carries nothing but the
-// boolean: the installation name is an authenticated detail the console reads
+// SetupStatus Unauthenticated first-run probe. It deliberately carries nothing but
+// booleans: the installation name is an authenticated detail the console reads
 // from `SessionResponse`.
 type SetupStatus struct {
-	SetupRequired bool `json:"setup_required"`
+	// BootstrapTokenConfigured Whether the server can read a bootstrap token, without revealing it
+	BootstrapTokenConfigured bool `json:"bootstrap_token_configured"`
+	SetupRequired            bool `json:"setup_required"`
 }
 
 // ShadowExperiment A route's primary path compared with one shadow target over the requests the shadow mirrored, from metadata only.
@@ -17023,6 +17037,9 @@ type UpdateGuardrailRequestOnError string
 
 // UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
 type UpdateInstallationBrandingRequest struct {
+	// Accent Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text.
+	Accent string `json:"accent"`
+
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
 	Logo string `json:"logo"`
 	Name string `json:"name"`

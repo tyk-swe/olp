@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
   import { routeTabs } from './routeTabs.js';
@@ -13,7 +15,7 @@
   } from '#lib/editing/focusError.js';
   import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import RouteCacheEditor from '#lib/features/caching/RouteCacheEditor.svelte';
+  import { RouteCacheEditor } from '#lib/features/caching/index.js';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import { errorMessage } from '#lib/management/http.js';
@@ -21,7 +23,7 @@
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '#lib/format.js';
   import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { ProjectScopeField } from '#lib/features/access/index.js';
   let {
     routeId
   }: {
@@ -37,7 +39,7 @@
   });
 </script>
 
-<svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Routes" />
 
 <PageHeader
   title={editor.isNew
@@ -75,9 +77,9 @@
   >
     {editor.errorMessage}
   </div>{/if}
-{#if editor.notice}<div class="success-banner" role="status">
+{#if editor.notice}<Callout tone="success">
     {editor.notice}
-  </div>{/if}
+  </Callout>{/if}
 <p class="sr-only" role="status">
   {editor.busy ? 'Operation in progress. Please wait.' : ''}
 </p>
@@ -236,7 +238,7 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

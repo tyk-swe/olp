@@ -21,9 +21,9 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -751,7 +751,7 @@ func (m *Manager) Release() *Release {
 
 // EndUserDigest derives a project-scoped identity without retaining the identifier.
 func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
-	return access.DigestEndUser(m.auth, projectID, identifier)
+	return keyauthority.DigestEndUser(m.auth, projectID, identifier)
 }
 
 func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {

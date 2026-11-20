@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -8,15 +10,15 @@
   import PageHeader from '#lib/components/PageHeader.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { createProject, listProjectMemberships } from './api';
   import { projectKeys } from './projectKeys';
 
   const access = useRole();
   const queryClient = useQueryClient();
-  const createIntent = useMutationIntent();
+  const creation = useMutation();
   const projects = createQuery(() => ({
     queryKey: projectKeys.memberships,
     queryFn: ({ signal }) => listProjectMemberships(signal)
@@ -25,41 +27,26 @@
 
   let creating = $state(false);
   let name = $state('');
-  let busy = $state(false);
-  let problem = $state('');
 
   function startCreate() {
     name = '';
-    problem = '';
+    creation.error = '';
     creating = true;
   }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !name.trim()) return;
-    busy = true;
-    problem = '';
-    try {
-      const submission =
-        createIntent.prepare<Parameters<typeof createProject>[0]>(name);
-      const project = await createProject(
-        submission.input,
-        submission.requestId
-      );
-      createIntent.reset();
+    if (!name.trim()) return;
+    await creation.submit(name, createProject, async (project) => {
       await queryClient.invalidateQueries({ queryKey: projectKeys.root });
       creating = false;
       notify(`Created ${project.name}`);
       await goto(resolve(`projects/${project.id}`));
-    } catch (error) {
-      problem = errorMessage(error);
-    } finally {
-      busy = false;
-    }
+    });
   }
 </script>
 
-<svelte:head><title>Projects · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Projects" />
 
 <PageHeader
   title="Projects"
@@ -95,7 +82,7 @@
         >{/if}{/snippet}
   </EmptyState>
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Projects">
     <table class="data-table">
       <thead><tr><th>Name</th><th>Your role</th></tr></thead>
       <tbody>
@@ -116,7 +103,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
 
 {#if creating}
@@ -131,10 +118,12 @@
             bind:value={name}
             maxlength="100"
             required
-            disabled={busy}
+            disabled={creation.busy}
           />
         </div>
-        {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
+        {#if creation.error}<p class="inline-problem" role="alert">
+            {creation.error}
+          </p>{/if}
         <div class="page-actions">
           <button class="button button-secondary" type="button" onclick={close}
             >Cancel</button
@@ -142,8 +131,8 @@
           <button
             class="button button-primary"
             type="submit"
-            disabled={busy || !name.trim()}
-            >{busy ? 'Creating…' : 'Create project'}</button
+            disabled={creation.busy || !name.trim()}
+            >{creation.busy ? 'Creating…' : 'Create project'}</button
           >
         </div>
       </form>

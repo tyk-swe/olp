@@ -5,37 +5,41 @@ import (
 	"net/http"
 	"reflect"
 
+	signin "github.com/tyk-swe/olp/internal/identity"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
-func parseSAML(fragment nullable.Nullable[contract.ConfigurationSAML]) (*access.SAMLDefinition, error) {
+func parseSAML(fragment nullable.Nullable[contract.ConfigurationSAML]) (*signin.SAMLDefinition, error) {
 	declared, ok := promotion.Present(fragment)
 	if !ok {
 		return nil, nil
 	}
-	definition, err := promotion.Convert[access.SAMLDefinition](declared)
+	definition, err := promotion.Convert[signin.SAMLDefinition](declared)
 	if err != nil {
 		return nil, err
 	}
-	if err := access.ValidateSAMLDefinition(definition); err != nil {
+	if err := signin.ValidateSAMLDefinition(definition); err != nil {
 		return nil, err
 	}
 	return &definition, nil
 }
 
-func readSAML(ctx context.Context, q access.Queryer) (*access.SAMLDefinition, error) {
-	definition, ok, err := access.ReadSAMLDefinition(ctx, q)
+func readSAML(ctx context.Context, q database.Queryer) (*signin.SAMLDefinition, error) {
+	definition, ok, err := signin.ReadSAMLDefinition(ctx, q)
 	if !ok {
 		return nil, err
 	}
 	return &definition, nil
 }
 
-func renderSAML(definition *access.SAMLDefinition) (nullable.Nullable[contract.ConfigurationSAML], error) {
+func renderSAML(definition *signin.SAMLDefinition) (nullable.Nullable[contract.ConfigurationSAML], error) {
 	if definition == nil {
 		return nullable.Nullable[contract.ConfigurationSAML]{}, nil
 	}
@@ -46,11 +50,11 @@ func renderSAML(definition *access.SAMLDefinition) (nullable.Nullable[contract.C
 	return nullable.NewNullableWithValue(rendered), nil
 }
 
-func planSAML(ctx context.Context, q access.Queryer, desired *access.SAMLDefinition) ([]promotion.Item, error) {
+func planSAML(ctx context.Context, q database.Queryer, desired *signin.SAMLDefinition) ([]promotion.Item, error) {
 	if desired == nil {
 		return nil, nil
 	}
-	current, exists, err := access.ReadSAMLDefinition(ctx, q)
+	current, exists, err := signin.ReadSAMLDefinition(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -63,15 +67,15 @@ func planSAML(ctx context.Context, q access.Queryer, desired *access.SAMLDefinit
 }
 
 func SAMLApplier(desired Desired, deps Deps, request *http.Request) promotion.Applier {
-	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+	return func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
 		if desired.saml == nil {
 			return nil
 		}
-		current, exists, err := access.ReadSAMLDefinition(ctx, tx)
+		current, exists, err := signin.ReadSAMLDefinition(ctx, tx)
 		if err != nil || exists && sameSAML(current, *desired.saml) {
 			return err
 		}
-		stored, err := deps.Access.StoreSAMLDefinition(ctx, tx, p, *desired.saml, false)
+		stored, err := deps.SignIn.StoreSAMLDefinition(ctx, tx, p, *desired.saml, false)
 		if err != nil {
 			return err
 		}
@@ -79,12 +83,12 @@ func SAMLApplier(desired Desired, deps Deps, request *http.Request) promotion.Ap
 	}
 }
 
-func sameSAML(a, b access.SAMLDefinition) bool {
+func sameSAML(a, b signin.SAMLDefinition) bool {
 	return reflect.DeepEqual(canonicalSAML(a), canonicalSAML(b))
 }
 
-func canonicalSAML(d access.SAMLDefinition) access.SAMLDefinition {
-	return access.SAMLDefinition{
+func canonicalSAML(d signin.SAMLDefinition) signin.SAMLDefinition {
+	return signin.SAMLDefinition{
 		Enabled:         d.Enabled,
 		Metadata:        d.Metadata,
 		EmailAttribute:  d.EmailAttribute,

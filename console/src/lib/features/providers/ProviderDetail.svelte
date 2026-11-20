@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
   import { page } from '$app/state';
@@ -15,7 +16,7 @@
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { errorMessage as providerDetailError } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import ProviderConfigurationSection from './ProviderConfigurationSection.svelte';
   import ProviderCredentialsSection from './ProviderCredentialsSection.svelte';
   import BillingImportSection from './BillingImportSection.svelte';
@@ -97,9 +98,9 @@
     {editorView.error}
     <ProviderValidationIssues issues={editorView.validationIssues} />
   </div>{/if}
-{#if editorView.notice}<div class="success-banner" role="status">
+{#if editorView.notice}<Callout tone="success">
     {editorView.notice}
-  </div>{/if}
+  </Callout>{/if}
 <ConflictNotice
   notice={editorView.concurrentNotice}
   onReload={editor.reload}

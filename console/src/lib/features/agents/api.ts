@@ -1,6 +1,12 @@
 import { apiClient } from '#lib/management/client.js';
 import type { components } from '#lib/management/schema.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  createHeaders,
+  mutationHeaders
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { PublicationCommand, PublicationIdentity } from './form';
 
@@ -109,10 +115,7 @@ export async function saveServer(
     await apiClient.PUT('/api/v1/mcp-servers/{server_id}', {
       params: {
         path: { server_id: current.id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(current.etag, requestId)
       },
       body: input
     })
@@ -202,7 +205,7 @@ export const createInvestigation = async (
 ) =>
   unwrap(
     await apiClient.POST('/api/v1/investigations', {
-      params: { header: { 'Idempotency-Key': requestId } },
+      params: { header: createHeaders(requestId) },
       body: input
     })
   );
@@ -243,17 +246,14 @@ export async function savePublication(
         await apiClient.PUT(details[kind], {
           params: {
             path: { publication_id: current.id },
-            header: {
-              'If-Match': `"${current.etag}"`,
-              'Idempotency-Key': requestId
-            }
+            header: mutationHeaders(current.etag, requestId)
           },
           body: input
         })
       )
     : unwrap(
         await apiClient.POST(collections[kind], {
-          params: { header: { 'Idempotency-Key': requestId } },
+          params: { header: createHeaders(requestId) },
           body: input
         })
       );
@@ -267,10 +267,7 @@ export async function publish(
     await apiClient.POST(publications[kind], {
       params: {
         path: { publication_id: current.id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(current.etag, requestId)
       }
     })
   );
@@ -284,10 +281,7 @@ export async function retire(
     await apiClient.DELETE(details[kind], {
       params: {
         path: { publication_id: current.id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(current.etag, requestId)
       }
     })
   );
@@ -302,10 +296,7 @@ export async function setLabel(
     await apiClient.PUT('/api/v1/prompts/{publication_id}/labels/{label}', {
       params: {
         path: { publication_id: current.id, label },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(current.etag, requestId)
       },
       body: { revision_id: revision }
     })
@@ -444,7 +435,7 @@ export const createServer = async (
   unwrap(
     await apiClient.POST('/api/v1/mcp-servers', {
       body,
-      params: { header: { 'Idempotency-Key': requestId } }
+      params: { header: createHeaders(requestId) }
     })
   );
 export const retireServer = async (
@@ -455,7 +446,7 @@ export const retireServer = async (
     await apiClient.DELETE('/api/v1/mcp-servers/{server_id}', {
       params: {
         path: { server_id: server.id },
-        header: { 'If-Match': `"${server.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(server.etag, requestId)
       }
     })
   );
@@ -475,7 +466,7 @@ export const resolveToolCall = async (
       body,
       params: {
         path: { call_id: id },
-        header: { 'Idempotency-Key': requestId }
+        header: createHeaders(requestId)
       }
     })
   );

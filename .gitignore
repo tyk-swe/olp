@@ -5,8 +5,7 @@ __pycache__/
 /console/build/
 /console/node_modules/
 /console/.svelte-kit/
-/deploy/secrets/*
-!/deploy/secrets/README.md
+/deploy/secrets/
 
 .env
 .env.*

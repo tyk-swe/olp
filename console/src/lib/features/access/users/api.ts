@@ -1,6 +1,6 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { unwrap, unwrapPage, ifMatch } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
@@ -28,7 +28,7 @@ export async function listUsers(signal?: AbortSignal): Promise<User[]> {
 export async function updateUser(user: User, patch: UserPatch): Promise<User> {
   return unwrap(
     await apiClient.PATCH('/api/v1/users/{user_id}', {
-      params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
+      params: { path: { user_id: user.id }, header: ifMatch(user.etag) },
       body: patch
     })
   );

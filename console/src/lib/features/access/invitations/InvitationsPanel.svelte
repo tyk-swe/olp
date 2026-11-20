@@ -1,11 +1,13 @@
 <script lang="ts">
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { invitationKeys } from '#lib/features/access/invitations/invitationKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -22,8 +24,8 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
-  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { FIXED_ROLES } from '#lib/session/authorization.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
@@ -54,7 +56,6 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
   let email = $state('');
   let role = $state('developer');
   let expiresInHours = $state(DEFAULT_EXPIRY_HOURS);
@@ -73,7 +74,7 @@
     role = 'developer';
     expiresInHours = DEFAULT_EXPIRY_HOURS;
     copied = false;
-    copyError = error = notice = busy = '';
+    copyError = error = busy = '';
   });
 
   async function run(
@@ -82,7 +83,7 @@
   ) {
     const isCurrent = captureOwner();
     busy = label;
-    error = notice = '';
+    error = '';
     try {
       await action(isCurrent);
     } catch (cause) {
@@ -115,7 +116,7 @@
       invitationSecret = result;
       createIntent.reset();
       email = '';
-      notice = 'Invitation created.';
+      notify('Invitation created.');
       try {
         const observation = await invitations.refetch();
         if (observation?.isError) throw observation.error;
@@ -142,7 +143,7 @@
       );
       if (!isCurrent()) return;
       await invitations.refetch();
-      notice = 'Invitation revoked.';
+      notify('Invitation revoked.');
     });
   }
 
@@ -206,7 +207,6 @@
 {/if}
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 {#if !canManage}
   <ReadOnlyNote>
@@ -286,7 +286,7 @@
     >Invite someone by email and choose their role.</EmptyState
   >
 {:else}
-  <div class="table-shell">
+  <ScrollTable label="Invitations">
     <table class="data-table">
       <thead
         ><tr
@@ -339,7 +339,7 @@
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
   <CursorPagination
     {...cursorPaginationProps(pagination, invitations.data?.nextCursor)}
     label="Invitation pages"
@@ -349,7 +349,7 @@
 <style>
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

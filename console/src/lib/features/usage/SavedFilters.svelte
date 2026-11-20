@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { authLifecycle } from '#lib/session/lifecycle.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     readSavedFilters,
@@ -68,7 +68,7 @@
 
 <details class="saved-views">
   <summary>Saved views</summary>
-  <p class="helper">
+  <p class="muted">
     Save the current filters for this sign-in session and browser tab. A new
     session starts with no saved views.
   </p>

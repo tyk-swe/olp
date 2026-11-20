@@ -232,11 +232,15 @@ func purgeExpiredAudit(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (i
 // report calls incomplete must stay incomplete after retention. A deduplicated
 // gap is held until its dedupe key can no longer be replayed, so rolling it up
 // cannot let the same loss be recorded twice.
-const gapRollupSQL = `WITH expired AS (
-      DELETE FROM olp.request_metadata_ingestion_gaps
+const gapRollupSQL = `WITH candidates AS (
+      SELECT id FROM olp.request_metadata_ingestion_gaps
        WHERE reported_at < $1
          AND (deduplication_key IS NULL
               OR reported_at < now() - make_interval(days => $2::integer, mins => $3::integer))
+       LIMIT $4 FOR UPDATE SKIP LOCKED
+    ), expired AS (
+      DELETE FROM olp.request_metadata_ingestion_gaps gap USING candidates
+       WHERE gap.id = candidates.id
       RETURNING gateway_instance, reason, event_count, certainty,
                 first_observed_at, last_observed_at
     ), rolled AS (
@@ -259,74 +263,149 @@ const gapRollupSQL = `WITH expired AS (
     )
     SELECT (SELECT count(*) FROM rolled)::bigint, (SELECT count(*) FROM expired)::bigint`
 
-// purgeExpiringRecords clears the tables that carry their own expiry, in one
-// transaction: they are small, bounded sets whose deletion has no dependants.
+func rollUpRequestMetadataGaps(ctx context.Context, conn *pgx.Conn, cutoff time.Time, report *MaintenanceReport) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("roll up request metadata gaps: %w", err)
+		}
+		var batchRollups, batchGaps int64
+		if err = tx.QueryRow(ctx, gapRollupSQL, cutoff, int64(usage.ReplayHorizonDays), int64(usage.FutureSkewMinutes), int64(retentionBatch)).
+			Scan(&batchRollups, &batchGaps); err != nil {
+			_ = tx.Rollback(context.WithoutCancel(ctx))
+			return fmt.Errorf("roll up request metadata gaps: %w", err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return fmt.Errorf("roll up request metadata gaps: %w", err)
+		}
+		if batchRollups < 0 || batchGaps < 0 {
+			return errors.New("maintenance returned an invalid gap rollup count")
+		}
+		report.GapRollupRows += batchRollups
+		report.GapRows += batchGaps
+		if batchGaps < retentionBatch {
+			return nil
+		}
+	}
+}
+
+// A resolved epoch is evidence only until its usage window closes; the gap it
+// opened is retained separately.
+const purgeEpochsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.request_metadata_gateway_epochs
+       WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1)
+          OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)
+       LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.request_metadata_gateway_epochs target USING expired
+     WHERE target.ctid = expired.ctid`
+
+// Receipts are the delivery idempotency record; they expire with the replay
+// horizon they protect, not with the usage window.
+const purgeReceiptsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.request_metadata_event_receipts
+       WHERE recorded_at < now() - make_interval(days => $1::integer, mins => $2::integer)
+       LIMIT $3 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.request_metadata_event_receipts receipt USING expired
+     WHERE receipt.ctid = expired.ctid`
+
+const purgeSessionsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.sessions WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.sessions target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeInvitationsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.invitations
+       WHERE expires_at <= $1 AND accepted_at IS NULL AND revoked_at IS NULL
+       LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.invitations target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeReplaysSQL = `WITH expired AS (
+      SELECT ctid FROM olp.replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.replays target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeSAMLFlowsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.saml_flows WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.saml_flows target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeSAMLAssertionReplaysSQL = `WITH expired AS (
+      SELECT ctid FROM olp.saml_assertion_replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.saml_assertion_replays target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeOIDCFlowsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.oidc_flows WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.oidc_flows target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeGrantEnrollmentsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.grant_enrollments WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.grant_enrollments target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeMFAChallengesSQL = `WITH expired AS (
+      SELECT ctid FROM olp.mfa_challenges WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.mfa_challenges target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeSecretsSQL = `WITH expired AS (
+      SELECT ctid FROM olp.secrets WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.secrets target USING expired WHERE target.ctid = expired.ctid`
+
+const purgeRecentAuthSQL = `WITH expired AS (
+      SELECT ctid FROM olp.recent_auth WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.recent_auth target USING expired WHERE target.ctid = expired.ctid`
+
+// purgeExpiringRecords clears the tables that carry their own expiry. Each
+// table drains in its own committed batches, like the purges above, so one
+// locked row or a cancelled pass cannot roll back a whole pass of reclaimed
+// rows; a later table failing leaves the earlier ones purged.
 func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, windows cutoffs, report *MaintenanceReport) error {
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("purge expiring records: %w", err)
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err = tx.QueryRow(ctx, gapRollupSQL, windows.usage, int64(usage.ReplayHorizonDays), int64(usage.FutureSkewMinutes)).
-		Scan(&report.GapRollupRows, &report.GapRows); err != nil {
-		return fmt.Errorf("roll up request metadata gaps: %w", err)
-	}
-	if report.GapRollupRows < 0 || report.GapRows < 0 {
-		return errors.New("maintenance returned an invalid gap rollup count")
+	if err := rollUpRequestMetadataGaps(ctx, conn, windows.usage, report); err != nil {
+		return err
 	}
 	deletes := []struct {
 		into *int64
 		sql  string
 		args []any
 	}{
-		// A resolved epoch is evidence only until its usage window closes; the
-		// gap it opened is retained separately.
-		{&report.EpochRows, `DELETE FROM olp.request_metadata_gateway_epochs
-            WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1)
-               OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)`, []any{windows.usage}},
-		// Receipts are the delivery idempotency record; they expire with the
-		// replay horizon they protect, not with the usage window.
-		{&report.ReceiptRows, `WITH expired AS (
-              SELECT ctid FROM olp.request_metadata_event_receipts
-               WHERE recorded_at < now() - make_interval(days => $1::integer, mins => $2::integer)
-               LIMIT $3 FOR UPDATE SKIP LOCKED
-            )
-            DELETE FROM olp.request_metadata_event_receipts receipt USING expired
-             WHERE receipt.ctid = expired.ctid`,
+		{&report.EpochRows, purgeEpochsSQL, []any{windows.usage, int64(retentionBatch)}},
+		{&report.ReceiptRows, purgeReceiptsSQL,
 			[]any{int64(usage.ReplayHorizonDays), int64(usage.FutureSkewMinutes), int64(receiptBatch)}},
-		{&report.SessionRows, "DELETE FROM olp.sessions WHERE expires_at <= $1", []any{now}},
-		{&report.InvitationRows, `DELETE FROM olp.invitations
-            WHERE expires_at <= $1 AND accepted_at IS NULL AND revoked_at IS NULL`, []any{now}},
+		{&report.SessionRows, purgeSessionsSQL, []any{now, int64(retentionBatch)}},
+		{&report.InvitationRows, purgeInvitationsSQL, []any{now, int64(retentionBatch)}},
 		// Replay records first, then the encrypted responses they point at:
 		// deleting the secret would cascade the replay away uncounted.
-		{&report.ReplayRows, "DELETE FROM olp.replays WHERE expires_at <= $1", []any{now}},
-		{&report.OIDCFlowRows, "DELETE FROM olp.saml_flows WHERE expires_at <= $1", []any{now}},
-		{&report.OIDCFlowRows, "DELETE FROM olp.saml_assertion_replays WHERE expires_at <= $1", []any{now}},
-		{&report.OIDCFlowRows, "DELETE FROM olp.oidc_flows WHERE expires_at <= $1", []any{now}},
+		{&report.ReplayRows, purgeReplaysSQL, []any{now, int64(retentionBatch)}},
+		{&report.OIDCFlowRows, purgeSAMLFlowsSQL, []any{now, int64(retentionBatch)}},
+		{&report.OIDCFlowRows, purgeSAMLAssertionReplaysSQL, []any{now, int64(retentionBatch)}},
+		{&report.OIDCFlowRows, purgeOIDCFlowsSQL, []any{now, int64(retentionBatch)}},
 		// An expired grant enrollment's row outlives its session state for an
 		// hour, so a late continuation learns that it expired.
-		{&report.GrantEnrollmentRows, "DELETE FROM olp.grant_enrollments WHERE expires_at <= $1", []any{now.Add(-time.Hour)}},
+		{&report.GrantEnrollmentRows, purgeGrantEnrollmentsSQL, []any{now.Add(-time.Hour), int64(retentionBatch)}},
 	}
 	for _, statement := range deletes {
-		tag, execErr := tx.Exec(ctx, statement.sql, statement.args...)
-		if execErr != nil {
-			return fmt.Errorf("purge expiring records: %w", execErr)
+		deleted, err := drainInBatches(ctx, conn, statement.sql, statement.args...)
+		if err != nil {
+			return fmt.Errorf("purge expiring records: %w", err)
 		}
-		*statement.into = tag.RowsAffected()
+		*statement.into += deleted
 	}
 	// Stored replay responses and re-authentication grants expire with their
 	// owners; both are counted under the records above rather than separately.
-	for _, sql := range []string{
-		"DELETE FROM olp.mfa_challenges WHERE expires_at <= $1",
-		"DELETE FROM olp.secrets WHERE expires_at <= $1",
-		"DELETE FROM olp.recent_auth WHERE expires_at <= $1",
-	} {
-		if _, err = tx.Exec(ctx, sql, now); err != nil {
+	for _, sql := range []string{purgeMFAChallengesSQL, purgeSecretsSQL, purgeRecentAuthSQL} {
+		if _, err := drainInBatches(ctx, conn, sql, now, int64(retentionBatch)); err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)
 		}
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return fmt.Errorf("purge expiring records: %w", err)
 	}
 	return nil
 }

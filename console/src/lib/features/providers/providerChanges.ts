@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/svelte-query';
-import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+import { overviewKeys } from '#lib/features/overview/index.js';
 import { errorMessage } from '#lib/management/http.js';
 import { providerKeys } from './providerKeys';
 

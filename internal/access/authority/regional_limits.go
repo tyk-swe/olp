@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/routeidentity"
+
+	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
 // RegionalRateLimits override the key's default rate and concurrency limits.

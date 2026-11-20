@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type input struct {
@@ -24,7 +24,7 @@ type Draft struct {
 	entries []guardrails.Entry
 }
 
-func NewDraft(ctx context.Context, q access.Queryer, project, name string, entries []guardrails.Entry) (Draft, error) {
+func NewDraft(ctx context.Context, q database.Queryer, project, name string, entries []guardrails.Entry) (Draft, error) {
 	trimmed, err := shape(name, entries)
 	if err != nil {
 		return Draft{}, err
@@ -46,7 +46,7 @@ func shape(name string, entries []guardrails.Entry) (string, error) {
 	return trimmed, nil
 }
 
-func pinnable(ctx context.Context, q access.Queryer, project string, entries []guardrails.Entry) error {
+func pinnable(ctx context.Context, q database.Queryer, project string, entries []guardrails.Entry) error {
 	ids := revisionIDs(entries)
 	definitions, err := guardrails.ReadRevisions(ctx, q, ids)
 	if err != nil {

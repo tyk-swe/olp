@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -15,7 +16,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listCredentials,
     retireDefinition,
@@ -361,7 +362,7 @@
   }
 </script>
 
-<svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
+<PageTitle title="Guardrails" />
 {#if error && !definitionOpen && !policyOpen}<Callout tone="danger"
     >{error}</Callout
   >{/if}

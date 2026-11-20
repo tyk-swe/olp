@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '#lib/management/http.js';
   import { onDestroy } from 'svelte';
   import {
     translateAudio,
@@ -35,8 +36,7 @@
         abort.signal
       );
     } catch (reason) {
-      error =
-        reason instanceof Error ? reason.message : 'Audio translation failed.';
+      error = errorMessage(reason, 'Audio translation failed.');
     } finally {
       busy = false;
       abort = null;
