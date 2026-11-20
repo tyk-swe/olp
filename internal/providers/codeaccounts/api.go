@@ -47,12 +47,6 @@ func (a API) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	})
 }
 
-type connectionProfile struct {
-	kind     connectors.Kind
-	authMode connectors.AuthMode
-	id       string
-}
-
 func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "id")
 	if err != nil {
@@ -67,18 +61,17 @@ func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	if input.Draining == nil {
 		return httpkit.Reply{}, httpkit.Invalid("draining", "Set draining to true or false.")
 	}
-	return access.Run(a.access, r, func(tx pgx.Tx, p authz.Principal) (httpkit.Reply, access.Event, error) {
-		ctx := r.Context()
+	ctx := r.Context()
+	return access.Transact(a.access, r, func(tx pgx.Tx, p authz.Principal) (string, error) {
 		var project, oldETag string
 		if err := tx.QueryRow(ctx, `SELECT project_id::text,etag::text FROM olp.code_accounts WHERE id=$1`, id).Scan(&project, &oldETag); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
+			return "", err
 		}
 		if err := p.Project(&project, authz.Change); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
+			return "", err
 		}
-		if err := httpkit.Match(r, oldETag); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
+		return project, httpkit.Match(r, oldETag)
+	}, func(tx pgx.Tx, _ authz.Principal, project string) (httpkit.Reply, access.Event, error) {
 		etag := httpkit.NewID()
 		if _, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET draining=$2,etag=$3 WHERE id=$1`, id, *input.Draining, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -93,6 +86,12 @@ func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 		}
 		return httpkit.Detail(body, etag), access.Event{Action: action, Resource: "code_account", ID: id, Project: &project}, nil
 	})
+}
+
+type connectionProfile struct {
+	kind     connectors.Kind
+	authMode connectors.AuthMode
+	id       string
 }
 
 func (a API) requestAllowanceRead(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
