@@ -1163,6 +1163,71 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	}
 }
 
+func TestAStoredResponseKeepsItsCitedFileWhenTheProviderReusesTheFileID(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug = "cited-files"
+	upstream := &retainedUpstream{replies: func(request string, nth int) map[string]string {
+		replies := openAIReplies(request, 1)
+		first := strings.Replace(replies["POST /responses"], `"annotations":[]`,
+			`"annotations":[{"type":"file_citation","index":0,"file_id":"file-`+providerOwned+`","filename":"batch.jsonl"}]`, 1)
+		later := strings.ReplaceAll(first, "resp_provider-owned-1", "resp_provider-owned-2")
+		replies["GET /responses/resp_provider-owned-1"], replies["GET /responses/resp_provider-owned-2"] = first, later
+		replies["POST /responses"] = first
+		if nth > 1 {
+			replies["POST /responses"] = later
+		}
+		return replies
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: "citing-model", kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	ask := func(method, path, body string) (string, string) {
+		t.Helper()
+		_, raw := g.send(t, method, path, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}, body, 200)
+		var response struct {
+			ID     string
+			Output []struct {
+				Content []struct {
+					Annotations []struct {
+						FileID string `json:"file_id"`
+					}
+				}
+			}
+		}
+		if err := json.Unmarshal(raw, &response); err != nil || len(response.Output) != 1 || len(response.Output[0].Content) != 1 || len(response.Output[0].Content[0].Annotations) != 1 {
+			t.Fatalf("%s %s returned %s, want one cited file: %v", method, path, raw, err)
+		}
+		return response.ID, response.Output[0].Content[0].Annotations[0].FileID
+	}
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" +
+		`{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}` + "\n\r\n--b--\r\n"
+	create := `{"model":"` + slug + `","input":"hi","store":true}`
+
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	first, cited := ask("POST", "/v1/responses", create)
+	if file.ID == "" || cited != file.ID {
+		t.Fatalf("the first response cites %q, want the uploaded file %q", cited, file.ID)
+	}
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
+
+	if _, cited := ask("GET", "/v1/responses/"+first, ""); cited != file.ID {
+		t.Fatalf("the first response now cites %q, want the file it was created with %q", cited, file.ID)
+	}
+	second, cited := ask("POST", "/v1/responses", create)
+	if cited != replacement.ID {
+		t.Fatalf("a response created after the reuse cites %q, want the replacement %q", cited, replacement.ID)
+	}
+	if _, cited := ask("GET", "/v1/responses/"+second, ""); cited != replacement.ID {
+		t.Fatalf("the later response reads back citing %q, want the replacement %q", cited, replacement.ID)
+	}
+}
+
 func TestStrictBatchKeepsItsOriginalInputWhenTheProviderReusesAFileID(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

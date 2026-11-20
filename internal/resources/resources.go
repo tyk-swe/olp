@@ -224,20 +224,47 @@ func (r *Resource) NativeIdentity() NativeIdentity {
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, false, nil)
+	return s.getByUpstream(ctx, s.pool, identity, liveUpstream())
 }
 
 // GetByUpstreamIncludingDeleted preserves an identifier mapping during
 // projection. User access still goes through Get, which rejects tombstones.
 func (s *Store) GetByUpstreamIncludingDeleted(ctx context.Context, identity NativeIdentity) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, true, nil)
+	return s.getByUpstream(ctx, s.pool, identity, newestUpstream())
 }
 
 func (s *Store) GetBatchFileByUpstream(ctx context.Context, identity NativeIdentity, batchID uuid.UUID) (*Resource, error) {
-	return s.getByUpstream(ctx, s.pool, identity, true, &batchID)
+	return s.getByUpstream(ctx, s.pool, identity, batchUpstream(batchID))
 }
 
-func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, includeDeleted bool, preferredParent *uuid.UUID) (*Resource, error) {
+func (s *Store) GetByUpstreamAsOf(ctx context.Context, identity NativeIdentity, at time.Time) (*Resource, error) {
+	return s.getByUpstream(ctx, s.pool, identity, upstreamAsOf(at))
+}
+
+type upstreamChoice struct {
+	clause string
+	args   []any
+}
+
+func liveUpstream() upstreamChoice {
+	return upstreamChoice{` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`, []any{StateDeleted}}
+}
+
+func newestUpstream() upstreamChoice {
+	return upstreamChoice{clause: ` ORDER BY (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`}
+}
+
+func batchUpstream(batchID uuid.UUID) upstreamChoice {
+	return upstreamChoice{` AND (parent_id=$13 OR (state<>$14 AND (expires_at IS NULL OR expires_at>now())))
+ ORDER BY (parent_id IS NOT DISTINCT FROM $13::uuid) DESC,(state=$14) ASC,updated_at DESC,id DESC LIMIT 1`, []any{batchID, StateDeleted}}
+}
+
+func upstreamAsOf(at time.Time) upstreamChoice {
+	return upstreamChoice{` ORDER BY (CASE WHEN created_at<=$13::timestamptz THEN created_at END) DESC NULLS LAST,
+ (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`, []any{at}}
+}
+
+func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, identity NativeIdentity, choice upstreamChoice) (*Resource, error) {
 	if identity.TargetID == "" {
 		return nil, ErrContract
 	}
@@ -245,19 +272,9 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
 		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
 		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
-		AND (NOT $12::boolean OR parent_id IS NOT DISTINCT FROM $11::uuid)`
-	args := []any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
-		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}
-	if preferredParent != nil {
-		statement += ` AND (parent_id=$13 OR (state<>$14 AND (expires_at IS NULL OR expires_at>now())))
- ORDER BY (parent_id IS NOT DISTINCT FROM $13::uuid) DESC,(state=$14) ASC,updated_at DESC,id DESC LIMIT 1`
-		args = append(args, *preferredParent, StateDeleted)
-	} else if includeDeleted {
-		statement += ` ORDER BY (state='deleted') ASC,updated_at DESC,id DESC LIMIT 1`
-	} else {
-		statement += ` AND state<>$13 AND (expires_at IS NULL OR expires_at>now())`
-		args = append(args, StateDeleted)
-	}
+		AND (NOT $12::boolean OR parent_id IS NOT DISTINCT FROM $11::uuid)` + choice.clause
+	args := slices.Concat([]any{identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID, identity.CredentialID, identity.UpstreamID, identity.ParentID, slices.Contains(retainedapi.Kinds(), identity.Kind)}, choice.args)
 	r, err := scan(query.QueryRow(ctx, statement, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
