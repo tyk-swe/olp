@@ -21,17 +21,17 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-type durableDocument struct {
+type DurableDocument struct {
 	Version   string              `json:"version"`
 	Source    []byte              `json:"source"`
 	Effective []byte              `json:"effective,omitempty"`
 	Result    []byte              `json:"result,omitempty"`
 	Binding   string              `json:"binding"`
 	Serving   oif.ServingIdentity `json:"serving"`
-	Asset     *durableAsset       `json:"asset,omitempty"`
+	Asset     *DurableAsset       `json:"asset,omitempty"`
 }
 
-type durableAsset struct {
+type DurableAsset struct {
 	SHA256      string `json:"sha256"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
@@ -43,7 +43,7 @@ type durableAsset struct {
 // The file is already staged by the bounded media owner. Inspection never
 // rewrites its bytes; it only refuses unqualified mixed endpoints/models and
 // ambiguous per-item identities before an effectful provider upload.
-func (s *Server) validateBatchInput(part *staging.Part, model string, provider *routing.Provider, route *routing.Route) (string, int, error) {
+func (s *Server) ValidateBatchInput(part *staging.Part, model string, provider *routing.Provider, route *routing.Route) (string, int, error) {
 	opened, err := s.Deps.Staging.Open(part.Handle)
 	if err != nil {
 		return "", 0, err
@@ -115,14 +115,14 @@ func (s *Server) validateBatchInput(part *staging.Part, model string, provider *
 	return endpoint, len(seen), nil
 }
 
-func durableKind(prefix string, id string) string {
+func DurableKind(prefix string, id string) string {
 	if strings.HasPrefix(id, "strict_"+prefix+"_") {
 		return "strict_" + prefix
 	}
 	return prefix
 }
 
-func validDurableDocument(doc durableDocument, r *resources.Resource) bool {
+func validDurableDocument(doc DurableDocument, r *resources.Resource) bool {
 	if doc.Version != resources.DurableContractVersion || doc.Binding == "" || doc.Binding != ResourceModel(r) || doc.Serving.ProviderID != r.ProviderID || doc.Serving.RevisionID != r.ProviderRevisionID || doc.Serving.Model != doc.Binding || len(doc.Source) == 0 {
 		return false
 	}
@@ -142,7 +142,7 @@ func validDurableDocument(doc durableDocument, r *resources.Resource) bool {
 	return true
 }
 
-func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*resources.Resource, *durableDocument, error) {
+func (s *Server) ReadDurable(ctx context.Context, kind, owner, id string) (*resources.Resource, *DurableDocument, error) {
 	if kind != resources.KindStrictBatch && kind != resources.KindStrictFile {
 		r, err := s.Deps.Resources.Get(ctx, kind, owner, id)
 		return r, nil, err
@@ -151,14 +151,14 @@ func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*reso
 	if err != nil {
 		return nil, nil, err
 	}
-	var doc durableDocument
+	var doc DurableDocument
 	if json.Unmarshal(payload, &doc) != nil || !validDurableDocument(doc, r) {
 		return nil, nil, resources.ErrContract
 	}
 	return r, &doc, nil
 }
 
-func strictResult(body []byte, expectedID string) (oif.Document, string, error) {
+func StrictResult(body []byte, expectedID string) (oif.Document, string, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: resources.MaxContinuationBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return oif.Document{}, "", resources.ErrContract
@@ -175,8 +175,8 @@ func batchFileFields() [3]string {
 	return [3]string{"input_file_id", "output_file_id", "error_file_id"}
 }
 
-func strictBatchResult(body []byte, expectedID string) (oif.Document, string, error) {
-	doc, id, err := strictResult(body, expectedID)
+func StrictBatchResult(body []byte, expectedID string) (oif.Document, string, error) {
+	doc, id, err := StrictResult(body, expectedID)
 	if err != nil {
 		return oif.Document{}, "", err
 	}
@@ -211,7 +211,7 @@ func strictBatchResult(body []byte, expectedID string) (oif.Document, string, er
 	return doc, id, nil
 }
 
-func strictBatchInputMatches(result oif.Document, effective []byte) bool {
+func StrictBatchInputMatches(result oif.Document, effective []byte) bool {
 	bound, err := oif.ParseJSON(effective, oif.Limits{MaxBytes: resources.MaxContinuationBytes})
 	if err != nil || bound.Root().Kind() != oif.Object {
 		return false
@@ -228,7 +228,7 @@ func strictBatchInputMatches(result oif.Document, effective []byte) bool {
 	return true
 }
 
-func (s *Server) durableExpiry(provider *time.Time) *time.Time {
+func (s *Server) DurableExpiry(provider *time.Time) *time.Time {
 	expires := s.Now().Add(resources.DurableLifetime - time.Second)
 	if provider != nil && provider.Before(expires) {
 		expires = *provider
@@ -236,20 +236,20 @@ func (s *Server) durableExpiry(provider *time.Time) *time.Time {
 	return &expires
 }
 
-func durableMetadata(model string) []byte {
+func DurableMetadata(model string) []byte {
 	encoded, _ := json.Marshal(map[string]string{"upstream_model": model})
 	return encoded
 }
 
-func durableError(err error) *fault.Error {
+func DurableError(err error) *fault.Error {
 	if errors.Is(err, resources.ErrPayloadTooLarge) || errors.Is(err, resources.ErrMetadataTooLarge) {
 		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The provider resource exceeded the durable state bound.")
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted provider resource could not be committed.")
 }
 
-func durableProjection(result []byte, localID string, files map[string]string) ([]byte, error) {
-	doc, _, err := strictResult(result, "")
+func DurableProjection(result []byte, localID string, files map[string]string) ([]byte, error) {
+	doc, _, err := StrictResult(result, "")
 	if err != nil {
 		return nil, err
 	}

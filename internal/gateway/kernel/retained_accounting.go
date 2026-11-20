@@ -95,7 +95,7 @@ func (s *Server) admitRetainedPageCost(ctx context.Context, x *Call, authority k
 	authority = retainedCostAuthority(authority)
 	authority.Attribution = x.attribution
 	authority.Policy.RouteLimits = nil // each route has its own page lease
-	lease, failure := s.Deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
+	lease, failure := s.Deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), ResourceEstimate, ttl)
 	if failure != nil {
 		return failure
 	}
@@ -133,14 +133,19 @@ func retainedCostAuthority(authority keyauthority.Authority) keyauthority.Author
 	return authority
 }
 
-func (s *Server) admitRetainedRequest(ctx context.Context, x *Call, a keyauthority.Authority, p *Pin, route *routing.Route, deferred bool) *fault.Error {
+func (x *Call) HousekeepingOperation(operation string) {
+	x.operationOverride = operation
+	x.retained = retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage}
+}
+
+func (s *Server) AdmitRetainedRequest(ctx context.Context, x *Call, a keyauthority.Authority, p *Pin, route *routing.Route, deferred bool) *fault.Error {
 	admission, err := s.prepareRetainedAdmission(x, p, deferred)
 	if err != nil {
 		return err
 	}
 	x.retainedAdmission = &admission
 	p.attempt = admission.attempt
-	if err := s.reserveState(ctx, x, a, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+	if err := s.ReserveState(ctx, x, a, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
 		return err
 	}
 	if err := s.reserveRetainedCost(ctx, x, p, route); err != nil {
@@ -154,7 +159,7 @@ func (s *Server) reserveRetainedPage(ctx context.Context, x *Call, authority key
 	if retainedPageFreeControl(entries, limit) {
 		authority = quota.RequestRateAuthority(authority, false)
 	}
-	lease, failure := s.Deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
+	lease, failure := s.Deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(ResourceEstimate, x.estimate), ttl)
 	x.lease = lease
 	return failure
 }
@@ -187,7 +192,7 @@ func (s *Server) prepareRetainedAdmission(x *Call, p *Pin, deferred bool) (retai
 	return retainedAdmissionPlan{attempt: attempt, billing: retainedPriced}, nil
 }
 
-func (s *Server) retainedSettle(ctx context.Context, x *Call, p *Pin) {
+func (s *Server) SettleRetained(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
 		s.settlePinnedHold(ctx, p.Hold)
 	}

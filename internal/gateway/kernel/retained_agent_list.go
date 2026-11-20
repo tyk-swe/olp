@@ -124,7 +124,7 @@ func (l agentListing) ready(rows []*resources.Resource) ([]agentListed, time.Dur
 }
 
 func (l agentListing) resolve(resource *resources.Resource) (agentListed, bool, *fault.Error) {
-	if retainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+	if RetainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 		return agentListed{}, false, nil
 	}
 	pin, route, err := l.server.ResolveResource(l.r.Context(), l.x, l.authority, resource, l.endpoint.Operation, RetainedRetrieval)
@@ -156,7 +156,7 @@ func (l agentListing) reserve(ctx context.Context, ready []agentListed, overall 
 		return nil
 	}
 	s, x := l.server, l.x
-	if err := s.reserveState(ctx, x, l.authority, overall); err != nil {
+	if err := s.ReserveState(ctx, x, l.authority, overall); err != nil {
 		return err
 	}
 	authority := x.AdmissionAuthority(l.authority)
@@ -166,7 +166,7 @@ func (l agentListing) reserve(ctx context.Context, ready []agentListed, overall 
 		if admitted[entry.route.Slug] {
 			continue
 		}
-		lease, err := s.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, quota.CostReservation{}, &costChecked)
+		lease, err := s.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, ResourceEstimate, overall, quota.CostReservation{}, &costChecked)
 		if err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (l agentListing) item(ctx context.Context, entry agentListed) (agentItem, *
 
 func (l agentListing) unread(ctx context.Context, resource *resources.Resource, failure *AttemptFailure) (agentItem, *fault.Error) {
 	if failure.Status != http.StatusNotFound {
-		return agentItem{}, retainedPublicError(UpstreamError(failure), failure.Status)
+		return agentItem{}, RetainedPublicError(UpstreamError(failure), failure.Status)
 	}
 	commitCtx, cancel := ResourceCommitContext(ctx)
 	defer cancel()
@@ -239,7 +239,7 @@ func (l agentListing) unread(ctx context.Context, resource *resources.Resource, 
 
 func (l agentListing) accept(ctx context.Context, resource *resources.Resource, native *PinnedResponse) ([]byte, *fault.Error) {
 	invalid := fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource.")
-	body, readErr := native.ReadBody(l.server.retainedResponseLimit())
+	body, readErr := native.ReadBody(l.server.RetainedResponseLimit())
 	native.Body.Close()
 	if readErr != nil {
 		return nil, invalid
@@ -255,6 +255,6 @@ func (l agentListing) accept(ctx context.Context, resource *resources.Resource, 
 	if projectErr != nil {
 		return nil, retainedProjectionError(native.Exchange, projectErr)
 	}
-	native.Exchange.completeRetainedControl()
+	native.Exchange.CompleteRetainedControl()
 	return projected, nil
 }

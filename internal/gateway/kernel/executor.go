@@ -26,13 +26,13 @@ const (
 	classRateLimit      = string(upstream.RateLimit)
 	ClassUpstreamServer = string(upstream.ServerError)
 	classUpstreamClient = string(upstream.ClientError)
-	classCredential     = string(upstream.Credential)
+	ClassCredential     = string(upstream.Credential)
 	ClassProtocol       = string(upstream.Protocol)
 	classPolicy         = "policy"
 	ClassCancelled      = string(upstream.Cancelled)
-	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
+	// ClassAmbiguous marks a side-effecting attempt whose upstream outcome the
 	// gateway cannot prove; it never fails over.
-	classAmbiguous         = string(upstream.Ambiguous)
+	ClassAmbiguous         = string(upstream.Ambiguous)
 	classLimitsUnavailable = "limits_unavailable"
 	classContextWindow     = string(upstream.ContextWindow)
 	classContentFilter     = string(upstream.ContentFilter)
@@ -49,7 +49,7 @@ const (
 
 const (
 	maxStreamDuration = time.Hour
-	errorBodyLimit    = 64 * 1024
+	ErrorBodyLimit    = 64 * 1024
 )
 
 // redacted removes this execution's applied credentials from every field of a
@@ -177,7 +177,7 @@ func (f *AttemptFailure) billingUncertain() bool {
 		return f.Acceptance.Unresolved()
 	}
 	switch f.class {
-	case classRateLimit, classUpstreamClient, classCredential, classContextWindow, classContentFilter:
+	case classRateLimit, classUpstreamClient, ClassCredential, classContextWindow, classContentFilter:
 		return false
 	}
 	return f.dispatched
@@ -208,7 +208,7 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 	switch f.class {
 	case classLimitsUnavailable:
 		return quota.LimitsUnavailable()
-	case classAmbiguous:
+	case ClassAmbiguous:
 		err := fault.ServerError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
 		err.NoRetry = f.noRetry
 		return err
@@ -232,7 +232,7 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 		return fault.ServerError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
 	case ClassUpstreamServer:
 		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.Status)+".")
-	case classCredential:
+	case ClassCredential:
 		code := "upstream_authentication_failed"
 		if f.Status == http.StatusForbidden {
 			code = "upstream_permission_denied"

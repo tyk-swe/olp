@@ -36,7 +36,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	s.bindAuthority(x, authority)
+	s.BindAuthority(x, authority)
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 		fail(e)
 		return
@@ -57,7 +57,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.Route = &route
-	if e := s.reserveState(r.Context(), x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.ReserveState(r.Context(), x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
 		fail(e)
 		return
 	}
@@ -188,8 +188,8 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Cal
 	upstream.RawQuery = query.Encode()
 	upstream.Fragment = ""
 
-	defer s.settleCaps(r.Context(), x)
-	estimate := max(resourceEstimate, x.estimate)
+	defer s.SettleCaps(r.Context(), x)
+	estimate := max(ResourceEstimate, x.estimate)
 	var slot routing.Slot
 	var hold *dispatchHold
 	var factP *events.AttemptFact
@@ -229,7 +229,7 @@ slots:
 		if x.dispatched && hold != nil {
 			x.spendCaps(hold.budgets, attempt)
 		}
-		s.settleSessionHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
+		s.SettleSessionHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
 	}()
 	if e := s.reserveSessionCost(ctx, x, x.authority, attempt, time.Until(deadline)); e != nil {
 		fail(e)
@@ -258,14 +258,14 @@ slots:
 	x.facts = append(x.facts, fact)
 	factP = &x.facts[len(x.facts)-1]
 	if err := s.applySlotCredential(ctx, x, req, provider.Connector(), slot, body, &provider, target.ProviderModel); err != nil {
-		factP.Class, factP.Duration = classCredential, s.Now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = ClassCredential, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound credential could not be applied."))
 		return
 	}
 	client, err := s.providerClient(ctx, x.request.release, &provider, slot)
 	if err != nil {
-		factP.Class, factP.Duration = classCredential, s.Now().Sub(factP.StartedAt)
+		factP.Class, factP.Duration = ClassCredential, s.Now().Sub(factP.StartedAt)
 		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound connection could not be reached."))
 		return

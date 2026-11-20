@@ -101,11 +101,11 @@ func geminiInteractionUsage(object oif.Value) *wire.Usage {
 	if json.Unmarshal(usageValue.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
 		return nil
 	}
-	usage := geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
+	usage := GeminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
 	if usage == nil {
 		return nil
 	}
-	if audio, image := geminiUsageDetails(native.PromptDetails); audio > 0 || image > 0 {
+	if audio, image := GeminiUsageDetails(native.PromptDetails); audio > 0 || image > 0 {
 		if audio > 0 {
 			usage.AudioInputTokens = &audio
 		}
@@ -113,7 +113,7 @@ func geminiInteractionUsage(object oif.Value) *wire.Usage {
 			usage.ImageInputTokens = &image
 		}
 	}
-	if audio, image := geminiUsageDetails(native.CacheDetails); audio > 0 || image > 0 {
+	if audio, image := GeminiUsageDetails(native.CacheDetails); audio > 0 || image > 0 {
 		if audio > 0 {
 			usage.CachedAudioInputTokens = &audio
 		}
@@ -121,7 +121,7 @@ func geminiInteractionUsage(object oif.Value) *wire.Usage {
 			usage.CachedImageInputTokens = &image
 		}
 	}
-	if audio, image := geminiUsageDetails(native.CandidateDetails); audio > 0 || image > 0 {
+	if audio, image := GeminiUsageDetails(native.CandidateDetails); audio > 0 || image > 0 {
 		if audio > 0 {
 			usage.AudioOutputTokens = &audio
 		}
@@ -129,7 +129,7 @@ func geminiInteractionUsage(object oif.Value) *wire.Usage {
 			usage.ImageOutputTokens = &image
 		}
 	}
-	if audio, image := geminiUsageDetails(native.ResponseDetails); audio > 0 || image > 0 {
+	if audio, image := GeminiUsageDetails(native.ResponseDetails); audio > 0 || image > 0 {
 		if audio > 0 {
 			usage.AudioOutputTokens = &audio
 		}

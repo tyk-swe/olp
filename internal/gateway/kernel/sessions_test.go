@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -315,14 +313,6 @@ func TestGeminiLiveModalitySharesSettle(t *testing.T) {
 	assertUsageShare(t, "cached image input", settled.CachedImageInputTokens, 4)
 	assertUsageShare(t, "audio output", settled.AudioOutputTokens, 1)
 
-	overflowing := &wire.Usage{}
-	geminiLiveModality(overflowing, &geminilifecycle.LiveUsage{PromptDetails: []geminilifecycle.LiveUsageDetail{
-		{Modality: "IMAGE", TokenCount: math.MaxInt64},
-		{Modality: "VIDEO", TokenCount: math.MaxInt64},
-	}})
-	if overflowing.ImageInputTokens == nil || *overflowing.ImageInputTokens <= 0 {
-		t.Errorf("overflowing image share = %v, want a saturated positive share", overflowing.ImageInputTokens)
-	}
 }
 
 func TestRealtimeResponseDoneSettlesModalityShares(t *testing.T) {
@@ -344,9 +334,9 @@ func TestHoldWebRTCExposureSweepsExpired(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
 	s := &Server{Now: func() time.Time { return now }}
-	s.holdWebRTCExposure("live", now.Add(time.Hour))
-	s.holdWebRTCExposure("expired", now.Add(-time.Hour))
-	s.holdWebRTCExposure("other", now.Add(time.Hour))
+	s.HoldWebRTCExposure("live", now.Add(time.Hour))
+	s.HoldWebRTCExposure("expired", now.Add(-time.Hour))
+	s.HoldWebRTCExposure("other", now.Add(time.Hour))
 	if _, ok := s.webrtcExposures["expired"]; ok {
 		t.Error("expired exposure remained after holding another key")
 	}

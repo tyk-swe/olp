@@ -29,40 +29,15 @@ import (
 
 const StateRouteHeader = "X-OLP-Route"
 
-func (s *Server) registerState(mux *http.ServeMux) {
+func (s *Server) registerRetained(mux *http.ServeMux) {
 	if s.Deps.Resources == nil {
 		return
 	}
 	s.registerRetainedLifecycle(mux)
 	s.registerRetainedGeneric(mux)
-	s.registerRetrieval(mux)
-	if s.Deps.Staging != nil {
-		mux.HandleFunc("POST /v1/files", s.uploadFile)
-		mux.HandleFunc("GET /v1/files", s.listFiles)
-		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
-		mux.HandleFunc("DELETE /v1/files/{id}", s.deleteFile)
-		mux.HandleFunc("GET /v1/files/{id}/content", s.fileContent)
-		mux.HandleFunc("POST /v1/batches", s.createBatch)
-		mux.HandleFunc("GET /v1/batches", s.listBatches)
-		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
-		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
-	}
-	if s.Deps.Resources.Encrypted() {
-		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
-		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
-	}
-	mux.HandleFunc("GET /v1/responses/{id}", s.getResponse)
-	mux.HandleFunc("DELETE /v1/responses/{id}", s.deleteResponse)
-	mux.HandleFunc("POST /v1/responses/{id}/cancel", s.cancelResponse)
-	mux.HandleFunc("GET /v1/responses/{id}/input_items", s.responseInputItems)
-	mux.HandleFunc("GET /v1/realtime", s.realtime)
-	mux.HandleFunc("POST /bedrock/model/{model}/converse", s.bedrockConverse)
-	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", s.bedrockConverseStream)
-	mux.HandleFunc("POST /bedrock/model/{model}/invoke", s.bedrockInvoke)
-	mux.HandleFunc("POST /bedrock/model/{model}/invoke-with-response-stream", s.bedrockInvokeStream)
 }
 
-const resourceEstimate = 100
+const ResourceEstimate = 100
 
 // Once a provider has accepted durable work, its owner mapping must outlive
 // a client disconnect. Persistence still has a short independent deadline.
@@ -81,6 +56,8 @@ func (s *Server) settleFence(ctx context.Context, settle func(context.Context) e
 }
 
 const maxResourceList = 100
+
+func (p *Pin) Timeout() time.Duration { return p.attempt.Timeout }
 
 type Pin struct {
 	Target   routing.Target
@@ -112,7 +89,7 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	return p.Connector().SupportsFilesBatches()
 }
 
-func fireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
+func FireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
 	if x == nil || route == nil {
 		return nil
 	}
@@ -126,7 +103,7 @@ func fireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
 	return nil
 }
 
-func strictBatchTargetRefusal(p *Pin) *fault.Error {
+func StrictBatchTargetRefusal(p *Pin) *fault.Error {
 	if p != nil && p.Provider.Kind != "openai" && p.Provider.Kind != "azure_openai" {
 		return PolicyUnavailable("target_capability",
 			"Strict routes serve files and batches only for OpenAI and Azure.")
@@ -146,7 +123,7 @@ func ResourceModel(res *resources.Resource) string {
 	return meta.UpstreamModel
 }
 
-func (s *Server) selectPin(ctx context.Context, x *Call, route *routing.Route, operation, mode string) (*Pin, *fault.Error) {
+func (s *Server) SelectPin(ctx context.Context, x *Call, route *routing.Route, operation, mode string) (*Pin, *fault.Error) {
 	return s.SelectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
 		return stateQualified(p, model, operation, mode)
 	})
@@ -159,7 +136,7 @@ func (s *Server) SelectPinSurface(ctx context.Context, x *Call, route *routing.R
 type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
 
 func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*Pin, *fault.Error) {
-	if e := s.checkRouteFidelity(ctx, route); e != nil {
+	if e := s.CheckRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
 	if e := x.CheckBody(route); e != nil {
@@ -242,7 +219,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(ResourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &Pin{Target: target, Provider: provider, attempt: attempt, Slot: *slot, Model: attempt.UpstreamModel, Hold: gate.hold}, nil
@@ -284,7 +261,7 @@ func (s *Server) PinnedDo(ctx context.Context, x *Call, p *Pin, method, endpoint
 		if ctx.Err() != nil {
 			return nil, exchange.fail(ClassCancelled, nil)
 		}
-		return nil, exchange.fail(classCredential, nil)
+		return nil, exchange.fail(ClassCredential, nil)
 	}
 	maps.Copy(req.Header, x.PinnedHeaders)
 	// Skills use the GA contract the pinned SDK parses (id-addressed
@@ -311,12 +288,12 @@ func (s *Server) StateDeadline(ctx context.Context, route *routing.Route) (conte
 	return context.WithTimeout(ctx, time.Duration(route.OverallTimeout)*time.Millisecond)
 }
 
-func (s *Server) reserveState(ctx context.Context, x *Call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
+func (s *Server) ReserveState(ctx context.Context, x *Call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
 	if e := x.CheckBody(x.Route); e != nil {
 		return e
 	}
 	var e *fault.Error
-	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), max(ResourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
 
@@ -365,13 +342,13 @@ func (s *Server) NativeStatePin(ctx context.Context, x *Call, route *routing.Rou
 
 func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, route *routing.Route) *fault.Error {
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
-	if e := s.reserveState(ctx, x, authority, overall); e != nil {
+	if e := s.ReserveState(ctx, x, authority, overall); e != nil {
 		return e
 	}
 	if p.Hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, s.Now().Add(overall), "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, ResourceEstimate, s.Now().Add(overall), "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
@@ -383,7 +360,7 @@ func (s *Server) ResourceSettle(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
-	s.settleCaps(ctx, x)
+	s.SettleCaps(ctx, x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.Log)
 }
 
@@ -416,7 +393,7 @@ func NativeResourceID(body []byte, maxBytes int64) (string, bool) {
 	return upstream, present && valid && upstream != "" && len(upstream) <= 512
 }
 
-func retainedIdentityMatches(body []byte, expected string, maxBytes int64) bool {
+func RetainedIdentityMatches(body []byte, expected string, maxBytes int64) bool {
 	upstream, valid := NativeResourceID(body, maxBytes)
 	return valid && upstream == expected
 }
@@ -460,23 +437,23 @@ func rewritePrevious(body []byte, local string) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
+func (s *Server) FileObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
 	if res.Kind == resources.KindStrictFile {
-		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
+		_, contract, err := s.ReadDurable(ctx, res.Kind, res.APIKeyID, res.ID)
 		if err != nil {
 			return nil, err
 		}
 		if len(contract.Result) != 0 {
-			return durableProjection(contract.Result, res.ID, nil)
+			return DurableProjection(contract.Result, res.ID, nil)
 		}
 		return json.Marshal(map[string]any{"id": res.ID, "object": "file", "status": res.State})
 	}
-	adapter, err := resourceAdapter(res)
+	adapter, err := ResourceAdapter(res)
 	if err != nil {
 		return nil, err
 	}
 	if adapter.Managed() {
-		record, err := decodeManagedFileRecord(res.Metadata)
+		record, err := DecodeManagedFileRecord(res.Metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -514,8 +491,8 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 	return json.Marshal(obj)
 }
 
-func managedGeminiFilePath(res *resources.Resource) (string, error) {
-	name, err := geminiManagedFileName(res)
+func ManagedGeminiFilePath(res *resources.Resource) (string, error) {
+	name, err := GeminiManagedFileName(res)
 	if err != nil {
 		return "", err
 	}
@@ -526,17 +503,17 @@ func managedGeminiFilePath(res *resources.Resource) (string, error) {
 	return "files/" + url.PathEscape(id), nil
 }
 
-func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
+func (s *Server) BatchObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
 	if res.Kind == resources.KindStrictBatch {
-		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
+		_, contract, err := s.ReadDurable(ctx, res.Kind, res.APIKeyID, res.ID)
 		if err != nil || len(contract.Result) == 0 {
 			return nil, resources.ErrContract
 		}
-		doc, _, err := strictBatchResult(contract.Result, res.UpstreamID)
+		doc, _, err := StrictBatchResult(contract.Result, res.UpstreamID)
 		if err != nil {
 			return nil, err
 		}
-		if !strictBatchInputMatches(doc, contract.Effective) {
+		if !StrictBatchInputMatches(doc, contract.Effective) {
 			return nil, resources.ErrContract
 		}
 		files := map[string]string{}
@@ -555,16 +532,16 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			}
 			files[name] = mapped.ID
 		}
-		return durableProjection(contract.Result, res.ID, files)
+		return DurableProjection(contract.Result, res.ID, files)
 	}
-	adapter, err := resourceAdapter(res)
+	adapter, err := ResourceAdapter(res)
 	if err != nil {
 		return nil, err
 	}
 	if adapter == connectors.BatchGeminiManaged {
 		return s.geminiManagedBatchObject(ctx, res)
 	}
-	record, err := decodeBatchRecord(res)
+	record, err := DecodeBatchRecord(res)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +595,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		Metadata:           metadata,
 	}
 	if kind == resources.KindStrictFile {
-		_, batch, err := s.readDurable(ctx, owner.Kind, owner.APIKeyID, owner.ID)
+		_, batch, err := s.ReadDurable(ctx, owner.Kind, owner.APIKeyID, owner.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -626,7 +603,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		resource.ContractVersion = &version
 		resource.ExpiresAt = owner.ExpiresAt
 		source := MustJSON(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
-		payload := MustJSON(durableDocument{Version: version, Source: source, Binding: ResourceModel(owner), Serving: batch.Serving})
+		payload := MustJSON(DurableDocument{Version: version, Source: source, Binding: ResourceModel(owner), Serving: batch.Serving})
 		created, err := s.Deps.Resources.PutDurableContract(ctx, resource, payload)
 		if err == nil {
 			return created, nil
@@ -648,7 +625,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	return nil, err
 }
 
-func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time) {
+func FileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time) {
 	meta := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
@@ -683,7 +660,7 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 
 var privateBatchFields = [...]string{"upstream_model", "local_input_file_id", "adapter", "manifest", "provider_file", "role"}
 
-type batchRecord struct {
+type BatchRecord struct {
 	LocalInputFileID string          `json:"local_input_file_id,omitempty"`
 	CompletionWindow string          `json:"completion_window,omitempty"`
 	Metadata         json.RawMessage `json:"metadata,omitempty"`
@@ -692,13 +669,13 @@ type batchRecord struct {
 	ErrorFileID      *string         `json:"error_file_id"`
 }
 
-func decodeBatchRecord(res *resources.Resource) (batchRecord, error) {
-	var record batchRecord
+func DecodeBatchRecord(res *resources.Resource) (BatchRecord, error) {
+	var record BatchRecord
 	err := json.Unmarshal(res.Metadata, &record)
 	return record, err
 }
 
-func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resource, record batchRecord) (map[string]json.RawMessage, error) {
+func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resource, record BatchRecord) (map[string]json.RawMessage, error) {
 	upstreamFiles := map[string]*string{"output_file_id": record.OutputFileID, "error_file_id": record.ErrorFileID}
 	projected := map[string]json.RawMessage{}
 	if record.LocalInputFileID != "" {
@@ -761,7 +738,7 @@ func (s *Server) WriteStateJSONStatus(w http.ResponseWriter, x *Call, body []byt
 	s.Finish(x, &Outcome{Committed: true}, status)
 }
 
-func resourceListError(err error, message string) *fault.Error {
+func ResourceListError(err error, message string) *fault.Error {
 	if errors.Is(err, resources.ErrNotFound) {
 		return fault.InvalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", new("after"))
 	}
@@ -786,9 +763,9 @@ func ListArgs(r *http.Request) (int, string, *fault.Error) {
 	return limit, after, nil
 }
 
-// listBody writes the OpenAI cursor page shape: SDK auto-pagination follows
+// ListBody writes the OpenAI cursor page shape: SDK auto-pagination follows
 // has_more and resumes after the last item's id.
-func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
+func ListBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 	data, _ := json.Marshal(items)
 	more, _ := json.Marshal(hasMore)
 	body := map[string]json.RawMessage{
@@ -805,33 +782,33 @@ func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 }
 
 func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage, error) {
-	metadata := durableMetadata(ResourceModel(owner))
-	adapter, err := resourceAdapter(owner)
+	metadata := DurableMetadata(ResourceModel(owner))
+	adapter, err := ResourceAdapter(owner)
 	if err != nil {
 		return nil, err
 	}
 	if adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
 		return metadata, nil
 	}
-	return managedFileMetadata(metadata, nil, adapter, BatchManifest{}, role)
+	return ManagedFileMetadata(metadata, nil, adapter, BatchManifest{}, role)
 }
 
-type refreshedFile struct {
-	metadata json.RawMessage
-	state    string
-	expires  *time.Time
+type RefreshedFile struct {
+	Metadata json.RawMessage
+	State    string
+	Expires  *time.Time
 }
 
-func refreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (refreshedFile, error) {
-	metadata, state, expires := fileMetadata(body, ResourceModel(res))
+func RefreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (RefreshedFile, error) {
+	metadata, state, expires := FileMetadata(body, ResourceModel(res))
 	if res.Kind == resources.KindStrictFile {
-		return refreshedFile{metadata: metadata, state: state, expires: expires}, nil
+		return RefreshedFile{Metadata: metadata, State: state, Expires: expires}, nil
 	}
 	refreshed, err := refreshedProviderMetadata(res, body, metadata, adapter)
 	if err != nil {
-		return refreshedFile{}, err
+		return RefreshedFile{}, err
 	}
-	return refreshedFile{metadata: refreshed, state: state, expires: expires}, nil
+	return RefreshedFile{Metadata: refreshed, State: state, Expires: expires}, nil
 }
 
 func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata json.RawMessage, adapter connectors.BatchAdapter) (json.RawMessage, error) {
@@ -845,7 +822,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	}
 	base := metadata
 	if adapter.Managed() {
-		managed, err := managedFileMetadata(res.Metadata, body, adapter, BatchManifest{}, prior.Role)
+		managed, err := ManagedFileMetadata(res.Metadata, body, adapter, BatchManifest{}, prior.Role)
 		if err != nil {
 			return nil, err
 		}
@@ -861,7 +838,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 	return json.Marshal(fields)
 }
 
-func (e *PinnedExchange) completeRetainedControl() {
+func (e *PinnedExchange) CompleteRetainedControl() {
 	if e.request.retainedAdmission != nil {
 		_ = observeRetainedUsage(e, oif.Document{}, false)
 	}

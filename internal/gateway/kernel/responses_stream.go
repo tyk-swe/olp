@@ -19,7 +19,7 @@ import (
 // A retrieved stream is a read of one authorized response, never another
 // inference submission. Only the documented cursor and delivery selector may
 // reach the historical provider; all other query controls fail before dispatch.
-func responseRetrievalQuery(raw string) (url.Values, bool, *fault.Error) {
+func ResponseRetrievalQuery(raw string) (url.Values, bool, *fault.Error) {
 	query, err := url.ParseQuery(raw)
 	if err != nil {
 		return nil, false, fault.InvalidRequest("invalid_request", "The response retrieval query is malformed.", nil)
@@ -76,7 +76,7 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *fault.Error) {
 // and an echoed previous_response_id, which previous resolves to the caller's
 // local id ("" withholds it); untouched extensions and numeric lexemes stay
 // byte-identical.
-func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool, previous func(string) string) ([]byte, *openai.ResponseUsageObservation, error) {
+func projectStoredResponseFrame(frame []byte, projection ResponseProjection, strict bool, previous func(string) string) ([]byte, *openai.ResponseUsageObservation, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
 		return nil, nil, errors.New("response stream frame has no data")
@@ -111,21 +111,21 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 	}
 	id, present := response.Lookup("id")
 	identity, valid := id.Text()
-	if !present || !valid || identity != projection.upstreamID {
+	if !present || !valid || identity != projection.UpstreamID {
 		return nil, nil, errors.New("response stream changed resource identity")
 	}
 	var mapped oif.Document
 	if strict {
-		mapped, err = projection.project(doc, "/response")
+		mapped, err = projection.Project(doc, "/response")
 	} else {
-		local, _ := json.Marshal(projection.localID)
+		local, _ := json.Marshal(projection.LocalID)
 		changes := []oif.Change{{Pointer: "/response/id", Value: string(local), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
 		if prior, present := response.Lookup("previous_response_id"); present {
 			if upstream, valid := prior.Text(); valid && upstream != "" {
 				value := "null"
 				if previous != nil {
 					if mappedID := previous(upstream); mappedID != "" {
-						value = quotedResponseID(mappedID)
+						value = QuotedResponseID(mappedID)
 					}
 				}
 				changes = append(changes, oif.Change{Pointer: "/response/previous_response_id", Value: value, Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})

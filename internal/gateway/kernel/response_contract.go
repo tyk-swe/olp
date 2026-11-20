@@ -15,77 +15,87 @@ import (
 
 const responseContractVersion = "native-responses-v2"
 
-type storedResponseContract struct {
+type StoredResponseContract struct {
 	Version            string      `json:"version"`
 	Receipt            oif.Receipt `json:"receipt"`
 	Binding            string      `json:"binding"`
 	PreviousUpstreamID string      `json:"previous_upstream_id,omitempty"`
 }
 
-type responseProjection struct {
-	upstreamID, localID, route      string
-	previousUpstream, previousLocal string
+type ResponseProjection struct {
+	UpstreamID, LocalID, Route      string
+	PreviousUpstream, PreviousLocal string
 }
 
-// nativeResponse owns the validated provider result independently of the local
+// NativeResponse owns the validated provider result independently of the local
 // identity overlays. Native completion and accounting survive a later binding
 // or projection refusal; the immutable source stays available for both.
-type nativeResponse struct {
+type NativeResponse struct {
 	source     oif.Document
 	value      oif.Value
 	pointer    string
 	upstreamID string
 }
 
-func validateNativeResponse(source oif.Document, pointer, expectedID string) (nativeResponse, error) {
+func (x *Call) BindResponseContract(contract *StoredResponseContract) {
+	if contract != nil {
+		x.generation.responseContract = contract
+	}
+}
+
+func (x *Call) ResponseContract() *StoredResponseContract {
+	return x.generation.responseContract
+}
+
+func ValidateNativeResponse(source oif.Document, pointer, expectedID string) (NativeResponse, error) {
 	value, present := source.Lookup(pointer)
 	if !present || value.Kind() != oif.Object {
-		return nativeResponse{}, resources.ErrContract
+		return NativeResponse{}, resources.ErrContract
 	}
 	id, present := value.Lookup("id")
 	upstream, valid := id.Text()
 	if !present || !valid || upstream == "" || upstream != expectedID {
-		return nativeResponse{}, resources.ErrContract
+		return NativeResponse{}, resources.ErrContract
 	}
 	if object, present := value.Lookup("object"); present {
 		kind, valid := object.Text()
 		if !valid || kind != "response" {
-			return nativeResponse{}, resources.ErrContract
+			return NativeResponse{}, resources.ErrContract
 		}
 	}
 	if state, present := value.Lookup("status"); present {
 		status, valid := state.Text()
 		if !valid || !wire.ValidResponseStatus(status) {
-			return nativeResponse{}, resources.ErrContract
+			return NativeResponse{}, resources.ErrContract
 		}
 		if status == "completed" {
 			output, present := value.Lookup("output")
 			if !present || output.Kind() != oif.Array {
-				return nativeResponse{}, resources.ErrContract
+				return NativeResponse{}, resources.ErrContract
 			}
 		}
 	}
 	if output, present := value.Lookup("output"); present && output.Kind() != oif.Array {
-		return nativeResponse{}, resources.ErrContract
+		return NativeResponse{}, resources.ErrContract
 	}
-	return nativeResponse{source: source, value: value, pointer: pointer, upstreamID: upstream}, nil
+	return NativeResponse{source: source, value: value, pointer: pointer, upstreamID: upstream}, nil
 }
 
-func (r nativeResponse) project(p responseProjection) (oif.Document, error) {
-	if p.upstreamID != r.upstreamID {
+func (r NativeResponse) Project(p ResponseProjection) (oif.Document, error) {
+	if p.UpstreamID != r.upstreamID {
 		return oif.Document{}, resources.ErrContract
 	}
 	value, pointer := r.value, r.pointer
-	changes := []oif.Change{{Pointer: pointer + "/id", Value: quotedResponseID(p.localID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
+	changes := []oif.Change{{Pointer: pointer + "/id", Value: QuotedResponseID(p.LocalID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
 	if _, present := value.Lookup("model"); present {
-		changes = append(changes, oif.Change{Pointer: pointer + "/model", Value: quotedResponseID(p.route), Origin: oif.IdentityBinding, Reason: "published response model"})
+		changes = append(changes, oif.Change{Pointer: pointer + "/model", Value: QuotedResponseID(p.Route), Origin: oif.IdentityBinding, Reason: "published response model"})
 	}
 	if previous, present := value.Lookup("previous_response_id"); present && previous.Kind() != oif.Null {
 		upstream, valid := previous.Text()
-		if !valid || p.previousLocal == "" || upstream != p.previousUpstream {
+		if !valid || p.PreviousLocal == "" || upstream != p.PreviousUpstream {
 			return oif.Document{}, resources.ErrContract
 		}
-		changes = append(changes, oif.Change{Pointer: pointer + "/previous_response_id", Value: quotedResponseID(p.previousLocal), Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
+		changes = append(changes, oif.Change{Pointer: pointer + "/previous_response_id", Value: QuotedResponseID(p.PreviousLocal), Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
 	}
 	projected, err := oif.Apply(r.source, changes)
 	if err != nil {
@@ -94,20 +104,20 @@ func (r nativeResponse) project(p responseProjection) (oif.Document, error) {
 	return projected, nil
 }
 
-func (p responseProjection) project(source oif.Document, pointer string) (oif.Document, error) {
-	native, err := validateNativeResponse(source, pointer, p.upstreamID)
+func (p ResponseProjection) Project(source oif.Document, pointer string) (oif.Document, error) {
+	native, err := ValidateNativeResponse(source, pointer, p.UpstreamID)
 	if err != nil {
 		return oif.Document{}, err
 	}
-	return native.project(p)
+	return native.Project(p)
 }
 
-func quotedResponseID(value string) string {
+func QuotedResponseID(value string) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)
 }
 
-func responseParentProjection(res *resources.Resource, contract *storedResponseContract) (string, string, error) {
+func ResponseParentProjection(res *resources.Resource, contract *StoredResponseContract) (string, string, error) {
 	if res.ParentID == nil {
 		return "", "", nil
 	}
@@ -134,7 +144,7 @@ func responseNativeIdentity(x *Call, fact *events.AttemptFact, upstream string) 
 		RouteRevisionID: x.Route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID,
 		CredentialID: credential, UpstreamID: upstream}
 }
-func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*resources.Resource, *storedResponseContract, error) {
+func (s *Server) ReadResponseResource(ctx context.Context, owner, id string) (*resources.Resource, *StoredResponseContract, error) {
 	if !strings.HasPrefix(id, resources.KindStrictResponse+"_") {
 		r, err := s.Deps.Resources.Get(ctx, resources.KindResponse, owner, id)
 		return r, nil, err
@@ -143,7 +153,7 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	if err != nil {
 		return nil, nil, err
 	}
-	var contract storedResponseContract
+	var contract StoredResponseContract
 	if json.Unmarshal(payload, &contract) != nil || contract.Version != responseContractVersion || contract.Binding == "" || contract.Receipt.Obligations.Continuation != "native_response_resource" {
 		return nil, nil, resources.ErrContract
 	}
@@ -184,7 +194,7 @@ func (s *Server) putStrictResponse(ctx context.Context, x *Call, fact *events.At
 			return nil, resources.ErrContract
 		}
 	}
-	payload, err := json.Marshal(storedResponseContract{Version: version, Receipt: prepared.plan.Receipt(), Binding: fact.UpstreamModel, PreviousUpstreamID: previousID})
+	payload, err := json.Marshal(StoredResponseContract{Version: version, Receipt: prepared.plan.Receipt(), Binding: fact.UpstreamModel, PreviousUpstreamID: previousID})
 	if err != nil {
 		return nil, err
 	}

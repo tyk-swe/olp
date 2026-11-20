@@ -30,7 +30,7 @@ func (q retainedRequest) change() {
 	}
 	ctx, cancel := s.StateDeadline(q.r.Context(), route)
 	defer cancel()
-	if err := s.admitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
+	if err := s.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
 		q.reply.fail(err)
 		return
 	}
@@ -109,7 +109,7 @@ func (q retainedRequest) resolve(resource *resources.Resource) (*Pin, *routing.R
 			return nil, nil, err
 		}
 	}
-	if retainedUnsettled(resource.State) {
+	if RetainedUnsettled(resource.State) {
 		return nil, nil, fault.ServerError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted.")
 	}
 	return pin, route, nil

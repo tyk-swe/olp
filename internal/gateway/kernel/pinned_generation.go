@@ -7,6 +7,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -41,7 +42,7 @@ func (x *Call) RoutingControls(r *http.Request, authority keyauthority.Authority
 
 func (s *Server) ReserveGeneration(ctx context.Context, x *Call, authority keyauthority.Authority, bodyBytes int, route *routing.Route) *fault.Error {
 	sized := int64(bodyBytes) / 4
-	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
+	x.estimate, x.sizedInput = max(ResourceEstimate, sized), &sized
 	var e *fault.Error
 	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond, x.limitRoute())
 	return e
@@ -68,18 +69,75 @@ func (s *Server) SettleGeneration(ctx context.Context, x *Call, p *Pin) {
 	s.settleAdmission(ctx, x)
 }
 
+func (s *Server) SessionCall(w http.ResponseWriter, r *http.Request, family wire.Format, mode string) *Call {
+	return &Call{request: s.begin(w, r), family: family, actor: "api_key", mode: mode}
+}
+
+func (x *Call) Priority() string { return x.priority }
+
+func (x *Call) EndUserDigest() string { return x.endUserDigest }
+
+func (x *Call) AttributionValues() map[string]string { return x.attribution }
+
+func (x *Call) ClientIP() string { return x.request.clientIP }
+
+func (x *Call) SessionEstimate() { x.estimate = ResourceEstimate }
+
+func (x *Call) LastAttemptFact() *events.AttemptFact {
+	if len(x.facts) == 0 {
+		return nil
+	}
+	return &x.facts[len(x.facts)-1]
+}
+
+func (s *Server) EnterBedrock(w http.ResponseWriter, r *http.Request, family wire.Format, mode string) (*Call, keyauthority.Authority, bool) {
+	x := &Call{request: s.begin(w, r), family: family, actor: "api_key", mode: mode}
+	authority, ok := s.enter(w, r, x, s.Gate.BedrockAuthenticate)
+	return x, authority, ok
+}
+
+func (x *Call) SizedBody(bodyBytes int) {
+	sized := int64(bodyBytes) / 4
+	x.estimate, x.sizedInput = max(ResourceEstimate, sized), &sized
+}
+
+func (s *Server) ReleaseLease(ctx context.Context, x *Call) {
+	quota.SettleKey(ctx, x.lease, false, nil, s.Log)
+}
+
+func (s *Server) SettleBedrock(ctx context.Context, x *Call, p *Pin) {
+	actual := x.settledTokens()
+	s.settlePinnedHold(ctx, p.Hold)
+	s.recordCost(x)
+	quota.SettleKey(ctx, x.lease, x.dispatched, actual, s.Log)
+}
+
+func (s *Server) EnterRetrieval(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
+	x, authority, done := s.StateBegin(w, r, wire.File)
+	x.operationOverride = "retrieval"
+	x.mode = "unary"
+	x.actor = "api_key_resource"
+	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+	return x, authority, done
+}
+
+func (s *Server) SelectRetrievalPin(ctx context.Context, x *Call, route *routing.Route, estimate int64, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
+	x.estimate = estimate
+	return s.selectBoundPinSurface(ctx, x, route, "retrieval", "openai", "unary", nil, qualified)
+}
+
 func (s *Server) ReserveRetrieval(ctx context.Context, x *Call, authority keyauthority.Authority, route *routing.Route) *fault.Error {
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.ReserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
 		return e
 	}
-	x.estimate = resourceEstimate
+	x.estimate = ResourceEstimate
 	return nil
 }
 
 func (s *Server) GatePinnedRetrieval(ctx context.Context, x *Call, p *Pin) *fault.Error {
 	x.pinnedSlot = &p.Slot
 	deadline, _ := ctx.Deadline()
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, deadline, "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, ResourceEstimate, deadline, "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
@@ -96,6 +154,10 @@ func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 
 func ClassFailure(class string) *fault.Error {
 	return (&AttemptFailure{class: class}).Fault()
+}
+
+func AttemptFailureFor(class string) *AttemptFailure {
+	return &AttemptFailure{class: class}
 }
 
 func (x *Call) Sensitive() egress.Sensitive { return x.sensitive }

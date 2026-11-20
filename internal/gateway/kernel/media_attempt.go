@@ -74,13 +74,13 @@ func (run mediaRun) send(fact events.AttemptFact) (mediaSent, *attemptEnd) {
 
 	secret, err := s.slotSecret(sending, x, run.slot, run.provider, run.target.UpstreamModel)
 	if err != nil {
-		return unsent, ended(classCredential, nil)
+		return unsent, ended(ClassCredential, nil)
 	}
 	headers := http.Header{}
 	run.trace.InjectUpstream(headers)
 	networkSecret, err := s.providerNetworkSecret(sending, x.request.release, run.provider)
 	if err != nil {
-		return unsent, ended(classCredential, nil)
+		return unsent, ended(ClassCredential, nil)
 	}
 	target := transport.Target{Sensitive: &x.sensitive, CallerCredential: run.provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(run.target.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(run.provider, run.slot)}
 	result, failure := s.Deps.Media.Transport.Do(sending, target, encoded.call, transport.Options{Strict: encoded.template != nil, Headers: headers})
@@ -100,7 +100,7 @@ func (run mediaRun) send(fact events.AttemptFact) (mediaSent, *attemptEnd) {
 
 func (run mediaRun) verify(sent mediaSent) *attemptEnd {
 	strict, result := sent.encoded.template, sent.result
-	if artifact := mediaArtifact(result.Payload); strict != nil && artifact != nil {
+	if artifact := MediaArtifact(result.Payload); strict != nil && artifact != nil {
 		if _, err := artifact.BlobReference(); err != nil {
 			return ended(ClassProtocol, &AttemptFailure{dispatched: true})
 		}
@@ -113,7 +113,7 @@ func (run mediaRun) verify(sent mediaSent) *attemptEnd {
 			run.server.removeImages(images.ImageResult)
 		}
 		if sent.encoded.call.Ambiguous {
-			return ended(classAmbiguous, &AttemptFailure{dispatched: true})
+			return ended(ClassAmbiguous, &AttemptFailure{dispatched: true})
 		}
 		return ended(ClassProtocol, &AttemptFailure{dispatched: true})
 	}
@@ -143,7 +143,7 @@ func (run mediaRun) relay(sent mediaSent) (events.AttemptFact, *attemptEnd) {
 		return relayed, nil
 	}
 	if sent.encoded.call.Ambiguous && !failure.committed && failure.class == ClassTimeout {
-		return relayed, ended(classAmbiguous, failure)
+		return relayed, ended(ClassAmbiguous, failure)
 	}
 	return relayed, ended(failure.class, failure)
 }

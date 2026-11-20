@@ -208,7 +208,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
 	}
-	if e := s.checkRouteFidelity(ctx, x.Route); e != nil {
+	if e := s.CheckRouteFidelity(ctx, x.Route); e != nil {
 		return e
 	}
 	budgetRoute := *x.Route

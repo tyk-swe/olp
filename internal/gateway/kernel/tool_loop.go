@@ -152,7 +152,7 @@ func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMess
 }
 
 func (s *Server) workflowAuthority(ctx context.Context, x *Call, route *routing.Route, toolsetID string) (*keyauthority.Authority, *fault.Error) {
-	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
+	authority, err := s.ReauthenticateSession(ctx, x, x.workflow.token)
 	if errors.Is(err, release.ErrStaleAuthority) {
 		return nil, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}

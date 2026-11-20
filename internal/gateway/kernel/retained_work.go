@@ -52,9 +52,9 @@ type retainedWorkTarget struct {
 }
 
 func (s *Server) retainedSearch(w http.ResponseWriter, r *http.Request) {
-	if id, err := uuid.Parse(r.PathValue("id")); err == nil {
+	if id, err := uuid.Parse(r.PathValue("id")); err == nil && s.retrievalQuery != nil {
 		r.SetPathValue("binding_id", id.String())
-		s.queryRetrieval(w, r)
+		s.retrievalQuery(w, r)
 		return
 	}
 	s.retainedProxy(w, r, retainedWork{operation: "retrieval", path: "vector_stores/{id}/search", storeKind: "vector_store"})
@@ -77,11 +77,11 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, work reta
 	end := &retainedEnd{status: http.StatusInternalServerError}
 	defer func() {
 		s.Finish(x, nil, end.status)
-		s.retainedSettle(r.Context(), x, end.pin)
+		s.SettleRetained(r.Context(), x, end.pin)
 	}()
 	reply := retainedReply{w: w, x: x, surface: "openai", end: end}
 	if !authority.Policy.AllowProviderState {
-		reply.fail(providerStateForbidden())
+		reply.fail(ProviderStateForbidden())
 		return
 	}
 	q, err := s.readRetainedWork(r, x, authority, work, reply)
@@ -107,7 +107,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, work reta
 	x.estimate = int64(len(body))
 	ctx, cancel := s.StateDeadline(r.Context(), target.route)
 	defer cancel()
-	if err := s.admitRetainedRequest(ctx, x, authority, target.pin, target.route, false); err != nil {
+	if err := s.AdmitRetainedRequest(ctx, x, authority, target.pin, target.route, false); err != nil {
 		reply.fail(err)
 		return
 	}
@@ -225,7 +225,7 @@ func (q retainedWorkRequest) referenced() ([]*resources.Resource, *fault.Error) 
 	fileIDs := retainedFileIDs(q.source.Root())
 	files := make([]*resources.Resource, 0, len(fileIDs))
 	for _, fileID := range fileIDs {
-		resolved, _, readErr := q.server.readDurable(q.r.Context(), durableKind(resources.KindFile, fileID), q.x.keyID, fileID)
+		resolved, _, readErr := q.server.ReadDurable(q.r.Context(), DurableKind(resources.KindFile, fileID), q.x.keyID, fileID)
 		if readErr != nil {
 			return nil, retainedReferenceUnavailable()
 		}
@@ -243,7 +243,7 @@ func (q retainedWorkRequest) previousResponse() ([]*resources.Resource, *fault.E
 	if !isText || id == "" {
 		return nil, nil
 	}
-	resolved, _, readErr := q.server.readResponseResource(q.r.Context(), q.x.keyID, id)
+	resolved, _, readErr := q.server.ReadResponseResource(q.r.Context(), q.x.keyID, id)
 	if readErr != nil {
 		return nil, retainedReferenceUnavailable()
 	}
@@ -265,7 +265,7 @@ func (q retainedWorkRequest) perform(ctx context.Context, target retainedWorkTar
 	}
 	native, failure := q.server.PinnedDo(ctx, q.x, target.pin, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
-		return retainedPublicError(UpstreamError(failure), failure.Status)
+		return RetainedPublicError(UpstreamError(failure), failure.Status)
 	}
 	defer native.Body.Close()
 	projected, err := q.accept(ctx, target, native)
@@ -279,7 +279,7 @@ func (q retainedWorkRequest) perform(ctx context.Context, target retainedWorkTar
 }
 
 func (q retainedWorkRequest) accept(ctx context.Context, target retainedWorkTarget, native *PinnedResponse) ([]byte, *fault.Error) {
-	response, readErr := native.ReadBody(q.server.retainedResponseLimit())
+	response, readErr := native.ReadBody(q.server.RetainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response.")
 	}

@@ -301,6 +301,11 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 	}
 }
 
+var (
+	BedrockConverse       func(*Server) http.HandlerFunc
+	BedrockConverseStream func(*Server) http.HandlerFunc
+)
+
 func serveBedrock(t *testing.T, h *harness) {
 	t.Helper()
 	credentials := map[string][]byte{}
@@ -314,8 +319,8 @@ func serveBedrock(t *testing.T, h *harness) {
 	}
 	mux := http.NewServeMux()
 	RegisterGateway(h.gateway, mux)
-	mux.HandleFunc("POST /bedrock/model/{model}/converse", h.gateway.bedrockConverse)
-	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", h.gateway.bedrockConverseStream)
+	mux.HandleFunc("POST /bedrock/model/{model}/converse", BedrockConverse(h.gateway))
+	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", BedrockConverseStream(h.gateway))
 	h.server = httptest.NewServer(mux)
 	t.Cleanup(h.server.Close)
 }

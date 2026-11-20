@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-func (s *Server) generationResultResolver(ctx context.Context, x *Call, identity resources.NativeIdentity) generationrefs.Resolve {
+func (s *Server) GenerationResultResolver(ctx context.Context, x *Call, identity resources.NativeIdentity) generationrefs.Resolve {
 	return func(kind, upstream string) (string, error) {
 		key := kind + "\x00" + upstream
 		if x.generation.resources != nil {
@@ -37,12 +37,12 @@ func (s *Server) generationResultResolver(ctx context.Context, x *Call, identity
 	}
 }
 
-func (s *Server) mapGenerationResultReferences(ctx context.Context, x *Call, identity resources.NativeIdentity, body []byte) ([]byte, error) {
+func (s *Server) MapGenerationResultReferences(ctx context.Context, x *Call, identity resources.NativeIdentity, body []byte) ([]byte, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
 	if err != nil {
 		return nil, err
 	}
-	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, identity))
+	projected, err := generationrefs.ProjectResult(doc, s.GenerationResultResolver(ctx, x, identity))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, ident
 	if err != nil {
 		return nil, err
 	}
-	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, identity))
+	projected, err := generationrefs.ProjectResult(doc, s.GenerationResultResolver(ctx, x, identity))
 	if err != nil {
 		return nil, err
 	}

@@ -73,7 +73,7 @@ func (run attemptRun) send(plan attemptPlan, fact events.AttemptFact) (attemptSe
 	}
 	client, err := exchange.dispatchClient(plan.sending)
 	if err != nil {
-		return unsent, ended(classCredential, nil)
+		return unsent, ended(ClassCredential, nil)
 	}
 	parallel, end := run.announce(plan)
 	announced := attemptSent{plan: plan, config: config, fact: fact, parallel: parallel}
@@ -107,7 +107,7 @@ func (run attemptRun) authenticate(plan attemptPlan, exchange *boundExchange, re
 		// here, like one the gateway can't connect to.
 		return ended(ClassConnect, nil)
 	}
-	return ended(classCredential, nil)
+	return ended(ClassCredential, nil)
 }
 
 func (run attemptRun) announce(plan attemptPlan) (*parallelGuardrail, *attemptEnd) {
@@ -121,7 +121,7 @@ func (run attemptRun) announce(plan attemptPlan) (*parallelGuardrail, *attemptEn
 	if x.workflow == nil {
 		return parallel, nil
 	}
-	if e := s.markSessionDispatched(plan.sending, x); e != nil {
+	if e := s.MarkSessionDispatched(plan.sending, x); e != nil {
 		return parallel, ended(ClassConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
 	}
 	return parallel, nil
@@ -138,7 +138,7 @@ func (run attemptRun) accept(sent attemptSent) (attemptSent, *attemptEnd) {
 		run.state.accepted = true
 		return answered, nil
 	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, ErrorBodyLimit))
 	status, rejection := sent.config.Rejection(resp.StatusCode, raw)
 	f := &AttemptFailure{Status: status, upstream: run.x.redacted(openai.ParseErrorBody(rejection))}
 	class := run.state.rejected(status, f.upstream)

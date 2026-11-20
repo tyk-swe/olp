@@ -10,7 +10,6 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -33,80 +32,6 @@ const multipartParseDeadline = 60 * time.Second
 
 const mediaMultipartTokens = 2000
 
-func (s *Server) registerMedia(mux *http.ServeMux) {
-	if s.Deps.Media == nil {
-		return
-	}
-	mux.HandleFunc("POST /v1/images/generations", s.mediaJSONHandler(media.DecodeImageGeneration))
-	mux.HandleFunc("POST /v1/images/edits", s.mediaFormHandler(media.DefaultImageUploadLimit, 33, media.DecodeImageEdit))
-	mux.HandleFunc("POST /v1/images/variations", s.mediaFormHandler(media.DefaultImageUploadLimit, 1, media.DecodeImageVariation))
-	mux.HandleFunc("POST /v1/audio/speech", s.mediaJSONHandler(media.DecodeSpeech))
-	mux.HandleFunc("POST /v1/audio/transcriptions", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranscription))
-	mux.HandleFunc("POST /v1/audio/translations", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranslation))
-	mux.HandleFunc("POST /v1/videos", s.videoCreate)
-	mux.HandleFunc("GET /v1/videos", s.videoList)
-	mux.HandleFunc("GET /v1/videos/{video_id}", s.videoGet)
-	mux.HandleFunc("GET /v1/videos/{video_id}/content", s.videoContent)
-	mux.HandleFunc("DELETE /v1/videos/{video_id}", s.videoDelete)
-}
-
-func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		x, authority, done := s.mediaBegin(w, r)
-		if done {
-			return
-		}
-		rc := http.NewResponseController(w)
-		if err := rc.SetReadDeadline(time.Now().Add(RequestBodyTimeout)); err != nil {
-			s.Gate.Release(r.Context())
-			s.Refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
-			return
-		}
-		body, e := s.Gate.ReadBody(r)
-		if e != nil {
-			s.Gate.Release(r.Context())
-			s.Refuse(x, w, e)
-			return
-		}
-		rc.SetReadDeadline(time.Time{})
-		request, failure := decode(body)
-		if failure != nil {
-			s.Gate.Release(r.Context())
-			s.Refuse(x, w, mediaError(failure))
-			return
-		}
-		x.family = wire.Format(request.Op())
-		sized := estimate.HeuristicBytesTokens(len(body))
-		x.estimate, x.sizedInput = sized+1, &sized
-		s.serveMedia(r.Context(), w, x, authority, request)
-	}
-}
-
-func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(*staging.Form) (*media.Request, *media.Error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		x, authority, done := s.mediaBegin(w, r)
-		if done {
-			return
-		}
-		form, e := s.ParseMediaForm(w, r, authority.ID, maxFileBytes, maxFiles)
-		if e != nil {
-			s.Gate.Release(r.Context())
-			s.Refuse(x, w, e)
-			return
-		}
-		request, failure := decode(form)
-		if failure != nil {
-			form.Cleanup()
-			s.Gate.Release(r.Context())
-			s.Refuse(x, w, mediaError(failure))
-			return
-		}
-		form.Disarm()
-		x.family = wire.Format(request.Op())
-		s.serveMedia(r.Context(), w, x, authority, request)
-	}
-}
-
 func (s *Server) ParseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *fault.Error) {
 	limit := s.Config.MaxMediaBodyBytes
 	if r.ContentLength > limit {
@@ -126,7 +51,7 @@ func (s *Server) ParseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	return form, nil
 }
 
-func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
+func (s *Server) BeginMedia(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
 	x := &Call{request: s.begin(w, r), family: wire.Chat, actor: "api_key"}
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
@@ -151,7 +76,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*Call, keya
 		s.Refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
-	s.bindAuthority(x, authority)
+	s.BindAuthority(x, authority)
 	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
 		s.Gate.Release(r.Context())
 		s.Refuse(x, w, e)
@@ -160,7 +85,35 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*Call, keya
 	return x, authority, false
 }
 
-func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *Call, authority keyauthority.Authority, request *media.Request) {
+func (x *Call) UnaryFamily(family wire.Format) {
+	x.family = family
+	x.mode = "unary"
+}
+
+func (x *Call) NoteDecodedMedia(request *media.Request, sized *int64) {
+	x.family = wire.Format(request.Op())
+	if sized != nil {
+		x.estimate, x.sizedInput = *sized+1, sized
+	}
+}
+
+func (x *Call) MarkDispatched() { x.dispatched = true }
+
+func (x *Call) NoteDispatchFailure(failure *AttemptFailure) {
+	x.dispatched = failure == nil || failure.dispatched
+}
+
+func MediaResultOutcome(result *transport.Result, status int) *MediaOutcome {
+	return &MediaOutcome{result: result, committed: true, status: status}
+}
+
+func MediaStatusOutcome(status int) *MediaOutcome {
+	return &MediaOutcome{committed: true, status: status}
+}
+
+func (o *MediaOutcome) Status() int { return o.status }
+
+func (s *Server) ServeMedia(ctx context.Context, w http.ResponseWriter, x *Call, authority keyauthority.Authority, request *media.Request) {
 	defer s.Gate.Release(ctx)
 	x.media = request
 	switch request.Op() {
@@ -196,8 +149,18 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *Call,
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) finishMedia(x *Call, out *mediaOutcome, status int) {
+func (s *Server) finishMedia(x *Call, out *MediaOutcome, status int) {
 	s.Finish(x, &Outcome{Err: out.err, Committed: out.committed, Cancelled: out.cancelled}, status)
+}
+
+func (s *Server) FinishMedia(x *Call, out *MediaOutcome, status int) {
+	s.finishMedia(x, out, status)
+}
+
+func (s *Server) FailMediaOutcome(x *Call, w http.ResponseWriter, failure *AttemptFailure) {
+	e := failure.Fault()
+	s.finishMedia(x, &MediaOutcome{err: e, committed: failure.committed}, e.Status)
+	fault.WriteSurfaceError(w, e, "openai")
 }
 
 func (s *Server) cleanupUploads(request *media.Request) {
@@ -233,7 +196,7 @@ func (s *Server) planMedia(ctx context.Context, x *Call) *fault.Error {
 			return e
 		}
 	}
-	if e := s.checkRouteFidelity(ctx, x.Route); e != nil {
+	if e := s.CheckRouteFidelity(ctx, x.Route); e != nil {
 		return e
 	}
 	request := x.media
@@ -335,7 +298,7 @@ func videoLifecycle(supported func(op string) bool) bool {
 	return supported(string(media.OpVideoGet)) && supported(string(media.OpVideoContent)) && supported(string(media.OpVideoDelete))
 }
 
-type mediaOutcome struct {
+type MediaOutcome struct {
 	result    *transport.Result
 	err       *fault.Error
 	committed bool
@@ -344,14 +307,14 @@ type mediaOutcome struct {
 	localJob  string
 }
 
-func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Call) *mediaOutcome {
+func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Call) *MediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*transport.Result]{
 		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
 		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *AttemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
-	out := &mediaOutcome{
+	out := &MediaOutcome{
 		result:    attempted.result,
 		err:       attempted.err,
 		committed: attempted.committed,
@@ -365,12 +328,12 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *Cal
 
 func mediaClass(f *transport.Failure) string {
 	if f.Ambiguous {
-		return classAmbiguous
+		return ClassAmbiguous
 	}
 	return string(f.Class)
 }
 
-func mediaError(failure *media.Error) *fault.Error {
+func MediaError(failure *media.Error) *fault.Error {
 	if failure == nil {
 		return nil
 	}
