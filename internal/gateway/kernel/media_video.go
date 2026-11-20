@@ -24,27 +24,16 @@ type videoTarget struct {
 	slots    []routing.Slot
 }
 
-func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.mediaBegin(w, r)
-	if done {
-		return
-	}
-	form, request, e := s.readVideoCreate(w, r, authority)
-	if e != nil {
-		s.Gate.Release(r.Context())
-		s.Refuse(x, w, e)
-		return
-	}
+func (s *Server) CreateVideoJob(w http.ResponseWriter, r *http.Request, x *Call, authority keyauthority.Authority, form *staging.Form, request *media.Request) {
 	x.family = wire.Format(request.Op())
 	x.media = request
 	x.estimate = mediaMultipartTokens
-	defer s.Gate.Release(r.Context())
 	defer s.cleanupUploads(request)
 
 	jobID, err := uuid.NewV7()
 	if err != nil {
 		form.Cleanup()
-		s.Refuse(x, w, jobError(err))
+		s.Refuse(x, w, JobError(err))
 		return
 	}
 	x.affinity = []byte(jobID.String())
@@ -81,13 +70,13 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	reserved, jobErr := s.Deps.Media.Store.Reserve(ctx, videoReservation(x, authority, target.attempt, slot, jobID.String(), deadline))
 	if jobErr != nil {
 		s.ReleaseHold(ctx, hold)
-		s.Refuse(x, w, jobError(jobErr))
+		s.Refuse(x, w, JobError(jobErr))
 		return
 	}
 	s.submitVideo(ctx, w, x, target, slot, hold, reserved, deadline)
 }
 
-func (s *Server) readVideoCreate(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority) (*staging.Form, *media.Request, *fault.Error) {
+func (s *Server) ReadVideoCreate(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority) (*staging.Form, *media.Request, *fault.Error) {
 	form, parseError := s.ParseMediaForm(w, r, authority.ID, media.DefaultVideoReferenceLimit, 1)
 	if parseError != nil {
 		return nil, nil, parseError
@@ -95,7 +84,7 @@ func (s *Server) readVideoCreate(w http.ResponseWriter, r *http.Request, authori
 	request, failure := media.DecodeVideoCreate(form)
 	if failure != nil {
 		form.Cleanup()
-		return nil, nil, mediaError(failure)
+		return nil, nil, MediaError(failure)
 	}
 	return form, request, nil
 }
@@ -148,8 +137,8 @@ func (s *Server) submitVideo(ctx context.Context, w http.ResponseWriter, x *Call
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
 	if dispatchFailure != nil {
-		s.Deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == classAmbiguous)
-		out := &mediaOutcome{err: dispatchFailure.Fault(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == ClassCancelled}
+		s.Deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == ClassAmbiguous)
+		out := &MediaOutcome{err: dispatchFailure.Fault(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == ClassCancelled}
 		s.finishMedia(x, out, out.err.Status)
 		fault.WriteSurfaceError(w, out.err, "openai")
 		return
@@ -211,9 +200,9 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *Call, last *Attempt
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.Route.Slug+"`.")
 }
 
-func (s *Server) attachCreated(ctx context.Context, x *Call, reserved jobs.Record, result *transport.Result) *mediaOutcome {
-	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: reserved.ID}
-	err := s.Deps.Media.Jobs.Attach(ctx, reserved, mediaVideo(result), &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
+func (s *Server) attachCreated(ctx context.Context, x *Call, reserved jobs.Record, result *transport.Result) *MediaOutcome {
+	out := &MediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: reserved.ID}
+	err := s.Deps.Media.Jobs.Attach(ctx, reserved, MediaVideo(result), &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
 	rejected, isRejected := errors.AsType[*jobs.Rejected](err)
 	switch {
 	case isRejected:
@@ -224,32 +213,32 @@ func (s *Server) attachCreated(ctx context.Context, x *Call, reserved jobs.Recor
 	return out
 }
 
-func jobError(err error) *fault.Error {
+func JobError(err error) *fault.Error {
 	failure, ok := errors.AsType[*jobs.Error](err)
 	if !ok {
-		return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
+		return MediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
 	}
 	switch failure.Kind {
 	case jobs.KindNotFound:
-		return mediaError(media.Fail(http.StatusNotFound, "media_job_not_found", "The media job does not exist."))
+		return MediaError(media.Fail(http.StatusNotFound, "media_job_not_found", "The media job does not exist."))
 	case jobs.KindChanged:
-		return mediaError(media.Fail(http.StatusConflict, "media_job_changed", "The media job changed; refresh and retry."))
+		return MediaError(media.Fail(http.StatusConflict, "media_job_changed", "The media job changed; refresh and retry."))
 	case jobs.KindConflict:
-		return mediaError(media.Fail(http.StatusConflict, "media_job_upstream_conflict", "The upstream media job identity conflicts with stored metadata."))
+		return MediaError(media.Fail(http.StatusConflict, "media_job_upstream_conflict", "The upstream media job identity conflicts with stored metadata."))
 	case jobs.KindInvalid:
-		return mediaError(media.Fail(http.StatusBadRequest, "invalid_request", failure.Message))
+		return MediaError(media.Fail(http.StatusBadRequest, "invalid_request", failure.Message))
 	}
-	return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
+	return MediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
 }
 
-func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID string, op media.Operation) (*jobs.Record, *fault.Error) {
+func (s *Server) OwnedJob(ctx context.Context, authority keyauthority.Authority, videoID string, op media.Operation) (*jobs.Record, *fault.Error) {
 	id, err := uuid.Parse(videoID)
 	if err != nil {
 		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
 	record, err := s.Deps.Media.Store.Get(ctx, id.String())
 	if err != nil {
-		return nil, jobError(err)
+		return nil, JobError(err)
 	}
 	if record.APIKeyID != authority.ID {
 		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
@@ -273,7 +262,7 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 	if op == media.OpVideoDelete {
 		use = RetainedHousekeeping
 	}
-	if e := retainedContract(record.StrictContract, current, use); e != nil {
+	if e := RetainedContract(record.StrictContract, current, use); e != nil {
 		return nil, e
 	}
 	return &record, nil
@@ -287,7 +276,7 @@ func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.Ro
 	return projectID, current, nil
 }
 
-func strictVideoResourceContext(x *Call, record *jobs.Record, allowVariant bool) *fault.Error {
+func StrictVideoResourceContext(x *Call, record *jobs.Record, allowVariant bool) *fault.Error {
 	if !record.StrictContract {
 		return nil
 	}
@@ -300,7 +289,7 @@ func strictVideoResourceContext(x *Call, record *jobs.Record, allowVariant bool)
 	return nil
 }
 
-func videoJobRoute(record *jobs.Record) *routing.Route {
+func VideoJobRoute(record *jobs.Record) *routing.Route {
 	route := &routing.Route{Slug: record.RouteSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}}
 	if record.StrictContract {
 		route.Fidelity.Mode = routing.FidelityStrict
@@ -308,12 +297,12 @@ func videoJobRoute(record *jobs.Record) *routing.Route {
 	return route
 }
 
-func (s *Server) admitVideoRequest(parent context.Context, x *Call, authority keyauthority.Authority) (context.Context, func(), *fault.Error) {
+func (s *Server) AdmitVideoRequest(parent context.Context, x *Call, authority keyauthority.Authority) (context.Context, func(), *fault.Error) {
 	ttl := maxStreamDuration + jobs.LeaseSlack
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *fault.Error
-	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), ResourceEstimate, ttl, x.limitRoute())
 	if e != nil {
 		cancel()
 		return nil, nil, e

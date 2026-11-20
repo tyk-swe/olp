@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -72,7 +73,7 @@ func transcriptUsage(transcript *media.TranscriptionResult) *wire.Usage {
 	return &wire.Usage{MediaUnits: &units}
 }
 
-func mediaArtifact(payload transport.Payload) *staging.Artifact {
+func MediaArtifact(payload transport.Payload) *staging.Artifact {
 	switch payload := payload.(type) {
 	case transport.Audio:
 		return payload.Artifact
@@ -82,7 +83,7 @@ func mediaArtifact(payload transport.Payload) *staging.Artifact {
 	return nil
 }
 
-func mediaVideo(result *transport.Result) *media.VideoJobResult {
+func MediaVideo(result *transport.Result) *media.VideoJobResult {
 	if result == nil {
 		return nil
 	}
@@ -115,20 +116,20 @@ func tokenUsage(tokens *media.ImageUsage) *wire.Usage {
 		ImageInputTokens: tokens.ImageInputTokens, ImageOutputTokens: tokens.ImageOutputTokens}
 }
 
-func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutcome) {
+func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *MediaOutcome) {
 	result := out.result
 	switch payload := result.Payload.(type) {
 	case transport.Images:
 		if x.Strict() && result.Source.Valid() {
 			defer s.removeImages(payload.ImageResult)
-			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
+			s.DeliverMediaJSON(w, x, out, result.Source.Bytes())
 			return
 		}
 		s.writeImageResult(w, x, out, payload.ImageResult)
 	case transport.Audio:
-		s.streamArtifact(w, x, out, payload.Artifact)
+		s.StreamMediaArtifact(w, x, out, payload.Artifact)
 	case transport.Content:
-		s.streamArtifact(w, x, out, payload.Artifact)
+		s.StreamMediaArtifact(w, x, out, payload.Artifact)
 	case transport.Text:
 		format := "text/plain; charset=utf-8"
 		switch x.media.TranscriptFormat() {
@@ -143,7 +144,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 		})
 	case transport.Transcript:
 		if x.Strict() && result.Source.Valid() {
-			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
+			s.DeliverMediaJSON(w, x, out, result.Source.Bytes())
 			return
 		}
 		body, failure := media.EncodeTranscriptionJSON(payload.TranscriptionResult)
@@ -153,7 +154,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 			fault.WriteSurfaceError(w, out.err, "openai")
 			return
 		}
-		s.deliverMediaJSON(w, x, out, body)
+		s.DeliverMediaJSON(w, x, out, body)
 	case transport.Video:
 		var body []byte
 		var failure *media.Error
@@ -168,11 +169,11 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *Call, out *mediaOutc
 			fault.WriteSurfaceError(w, out.err, "openai")
 			return
 		}
-		s.deliverMediaJSON(w, x, out, body)
+		s.DeliverMediaJSON(w, x, out, body)
 	}
 }
 
-func (s *Server) deliverMedia(w http.ResponseWriter, x *Call, out *mediaOutcome, contentType string, write func() error) {
+func (s *Server) deliverMedia(w http.ResponseWriter, x *Call, out *MediaOutcome, contentType string, write func() error) {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 		out.err = fault.ServerError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
@@ -208,24 +209,24 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *Call, out *mediaOutcome,
 	}
 }
 
-func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *Call, out *mediaOutcome, body []byte) {
+func (s *Server) DeliverMediaJSON(w http.ResponseWriter, x *Call, out *MediaOutcome, body []byte) {
 	s.deliverMedia(w, x, out, "application/json", func() error {
 		_, err := w.Write(body)
 		return err
 	})
 }
 
-func outJobID(out *mediaOutcome) string {
+func outJobID(out *MediaOutcome) string {
 	if out.localJob != "" {
 		return out.localJob
 	}
-	if video := mediaVideo(out.result); video != nil {
+	if video := MediaVideo(out.result); video != nil {
 		return video.ID
 	}
 	return ""
 }
 
-func (s *Server) writeImageResult(w http.ResponseWriter, x *Call, out *mediaOutcome, images *media.ImageResult) {
+func (s *Server) writeImageResult(w http.ResponseWriter, x *Call, out *MediaOutcome, images *media.ImageResult) {
 	defer s.removeImages(images)
 	body, markers, failure := media.EncodeImageResponse(images)
 	if failure != nil {
@@ -278,7 +279,7 @@ func (s *Server) streamBase64(w io.Writer, handle staging.Handle) error {
 	return err
 }
 
-func (s *Server) streamArtifact(w http.ResponseWriter, x *Call, out *mediaOutcome, artifact *staging.Artifact) {
+func (s *Server) StreamMediaArtifact(w http.ResponseWriter, x *Call, out *MediaOutcome, artifact *staging.Artifact) {
 	opened, err := s.Deps.Staging.Open(artifact.Handle)
 	if err != nil {
 		s.Deps.Staging.Remove(artifact.Handle)
@@ -396,4 +397,32 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		class = ClassTimeout
 	}
 	return usage, sw.Committed, &AttemptFailure{class: class, committed: sw.Committed, dispatched: true}
+}
+
+func VideoUndeleted(result *transport.Result, failure *AttemptFailure) *AttemptFailure {
+	if failure != nil {
+		if failure.Status != http.StatusNotFound {
+			return failure
+		}
+		return nil
+	}
+	receipt := mediaDeleted(result)
+	if receipt == nil {
+		return &AttemptFailure{class: ClassProtocol}
+	}
+	if !receipt.Deleted {
+		return &AttemptFailure{class: classUpstreamClient, Status: http.StatusBadGateway}
+	}
+	return nil
+}
+
+func VideoDeletion(record *jobs.Record, upstream string, result *transport.Result) ([]byte, *media.Error) {
+	if record.StrictContract {
+		return media.EncodeStrictVideoObject(result.Source, upstream, record.ID, "")
+	}
+	receipt := mediaDeleted(result)
+	if receipt == nil {
+		return media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{Deleted: true}, record.ID)
+	}
+	return media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{Deleted: true, Extra: receipt.Extra}, record.ID)
 }

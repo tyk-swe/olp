@@ -8,7 +8,7 @@ func inBandStatus(class string) int {
 	switch class {
 	case classContextWindow, classUpstreamClient, classContentFilter:
 		return http.StatusBadRequest
-	case classCredential:
+	case ClassCredential:
 		return http.StatusUnauthorized
 	case classRateLimit:
 		return http.StatusTooManyRequests

@@ -33,6 +33,10 @@ func (o resultOwner) find(ctx context.Context, store *resources.Store, kind, ups
 	return store.GetByUpstreamAsOf(ctx, identity, *o.storedAt)
 }
 
+func (s *Server) StoredGenerationResultResolver(ctx context.Context, x *Call, response *resources.Resource) generationrefs.Resolve {
+	return s.generationResultResolver(ctx, x, storedResult(response))
+}
+
 func (s *Server) generationResultResolver(ctx context.Context, x *Call, owner resultOwner) generationrefs.Resolve {
 	return func(kind, upstream string) (string, error) {
 		key := kind + "\x00" + upstream
@@ -56,6 +60,10 @@ func (s *Server) generationResultResolver(ctx context.Context, x *Call, owner re
 		}
 		return resource.ID, nil
 	}
+}
+
+func (s *Server) MapStoredGenerationResultReferences(ctx context.Context, x *Call, response *resources.Resource, body []byte) ([]byte, error) {
+	return s.mapGenerationResultReferences(ctx, x, storedResult(response), body)
 }
 
 func (s *Server) mapGenerationResultReferences(ctx context.Context, x *Call, owner resultOwner, body []byte) ([]byte, error) {

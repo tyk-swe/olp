@@ -95,11 +95,11 @@ func (run unaryRun) send(fact events.AttemptFact) (unarySent, *attemptEnd) {
 	timer := time.AfterFunc(min(run.target.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
 	client, err := bound.client(sending)
 	if err != nil {
-		return unarySent{fact: fact, plan: plan, cancel: cancel, timer: timer}, ended(classCredential, nil)
+		return unarySent{fact: fact, plan: plan, cancel: cancel, timer: timer}, ended(ClassCredential, nil)
 	}
 	parallel := s.startParallel(sending, x, cancel)
 	observed := fact
-	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &observed, bodyCap: run.replyLimit(plan), inject: run.trace.InjectUpstream}
+	exchange := &unaryExchange{now: s.Now, dispatched: s.MarkSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &observed, bodyCap: run.replyLimit(plan), inject: run.trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	sent := unarySent{fact: observed, plan: plan, raw: raw, cancel: cancel, timer: timer, parallel: parallel}
 	if failure != nil {

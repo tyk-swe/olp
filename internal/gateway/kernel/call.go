@@ -166,7 +166,7 @@ type generationCall struct {
 
 	emit wire.Emit
 
-	responseContract *storedResponseContract
+	responseContract *StoredResponseContract
 	continuation     *continuationExecution
 
 	responseBinding *responseStreamBinding

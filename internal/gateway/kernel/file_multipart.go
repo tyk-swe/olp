@@ -96,7 +96,7 @@ func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint,
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if err := s.applySlotCredential(ctx, x, req, p.Provider.Connector(), p.Slot, nil, &p.Provider, p.Model); err != nil {
-		return nil, exchange.fail(classCredential, nil)
+		return nil, exchange.fail(ClassCredential, nil)
 	}
 	maps.Copy(req.Header, x.PinnedHeaders)
 	resp, failure := s.doPinnedRequest(ctx, p, exchange, req, openai.ParseErrorBody)

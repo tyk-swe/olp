@@ -22,21 +22,21 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-const continuationHeader = "X-OLP-Continuation"
+const ContinuationHeader = "X-OLP-Continuation"
 const submissionHeader = "X-OLP-Submission-ID"
 const handleHeader = "X-OLP-Continuation-Handle"
 
 type continuationExecution struct {
 	version, submission string
 	parent              *resources.Resource
-	parentState         *storedContinuation
+	parentState         *StoredContinuation
 	prior               *interaction.Continuation
 	resource            *resources.Resource
-	stored              *storedContinuation
+	stored              *StoredContinuation
 	replay              *interaction.Delivery
 	emitted             int
 }
-type storedContinuation struct {
+type StoredContinuation struct {
 	Version         string                    `json:"version"`
 	Source          json.RawMessage           `json:"source"`
 	Receipt         oif.Receipt               `json:"receipt"`
@@ -56,22 +56,22 @@ func (x *Call) Snapshot() *routing.View {
 	}
 	return x.request.release.Snapshot()
 }
-func continuationError(code, message string) *fault.Error {
+func ContinuationError(code, message string) *fault.Error {
 	return fault.ServerError(http.StatusConflict, code, message)
 }
 
-func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
+func DecodeStoredContinuation(payload []byte) (*StoredContinuation, error) {
 	if len(payload) > resources.MaxContinuationBytes {
 		return nil, resources.ErrContract
 	}
-	var state storedContinuation
+	var state StoredContinuation
 	if err := json.Unmarshal(payload, &state); err != nil || state.Version != interaction.ContinuationV1 || len(state.Source) == 0 || state.Binding == "" {
 		return nil, resources.ErrContract
 	}
 	return &state, nil
 }
 func (s *Server) prepareContinuation(ctx context.Context, x *Call) *fault.Error {
-	values := x.semanticHeaders.Values(continuationHeader)
+	values := x.semanticHeaders.Values(ContinuationHeader)
 	submission := x.semanticHeaders.Values(submissionHeader)
 	handles := x.semanticHeaders.Values(handleHeader)
 	if len(values) == 0 && len(submission) == 0 && len(handles) == 0 {
@@ -99,25 +99,25 @@ func (s *Server) prepareContinuation(ctx context.Context, x *Call) *fault.Error 
 	// the shorter window for claiming a fresh submission has closed.
 	res, payload, err := s.Deps.Resources.FindSubmission(ctx, x.keyID, c.submission)
 	if err == nil {
-		state, e := decodeStoredContinuation(payload)
+		state, e := DecodeStoredContinuation(payload)
 		if e != nil {
-			return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
+			return ContinuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 		}
 		parentMatches := res.ParentID == nil && len(handles) == 0 || res.ParentID != nil && len(handles) == 1 && handles[0] == resources.LocalID(resources.KindContinuation, *res.ParentID)
 		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.generation.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.generation.parsed.Route {
-			return continuationError("continuation_mismatch", "This submission identity belongs to a different request.")
+			return ContinuationError("continuation_mismatch", "This submission identity belongs to a different request.")
 		}
-		if e := s.authorizeContinuation(ctx, x, res, state); e != nil {
+		if e := s.AuthorizeContinuation(ctx, x, res, state); e != nil {
 			return e
 		}
 		if res.State != resources.StateReady || state.Interaction == nil {
-			return continuationError("continuation_outcome_unknown", "This submission already reserved provider work; no fresh inference will run. Recover only after a ready result is available.")
+			return ContinuationError("continuation_outcome_unknown", "This submission already reserved provider work; no fresh inference will run. Recover only after a ready result is available.")
 		}
 		c.resource, c.stored, c.replay = res, state, &state.Delivery
 		return nil
 	}
 	if !errors.Is(err, resources.ErrNotFound) {
-		return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
+		return ContinuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 	}
 	if err := resources.ValidateSubmission(c.submission, s.Now()); err != nil {
 		return fault.InvalidRequest("invalid_submission_identity", "Provide a timestamp.UUID submission identity from the last fifteen minutes, allowing five minutes of clock skew.", nil)
@@ -127,11 +127,11 @@ func (s *Server) prepareContinuation(ctx context.Context, x *Call) *fault.Error 
 	}
 	res, payload, err = s.Deps.Resources.ReadContract(ctx, resources.KindContinuation, x.keyID, handles[0])
 	if err != nil || res.State != resources.StateReady {
-		return continuationError("continuation_unavailable", "The continuation handle is expired, incomplete, or unavailable to this key.")
+		return ContinuationError("continuation_unavailable", "The continuation handle is expired, incomplete, or unavailable to this key.")
 	}
-	state, err := decodeStoredContinuation(payload)
+	state, err := DecodeStoredContinuation(payload)
 	if err != nil || state.Interaction == nil || res.RouteSlug != x.generation.parsed.Route {
-		return continuationError("continuation_mismatch", "The continuation handle does not belong to this route and contract.")
+		return ContinuationError("continuation_mismatch", "The continuation handle does not belong to this route and contract.")
 	}
 	// The pinned planning boundary resolves and authorizes this historical
 	// provider once, after the owner-scoped encrypted handle has been read.
@@ -143,14 +143,14 @@ func (s *Server) prepareContinuation(ctx context.Context, x *Call) *fault.Error 
 	x.servingBinding = state.Binding
 	return nil
 }
-func (s *Server) authorizeContinuation(ctx context.Context, x *Call, res *resources.Resource, state *storedContinuation) *fault.Error {
+func (s *Server) AuthorizeContinuation(ctx context.Context, x *Call, res *resources.Resource, state *StoredContinuation) *fault.Error {
 	p, _, e := s.ResolveResource(ctx, x, x.authority, res, operationGeneration, RetainedRetrieval)
 	if e != nil {
 		return e
 	}
 	return s.authorizeContinuationPin(ctx, x, res, state, p)
 }
-func (s *Server) authorizeContinuationPin(ctx context.Context, x *Call, res *resources.Resource, state *storedContinuation, p *Pin) *fault.Error {
+func (s *Server) authorizeContinuationPin(ctx context.Context, x *Call, res *resources.Resource, state *StoredContinuation, p *Pin) *fault.Error {
 	if !p.Provider.Enabled || !p.Slot.Allows(p.Model, res.RouteSlug, x.keyID) {
 		return PinUnavailable()
 	}
@@ -182,7 +182,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *Call, plan *interaction.P
 	if c.parent != nil {
 		r.ParentID = &c.parent.UUID
 	}
-	state := &storedContinuation{Version: version, Source: x.generation.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
+	state := &StoredContinuation{Version: version, Source: x.generation.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -225,20 +225,20 @@ func (s *Server) replayContinuation(w http.ResponseWriter, x *Call) error {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		for _, frame := range delivery.Frames {
-			if err := s.writeContinuationPayload(w, x, interaction.ContinuationFrame(frame)); err != nil {
+			if err := s.WriteContinuationPayload(w, x, interaction.ContinuationFrame(frame)); err != nil {
 				return err
 			}
 		}
-		return s.writeContinuationPayload(w, x, []byte("data: [DONE]\n\n"))
+		return s.WriteContinuationPayload(w, x, []byte("data: [DONE]\n\n"))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	return s.writeContinuationPayload(w, x, delivery.Body)
+	return s.WriteContinuationPayload(w, x, delivery.Body)
 }
 
 // Cached correspondence has the same bounded delivery obligation as its
 // original response. It never enters provider dispatch or owns new usage.
-func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *Call, data []byte) error {
+func (s *Server) WriteContinuationPayload(w http.ResponseWriter, x *Call, data []byte) error {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	n, err := w.Write(data)
@@ -257,7 +257,7 @@ func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *Call, data [
 	return nil
 }
 
-func continuationDeliveryOutcome(err error) *Outcome {
+func ContinuationDeliveryOutcome(err error) *Outcome {
 	out := &Outcome{Committed: true}
 	if err != nil {
 		out.Err = (&AttemptFailure{class: ClassCancelled}).Fault()
@@ -281,64 +281,6 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 // recoverContinuation serves already committed client delivery only. It performs
 // current authority checks and never enters admission, provider dispatch or a
 // second inference retry engine, so like a replay it adds no response headers.
-func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.StateBegin(w, r, wire.Chat)
-	if done {
-		return
-	}
-	defer s.Gate.Release(r.Context())
-	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
-		s.Refuse(x, w, fault.InvalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil))
-		return
-	}
-	if !authority.Policy.AllowProviderState {
-		s.Refuse(x, w, fault.InvalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil))
-		return
-	}
-	var res *resources.Resource
-	var payload []byte
-	var err error
-	if submission := r.PathValue("submission"); submission != "" {
-		res, payload, err = s.Deps.Resources.FindSubmission(r.Context(), authority.ID, submission)
-	} else {
-		res, payload, err = s.Deps.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
-	}
-	if err != nil {
-		s.Refuse(x, w, fault.NotFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."))
-		return
-	}
-	route, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
-	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
-		s.Refuse(x, w, fault.NotFoundError("continuation_unavailable", "The continuation is unavailable to this key."))
-		return
-	}
-	x.Route = &route
-	state, err := decodeStoredContinuation(payload)
-	if err != nil {
-		s.Refuse(x, w, continuationError("continuation_unavailable", "The stored contract is unavailable."))
-		return
-	}
-	if e := s.authorizeContinuation(r.Context(), x, res, state); e != nil {
-		s.Refuse(x, w, e)
-		return
-	}
-	if res.State != resources.StateReady || state.Interaction == nil {
-		s.Refuse(x, w, continuationError("continuation_outcome_unknown", "This submission reserved provider work but has no committed ready delivery; fresh inference will not run."))
-		return
-	}
-	body, err := json.Marshal(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
-	if err != nil {
-		s.Refuse(x, w, continuationError("continuation_unavailable", "The stored delivery could not be encoded."))
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Should-Retry", "false")
-	w.WriteHeader(http.StatusOK)
-	deliveryErr := s.writeContinuationPayload(w, x, append(body, '\n'))
-	s.Finish(x, continuationDeliveryOutcome(deliveryErr), http.StatusOK)
-}
-
 // Only semantic controls enter encrypted correspondence, never authentication,
 // tracing, cookies, helper headers or transient SDK transport settings.
 func continuationSemanticHeaders(input http.Header) http.Header {

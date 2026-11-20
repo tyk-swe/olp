@@ -1,4 +1,4 @@
-package kernel
+package openaistate
 
 import (
 	"cmp"
@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -34,7 +35,7 @@ type providerUpload struct {
 	file     *staging.Part
 	purpose  string
 	extra    map[string]string
-	manifest BatchManifest
+	manifest kernel.BatchManifest
 }
 
 type strictBatchContract struct {
@@ -46,71 +47,71 @@ type strictBatchContract struct {
 type providerFile struct {
 	body       []byte
 	upstreamID string
-	exchange   *PinnedExchange
+	exchange   *kernel.PinnedExchange
 }
 
 type batchFileUpload struct {
-	server    *Server
-	x         *Call
+	server    *kernel.Server
+	x         *kernel.Call
 	authority keyauthority.Authority
 	route     *routing.Route
-	pin       *Pin
+	pin       *kernel.Pin
 	adapter   connectors.BatchAdapter
 	fields    uploadFields
 	source    strictUploadSource
 }
 
-func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.StateBegin(w, r, wire.File)
+func (s surface) uploadFile(w http.ResponseWriter, r *http.Request) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.File)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
+	defer s.kernel.Gate.Release(r.Context())
 	route, e := uploadRoute(r, x)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	x.Route = route
 	if e := s.admitUpload(x, authority, route); e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
-	form, e := s.ParseMediaForm(w, r, authority.ID, s.Config.MaxMediaBodyBytes, 1)
+	form, e := s.kernel.ParseMediaForm(w, r, authority.ID, s.kernel.Config.MaxMediaBodyBytes, 1)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	defer form.Cleanup()
 	fields, e := readUploadFields(form)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	if fields.purpose != "batch" {
-		s.uploadRetainedFile(w, r, x, authority, route, fields.file, fields.purpose, fields.extra)
+		s.kernel.UploadRetainedFile(w, r, x, authority, route, fields.file, fields.purpose, fields.extra)
 		return
 	}
 	s.uploadBatchFile(w, r, x, authority, route, form, fields)
 }
 
-func uploadRoute(r *http.Request, x *Call) (*routing.Route, *fault.Error) {
-	slug := strings.TrimSpace(r.Header.Get(StateRouteHeader))
+func uploadRoute(r *http.Request, x *kernel.Call) (*routing.Route, *fault.Error) {
+	slug := strings.TrimSpace(r.Header.Get(kernel.StateRouteHeader))
 	if slug == "" {
 		return nil, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil)
 	}
-	route, ok := x.request.release.Snapshot().FindRoute(slug)
+	route, ok := x.Snapshot().FindRoute(slug)
 	if !ok {
 		return nil, fault.ModelNotFound(slug)
 	}
 	return &route, nil
 }
 
-func (s *Server) admitUpload(x *Call, authority keyauthority.Authority, route *routing.Route) *fault.Error {
+func (s surface) admitUpload(x *kernel.Call, authority keyauthority.Authority, route *routing.Route) *fault.Error {
 	if x.Strict() && !authority.Policy.AllowProviderState {
-		return providerStateForbidden()
+		return kernel.ProviderStateForbidden()
 	}
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.kernel.Now()) {
 		return fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	return x.GuardrailSurfaceGate(route)
@@ -127,33 +128,33 @@ func readUploadFields(form *staging.Form) (uploadFields, *fault.Error) {
 	return fields, nil
 }
 
-func (s *Server) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *Call, authority keyauthority.Authority, route *routing.Route, form *staging.Form, fields uploadFields) {
+func (s surface) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *kernel.Call, authority keyauthority.Authority, route *routing.Route, form *staging.Form, fields uploadFields) {
 	if !slices.Contains(route.Operations, "batch") {
-		s.Refuse(x, w, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil))
+		s.kernel.Refuse(x, w, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil))
 		return
 	}
-	if x.Strict() && !s.Deps.Resources.Encrypted() {
-		s.Refuse(x, w, providerStateForbidden())
+	if x.Strict() && !s.kernel.Deps.Resources.Encrypted() {
+		s.kernel.Refuse(x, w, kernel.ProviderStateForbidden())
 		return
 	}
 	source, e := readStrictUploadSource(x, r, form, fields)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	form.Disarm()
 	defer s.unstage(fields.file, "file upload cleanup failed")
 	p, e := s.batchUploadPin(r.Context(), x, route)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	adapter, _ := p.Provider.Connector().FilesBatchesAdapter()
-	u := batchFileUpload{server: s, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
+	u := batchFileUpload{server: s.kernel, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
 	sending, e := u.translated(r.Context())
 	if e != nil {
-		s.ReleaseHold(r.Context(), p.Hold)
-		s.Refuse(x, w, e)
+		s.kernel.ReleaseHold(r.Context(), p.Hold)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	if sending.file != fields.file {
@@ -161,38 +162,38 @@ func (s *Server) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *Call
 	}
 	contract, e := u.contract()
 	if e != nil {
-		s.ReleaseHold(r.Context(), p.Hold)
-		s.Refuse(x, w, e)
+		s.kernel.ReleaseHold(r.Context(), p.Hold)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
-	ctx, cancel := s.StateDeadline(r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), route)
 	defer cancel()
-	defer s.ResourceSettle(ctx, x, p)
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.Refuse(x, w, e)
+	defer s.kernel.ResourceSettle(ctx, x, p)
+	if e := s.kernel.ReserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	sent, e := u.send(ctx, sending)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	kept, e := u.keep(ctx, sending.manifest, contract, sent)
 	if e != nil {
-		s.Refuse(x, w, e)
+		s.kernel.Refuse(x, w, e)
 		return
 	}
 	out, err := u.object(r.Context(), sent.body, kept)
 	if err != nil {
-		s.Refuse(x, w, malformedFileObject())
+		s.kernel.Refuse(x, w, malformedFileObject())
 		return
 	}
-	s.WriteStateJSON(w, x, out, sent.exchange)
+	s.kernel.WriteStateJSON(w, x, out, sent.exchange)
 }
 
-func (s *Server) unstage(part *staging.Part, warning string) {
-	if err := s.Deps.Staging.Remove(part.Handle); err != nil {
-		s.Log.Warn(warning, "error", err)
+func (s surface) unstage(part *staging.Part, warning string) {
+	if err := s.kernel.Deps.Staging.Remove(part.Handle); err != nil {
+		s.kernel.Log.Warn(warning, "error", err)
 	}
 }
 
@@ -201,12 +202,12 @@ func malformedFileObject() *fault.Error {
 }
 
 type strictSourceField struct {
-	Name  string        `json:"name"`
-	Value string        `json:"value,omitempty"`
-	Asset *durableAsset `json:"asset,omitempty"`
+	Name  string               `json:"name"`
+	Value string               `json:"value,omitempty"`
+	Asset *kernel.DurableAsset `json:"asset,omitempty"`
 }
 
-func readStrictUploadSource(x *Call, r *http.Request, form *staging.Form, fields uploadFields) (strictUploadSource, *fault.Error) {
+func readStrictUploadSource(x *kernel.Call, r *http.Request, form *staging.Form, fields uploadFields) (strictUploadSource, *fault.Error) {
 	if !x.Strict() {
 		return strictUploadSource{}, nil
 	}
@@ -222,21 +223,21 @@ func readStrictUploadSource(x *Call, r *http.Request, form *staging.Form, fields
 			ordered[i] = strictSourceField{Name: part.Name, Value: string(text)}
 			continue
 		}
-		ordered[i] = strictSourceField{Name: part.Name, Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size}}
+		ordered[i] = strictSourceField{Name: part.Name, Asset: &kernel.DurableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size}}
 	}
-	return strictUploadSource{document: MustJSON(ordered), fileFirst: parts[0].Name == "file"}, nil
+	return strictUploadSource{document: kernel.MustJSON(ordered), fileFirst: parts[0].Name == "file"}, nil
 }
 
-func (s *Server) batchUploadPin(ctx context.Context, x *Call, route *routing.Route) (*Pin, *fault.Error) {
-	p, e := s.selectPin(ctx, x, route, "batch", "unary")
+func (s surface) batchUploadPin(ctx context.Context, x *kernel.Call, route *routing.Route) (*kernel.Pin, *fault.Error) {
+	p, e := s.kernel.SelectPin(ctx, x, route, "batch", "unary")
 	if e != nil {
-		return nil, cmp.Or(fireworksBatchRefusal(x, route), e)
+		return nil, cmp.Or(kernel.FireworksBatchRefusal(x, route), e)
 	}
 	if !x.Strict() {
 		return p, nil
 	}
-	if refusal := strictBatchTargetRefusal(p); refusal != nil {
-		s.ReleaseHold(ctx, p.Hold)
+	if refusal := kernel.StrictBatchTargetRefusal(p); refusal != nil {
+		s.kernel.ReleaseHold(ctx, p.Hold)
 		return nil, refusal
 	}
 	return p, nil
@@ -250,7 +251,7 @@ func (u batchFileUpload) translated(ctx context.Context) (providerUpload, *fault
 	if u.adapter != connectors.BatchOpenAI && len(extra) > 0 {
 		return providerUpload{}, fault.InvalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", new("purpose"))
 	}
-	translated, manifest, e := u.server.translateManagedBatchInput(ctx, u.pin, u.route, file, u.adapter)
+	translated, manifest, e := u.server.TranslateManagedBatchInput(ctx, u.pin, u.route, file, u.adapter)
 	if e != nil {
 		return providerUpload{}, e
 	}
@@ -268,7 +269,7 @@ func (u batchFileUpload) contract() (strictBatchContract, *fault.Error) {
 	if !ok {
 		return strictBatchContract{}, fault.InvalidRequest("target_capability", "The selected target has no strict batch contract.", nil)
 	}
-	endpoint, items, err := u.server.validateBatchInput(u.fields.file, template.Model(), &u.pin.Provider, u.route)
+	endpoint, items, err := u.server.ValidateBatchInput(u.fields.file, template.Model(), &u.pin.Provider, u.route)
 	if err != nil {
 		return strictBatchContract{}, fault.InvalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", new("file"))
 	}
@@ -278,9 +279,9 @@ func (u batchFileUpload) contract() (strictBatchContract, *fault.Error) {
 func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (providerFile, *fault.Error) {
 	s, p := u.server, u.pin
 	if u.adapter == connectors.BatchGeminiManaged {
-		body, upstreamID, exchange, failure := s.uploadGeminiManagedFile(ctx, u.x, p, sending.file)
+		body, upstreamID, exchange, failure := s.UploadGeminiManagedFile(ctx, u.x, p, sending.file)
 		if failure != nil {
-			return providerFile{}, UpstreamError(failure)
+			return providerFile{}, kernel.UpstreamError(failure)
 		}
 		return providerFile{body: body, upstreamID: upstreamID, exchange: exchange}, nil
 	}
@@ -288,13 +289,13 @@ func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (prov
 	if u.adapter == connectors.BatchTogether {
 		filePath = "files/upload"
 	}
-	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, filePath, nil)
+	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, filePath, nil)
 	if err != nil {
 		return providerFile{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
 	resp, failure := s.UploadMultipart(ctx, u.x, p, endpoint, sending.purpose, sending.extra, sending.file, u.source.fileFirst)
 	if failure != nil {
-		return providerFile{}, UpstreamError(failure)
+		return providerFile{}, kernel.UpstreamError(failure)
 	}
 	defer resp.Body.Close()
 	body, err := resp.ReadBody(s.Config.MaxResponseBytes)
@@ -302,28 +303,28 @@ func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (prov
 		return providerFile{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
 	if u.x.Strict() {
-		_, upstreamID, err := strictResult(body, "")
+		_, upstreamID, err := kernel.StrictResult(body, "")
 		if err != nil {
 			return providerFile{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
 		}
 		return providerFile{body: body, upstreamID: upstreamID, exchange: resp.Exchange}, nil
 	}
-	upstreamID, valid := NativeResourceID(body, s.Config.MaxResponseBytes)
+	upstreamID, valid := kernel.NativeResourceID(body, s.Config.MaxResponseBytes)
 	if !valid {
 		return providerFile{}, malformedFileObject()
 	}
 	return providerFile{body: body, upstreamID: upstreamID, exchange: resp.Exchange}, nil
 }
 
-func (u batchFileUpload) keep(ctx context.Context, manifest BatchManifest, contract strictBatchContract, sent providerFile) (*resources.Resource, *fault.Error) {
+func (u batchFileUpload) keep(ctx context.Context, manifest kernel.BatchManifest, contract strictBatchContract, sent providerFile) (*resources.Resource, *fault.Error) {
 	s, p := u.server, u.pin
-	provided, state, expires := fileMetadata(sent.body, p.Model)
+	provided, state, expires := kernel.FileMetadata(sent.body, p.Model)
 	metadata, err := uploadedFileMetadata(provided, sent.body, u.adapter, manifest)
 	if err != nil {
 		return nil, malformedFileObject()
 	}
-	sent.exchange.Complete(ClassSuccess)
-	commitCtx, stopCommit := ResourceCommitContext(ctx)
+	sent.exchange.Complete(kernel.ClassSuccess)
+	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
 	if !u.x.Strict() {
 		kept, err := s.Deps.Resources.Put(commitCtx, u.resource(resources.KindFile, sent.upstreamID, state, metadata, expires, nil))
@@ -333,12 +334,12 @@ func (u batchFileUpload) keep(ctx context.Context, manifest BatchManifest, contr
 		return kept, nil
 	}
 	file, version := u.fields.file, resources.DurableContractVersion
-	payload, err := json.Marshal(durableDocument{Version: version, Source: u.source.document, Result: sent.body, Binding: p.Model, Serving: contract.serving,
-		Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: contract.endpoint, ItemCount: contract.items}})
+	payload, err := json.Marshal(kernel.DurableDocument{Version: version, Source: u.source.document, Result: sent.body, Binding: p.Model, Serving: contract.serving,
+		Asset: &kernel.DurableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: contract.endpoint, ItemCount: contract.items}})
 	if err != nil {
-		return nil, durableError(err)
+		return nil, kernel.DurableError(err)
 	}
-	strict := u.resource(resources.KindStrictFile, sent.upstreamID, state, durableMetadata(p.Model), s.durableExpiry(expires), &version)
+	strict := u.resource(resources.KindStrictFile, sent.upstreamID, state, kernel.DurableMetadata(p.Model), s.DurableExpiry(expires), &version)
 	kept, err := s.Deps.Resources.PutDurableContract(commitCtx, strict, payload)
 	if err != nil {
 		return nil, unstoredFileMapping()
@@ -372,10 +373,10 @@ func unstoredFileMapping() *fault.Error {
 
 func (u batchFileUpload) object(ctx context.Context, body []byte, kept *resources.Resource) ([]byte, error) {
 	if u.x.Strict() {
-		return durableProjection(body, kept.ID, nil)
+		return kernel.DurableProjection(body, kept.ID, nil)
 	}
 	if u.adapter.Managed() {
-		return u.server.fileObject(ctx, kept)
+		return u.server.FileObject(ctx, kept)
 	}
-	return RewriteID(body, "id", kept.ID)
+	return kernel.RewriteID(body, "id", kept.ID)
 }

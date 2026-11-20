@@ -321,7 +321,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}}
 			s := &Server{Now: func() time.Time { return now }, fleet: &health.Fleet{}, Deps: Dependencies{Runtime: rt}}
-			s.bindAuthority(x, authority)
+			s.BindAuthority(x, authority)
 			dispatch := func() {
 				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
 				fact.Class, fact.UsageObserved, fact.UsageComplete = ClassSuccess, true, true
@@ -508,7 +508,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: refreshed}}
 			s := &Server{Now: func() time.Time { return now }, fleet: &health.Fleet{}, Deps: Dependencies{Runtime: rt}}
-			s.bindAuthority(x, keyauthority.Authority{})
+			s.BindAuthority(x, keyauthority.Authority{})
 			provider := x.Snapshot().Provider(x.attempts[0].ProviderID)
 			fact := s.newFact(x, x.attempts[0], provider.Slots[0], 1)
 			assertAccountingCardPin(t, fact, fresh, "")

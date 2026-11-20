@@ -118,9 +118,9 @@ func (x *Call) spendCaps(owners []string, attempt routing.Attempt) {
 	}
 }
 
-// settleCaps replaces each cap reservation with what the attempts counted
+// SettleCaps replaces each cap reservation with what the attempts counted
 // against its owner cost, or gives it back when none of them was dispatched.
-func (s *Server) settleCaps(ctx context.Context, x *Call) {
+func (s *Server) SettleCaps(ctx context.Context, x *Call) {
 	for _, hold := range x.caps {
 		if hold.dispatched && hold.lease.HasCostReservation() {
 			actual := x.costOf(hold.owner).String()

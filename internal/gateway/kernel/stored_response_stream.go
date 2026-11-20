@@ -24,7 +24,7 @@ type storedStream struct {
 	server     *Server
 	x          *Call
 	resource   *resources.Resource
-	projection responseProjection
+	projection ResponseProjection
 	exchange   *PinnedExchange
 	limit      int
 }
@@ -37,12 +37,12 @@ func (seen storedStreamStatus) after(status string) storedStreamStatus {
 	return storedStreamStatus{incomplete: seen.incomplete || status == "incomplete", failed: seen.failed || status == "failed"}
 }
 
-func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *Call, res *resources.Resource, p *Pin, query url.Values) *fault.Error {
+func (s *Server) StreamStoredResponse(ctx context.Context, w http.ResponseWriter, x *Call, res *resources.Resource, p *Pin, query url.Values) *fault.Error {
 	projection, refusal := storedStreamProjection(x, res, p)
 	if refusal != nil {
 		return refusal
 	}
-	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, responsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -84,19 +84,19 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	return stream.end(ctx, streamErr, committed, seen)
 }
 
-func storedStreamProjection(x *Call, res *resources.Resource, p *Pin) (responseProjection, *fault.Error) {
-	projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
+func storedStreamProjection(x *Call, res *resources.Resource, p *Pin) (ResponseProjection, *fault.Error) {
+	projection := ResponseProjection{UpstreamID: res.UpstreamID, LocalID: res.ID, Route: res.RouteSlug}
 	if res.Kind != resources.KindStrictResponse {
 		return projection, nil
 	}
 	if !p.Provider.Supports(p.Model, "generation", "openai", "streaming") || !p.Provider.Connector().Supports("generation", "openai", "streaming") {
-		return responseProjection{}, fault.InvalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
+		return ResponseProjection{}, fault.InvalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
 	}
-	previousUpstream, previousLocal, err := responseParentProjection(res, x.generation.responseContract)
+	previousUpstream, previousLocal, err := ResponseParentProjection(res, x.generation.responseContract)
 	if err != nil {
-		return responseProjection{}, fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
+		return ResponseProjection{}, fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 	}
-	return responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug, previousUpstream: previousUpstream, previousLocal: previousLocal}, nil
+	return ResponseProjection{UpstreamID: res.UpstreamID, LocalID: res.ID, Route: res.RouteSlug, PreviousUpstream: previousUpstream, PreviousLocal: previousLocal}, nil
 }
 
 func (s *Server) storedEventLimit() int {
@@ -125,7 +125,7 @@ func (t storedStream) observe(ctx context.Context, event oif.Event, seen storedS
 	t.settle(now, observation.Status)
 	commitCtx, stopCommit := ResourceCommitContext(ctx)
 	defer stopCommit()
-	if t.server.applyResponseObservation(commitCtx, t.resource.ID, observation) != nil {
+	if t.server.ApplyResponseObservation(commitCtx, t.resource.ID, observation) != nil {
 		return now, &responseLocalRefusal{cause: errors.New("retained response observation could not be committed")}
 	}
 	return now, nil
@@ -133,7 +133,7 @@ func (t storedStream) observe(ctx context.Context, event oif.Event, seen storedS
 
 func (t storedStream) identified(event oif.Event) error {
 	if t.strict() {
-		_, err := validateNativeResponse(event.Source(), "/response", t.resource.UpstreamID)
+		_, err := ValidateNativeResponse(event.Source(), "/response", t.resource.UpstreamID)
 		return err
 	}
 	id, present := event.Source().Lookup("/response/id")

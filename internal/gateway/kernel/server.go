@@ -184,8 +184,8 @@ type Server struct {
 	Now             func() time.Time
 	counted         func(estimate.Family)
 	webrtcMu        sync.Mutex
-	webrtcSessions  map[string]*webrtcSession
 	webrtcExposures map[string]time.Time
+	retrievalQuery  http.HandlerFunc
 }
 
 const UpstreamHeaderTimeout = 5 * time.Minute
@@ -245,7 +245,8 @@ func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 // name after the colon in /models/{model}:{action}.
 type GeminiActions map[string]http.HandlerFunc
 
-func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
+func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions, retrievalQuery http.HandlerFunc) {
+	s.retrievalQuery = retrievalQuery
 	if s.code != nil {
 		s.code.Register(mux)
 	}
@@ -259,10 +260,7 @@ func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
 		Workflow: s.workflowCapability,
 	})
 	s.registerNative(mux, catalog, actions)
-	s.registerGeminiLifecycle(mux)
-	s.registerMedia(mux)
-	s.registerState(mux)
-	mux.HandleFunc("POST /v1/realtime/calls", s.realtimeCallsCreate)
+	s.registerRetained(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(wire.Chat))
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", catalog.List)
@@ -338,7 +336,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
-func (s *Server) browserOriginAllowed(r *http.Request) bool {
+func (s *Server) BrowserOriginAllowed(r *http.Request) bool {
 	values := r.Header.Values("Origin")
 	if len(values) == 0 {
 		return true
@@ -572,7 +570,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 		param := "olp_prompt"
 		return fault.InvalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
-	if e := s.checkRouteFidelity(ctx, x.Route); e != nil {
+	if e := s.CheckRouteFidelity(ctx, x.Route); e != nil {
 		return e
 	}
 	if x.Strict() {
@@ -655,10 +653,10 @@ func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
 	fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
 }
 
-// bindAuthority attaches the authenticated caller's authority to x and pins
+// BindAuthority attaches the authenticated caller's authority to x and pins
 // its consumer rate card when the routing inputs are fresh. Stale inputs leave
 // the request unpinned so accounting resolves the card at fact time.
-func (s *Server) bindAuthority(x *Call, authority keyauthority.Authority) {
+func (s *Server) BindAuthority(x *Call, authority keyauthority.Authority) {
 	x.authority = authority
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.endUserDigest = authority.EndUserDigest

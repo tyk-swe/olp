@@ -46,7 +46,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}()
 	reply := retainedReply{w: w, x: x, action: e.Action, surface: e.Surface, end: end}
 	if !authority.Policy.AllowProviderState {
-		reply.fail(providerStateForbidden())
+		reply.fail(ProviderStateForbidden())
 		return
 	}
 	if err := agentQuery(r.URL.Query(), e.Action == "list"); err != nil {
@@ -197,7 +197,7 @@ func (q agentRequest) baseAgent(route *routing.Route) (*resources.Resource, *fau
 	}
 	id, _ := value.Text()
 	base, err := q.server.Deps.Resources.Get(q.r.Context(), "agent_resource", q.x.keyID, id)
-	if err != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || retainedUnsettled(base.State) || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
+	if err != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || RetainedUnsettled(base.State) || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
 		return nil, retainedReferenceUnavailable()
 	}
 	return base, nil
@@ -206,7 +206,7 @@ func (q agentRequest) baseAgent(route *routing.Route) (*resources.Resource, *fau
 func (q agentRequest) bindBase(pin *Pin, route *routing.Route) ([]byte, *fault.Error) {
 	bound, err := retainedapi.Rewrite(q.source, map[string]string{"base_agent": "agent_resource"}, func(kind, id string) (string, error) {
 		base, getErr := q.server.Deps.Resources.Get(q.r.Context(), kind, q.x.keyID, id)
-		if getErr != nil || !retainedAffinity(base, pin, route) || retainedUnsettled(base.State) {
+		if getErr != nil || !retainedAffinity(base, pin, route) || RetainedUnsettled(base.State) {
 			return "", resources.ErrNotFound
 		}
 		return base.UpstreamID, nil
@@ -222,7 +222,7 @@ func (q agentRequest) admit(ctx context.Context, pin *Pin, route *routing.Route,
 	if err := s.retainedControlPolicy(q.x, pin, route); err != nil {
 		return "", err
 	}
-	if err := s.reserveState(ctx, q.x, q.authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+	if err := s.ReserveState(ctx, q.x, q.authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
 		return "", err
 	}
 	if err := s.gateRetainedSlot(ctx, q.x, pin, route); err != nil {
@@ -303,7 +303,7 @@ func (q agentRequest) resolve(resource *resources.Resource) (*Pin, *routing.Rout
 			return pin, nil, err
 		}
 	}
-	if retainedUnsettled(resource.State) {
+	if RetainedUnsettled(resource.State) {
 		return pin, nil, fault.ServerError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted.")
 	}
 	return pin, route, nil
@@ -317,7 +317,7 @@ func (q agentRequest) exchange(ctx context.Context, pin *Pin, endpoint string, b
 		return
 	}
 	defer native.Body.Close()
-	response, readErr := native.ReadBody(s.retainedResponseLimit())
+	response, readErr := native.ReadBody(s.RetainedResponseLimit())
 	if readErr != nil {
 		q.reply.fail(fault.ServerError(502, "provider_protocol_error", "The provider response exceeded the supported resource contract."))
 		return
@@ -342,7 +342,7 @@ func (q agentRequest) exchange(ctx context.Context, pin *Pin, endpoint string, b
 		q.reply.fail(retainedProjectionError(native.Exchange, projectErr))
 		return
 	}
-	native.Exchange.completeRetainedControl()
+	native.Exchange.CompleteRetainedControl()
 	end.status = native.StatusCode
 	s.WriteStateJSONStatus(q.reply.w, q.x, projected, end.status, native.Exchange)
 }
@@ -352,7 +352,7 @@ func (q agentRequest) refused(ctx context.Context, resource *resources.Resource,
 		return err
 	}
 	if q.endpoint.Action == "create" || failure.Status != http.StatusNotFound {
-		return retainedPublicError(UpstreamError(failure), failure.Status)
+		return RetainedPublicError(UpstreamError(failure), failure.Status)
 	}
 	commitCtx, cancel := ResourceCommitContext(ctx)
 	defer cancel()
@@ -364,7 +364,7 @@ func (q agentRequest) refused(ctx context.Context, resource *resources.Resource,
 
 func (q agentRequest) forget(ctx context.Context, native *PinnedResponse, resource *resources.Resource) {
 	s, end := q.server, q.reply.end
-	native.Exchange.completeRetainedControl()
+	native.Exchange.CompleteRetainedControl()
 	if err := s.Deps.Resources.Tombstone(ctx, resource.ID); err != nil {
 		q.reply.fail(fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 		return

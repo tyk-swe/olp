@@ -42,7 +42,7 @@ type BatchIntent struct {
 	Source     oif.Document
 	Canonical  []byte
 	Effective  []byte
-	serving    oif.ServingIdentity
+	Serving    oif.ServingIdentity
 }
 
 type batchSubmission struct {
@@ -54,18 +54,18 @@ type AcceptedBatch struct {
 	UpstreamID string
 	State      string
 	Metadata   json.RawMessage
-	expected   *int64
-	contract   []byte
+	Expected   *int64
+	Contract   []byte
 }
 
-type batchWindow struct {
-	label  string
-	length time.Duration
+type BatchWindow struct {
+	Label  string
+	Length time.Duration
 }
 
 var errUnsupportedBatchEndpoint = fault.InvalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", new("endpoint"))
 
-func batchLineOperation(source oif.Document) (string, wire.LineOperation, *fault.Error) {
+func BatchLineOperation(source oif.Document) (string, wire.LineOperation, *fault.Error) {
 	value, present := source.Root().Lookup("endpoint")
 	endpoint, valid := value.Text()
 	if !present || !valid {
@@ -78,24 +78,24 @@ func batchLineOperation(source oif.Document) (string, wire.LineOperation, *fault
 	return endpoint, operation, nil
 }
 
-func batchCompletionWindow(source oif.Document, vendor string) (batchWindow, *fault.Error) {
+func BatchCompletionWindow(source oif.Document, vendor string) (BatchWindow, *fault.Error) {
 	value, present := source.Root().Lookup("completion_window")
 	if !present {
-		return batchWindow{label: "24h", length: DefaultBatchCompletionWindow}, nil
+		return BatchWindow{Label: "24h", Length: DefaultBatchCompletionWindow}, nil
 	}
 	raw, valid := value.Text()
 	if !valid {
-		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must be a valid duration.", new("completion_window"))
+		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must be a valid duration.", new("completion_window"))
 	}
 	hours, ok := windowHours(raw)
 	if !ok {
-		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
+		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
 	}
 	minimum, maximum := completionWindowRange(vendor)
 	if hours < minimum || hours > maximum {
-		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
+		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
 	}
-	return batchWindow{label: raw, length: time.Duration(hours) * time.Hour}, nil
+	return BatchWindow{Label: raw, Length: time.Duration(hours) * time.Hour}, nil
 }
 
 func windowHours(raw string) (int, bool) {
@@ -169,13 +169,13 @@ func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p 
 	if intent.Kind != resources.KindStrictBatch {
 		return submission, nil
 	}
-	payload, err := json.Marshal(durableDocument{
+	payload, err := json.Marshal(DurableDocument{
 		Version: *resource.ContractVersion, Source: intent.Source.Bytes(), Effective: intent.Effective,
-		Binding: p.Model, Serving: intent.serving,
+		Binding: p.Model, Serving: intent.Serving,
 	})
 	if err != nil {
 		s.abandonBatch(ctx, resource.UUID)
-		return batchSubmission{}, durableError(err)
+		return batchSubmission{}, DurableError(err)
 	}
 	if err = s.Deps.Resources.StageDurableContract(ctx, resource.UUID, payload, resource.ExpiresAt); err != nil {
 		s.abandonBatch(ctx, resource.UUID)
@@ -199,7 +199,7 @@ func (s *Server) batchResource(x *Call, authorityID string, p *Pin, intent Batch
 		return resource
 	}
 	version := resources.DurableContractVersion
-	resource.ContractVersion, resource.ExpiresAt, resource.Metadata = &version, s.durableExpiry(nil), durableMetadata(p.Model)
+	resource.ContractVersion, resource.ExpiresAt, resource.Metadata = &version, s.DurableExpiry(nil), DurableMetadata(p.Model)
 	return resource
 }
 
@@ -270,13 +270,13 @@ func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmis
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	stored, err := s.putAcceptedBatch(ctx, tx, &resource, accepted.contract)
+	stored, err := s.putAcceptedBatch(ctx, tx, &resource, accepted.Contract)
 	if err != nil {
 		return nil, err
 	}
 	expected := submission.expected
 	if expected == nil {
-		expected = accepted.expected
+		expected = accepted.Expected
 	}
 	if err = s.Deps.Batches.ActivateTx(ctx, tx, resource.UUID, accepted.UpstreamID, expected); err != nil {
 		return nil, err
@@ -408,7 +408,7 @@ func withPolicyFlag(policy json.RawMessage, name string, value bool) (json.RawMe
 	return json.Marshal(fields)
 }
 
-func batchExpectedResults(body []byte) *int64 {
+func BatchExpectedResults(body []byte) *int64 {
 	var response struct {
 		RequestCounts *struct {
 			Total *int64 `json:"total"`
@@ -423,10 +423,10 @@ func batchExpectedResults(body []byte) *int64 {
 }
 
 func (s *Server) BatchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *fault.Error {
-	return s.markBatchUnknown(ctx, resourceID, fault.ServerError(http.StatusBadGateway, "submission_unknown", message))
+	return s.MarkBatchUnknown(ctx, resourceID, fault.ServerError(http.StatusBadGateway, "submission_unknown", message))
 }
 
-func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, failure *fault.Error) *fault.Error {
+func (s *Server) MarkBatchUnknown(ctx context.Context, resourceID uuid.UUID, failure *fault.Error) *fault.Error {
 	commitCtx, stop := ResourceCommitContext(ctx)
 	defer stop()
 	if err := s.Deps.Batches.MarkUnknown(commitCtx, resourceID, batches.ErrorSubmissionUnknown, s.Now()); err != nil {

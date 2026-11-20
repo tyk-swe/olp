@@ -53,7 +53,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Cal
 		return refusal.Status
 	}
 	defer native.Body.Close()
-	response, readErr := native.ReadBody(s.retainedResponseLimit())
+	response, readErr := native.ReadBody(s.RetainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return 502
@@ -101,7 +101,7 @@ func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) 
 			return fault.NotFoundError("not_found", "No resource with this identifier exists for this key.")
 		}
 	}
-	return retainedPublicError(UpstreamError(failure), failure.Status)
+	return RetainedPublicError(UpstreamError(failure), failure.Status)
 }
 
 func recordRetainedRejection(ctx context.Context, fence *resources.Lifecycle, failure *AttemptFailure) *fault.Error {

@@ -43,6 +43,10 @@ type inferenceCaller struct {
 	body      []byte
 }
 
+func (s *Server) InferenceHandler(family wire.Format) http.HandlerFunc {
+	return s.inference(family)
+}
+
 func (s *Server) inference(family wire.Format) http.HandlerFunc {
 	return s.inferenceOperation(family, "")
 }
@@ -165,7 +169,7 @@ func (q inferenceRequest) read() (inferenceCaller, *fault.Error) {
 	if e != nil {
 		return inferenceCaller{}, e
 	}
-	s.bindAuthority(x, authority)
+	s.BindAuthority(x, authority)
 	x.mirrors = true
 	if x.attribution, e = ingress.ParseAttribution(q.r, authority); e != nil {
 		return inferenceCaller{}, e
@@ -222,7 +226,7 @@ func (q inferenceRequest) decode(body []byte) (*wire.Request, *fault.Error) {
 }
 
 func (q inferenceRequest) replay() {
-	q.end.status, q.end.out = http.StatusOK, continuationDeliveryOutcome(q.server.replayContinuation(q.w, q.x))
+	q.end.status, q.end.out = http.StatusOK, ContinuationDeliveryOutcome(q.server.replayContinuation(q.w, q.x))
 	// Replaying a committed response never starts shadow inference.
 	q.x.mirrors = false
 }

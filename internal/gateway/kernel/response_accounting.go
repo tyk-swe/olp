@@ -159,10 +159,10 @@ func (s *Server) reconcileResponse(ctx context.Context, localID string, body []b
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed response usage.")
 	}
-	return s.applyResponseObservation(ctx, localID, observation)
+	return s.ApplyResponseObservation(ctx, localID, observation)
 }
 
-func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *fault.Error {
+func (s *Server) ApplyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *fault.Error {
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observation.Usage != nil {
 		evidence = events.ObservedUsage(observation.Usage, observation.Complete, "generation")
