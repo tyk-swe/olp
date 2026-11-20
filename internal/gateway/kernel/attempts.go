@@ -107,8 +107,6 @@ type routeRun[Result any] struct {
 	deadline time.Time
 }
 
-// routeEvidence is what failed attempts leave behind for the answer a route
-// gives when none of them served.
 type routeEvidence struct {
 	last        *AttemptFailure
 	unmeterable bool
