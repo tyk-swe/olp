@@ -63,8 +63,12 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	templates, err := json.Marshal(map[string]*usage.Event{"fixture-model": fixture.event(fixture.attempt(1))})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.retained_settlements
-		(resource_id,operation,templates,token_consuming) VALUES($1,'fine_tuning','{}',false)`, resource.UUID); err != nil {
+		(resource_id,operation,templates,token_consuming) VALUES($1,'fine_tuning',$2,false)`, resource.UUID, templates); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -89,7 +93,7 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 			if resourceFailures != 1 || lastError != "credential_or_pin_unavailable" || failures != 1 {
 				t.Fatal("failed retained settlement was reported as a successful worker pass")
 			}
-			testClosedRetainedReconciliation(t, fixture, resource)
+			testRetainedManagement(t, fixture, resource)
 			return
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -100,12 +104,9 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 	t.Fatal("retained worker did not checkpoint its first pass")
 }
 
-func testClosedRetainedReconciliation(t *testing.T, fixture usageFixture, resource *resources.Resource) {
+func testRetainedManagement(t *testing.T, fixture usageFixture, resource *resources.Resource) {
 	t.Helper()
 	ctx, pool := t.Context(), fixture.pool
-	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed' WHERE resource_id=$1`, resource.UUID); err != nil {
-		t.Fatal(err)
-	}
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
 	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
@@ -121,26 +122,70 @@ func testClosedRetainedReconciliation(t *testing.T, fixture usageFixture, resour
 	management.Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/v1/provider-resources/"+resource.ID+"/reconcile", strings.NewReader(`{"upstream_id":"test-hint"}`))
-	if err != nil {
+	post := func(action, body string) (int, []byte) {
+		t.Helper()
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/v1/provider-resources/"+resource.ID+"/"+action, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", origin)
+		r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+		r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		reply, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, reply
+	}
+	testRetainedUsageEvidence(t, fixture, resource, post)
+	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed' WHERE resource_id=$1`, resource.UUID); err != nil {
 		t.Fatal(err)
 	}
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Origin", origin)
-	r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
-	r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-	response, err := server.Client().Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	status, body := post("reconcile", `{"upstream_id":"test-hint"}`)
 	var problem struct{ Type string }
-	if err := json.Unmarshal(body, &problem); err != nil || response.StatusCode != http.StatusConflict || !strings.HasSuffix(problem.Type, "/settlement_closed") {
-		t.Fatalf("reconcile closed settlement = %d %s, want 409 settlement_closed", response.StatusCode, body)
+	if err := json.Unmarshal(body, &problem); err != nil || status != http.StatusConflict || !strings.HasSuffix(problem.Type, "/settlement_closed") {
+		t.Fatalf("reconcile closed settlement = %d %s, want 409 settlement_closed", status, body)
+	}
+}
+
+func testRetainedUsageEvidence(t *testing.T, fixture usageFixture, resource *resources.Resource, post func(action, body string) (int, []byte)) {
+	t.Helper()
+	ctx, pool := t.Context(), fixture.pool
+	audited := func() int {
+		var rows int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE action='provider_resource.usage_evidence' AND resource_id=$1`, resource.UUID.String()).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	evidence := func(model string) string {
+		return fmt.Sprintf(`{"idempotency_key":"evidence-1","evidence_digest":%q,"start":%q,"end":%q,"model":%q,"training_tokens":10}`,
+			strings.Repeat("ab", 32), start.Format(time.RFC3339), start.Add(time.Minute).Format(time.RFC3339), model)
+	}
+	if status, body := post("usage-evidence", evidence("unpinned-model")); status != http.StatusUnprocessableEntity || audited() != 0 {
+		t.Fatalf("evidence for an unpinned model = %d %s with %d audit rows, want 422 and none", status, body, audited())
+	}
+	status, body := post("usage-evidence", evidence("fixture-model"))
+	var accepted struct {
+		ID         string `json:"id"`
+		Provenance string `json:"provenance"`
+	}
+	if err := json.Unmarshal(body, &accepted); err != nil || status != http.StatusOK || accepted.ID != resource.ID || accepted.Provenance != "operator_verified" {
+		t.Fatalf("usage evidence = %d %s, want 200 for %s", status, body, resource.ID)
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.retained_usage_evidence WHERE resource_id=$1 AND idempotency_key='evidence-1'`, resource.UUID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 1 || audited() != 1 {
+		t.Fatalf("accepted evidence stored %d rows and %d audit rows, want one of each", stored, audited())
 	}
 }
 

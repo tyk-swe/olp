@@ -1,6 +1,7 @@
 package registration
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -368,56 +369,41 @@ func (s *Server) write(r *http.Request, _ authz.Principal, id string, retire boo
 		return httpkit.Reply{}, err
 	}
 	defer clear(material)
-	tx, principal, err := s.access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := s.loadForWrite(r.Context(), tx, principal, in, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	claim, replay, err := s.access.Replay(r, tx, principal, in)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if replay != nil {
-		return *replay, tx.Commit(r.Context())
-	}
-	if current != nil {
-		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, err
+	return access.Mutate(s.access, r, in, func(tx pgx.Tx, principal authz.Principal) (*Definition, error) {
+		return s.loadForWrite(r.Context(), tx, principal, in, id)
+	}, func(tx pgx.Tx, principal authz.Principal, current *Definition) (httpkit.Reply, access.Event, error) {
+		if current != nil {
+			if err := httpkit.Match(r, current.ETag); err != nil {
+				return httpkit.Reply{}, access.Event{}, err
+			}
+			if current.ETag != previous.ETag {
+				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
+			}
 		}
-		if current.ETag != previous.ETag {
-			return httpkit.Reply{}, httpkit.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
+		change, err := s.saveChange(r.Context(), tx, principal.UserID(), in, current, catalog, material, retire, limitsOnly)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
+		reply, err := s.publishChange(r.Context(), tx, principal, change, current, replacedBy(in, retire), retire)
+		return reply, access.Event{Action: change.action, Resource: "mcp_server", ID: change.id}, err
+	})
+}
+
+func (s *Server) publishChange(ctx context.Context, tx pgx.Tx, principal authz.Principal, change registrationChange, current *Definition, replaced Replaced, retire bool) (httpkit.Reply, error) {
+	if err := DeleteReplacedCredentials(ctx, tx, current, replaced); err != nil {
+		return httpkit.Reply{}, err
 	}
-	change, err := s.saveChange(r.Context(), tx, principal.UserID(), in, current, catalog, material, retire, limitsOnly)
+	reply, err := changeReply(ctx, tx, change, retire, current == nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := DeleteReplacedCredentials(r.Context(), tx, current, replacedBy(in, retire)); err != nil {
+	if _, err := access.AdvanceAuthority(ctx, tx); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := access.Audit(r.Context(), tx, r, principal.Actor(), change.action, "mcp_server", change.id, "success"); err != nil {
-		return httpkit.Reply{}, err
+	if s.access.RuntimePublisher == nil {
+		return reply, nil
 	}
-	reply, err := changeReply(r.Context(), tx, change, retire, current == nil)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err := access.AdvanceAuthority(r.Context(), tx); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if s.access.RuntimePublisher != nil {
-		if err := s.access.RuntimePublisher(r.Context(), tx, principal.UserID()); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return reply, s.access.RuntimePublisher(ctx, tx, principal.UserID())
 }
 
 func definitionStdio(in Input, previous *Definition) *routing.MCPStdioBinding {

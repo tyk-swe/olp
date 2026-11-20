@@ -147,8 +147,6 @@
     "internal/media/jobs/api.go",
     "internal/promotion/serve/server.go",
     "internal/providers/credentials.go",
-    "internal/providers/enrollments.go",
-    "internal/release/delegation_management.go",
-    "internal/resources/retained_management.go"
+    "internal/providers/enrollments.go"
   ]
 }
