@@ -395,6 +395,34 @@ func TestBudgetGroupAndIncreaseWritesReplayGuardStaleAndAudit(t *testing.T) {
 	}
 }
 
+func TestAReplayedBudgetGroupDeleteIsRefusedOnceTheCallerNoLongerManagesItsProject(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.Owner()
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "handed-over"}, harness.Idempotent(), http.StatusCreated)
+	projectID := project["id"].(string)
+	const email = "former-manager@example.com"
+	invited := s.Invite(owner, email, authz.RoleOperator)
+	profile := s.Want(invited, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	userID := profile["id"].(string)
+	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	membership := "/api/v1/projects/" + projectID + "/members/" + userID
+	s.Want(owner, "PUT", membership, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
+	manager := s.Login(email)
+
+	group := s.Want(manager, "POST", "/api/v1/budget-groups", map[string]any{"name": "team", "monthly_cost_limit": "5.00", "project_id": projectID}, harness.Idempotent(), http.StatusCreated)
+	path := "/api/v1/budget-groups/" + group["id"].(string)
+	remove := harness.Idempotent(harness.ETag(group))
+	s.Want(manager, "DELETE", path, nil, remove, http.StatusNoContent)
+	s.Want(manager, "DELETE", path, nil, remove, http.StatusNoContent)
+
+	managed := s.Want(owner, "GET", "/api/v1/projects/"+projectID, nil, nil, http.StatusOK)
+	s.Want(owner, "PUT", membership, map[string]any{"role": "viewer"}, harness.ETag(managed), http.StatusOK)
+	if status, raw := s.Do(s.Login(email), "DELETE", path, nil, remove); status != http.StatusForbidden {
+		t.Fatalf("replayed delete after losing the project: %s", describe(status, raw))
+	}
+}
+
 func TestAPIKeyWritesReplayGuardStaleRotateRevokeAndAudit(t *testing.T) {
 	t.Parallel()
 	s := startService(t)
