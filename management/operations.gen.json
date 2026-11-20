@@ -5237,6 +5237,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "max_concurrency": {
+              "$ref": "#/$defs/CodeAccountMaxConcurrency"
+            },
             "id": {
               "type": "string",
               "format": "uuid"
@@ -5291,6 +5294,16 @@
             "enabled",
             "models"
           ]
+        },
+        "CodeAccountMaxConcurrency": {
+          "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 2147483647
         },
         "ConfigurationCodePool": {
           "type": "object",
@@ -7453,6 +7466,9 @@
         "CodeAccountWrite": {
           "additionalProperties": false,
           "properties": {
+            "max_concurrency": {
+              "$ref": "#/$defs/CodeAccountMaxConcurrency"
+            },
             "credential_id": {
               "format": "uuid",
               "type": "string"
@@ -7509,6 +7525,16 @@
             "models"
           ],
           "type": "object"
+        },
+        "CodeAccountMaxConcurrency": {
+          "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 2147483647
         }
       }
     }
@@ -31231,6 +31257,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "max_concurrency": {
+              "$ref": "#/$defs/CodeAccountMaxConcurrency"
+            },
             "id": {
               "type": "string",
               "format": "uuid"
@@ -31285,6 +31314,16 @@
             "enabled",
             "models"
           ]
+        },
+        "CodeAccountMaxConcurrency": {
+          "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 2147483647
         },
         "ConfigurationCodePool": {
           "type": "object",
@@ -36369,6 +36408,9 @@
         "CodeAccountWrite": {
           "additionalProperties": false,
           "properties": {
+            "max_concurrency": {
+              "$ref": "#/$defs/CodeAccountMaxConcurrency"
+            },
             "credential_id": {
               "format": "uuid",
               "type": "string"
@@ -36425,6 +36467,16 @@
             "models"
           ],
           "type": "object"
+        },
+        "CodeAccountMaxConcurrency": {
+          "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 2147483647
         }
       }
     }

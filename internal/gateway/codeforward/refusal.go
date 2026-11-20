@@ -55,6 +55,8 @@ func (f *Forwarder) recordCodeRefusal(ctx context.Context, route codemode.Route,
 
 func codeRefusalMessage(code string) string {
 	switch code {
+	case "code_account_busy":
+		return "The coding account is busy. Retry the same conversation shortly."
 	case "code_recovery_unsafe", "code_account_unavailable":
 		return "Continue on the original account when available, or start a new conversation with full context and no response references, reasoning signatures or socket state"
 	case "code_parent_unresolved":

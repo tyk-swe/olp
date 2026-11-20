@@ -59,6 +59,8 @@ type Authorization struct {
 	ProjectID       string
 }
 
+const GenerationTimeout = 10 * time.Minute
+
 type Refusal struct {
 	Status  int
 	Code    string
@@ -130,6 +132,8 @@ type ClientConfiguration struct {
 	Models            []Model             `json:"models"`
 	AdditionalFiles   []ConfigurationFile `json:"additional_files,omitempty"`
 	RouteSlug         string              `json:"route_slug"`
+	RevisionID        string              `json:"revision_id"`
+	Revision          int                 `json:"revision"`
 	BaseURL           string              `json:"base_url"`
 	NativeModels      []string            `json:"native_models"`
 	Adapters          []Adapter           `json:"adapters"`

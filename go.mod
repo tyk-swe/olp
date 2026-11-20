@@ -36,6 +36,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oapi-codegen/nullable v1.2.0
 	github.com/oapi-codegen/runtime v1.8.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/russellhaering/goxmldsig v1.6.1

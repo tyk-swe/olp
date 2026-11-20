@@ -12251,6 +12251,86 @@
         },
         "type": "object"
       },
+      "RouteContextWindowPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.",
+        "properties": {
+          "input_breakdown": {
+            "description": "Input tokens by category, summing to estimated_input_tokens. Null for a caller-supplied estimate.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteInputTokenBreakdown"
+              }
+            ]
+          },
+          "retained_context_unknown": {
+            "type": "boolean",
+            "description": "The request references provider-held or opaque context not included in the inline estimate."
+          },
+          "remaining_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Model context length less estimated input and any output bound used by the preview, per completion. Negative means over the window. Null if the limit, input or retained context is unknown."
+          }
+        },
+        "required": [
+          "input_breakdown",
+          "retained_context_unknown",
+          "remaining_tokens"
+        ]
+      },
+      "RouteInputTokenBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Counts for the prompt checked against the window. For batched completions, this is the largest prompt. Unclassified includes framing and counted material outside the named categories.",
+        "properties": {
+          "instructions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "conversation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_schemas": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_calls_results": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "media": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unclassified": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "instructions",
+          "conversation",
+          "tool_schemas",
+          "tool_calls_results",
+          "media",
+          "unclassified"
+        ]
+      },
       "RoutingDecision": {
         "properties": {
           "attempt": {
@@ -12266,6 +12346,9 @@
               "integer",
               "null"
             ]
+          },
+          "context_window": {
+            "$ref": "#/components/schemas/RouteContextWindowPreview"
           },
           "credential_slot_id": {
             "format": "uuid",
@@ -15534,6 +15617,9 @@
       "CodeAccount": {
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "credential_id": {
             "format": "uuid",
             "type": "string"
@@ -15723,6 +15809,7 @@
           "enabled",
           "models",
           "extra_usage_enabled",
+          "max_concurrency",
           "principal",
           "etag",
           "health",
@@ -15789,9 +15876,22 @@
         ],
         "type": "object"
       },
+      "CodeAccountMaxConcurrency": {
+        "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+        "type": [
+          "integer",
+          "null"
+        ],
+        "format": "int32",
+        "minimum": 1,
+        "maximum": 2147483647
+      },
       "CodeAccountWrite": {
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "credential_id": {
             "format": "uuid",
             "type": "string"
@@ -16280,13 +16380,14 @@
                 "class": {
                   "enum": [
                     "cooldown",
+                    "busy",
                     "band",
                     "weight",
                     "tree",
                     "unavailable"
                   ],
                   "type": "string",
-                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
+                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
                 }
               },
               "required": [
@@ -16710,6 +16811,16 @@
           "route_slug": {
             "type": "string"
           },
+          "revision": {
+            "description": "The published Code Mode route revision number.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "revision_id": {
+            "description": "The ID of the published route revision used to generate the configuration.",
+            "type": "string",
+            "format": "uuid"
+          },
           "small_model": {
             "description": "The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.",
             "type": [
@@ -16760,6 +16871,8 @@
         },
         "required": [
           "route_slug",
+          "revision",
+          "revision_id",
           "base_url",
           "native_models",
           "adapters",
@@ -31811,6 +31924,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "max_concurrency": {
+            "$ref": "#/components/schemas/CodeAccountMaxConcurrency"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
