@@ -83,30 +83,17 @@ func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 	if source == nil {
 		return httpkit.Reply{}, httpkit.Invalid("credential", "Supply a credential or external reference.")
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = authorizeCredential(p, source); err != nil {
-		return httpkit.Reply{}, err
-	}
 	// The stored reply discloses the provider, so the caller must still reach
-	// its project before a replay is served.
-	current, err := readProvider(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	_, replayed, err := a.Replay(r, tx, p, input)
+	// its project before a replay is served. The upstream probe then runs
+	// without the installation lock, and the commit rechecks the draft ETag.
+	draft, replayed, err := access.Preflight(a, r, input, rotationDraftFor(r.Context(), id, source))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
+		return *replayed, nil
 	}
+	current, models := draft.provider, draft.models
 	if err = httpkit.Match(r, current.ETag); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -116,20 +103,7 @@ func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 	if current.Connection.Document().Grant() {
 		return httpkit.Reply{}, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
-	models, err := enabledModels(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	slots, err := loadSlots(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defaultSlot := slots[slices.IndexFunc(slots, func(row slotRow) bool { return row.Default })]
-	// Do not hold the installation mutation lock during the upstream probe.
-	// The commit transaction rechecks authority, replay, and the draft ETag.
-	if err = tx.Rollback(r.Context()); err != nil {
-		return httpkit.Reply{}, err
-	}
+	defaultSlot := draft.slots[slices.IndexFunc(draft.slots, func(row slotRow) bool { return row.Default })]
 	declared := make([]string, len(models))
 	for i, model := range models {
 		declared[i] = model.UpstreamModel
@@ -160,6 +134,33 @@ func (s *Server) rotate(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 		}
 		return httpkit.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, access.Event{Action: "provider.credential.rotate", Resource: "provider_credential", ID: rotated.ID}, nil
 	})
+}
+
+type rotationDraft struct {
+	provider *record
+	models   []storedModel
+	slots    []slotRow
+}
+
+func rotationDraftFor(ctx context.Context, id string, source credentialSource) func(pgx.Tx, authz.Principal) (rotationDraft, error) {
+	return func(tx pgx.Tx, p authz.Principal) (rotationDraft, error) {
+		if err := authorizeCredential(p, source); err != nil {
+			return rotationDraft{}, err
+		}
+		current, err := readProvider(ctx, tx, id)
+		if err != nil {
+			return rotationDraft{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return rotationDraft{}, err
+		}
+		models, err := enabledModels(ctx, tx, id)
+		if err != nil {
+			return rotationDraft{}, err
+		}
+		slots, err := loadSlots(ctx, tx, id)
+		return rotationDraft{provider: current, models: models, slots: slots}, err
+	}
 }
 
 type credentialChange struct {

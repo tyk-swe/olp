@@ -233,39 +233,26 @@ func (s *Server) retire(r *http.Request, p authz.Principal) (httpkit.Reply, erro
 // then releases every database lock. The commit phase repeats the checks so
 // upstream validation cannot race a new owner or draft observation.
 func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *httpkit.Reply, error) {
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
+	d, replayed, err := access.Preflight(s.access, r, in, func(tx pgx.Tx, p authz.Principal) (*Definition, error) {
+		if id == "" && (in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid()) {
+			return nil, httpkit.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
+		}
+		return s.loadForWrite(r.Context(), tx, p, in, id)
+	})
+	if err != nil || replayed != nil || d == nil {
+		return d, replayed, err
+	}
+	if err = httpkit.Match(r, d.ETag); err != nil {
 		return nil, nil, err
 	}
-	defer tx.Rollback(r.Context())
-	if id == "" && (in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid()) {
-		return nil, nil, httpkit.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
+	if d.RetiredAt != nil {
+		return nil, nil, httpkit.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 	}
-	d, err := s.loadForWrite(r.Context(), tx, p, in, id)
-	if err != nil {
-		return nil, nil, err
+	if in.Present("stdio") {
+		return nil, nil, httpkit.Invalid("stdio", "The executable binding is immutable.")
 	}
-	_, replayed, err := s.access.Replay(r, tx, p, in)
-	if err != nil {
-		return nil, nil, err
-	}
-	if replayed != nil {
-		reply, err := *replayed, tx.Commit(r.Context())
-		return d, &reply, err
-	}
-	if d != nil {
-		if err = httpkit.Match(r, d.ETag); err != nil {
-			return nil, nil, err
-		}
-		if d.RetiredAt != nil {
-			return nil, nil, httpkit.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
-		}
-		if in.Present("stdio") {
-			return nil, nil, httpkit.Invalid("stdio", "The executable binding is immutable.")
-		}
-		if in.ProjectID != nil || in.Transport != "" {
-			return nil, nil, httpkit.Invalid("project_id", "Project and transport are immutable.")
-		}
+	if in.ProjectID != nil || in.Transport != "" {
+		return nil, nil, httpkit.Invalid("project_id", "Project and transport are immutable.")
 	}
 	return d, nil, nil
 }

@@ -433,3 +433,23 @@ func TestPromotionStopsSnapshotInstallationOnFailure(t *testing.T) {
 		t.Fatal("did not install valid snapshot")
 	}
 }
+
+func TestARefusedConfigurationApplyIsNotReplayedOnceItsConflictIsResolved(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	operator := s.installationToken(s.Owner(), "promotion-retry")
+	exported := s.Want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	request := map[string]any{"document": exported["document"], "expected_digest": exported["digest"]}
+
+	const setting = "/api/v1/settings/auth.mfa_required"
+	original := s.Want(operator, "GET", setting, nil, nil, http.StatusOK)
+	drifted := s.Want(operator, "PUT", setting, map[string]any{"value": "true"}, harness.ETag(original), http.StatusOK)
+	apply := harness.Idempotent()
+	refused := s.Want(operator, "POST", "/api/v1/configuration/apply", request, apply, http.StatusConflict)
+	if conflicts := items(refused["conflicts"]); len(conflicts) != 1 || conflicts[0]["detail"] != "configuration_changed" {
+		t.Fatalf("apply over a drifted destination = %v, want one configuration_changed conflict", refused)
+	}
+
+	s.Want(operator, "PUT", setting, map[string]any{"value": original["value"]}, harness.ETag(drifted), http.StatusOK)
+	s.Want(operator, "POST", "/api/v1/configuration/apply", request, apply, http.StatusOK)
+}

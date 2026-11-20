@@ -120,3 +120,28 @@ func applied[T any](s *Server, r *http.Request, tx pgx.Tx, p authz.Principal, cu
 	}
 	return reply, s.record(r, tx, p, event)
 }
+
+// Preflight is the first half of a change that validates against an upstream
+// before it commits. It runs lock and serves a stored replay, then releases
+// the installation lock so the slow step never holds it. The Mutate that
+// follows locks and checks the replay again.
+func Preflight[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, authz.Principal) (T, error)) (T, *httpkit.Reply, error) {
+	var none T
+	tx, p, err := s.BeginMutation(r)
+	if err != nil {
+		return none, nil, err
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	current, err := lock(tx, p)
+	if err != nil {
+		return none, nil, err
+	}
+	_, replayed, err := s.Replay(r, tx, p, input)
+	if err != nil {
+		return none, nil, err
+	}
+	if replayed == nil {
+		return current, nil, nil
+	}
+	return current, replayed, tx.Commit(r.Context())
+}

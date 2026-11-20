@@ -143,10 +143,7 @@
     "internal/usage/routinginputs/inputs.go loadRoutingRateCards"
   ],
   "handRolledTransaction": [
-    "internal/mcp/registration/server.go",
     "internal/media/jobs/api.go",
-    "internal/promotion/serve/server.go",
-    "internal/providers/credentials.go",
     "internal/providers/enrollments.go"
   ]
 }
