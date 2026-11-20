@@ -68,10 +68,10 @@ func TestPublishedQuotaWireCompatibility(t *testing.T) {
 
 func TestCodePaidLimitsMatchServingPolicy(t *testing.T) {
 	provider := &Limits{RequestsPerMinute: new(int64(10))}
-	slot := Slot{
+	slot := Slot{Limits: Limits{
 		RequestsPerMinute: new(int64(10)), TokensPerMinute: new(int64(100)), InputTokensPerMinute: new(int64(80)), OutputTokensPerMinute: new(int64(20)),
 		MaxConcurrency: new(int64(2)), Supply: Supply{DailyCostLimit: new("2.00")},
-	}
+	}}
 	changed := func(change func(*Slot)) Slot {
 		live := slot
 		change(&live)
@@ -114,7 +114,7 @@ func TestSplitTokenLimitsCountAsLimitsOnTheirOwn(t *testing.T) {
 			if !UnboundedWorkBudgeted(&Provider{Limits: &limits}, nil, nil, true) {
 				t.Fatal("unbounded work passed a connection limited on one token dimension only")
 			}
-			slot := Slot{InputTokensPerMinute: limits.InputTokensPerMinute, OutputTokensPerMinute: limits.OutputTokensPerMinute}
+			slot := Slot{Limits: limits}
 			if !UnboundedWorkBudgeted(&Provider{}, &slot, nil, true) {
 				t.Fatal("unbounded work passed a slot limited on one token dimension only")
 			}
@@ -126,7 +126,7 @@ func TestCloneKeepsSplitTokenLimitsApart(t *testing.T) {
 	limits := Limits{InputTokensPerMinute: new(int64(80)), OutputTokensPerMinute: new(int64(20))}
 	source := &Snapshot{Providers: map[string]Provider{"provider": {
 		Limits: &limits,
-		Slots:  []Slot{{InputTokensPerMinute: new(int64(8)), OutputTokensPerMinute: new(int64(2))}},
+		Slots:  []Slot{{Limits: Limits{InputTokensPerMinute: new(int64(8)), OutputTokensPerMinute: new(int64(2))}}},
 	}}}
 	clone := source.Clone().Providers["provider"]
 	*clone.Limits.InputTokensPerMinute, *clone.Limits.OutputTokensPerMinute = 1, 1
