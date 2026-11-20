@@ -21,6 +21,7 @@ type Settings struct {
 	Models            []string `json:"models"`
 	ExtraUsageEnabled *bool    `json:"extra_usage_enabled"`
 	CycleAnchor       *string  `json:"cycle_anchor,omitempty"`
+	MaxConcurrency    *int32   `json:"max_concurrency,omitempty"`
 }
 
 type Input struct {
@@ -49,6 +50,9 @@ func (s Settings) Validate() error {
 	if err := codemode.ValidateModels(s.Models); err != nil {
 		return httpkit.Invalid("models", err.Error())
 	}
+	if s.MaxConcurrency != nil && *s.MaxConcurrency < 1 {
+		return httpkit.Invalid("max_concurrency", "Set a positive generation limit or leave it unset.")
+	}
 	if s.CycleAnchor == nil {
 		return nil
 	}
@@ -67,7 +71,7 @@ func (in Input) validated() (Input, error) {
 }
 
 func ReadAccounts(ctx context.Context, q database.Queryer) ([]Account, error) {
-	rows, err := q.Query(ctx, `SELECT a.id::text,p.name,v.name,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
+	rows, err := q.Query(ctx, `SELECT a.id::text,p.name,v.name,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text,a.max_concurrency FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +88,8 @@ func AccountIDs(ctx context.Context, q database.Queryer, projectID, providerID, 
 
 func ReadInput(ctx context.Context, q database.Queryer, id string) (Input, error) {
 	var in Input
-	err := q.QueryRow(ctx, `SELECT project_id::text,provider_id::text,credential_id::text,name,enabled,models,extra_usage_enabled,cycle_anchor::text FROM olp.code_accounts WHERE id=$1`, id).
-		Scan(&in.ProjectID, &in.ProviderID, &in.CredentialID, &in.Name, &in.Enabled, &in.Models, &in.ExtraUsageEnabled, &in.CycleAnchor)
+	err := q.QueryRow(ctx, `SELECT project_id::text,provider_id::text,credential_id::text,name,enabled,models,extra_usage_enabled,cycle_anchor::text,max_concurrency FROM olp.code_accounts WHERE id=$1`, id).
+		Scan(&in.ProjectID, &in.ProviderID, &in.CredentialID, &in.Name, &in.Enabled, &in.Models, &in.ExtraUsageEnabled, &in.CycleAnchor, &in.MaxConcurrency)
 	return in, err
 }
 
@@ -99,6 +103,7 @@ func ReadGranted(ctx context.Context, q database.Queryer, providerName, projectI
 }
 
 var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'extra_usage_enabled',x.extra_usage_enabled,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,'cycle_anchor',x.cycle_anchor,
+	'max_concurrency',x.max_concurrency,
 	'cooldowns',coalesce((SELECT jsonb_agg(jsonb_build_object('class',cd.class,'model',cd.model,'retry_at',cd.retry_at) ORDER BY cd.retry_at,cd.class,cd.model) FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now()),'[]'::jsonb),
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
 	'allowance_signal',` + codeadapter.SQLAllowanceSignal("p.configuration") + `,
@@ -151,11 +156,11 @@ func save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, in
 			return nil, httpkit.Invalid("credential_id", "Account identity cannot change during credential rotation.")
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,extra_usage_enabled,etag,created_by,cycle_anchor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,extra_usage_enabled=excluded.extra_usage_enabled,etag=excluded.etag,cycle_anchor=excluded.cycle_anchor,
+	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,extra_usage_enabled,etag,created_by,cycle_anchor,max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,extra_usage_enabled=excluded.extra_usage_enabled,etag=excluded.etag,cycle_anchor=excluded.cycle_anchor,max_concurrency=excluded.max_concurrency,
 			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END,
 			health_observed_at=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.health_observed_at END,
-			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, in.Models, in.ExtraUsageEnabled, etag, p.UserID(), in.CycleAnchor)
+			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, in.Models, in.ExtraUsageEnabled, etag, p.UserID(), in.CycleAnchor, in.MaxConcurrency)
 	if err != nil {
 		return nil, err
 	}

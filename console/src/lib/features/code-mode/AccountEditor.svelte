@@ -43,6 +43,7 @@
   let credentialId = $state(initial?.credential_id ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
   let cycleAnchor = $state(initial?.cycle_anchor ?? '');
+  let maxConcurrency = $state(initial?.max_concurrency ?? undefined);
   let enabled = $state(initial?.enabled ?? true);
   let extraUsage = $state(
     initial?.extra_usage_enabled == null
@@ -94,6 +95,7 @@
       credential_id: credentialId,
       models: nativeModels(models),
       cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
+      max_concurrency: maxConcurrency ?? null,
       enabled,
       extra_usage_enabled: extraUsageValue(
         extraUsageAdapter,
@@ -193,6 +195,19 @@
   <p>
     Model names pass through unchanged. An allowed model is not proof of client
     or inference qualification.
+  </p>
+  <label for="code-max-concurrency">Maximum simultaneous generations</label>
+  <input
+    id="code-max-concurrency"
+    type="number"
+    min="1"
+    max="2147483647"
+    step="1"
+    bind:value={maxConcurrency}
+  />
+  <p>
+    Leave blank for no account limit. The limit is shared across routes and
+    keys.
   </p>
   {#if qwenTokenPlan}
     <label for="code-cycle-anchor">Subscription cycle anchor</label><input

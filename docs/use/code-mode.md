@@ -530,6 +530,10 @@ and retirement, and `If-Match` on updates and publication.
 2. Create a code account with `project_id`, `provider_id`, `credential_id`,
    `name`, `enabled` and an explicit `models` array. Account identity survives
    credential rotation only when both provider and principal remain the same.
+   Set **Maximum simultaneous generations** (API field `max_concurrency`) to a
+   positive integer to cap the account across all gateway replicas, routes and
+   keys. Leave it blank or send `null` for no account cap.
+   Finish upgrading every gateway replica before enabling the cap.
 3. Create a pool and assign accounts and API keys explicitly; accounts of
    several adapters may share one. A `shared` pool has no owner. A `personal`
    pool names `owner_user_id` and accepts only keys
@@ -905,6 +909,15 @@ the principal stored in the binding.
 Request rate, token rate and concurrency reuse shared admission. Those estimates
 do not establish hard token bounds. Subscription traffic excludes ordinary
 monetary spending limits; dollar estimates are informational.
+
+A new conversation can use another eligible account if its preferred account
+is at capacity. An existing pin stays put. If no allowed account has room,
+HTTP returns `429 code_account_busy` with `Retry-After`. On an open WebSocket,
+the gateway closes the socket with code `1013` and reason `code_account_busy`.
+Retry the same conversation after a short delay. Local saturation does not change account
+health, replay the request or send it to paid fallback. An idle WebSocket and
+prewarming do not use generation slots. Completion and cancellation release the
+slot even if final token usage is unknown. Abandoned slots expire after 11 minutes.
 
 Hard token budgets are optional. An enabled matching budget requires an
 adapter-proven conservative bound before dispatch. Project-wide, route-scoped and
