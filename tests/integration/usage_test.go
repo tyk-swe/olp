@@ -2349,7 +2349,7 @@ func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, strin
 	return keys, installation
 }
 
-func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string) apiResult {
+func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
@@ -2366,7 +2366,7 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))
-	return func(method, path, ifMatch, body string) apiResult {
+	return func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 		t.Helper()
 		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
 		if err != nil {
@@ -2374,7 +2374,12 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 		}
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://test.example")
-		r.Header.Set("Idempotency-Key", uuid.NewString())
+		r.Header.Set("Idempotency-Key", func() string {
+			if len(idempotencyKey) > 0 {
+				return idempotencyKey[0]
+			}
+			return uuid.NewString()
+		}())
 		r.Header.Set("X-CSRF-Token", csrf)
 		if ifMatch != "" {
 			r.Header.Set("If-Match", ifMatch)
@@ -2418,11 +2423,31 @@ func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
 		}
 		return r
 	}
-	created := expect("create destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"ops","url":"https://hooks.example.com/olp","secret":"signing-key"}`), http.StatusCreated)
+	const destinationKey = "notification-destination-create"
+	const destinationBody = `{"name":"ops","url":"https://hooks.example.com/olp","secret":"signing-key"}`
+	created := expect("create destination", call("POST", "/api/v1/notifications/destinations", "", destinationBody, destinationKey), http.StatusCreated)
 	destination := decode(created)
 	path := "/api/v1/notifications/destinations/" + destination.ID
+	conflict := call("POST", "/api/v1/notifications/destinations", "", `{"name":"changed","url":"https://hooks.example.com/olp","secret":"signing-key"}`, destinationKey)
+	var conflictProblem struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(conflict.body, &conflictProblem); err != nil || conflict.status != http.StatusConflict || !strings.HasSuffix(conflictProblem.Type, "/idempotency_conflict") {
+		t.Fatalf("create destination with changed name answered %d %s, want 409 idempotency_conflict (%v)", conflict.status, conflict.body, err)
+	}
+	replayed := expect("retry destination creation", call("POST", "/api/v1/notifications/destinations", "", destinationBody, destinationKey), http.StatusCreated)
+	if replay := decode(replayed); replay.ID != destination.ID || replayed.etag != created.etag {
+		t.Fatalf("retried destination id=%q etag=%q, want id=%q etag=%q", replay.ID, replayed.etag, destination.ID, created.etag)
+	}
+	listed := expect("list after changed-name conflict", call("GET", "/api/v1/notifications/destinations", "", ""), http.StatusOK)
+	var page struct {
+		Items []resource `json:"items"`
+	}
+	if err := json.Unmarshal(listed.body, &page); err != nil || len(page.Items) != 1 || page.Items[0].ID != destination.ID || page.Items[0].Name != "ops" {
+		t.Fatalf("destinations after changed-name conflict = %s (%v), want only original destination %q named ops", listed.body, err, destination.ID)
+	}
 	fetched := expect("get destination", call("GET", path, "", ""), http.StatusOK)
-	if fetched.etag == "" || fetched.etag != created.etag || !decode(fetched).SecretConfigured || strings.Contains(string(fetched.body), "signing-key") {
+	if fetched.etag == "" || fetched.etag != created.etag || decode(fetched).Name != "ops" || !decode(fetched).SecretConfigured || strings.Contains(string(fetched.body), "signing-key") {
 		t.Fatalf("get destination etag=%q created etag=%q body=%s", fetched.etag, created.etag, fetched.body)
 	}
 	expect("patch without If-Match", call("PATCH", path, "", `{"name":"renamed"}`), http.StatusPreconditionRequired)
