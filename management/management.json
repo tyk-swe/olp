@@ -2767,6 +2767,20 @@
               "null"
             ]
           },
+          "input_tokens_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "daily_cost_limit": {
             "description": "Exact decimal amount in the installation currency.",
             "type": [
@@ -2859,6 +2873,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,
@@ -3753,7 +3785,7 @@
         "type": "object"
       },
       "CreateNotificationRuleRequest": {
-        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.",
+        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, and spend.spike requires a project.",
         "properties": {
           "configuration": {
             "description": "Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.",
@@ -4283,6 +4315,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,
@@ -5636,7 +5686,7 @@
         "type": "object"
       },
       "NotificationEvent": {
-        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.",
+        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.",
         "enum": [
           "budget.exhausted",
           "budget.threshold",
@@ -5650,6 +5700,7 @@
           "report.spend",
           "route.latency",
           "runtime.install_failed",
+          "spend.spike",
           "worker.stale"
         ],
         "type": "string"
@@ -9338,11 +9389,23 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "input_tokens_this_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens_this_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
           "requests_this_minute",
           "tokens_this_minute",
+          "input_tokens_this_minute",
+          "output_tokens_this_minute",
           "concurrent_requests"
         ],
         "type": "object"
@@ -22727,6 +22790,24 @@
             ]
           },
           "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
             "default": null,
             "format": "int64",
             "minimum": 0,

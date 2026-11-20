@@ -92,12 +92,12 @@ func TestInvalidFixturesAreRejected(t *testing.T) {
 	paths := fixturePaths(t, "testdata/invalid")
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			catalog, err := decodeFixture(path)
-			if err == nil {
-				err = catalog.Validate()
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if err == nil {
-				t.Fatal("invalid fixture decodes and validates")
+			if _, err := Canonical(raw); err == nil {
+				t.Fatal("invalid fixture can be formatted")
 			}
 		})
 	}

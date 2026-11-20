@@ -103,7 +103,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 	}
 	base, err := url.Parse(in.GatewayURL)
-	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
+	if err != nil || base.Host == "" || base.User != nil || base.ForceQuery || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
 		return empty, httpkit.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
 	}
 	local := base.Hostname() == "localhost"

@@ -109,6 +109,8 @@
           allowed_api_keys: [],
           requests_per_minute: null,
           tokens_per_minute: null,
+          input_tokens_per_minute: null,
+          output_tokens_per_minute: null,
           max_concurrency: null
         };
     secret = '';
@@ -254,7 +256,11 @@
             >{#if health.usage}<small
                 >{health.usage.requests_this_minute} / {slot.requests_per_minute ??
                   'unlimited'} requests this minute · {health.usage
-                  .tokens_this_minute} / {slot.tokens_per_minute ?? 'unlimited'} tokens
+                  .tokens_this_minute} / {slot.tokens_per_minute ?? 'unlimited'} tokens{#if slot.input_tokens_per_minute != null}
+                  · {health.usage.input_tokens_this_minute} / {slot.input_tokens_per_minute}
+                  input tokens{/if}{#if slot.output_tokens_per_minute != null}
+                  · {health.usage.output_tokens_this_minute} / {slot.output_tokens_per_minute}
+                  output tokens{/if}
                 · {health.usage.concurrent_requests} / {slot.max_concurrency ??
                   'unlimited'} concurrent</small
               >{/if}{/if}<small
@@ -389,6 +395,20 @@
               type="number"
               min="1"
               bind:value={editing.tokens_per_minute}
+            /></label
+          >
+          <label
+            >Input tokens / minute<input
+              type="number"
+              min="1"
+              bind:value={editing.input_tokens_per_minute}
+            /></label
+          >
+          <label
+            >Output tokens / minute<input
+              type="number"
+              min="1"
+              bind:value={editing.output_tokens_per_minute}
             /></label
           >
           <label

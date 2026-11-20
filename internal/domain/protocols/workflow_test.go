@@ -1,11 +1,13 @@
 package protocols
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
@@ -60,49 +62,92 @@ func TestAnthropicWorkflowPreservesStreamedToolAndSignedThinking(t *testing.T) {
 	}
 }
 
-func TestGeminiWorkflowPreservesStreamedCallsAndPairedResults(t *testing.T) {
+func TestGeminiWorkflowPreservesCallsAndPairedResults(t *testing.T) {
 	// Gemini GenerateContent function calls: https://ai.google.dev/api/generate-content (2026-10-29).
-	stream := strings.Join([]string{
-		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"checking"}]}}]}`,
-		`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"lookup","args":{"query":"weather"}},"thoughtSignature":"signed"}]}}]}`,
-		`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"lookup","args":{"query":"traffic"}}}]}}]}`,
-	}, "\n\n") + "\n\n"
-	body, err := WorkflowStreamBody(wire.GeminiStream, strings.NewReader(stream), 4096)
-	if err != nil {
-		t.Fatal(err)
+	parts := []json.RawMessage{
+		json.RawMessage(`{"text":"checking"}`),
+		json.RawMessage(`{"functionCall":{"name":"read_weather","args":{"city":"Paris"}},"thoughtSignature":"c2lnbmVk"}`),
+		json.RawMessage(`{"functionCall":{"id":"weather-london","name":"read_weather","args":{"city":"London"}}}`),
+		json.RawMessage(`{"functionCall":{"name":"read_weather","args":{"city":"Rome"}}}`),
 	}
-	completion := &wire.Completion{Body: body, ToolCalls: []wire.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{"query":"weather"}`}, {ID: "call-2", Name: "lookup", Arguments: `{"query":"traffic"}`}}}
-	turns, err := WorkflowTurns(wire.Gemini, completion, []WorkflowResult{{CallID: "call-1", Content: "sunny"}, {CallID: "call-2", Content: "clear"}})
+	assistant := raw(Object{"role": raw("model"), "parts": raw(parts)})
+	unary := raw(Object{"candidates": raw([]Object{{"content": assistant, "finishReason": raw("STOP")}})})
+	var stream strings.Builder
+	for _, part := range parts {
+		content := Object{"role": raw("model"), "parts": raw([]json.RawMessage{part})}
+		stream.Write(eventFrame("", Object{"candidates": raw([]Object{{"content": raw(content)}})}))
+	}
+	stream.WriteString("data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n")
+
+	t.Run("unary", func(t *testing.T) {
+		completion, err := Decode(wire.Gemini, wire.Gemini, unary, "weather", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertGeminiWorkflowResults(t, wire.Gemini, completion, assistant)
+	})
+	t.Run("streaming", func(t *testing.T) {
+		var chat bytes.Buffer
+		_, err := Stream(wire.Gemini, wire.Chat, strings.NewReader(stream.String()), 4096, "weather", func(frame []byte) error {
+			_, err := chat.Write(frame)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		completion, err := openai.Stream(wire.Chat, &chat, 4096, "weather")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := WorkflowStreamBody(wire.GeminiStream, strings.NewReader(stream.String()), 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		completion.Body = body
+		assertGeminiWorkflowResults(t, wire.GeminiStream, completion, assistant)
+	})
+}
+
+func assertGeminiWorkflowResults(t *testing.T, family wire.Format, completion *wire.Completion, assistant json.RawMessage) {
+	t.Helper()
+	weather := map[string]string{"Paris": "sunny", "London": "cloudy", "Rome": "clear"}
+	if len(completion.ToolCalls) != len(weather) {
+		t.Fatalf("decoded tool calls = %+v", completion.ToolCalls)
+	}
+	results := make([]WorkflowResult, 0, len(weather))
+	for _, call := range completion.ToolCalls {
+		var args struct{ City string }
+		err := json.Unmarshal([]byte(call.Arguments), &args)
+		output, found := weather[args.City]
+		if err != nil || !found || call.Name != "read_weather" || call.ID == "" {
+			t.Fatalf("invalid weather call %+v: %v", call, err)
+		}
+		results = append(results, WorkflowResult{CallID: call.ID, Content: output})
+	}
+	turns, err := WorkflowTurns(family, completion, results)
 	if err != nil || len(turns) != 2 {
 		t.Fatalf("continuation = %s, %v", turns, err)
 	}
-	var assistant struct {
-		Role  string `json:"role"`
-		Parts []struct {
-			Text             string `json:"text"`
-			ThoughtSignature string `json:"thoughtSignature"`
-			FunctionCall     *struct {
-				ID   string            `json:"id"`
-				Name string            `json:"name"`
-				Args map[string]string `json:"args"`
-			} `json:"functionCall"`
-		} `json:"parts"`
-	}
-	if err := json.Unmarshal(turns[0], &assistant); err != nil || assistant.Role != "model" || len(assistant.Parts) != 3 || assistant.Parts[0].Text != "checking" || assistant.Parts[1].ThoughtSignature != "signed" || assistant.Parts[1].FunctionCall == nil || assistant.Parts[1].FunctionCall.ID != completion.ToolCalls[0].ID || assistant.Parts[1].FunctionCall.Name != completion.ToolCalls[0].Name || assistant.Parts[1].FunctionCall.Args["query"] != "weather" || assistant.Parts[2].FunctionCall == nil || assistant.Parts[2].FunctionCall.ID != completion.ToolCalls[1].ID {
-		t.Fatalf("assistant continuation = %s, %v", turns[0], err)
+	var gotAssistant, wantAssistant map[string]any
+	if json.Unmarshal(turns[0], &gotAssistant) != nil || json.Unmarshal(assistant, &wantAssistant) != nil || !reflect.DeepEqual(gotAssistant, wantAssistant) {
+		t.Fatalf("assistant continuation = %s, want %s", turns[0], assistant)
 	}
 	var result struct {
-		Role  string `json:"role"`
-		Parts []struct {
-			FunctionResponse struct {
-				ID       string            `json:"id"`
-				Name     string            `json:"name"`
-				Response map[string]string `json:"response"`
-			} `json:"functionResponse"`
-		} `json:"parts"`
+		Role  string   `json:"role"`
+		Parts []Object `json:"parts"`
 	}
-	if err := json.Unmarshal(turns[1], &result); err != nil || result.Role != "user" || len(result.Parts) != 2 || result.Parts[0].FunctionResponse.ID != completion.ToolCalls[0].ID || result.Parts[0].FunctionResponse.Name != completion.ToolCalls[0].Name || result.Parts[0].FunctionResponse.Response["output"] != "sunny" || result.Parts[1].FunctionResponse.ID != completion.ToolCalls[1].ID || result.Parts[1].FunctionResponse.Response["output"] != "clear" {
+	if err := json.Unmarshal(turns[1], &result); err != nil || result.Role != "user" || len(result.Parts) != len(results) {
 		t.Fatalf("tool result continuation = %s, %v", turns[1], err)
+	}
+	for i, want := range []Object{
+		{"name": raw("read_weather"), "response": raw(map[string]string{"output": weather["Paris"]})},
+		{"id": raw("weather-london"), "name": raw("read_weather"), "response": raw(map[string]string{"output": weather["London"]})},
+		{"name": raw("read_weather"), "response": raw(map[string]string{"output": weather["Rome"]})},
+	} {
+		got, err := object(result.Parts[i]["functionResponse"])
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("functionResponse %d = %s, want %s", i, raw(got), raw(want))
+		}
 	}
 }
 

@@ -175,9 +175,11 @@ var (
 	vendorID    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	modelID     = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$`)
 	canonical   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	modalities  = []string{"audio", "embeddings", "file", "image", "text", "video"}
 	familyNames = []string{"anthropic", "gemini", "other"}
+
+	priceOperations = []string{"generation", "embeddings", "rerank", "moderation", "image_generation",
+		"image_edit", "speech", "transcription", "translation", "video_create"}
 )
 
 // Decode parses a catalog document strictly: unknown members, trailing data
@@ -270,8 +272,11 @@ func (c *Catalog) validateModel(m *Model, names map[string]bool) error {
 	}
 	operations := map[string]bool{}
 	for _, p := range m.Prices {
-		if !snakeName.MatchString(p.Operation) || operations[p.Operation] {
-			return fmt.Errorf("operation %q is malformed or priced twice", p.Operation)
+		if !slices.Contains(priceOperations, p.Operation) {
+			return fmt.Errorf("unknown price operation %q", p.Operation)
+		}
+		if operations[p.Operation] {
+			return fmt.Errorf("operation %q is priced twice", p.Operation)
 		}
 		operations[p.Operation] = true
 		if err := c.validatePrice(p); err != nil {

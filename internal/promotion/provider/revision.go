@@ -74,8 +74,11 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 				Weight:        slot.Weight,
 				AllowedModels: promotion.NonNil(slot.AllowedModels),
 				AllowedRoutes: promotion.NonNil(slot.AllowedRoutes),
-				Limits:        connection.Limits{MaxConcurrency: slot.MaxConcurrency, RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, Supply: slot.Supply},
-				Credential:    storedCredential(configuration.Grant(), slot.CredentialID != nil),
+				Limits: connection.Limits{
+					MaxConcurrency: slot.MaxConcurrency, RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute,
+					InputTokensPerMinute: slot.InputTokensPerMinute, OutputTokensPerMinute: slot.OutputTokensPerMinute, Supply: slot.Supply,
+				},
+				Credential: storedCredential(configuration.Grant(), slot.CredentialID != nil),
 			}
 		}),
 		Network: storedNetwork(configuration),

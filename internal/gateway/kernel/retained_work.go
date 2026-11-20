@@ -170,7 +170,7 @@ func (q retainedWorkRequest) routeTarget() (retainedWorkTarget, *fault.Error) {
 		return retainedWorkTarget{}, err
 	}
 	operation := q.work.operation
-	pin, err := q.server.selectBoundPinSurface(q.r.Context(), q.x, route, operation, "openai", "unary", bound, func(provider *routing.Provider, model string) bool {
+	pin, err := q.server.selectBoundPinSurface(q.r.Context(), q.x, route, operation, "openai", "unary", resourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.Connector().Supports(operation, "openai", "unary")
 	})
 	q.reply.end.pin = pin

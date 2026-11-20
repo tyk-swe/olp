@@ -7,18 +7,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 type InteractionRequest struct {
-	Source     oif.Document
-	Model      string
-	Previous   string
-	Store      bool
-	Stream     bool
-	Background bool
+	Source          oif.Document
+	Model           string
+	Previous        string
+	Store           bool
+	Stream          bool
+	Background      bool
+	MaxOutputTokens int64
 }
 
 func ParseInteractionRequest(body []byte, maxBytes int) (InteractionRequest, error) {
@@ -61,7 +63,7 @@ func ParseInteractionRequest(body []byte, maxBytes int) (InteractionRequest, err
 	if previous != "" && !store {
 		return InteractionRequest{}, errors.New("previous_interaction_id requires store=true")
 	}
-	return InteractionRequest{Source: doc, Model: model, Previous: previous, Store: store, Stream: stream, Background: background}, nil
+	return InteractionRequest{Source: doc, Model: model, Previous: previous, Store: store, Stream: stream, Background: background, MaxOutputTokens: maxOutputTokens(doc.Root())}, nil
 }
 
 func (r InteractionRequest) Bind(model, previous string) ([]byte, error) {
@@ -436,6 +438,22 @@ func validLiveUsage(u LiveUsage) bool {
 		}
 	}
 	return u.Cached == nil || *u.Cached <= *u.Input
+}
+
+func maxOutputTokens(root oif.Value) int64 {
+	config, ok := root.Lookup("generation_config")
+	if !ok || config.Kind() != oif.Object {
+		return 0
+	}
+	bound, ok := config.Lookup("max_output_tokens")
+	if !ok || bound.Kind() != oif.Number {
+		return 0
+	}
+	tokens, err := strconv.ParseInt(bound.Raw(), 10, 64)
+	if err != nil || tokens < 1 {
+		return 0
+	}
+	return tokens
 }
 
 func stringField(parent oif.Value, name string) (string, bool) {

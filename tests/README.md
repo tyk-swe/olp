@@ -88,8 +88,9 @@ real `olp` binary and drives it over HTTP, so requests cross the same
 composition a deployment runs. Each test starts its own process on its own
 database and ports, and provider calls go to the scripted vendor in
 `tests/harness/vendor`. The suite covers startup failure cleanup, the process
-running under the restricted runtime role, every secured management read
-answering without a server error, cross-project isolation of those reads, one
+running under the restricted runtime role after applying the restore runbook's
+grants to a migrated database with no runtime access, every secured management
+read answering without a server error, cross-project isolation of those reads, one
 guardrail definition, policy, attachment and credential lifecycle with its
 audit trail, one promotion round trip, one request travelling from route
 publication to durable usage, the code account endpoints, and a SCIM directory

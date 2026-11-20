@@ -398,6 +398,12 @@ dirty drafts; kind changes conflict and imported capabilities stay declared.
 Routes become non-activated drafts; cross-project slug conflicts and lifecycle
 differences need explicit activation/retirement. Active runtime stays pinned.
 
+Route template selectors using `provider:<uuid>` must match a provider in the
+template's project on the destination, or an installation-wide provider for an
+installation-wide template. When moving an artifact to another installation,
+replace source UUIDs with destination UUIDs before planning. A missing provider
+or a project mismatch blocks apply. Vendor selectors are unchanged.
+
 Exact unchanged prices are noop; other prices create a revision and republish.
 Future effective times survive, past/current times rebase to apply.
 

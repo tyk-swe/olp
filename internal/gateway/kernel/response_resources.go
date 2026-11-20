@@ -143,7 +143,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *Call, res *resources.R
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
-	out, err = s.mapGenerationResultReferences(commitCtx, x, res.NativeIdentity(), out)
+	out, err = s.mapGenerationResultReferences(commitCtx, x, storedResult(res), out)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "resource_affinity", "The retained provider returned an unowned result reference.")
 	}
@@ -251,7 +251,7 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}
 		resp.Exchange.Complete(ClassSuccess)
-		projected, err := generationrefs.ProjectInputItems(document, refs, s.generationResultResolver(ctx, x, res.NativeIdentity()))
+		projected, err := generationrefs.ProjectInputItems(document, refs, s.generationResultResolver(ctx, x, storedResult(res)))
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned input items with unbound resource references.")
 		}

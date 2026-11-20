@@ -69,6 +69,29 @@ func TestPrepareCompletesAUsableConnection(t *testing.T) {
 	}
 }
 
+func TestPrepareCarriesSplitTokenLimitsIntoServing(t *testing.T) {
+	prepared, err := prepare(t, openAI(Options{Limits: &Limits{
+		InputTokensPerMinute: new(int64(400_000)), OutputTokensPerMinute: new(int64(80_000)),
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := prepared.Document().Options.Limits
+	if saved == nil || saved.InputTokensPerMinute == nil || *saved.InputTokensPerMinute != 400_000 ||
+		saved.OutputTokensPerMinute == nil || *saved.OutputTokensPerMinute != 80_000 {
+		t.Fatalf("stored split limits = %+v", saved)
+	}
+	served, err := prepared.Document().Serving()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := served.Options.Limits
+	if limits == nil || limits.InputTokensPerMinute == nil || *limits.InputTokensPerMinute != 400_000 ||
+		limits.OutputTokensPerMinute == nil || *limits.OutputTokensPerMinute != 80_000 {
+		t.Fatalf("served split limits = %+v", limits)
+	}
+}
+
 func TestPrepareRefusesConnectionsThatCannotBeServedSafely(t *testing.T) {
 	shares := &routing.Shares{Critical: 25, High: 25, Normal: 25, Low: 25}
 	cases := map[string]struct {
@@ -95,6 +118,8 @@ func TestPrepareRefusesConnectionsThatCannotBeServedSafely(t *testing.T) {
 		"a commitment that owes nothing":                    {openAI(Options{Commitment: &routing.Commitment{Amount: "0.00", Period: "month"}}), "configuration.options.commitment.amount"},
 		"a commitment over an unknown period":               {openAI(Options{Commitment: &routing.Commitment{Amount: "250.00", Period: "year"}}), "configuration.options.commitment.period"},
 		"a negative request limit":                          {openAI(Options{Limits: &Limits{RequestsPerMinute: new(int64(-1))}}), "configuration.options.limits"},
+		"a negative input token limit":                      {openAI(Options{Limits: &Limits{InputTokensPerMinute: new(int64(-1))}}), "configuration.options.limits"},
+		"a zero output token limit":                         {openAI(Options{Limits: &Limits{OutputTokensPerMinute: new(int64(0))}}), "configuration.options.limits"},
 		"priority shares with no quota to divide":           {openAI(Options{Limits: &Limits{Supply: routing.Supply{PriorityShares: shares, SaturationPercent: new(int64(80))}}}), "configuration.options.limits.priority_shares"},
 		"priority shares that leave part of the quota out":  {openAI(Options{Limits: &Limits{RequestsPerMinute: new(int64(60)), Supply: routing.Supply{PriorityShares: &routing.Shares{Critical: 50}, SaturationPercent: new(int64(80))}}}), "configuration.options.limits.priority_shares"},
 	}

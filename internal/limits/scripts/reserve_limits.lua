@@ -60,7 +60,7 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(raw)
 end
 
-if #KEYS ~= 2 or (#ARGV ~= 7 and #ARGV ~= 8 and #ARGV ~= 10 and #ARGV ~= 11) then
+if #KEYS ~= 2 or (#ARGV ~= 11 and #ARGV ~= 12 and #ARGV ~= 14 and #ARGV ~= 15) then
   return failure("invalid_arguments")
 end
 
@@ -71,13 +71,17 @@ local concurrency_limit = parse_safe_unsigned_integer(ARGV[4])
 local lease_id = ARGV[5]
 local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
 local report_allowance = ARGV[7]
+local itpm_limit = parse_safe_unsigned_integer(ARGV[8])
+local otpm_limit = parse_safe_unsigned_integer(ARGV[9])
+local requested_input = parse_safe_unsigned_integer(ARGV[10])
+local requested_output = parse_safe_unsigned_integer(ARGV[11])
 local share_class = nil
 local share_percent = 0
 local saturation_percent = 100
-if #ARGV >= 10 then
-  share_class = ARGV[8]
-  share_percent = parse_safe_unsigned_integer(ARGV[9])
-  saturation_percent = parse_safe_unsigned_integer(ARGV[10])
+if #ARGV >= 14 then
+  share_class = ARGV[12]
+  share_percent = parse_safe_unsigned_integer(ARGV[13])
+  saturation_percent = parse_safe_unsigned_integer(ARGV[14])
   if type(share_class) ~= "string" or string.match(share_class, "^[a-z]+$") == nil
       or #share_class > 16 or share_percent == nil or share_percent > 100
       or saturation_percent == nil or saturation_percent < 1 or saturation_percent > 100
@@ -86,16 +90,20 @@ if #ARGV >= 10 then
   end
 end
 
-local track_only = (#ARGV == 8 and ARGV[8] == "1") or (#ARGV == 11 and ARGV[11] == "1")
+local track_only = (#ARGV == 12 and ARGV[12] == "1") or (#ARGV == 15 and ARGV[15] == "1")
 local track_concurrency = concurrency_limit ~= nil and (concurrency_limit > 0 or track_only)
 
-if (#ARGV == 8 and ARGV[8] ~= "1") or (#ARGV == 11 and ARGV[11] ~= "1")
+if (#ARGV == 12 and ARGV[12] ~= "1") or (#ARGV == 15 and ARGV[15] ~= "1")
     or rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
     or concurrency_limit == nil or lease_ttl == nil
+    or itpm_limit == nil or otpm_limit == nil
+    or requested_input == nil or requested_output == nil
     or (rpm_limit > 0 and rpm_limit < 1)
     or (tpm_limit > 0 and tpm_limit < 1)
     or (concurrency_limit > 0 and concurrency_limit < 1)
-    or (tpm_limit > 0 and requested_tokens < 1)
+    or ((tpm_limit > 0 or itpm_limit > 0 or otpm_limit > 0) and requested_tokens < 1)
+    or (itpm_limit > 0 and requested_input > requested_tokens)
+    or (otpm_limit > 0 and requested_output > requested_tokens)
     or lease_ttl < 1
     or (report_allowance ~= "0" and report_allowance ~= "1")
     or type(lease_id) ~= "string" or #lease_id < 1 or #lease_id > 128 then
@@ -133,12 +141,16 @@ if track_concurrency then
   lease_expires_at_ms = now_ms + lease_ttl
 end
 
-local rate_enabled = rpm_limit > 0 or tpm_limit > 0
+local rate_enabled = rpm_limit > 0 or tpm_limit > 0 or itpm_limit > 0 or otpm_limit > 0
 local rate_is_current = false
 local rpm = 0
 local tpm = 0
+local itpm = 0
+local otpm = 0
 local class_rpm = 0
 local class_tpm = 0
+local class_itpm = 0
+local class_otpm = 0
 
 -- What a limit leaves once used is spent. A counter above its limit, which a
 -- reconciliation or a lowered limit can leave, allows nothing rather than a
@@ -225,11 +237,23 @@ if rate_enabled then
     end
   end
 
+  if rate_is_current and (itpm_limit > 0 or otpm_limit > 0) then
+    local split = redis.call("HMGET", KEYS[1], "itpm", "otpm")
+    itpm = split[1] == false and 0 or parse_safe_unsigned_integer(split[1])
+    otpm = split[2] == false and 0 or parse_safe_unsigned_integer(split[2])
+    if itpm == nil or otpm == nil then
+      return failure("malformed_rate_state", window_id)
+    end
+  end
+
   if share_class ~= nil and rate_is_current then
-    local held = redis.call("HMGET", KEYS[1], "rpm:" .. share_class, "tpm:" .. share_class)
+    local held = redis.call("HMGET", KEYS[1], "rpm:" .. share_class, "tpm:" .. share_class,
+                             "itpm:" .. share_class, "otpm:" .. share_class)
     class_rpm = held[1] == false and 0 or parse_safe_unsigned_integer(held[1])
     class_tpm = held[2] == false and 0 or parse_safe_unsigned_integer(held[2])
-    if class_rpm == nil or class_tpm == nil then
+    class_itpm = held[3] == false and 0 or parse_safe_unsigned_integer(held[3])
+    class_otpm = held[4] == false and 0 or parse_safe_unsigned_integer(held[4])
+    if class_rpm == nil or class_tpm == nil or class_itpm == nil or class_otpm == nil then
       return failure("malformed_rate_state", window_id)
     end
   end
@@ -244,6 +268,14 @@ if tpm_limit > 0
     and (requested_tokens > tpm_limit or tpm > tpm_limit - requested_tokens) then
   return decision(0, "tpm", window_remaining_ms, 0, rpm, tpm)
 end
+if itpm_limit > 0
+    and (requested_input > itpm_limit or itpm > itpm_limit - requested_input) then
+  return decision(0, "itpm", window_remaining_ms, 0, rpm, tpm)
+end
+if otpm_limit > 0
+    and (requested_output > otpm_limit or otpm > otpm_limit - requested_output) then
+  return decision(0, "otpm", window_remaining_ms, 0, rpm, tpm)
+end
 -- Both sums stay within their limits here, so they are exact.
 if share_class ~= nil then
   if rpm_limit > 0 and not within(rpm_limit, rpm + 1, class_rpm + 1) then
@@ -252,6 +284,14 @@ if share_class ~= nil then
   if tpm_limit > 0
       and not within(tpm_limit, tpm + requested_tokens, class_tpm + requested_tokens) then
     return decision(0, "tpm", window_remaining_ms, 0, rpm, tpm)
+  end
+  if itpm_limit > 0
+      and not within(itpm_limit, itpm + requested_input, class_itpm + requested_input) then
+    return decision(0, "itpm", window_remaining_ms, 0, rpm, tpm)
+  end
+  if otpm_limit > 0
+      and not within(otpm_limit, otpm + requested_output, class_otpm + requested_output) then
+    return decision(0, "otpm", window_remaining_ms, 0, rpm, tpm)
   end
 end
 
@@ -326,7 +366,11 @@ if rate_enabled then
       "rpm",
       rpm_limit > 0 and 1 or 0,
       "tpm",
-      tpm_limit > 0 and requested_tokens or 0
+      tpm_limit > 0 and requested_tokens or 0,
+      "itpm",
+      itpm_limit > 0 and requested_input or 0,
+      "otpm",
+      otpm_limit > 0 and requested_output or 0
     )
     redis.call("PEXPIRE", KEYS[1], window_remaining_ms)
   else
@@ -335,6 +379,12 @@ if rate_enabled then
     end
     if tpm_limit > 0 then
       redis.call("HINCRBY", KEYS[1], "tpm", requested_tokens)
+    end
+    if itpm_limit > 0 then
+      redis.call("HINCRBY", KEYS[1], "itpm", requested_input)
+    end
+    if otpm_limit > 0 then
+      redis.call("HINCRBY", KEYS[1], "otpm", requested_output)
     end
     -- Repair manually-created state without moving the fixed UTC boundary.
     if redis.call("PTTL", KEYS[1]) < 1 then
@@ -347,6 +397,12 @@ if rate_enabled then
     end
     if tpm_limit > 0 then
       redis.call("HINCRBY", KEYS[1], "tpm:" .. share_class, requested_tokens)
+    end
+    if itpm_limit > 0 then
+      redis.call("HINCRBY", KEYS[1], "itpm:" .. share_class, requested_input)
+    end
+    if otpm_limit > 0 then
+      redis.call("HINCRBY", KEYS[1], "otpm:" .. share_class, requested_output)
     end
   end
 end

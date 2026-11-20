@@ -142,30 +142,36 @@ func (r vertexReader) Reconcile(ctx context.Context, settlement batches.Settleme
 	if err != nil {
 		return nil, err
 	}
-	query := url.Values{"pageSize": {fmt.Sprint(listPageSize)}, "filter": {`labels.olp_submission="` + submission.Label + `"`}}
-	body, err := r.transport.get(ctx, target, endpoint+"?"+query.Encode(), listingLimit)
-	if err != nil {
-		return nil, tooLarge(err)
-	}
-	var listing struct {
-		Jobs []json.RawMessage `json:"batchPredictionJobs"`
-	}
-	if json.Unmarshal(body, &listing) != nil {
-		return nil, ErrProviderConflict
-	}
-	return vertexMatches(listing.Jobs, submission.Label)
-}
-
-func vertexMatches(jobs []json.RawMessage, label string) ([]Snapshot, error) {
 	var matches []Snapshot
-	for _, raw := range jobs {
+	listErr := walkPages(func(token string, _ int) ([]json.RawMessage, string, error) {
+		query := url.Values{"pageSize": {fmt.Sprint(listPageSize)}, "filter": {`labels.olp_submission="` + submission.Label + `"`}}
+		if token != "" {
+			query.Set("pageToken", token)
+		}
+		body, err := r.transport.get(ctx, target, endpoint+"?"+query.Encode(), listingLimit)
+		if err != nil {
+			return nil, "", tooLarge(err)
+		}
+		var page struct {
+			Jobs []json.RawMessage `json:"batchPredictionJobs"`
+			Next string            `json:"nextPageToken"`
+		}
+		if json.Unmarshal(body, &page) != nil {
+			return nil, "", ErrProviderConflict
+		}
+		return page.Jobs, page.Next, nil
+	}, func(raw json.RawMessage) (bool, error) {
 		job, err := decodeVertexJob(raw)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		if job.Labels["olp_submission"] == label {
+		if job.Labels["olp_submission"] == submission.Label {
 			matches = append(matches, job.snapshot(raw))
 		}
+		return false, nil
+	})
+	if listErr != nil {
+		return nil, listErr
 	}
 	return matches, nil
 }

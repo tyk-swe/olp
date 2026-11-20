@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -31,6 +33,25 @@ func readGapEvidence(ctx context.Context, q database.Queryer, f Filters) (int64,
 		return 0, 0, errInvalidUsageCount
 	}
 	return events, uncertain, nil
+}
+
+const gapDaysSQL = `SELECT day
+    FROM generate_series($1::timestamptz, $2::timestamptz - interval '24 hours', interval '24 hours') day
+   WHERE EXISTS (SELECT 1 FROM olp.request_metadata_ingestion_gaps
+                  WHERE last_observed_at >= day AND first_observed_at < day + interval '24 hours')
+      OR EXISTS (SELECT 1 FROM olp.request_metadata_gap_hourly
+                  WHERE last_observed_at >= day AND first_observed_at < day + interval '24 hours')`
+
+func ReadGapDays(ctx context.Context, q database.Queryer, start, end time.Time) ([]time.Time, error) {
+	rows, err := q.Query(ctx, gapDaysSQL, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("read request metadata gap days: %w", err)
+	}
+	days, err := pgx.CollectRows(rows, pgx.RowTo[time.Time])
+	if err != nil {
+		return nil, fmt.Errorf("read request metadata gap days: %w", err)
+	}
+	return days, nil
 }
 
 // readCoverage counts the partial boundary hours the range cannot include

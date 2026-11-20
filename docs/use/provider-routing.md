@@ -197,7 +197,7 @@ the period's list-cost weight, as [Pricing](../operate/pricing.md#commitments) d
 
 Connection `options.limits` and slot RPM/TPM/concurrency both apply. Valkey owns UTC
 minutes/leases; configured quotas fail closed. Logical quota identity survives
-rotation. Dispatched token reservations cannot decrease; settlement releases
+rotation. Dispatched combined token reservations cannot decrease; settlement releases
 concurrency. `priority_shares` sum to 100 across critical/high/normal/low, with
 `saturation_percent` 1–100. Below saturation any class borrows idle capacity;
 above it atomic shares preserve headroom across replicas:
@@ -205,6 +205,33 @@ above it atomic shares preserve headroom across replicas:
 ```json
 {"max_concurrency":40,"priority_shares":{"critical":50,"high":25,"normal":20,"low":5},"saturation_percent":60}
 ```
+
+Providers with separate input and output quotas take `input_tokens_per_minute` and
+`output_tokens_per_minute` on connection `options.limits` and on each slot, beside
+`tokens_per_minute`. Each configured dimension enforces independently, an unset one is
+unbounded, and a combined-only configuration behaves as before. Before dispatch, one
+atomic reservation holds the estimated input and a bounded output allowance against the
+connection and slot counters shared by every replica, without changing the request. The
+output allowance is the reply bound the request or provider defaults name, or 4096 tokens
+when neither does, per requested candidate. Subscription code requests and Gemini
+interaction continuations hold the same allowance. A request exceeding either dimension is
+refused on that target before dispatch and routing tries the next candidate; the refusal
+names the exhausted dimension. When usage is reported, the input and output counters
+settle to it, with input excluding tokens read from the provider prompt cache, so unused
+output allowance returns within the same minute. Missing or uncertain usage keeps the
+reservation, any settlement applies at most once, and the combined counter still never
+decreases.
+
+OLP accounting differs from a provider's in ways an operator setting split limits should
+expect. OLP windows are fixed UTC minutes, while providers commonly replenish
+continuously, so capacity returns at different moments. OLP input is an estimate from its
+own tokenizer until the upstream reports usage, and its estimate counts the whole prompt
+while a provider may exclude cache reads from the start. OLP holds the full output bound
+until the attempt ends, while a provider counts output tokens as they are produced and
+ignores the bound, so a large `max_tokens` holds output capacity here that costs nothing
+upstream; keep it near the expected reply size. A request whose output bound alone exceeds
+the output limit never dispatches on that target. During a rolling deploy, split limits
+enforce fully only once every replica runs a build that knows them.
 
 Connection/slot day/month supply caps use exact-decimal PostgreSQL facts/Valkey
 snapshots and per-attempt holds. Unknown windows skip as

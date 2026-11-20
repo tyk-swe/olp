@@ -1745,13 +1745,13 @@ type pinnedLimitCounter struct {
 
 func (c pinnedLimitCounter) Do(_ context.Context, args ...string) (any, error) {
 	switch len(args) {
-	case 12:
+	case 16:
 		if c.used[args[3]] {
 			return []any{int64(2), int64(0), "rpm", int64(30000), int64(42), int64(0)}, nil
 		}
 		c.used[args[3]] = true
 		return []any{int64(2), int64(1), "ok", int64(0), int64(42), int64(0)}, nil
-	case 9:
+	case 11:
 		delete(c.used, args[3])
 		return int64(1), nil
 	default:
@@ -1780,7 +1780,7 @@ func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
 	}
 	h.gateway.health.ReleaseProbe(unsent.Provider.ID)
 	reserve := func(p *Pin) gateResult {
-		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, 1, time.Minute, "")
+		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, quota.CombinedDemand(1), time.Minute, "")
 	}
 	first := reserve(sent)
 	if first.verdict != gateAdmitted {
@@ -2375,6 +2375,8 @@ func TestARouteRetriesAProviderOnlyUnderItsRetryRuleThenMovesOnAndSaysWhyNoProvi
 	const always = 1 << 20
 	brief := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1}}
 	patient := routing.Retry{classRateLimit: {MaxRetries: 2, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
+	serverRetry := routing.Retry{ClassUpstreamServer: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}}
+	serverRetryWithHint := routing.Retry{ClassUpstreamServer: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1, RespectRetryAfter: true}}
 	limited := &routing.Limits{RequestsPerMinute: new(int64(5))}
 	for name, tc := range map[string]struct {
 		retry      routing.Retry
@@ -2404,6 +2406,18 @@ func TestARouteRetriesAProviderOnlyUnderItsRetryRuleThenMovesOnAndSaysWhyNoProvi
 		"a wait the provider asks for past the deadline is not taken": {
 			retry: patient, refusals: [2]int64{always, 0}, refusal: http.StatusTooManyRequests, retryAfter: "60", deadline: 400,
 			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"an unavailable provider asking for a wait past the deadline is skipped": {
+			retry: serverRetryWithHint, refusals: [2]int64{1, 0}, refusal: http.StatusServiceUnavailable, retryAfter: "60", deadline: 400,
+			status: http.StatusOK, calls: [2]int64{1, 1}, retries: []int{0, 0},
+		},
+		"an unavailable provider is retried without opting in to its wait": {
+			retry: serverRetry, refusals: [2]int64{1, 0}, refusal: http.StatusServiceUnavailable, retryAfter: "60", deadline: 400,
+			status: http.StatusOK, calls: [2]int64{2, 0}, retries: []int{0, 1},
+		},
+		"another server error does not set the retry wait": {
+			retry: serverRetryWithHint, refusals: [2]int64{1, 0}, refusal: http.StatusInternalServerError, retryAfter: "60", deadline: 400,
+			status: http.StatusOK, calls: [2]int64{2, 0}, retries: []int{0, 1},
 		},
 		"every provider failing reports the last failure": {
 			refusals: [2]int64{always, always}, refusal: http.StatusInternalServerError,

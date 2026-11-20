@@ -450,7 +450,7 @@ func (q inferenceRequest) referenced(body []byte) ([]byte, *fault.Error) {
 		return body, nil
 	}
 	identity := responseNativeIdentity(x, &x.facts[len(x.facts)-1], "")
-	mapped, err := q.server.mapGenerationResultReferences(q.r.Context(), x, identity, body)
+	mapped, err := q.server.mapGenerationResultReferences(q.r.Context(), x, liveResult(identity), body)
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
 	}

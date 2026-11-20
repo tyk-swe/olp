@@ -306,6 +306,7 @@ type Request struct {
 	Operation        Operation
 	PreviousResponse string
 	Estimate         int64
+	OutputCap        int64
 }
 
 func ValidateModels(models []string) error {

@@ -153,12 +153,20 @@ func (s *Server) selectPin(ctx context.Context, x *Call, route *routing.Route, o
 }
 
 func (s *Server) SelectPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
-	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
+	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, resourceDemand(x), nil, qualified)
+}
+
+func (s *Server) SelectGenerationPin(ctx context.Context, x *Call, route *routing.Route, surface, mode string, replyBound int64, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
+	return s.selectBoundPinSurface(ctx, x, route, "generation", surface, mode, quota.GenerationDemand(x.estimate, replyBound, 1), nil, qualified)
+}
+
+func resourceDemand(x *Call) quota.TokenDemand {
+	return quota.CombinedDemand(max(resourceEstimate, x.estimate))
 }
 
 type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
 
-func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*Pin, *fault.Error) {
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, demand quota.TokenDemand, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*Pin, *fault.Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -242,7 +250,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, demand, deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &Pin{Target: target, Provider: provider, attempt: attempt, Slot: *slot, Model: attempt.UpstreamModel, Hold: gate.hold}, nil
@@ -371,7 +379,7 @@ func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority key
 	if p.Hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, s.Now().Add(overall), "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(resourceEstimate), s.Now().Add(overall), "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
@@ -549,6 +557,16 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			if !valid || upstream == "" {
 				return nil, resources.ErrContract
 			}
+			if name == "input_file_id" {
+				var source struct {
+					InputFileID string `json:"input_file_id"`
+				}
+				if err := json.Unmarshal(contract.Source, &source); err != nil || source.InputFileID == "" {
+					return nil, resources.ErrContract
+				}
+				files[name] = source.InputFileID
+				continue
+			}
 			mapped, err := s.mapUpstreamFile(ctx, res, upstream, strings.TrimSuffix(name, "_file_id"))
 			if err != nil {
 				return nil, err
@@ -593,7 +611,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = kind, upstreamID
-	if existing, err := s.Deps.Resources.GetByUpstream(ctx, identity); err == nil {
+	if existing, err := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -633,7 +651,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		}
 		// Another authorized poll may have installed the same output-file
 		// mapping concurrently. A collision owned by someone else still fails.
-		if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+		if existing, readErr := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); readErr == nil {
 			return existing, nil
 		}
 		return nil, err
@@ -642,7 +660,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.Deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
+	if existing, readErr := s.Deps.Resources.GetBatchFileByUpstream(ctx, identity, owner.UUID); readErr == nil {
 		return existing, nil
 	}
 	return nil, err

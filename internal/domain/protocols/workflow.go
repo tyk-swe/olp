@@ -333,6 +333,9 @@ func WorkflowTurns(family wire.Format, completion *wire.Completion, results []Wo
 		})
 		return slices.Concat(arr(fields["output"]), turns), nil
 	}
+	if family.Surface() == "gemini" && len(completion.Body) > 0 {
+		return workflowGeminiTurns(completion, results)
+	}
 	messages := slices.Collect(func(yield func(Message) bool) {
 		if !yield(Message{Role: "assistant", Parts: []Part{{Text: completion.OutputText}}, Calls: completion.ToolCalls}) {
 			return
@@ -360,6 +363,44 @@ func WorkflowTurns(family wire.Format, completion *wire.Completion, results []Wo
 		return nil, err
 	}
 	return slices.Concat([]json.RawMessage{assistant}, turns[1:]), nil
+}
+
+func workflowGeminiTurns(completion *wire.Completion, results []WorkflowResult) ([]json.RawMessage, error) {
+	assistant, err := workflowAssistant(wire.Gemini, completion.Body)
+	if err != nil {
+		return nil, err
+	}
+	content, err := object(assistant)
+	if err != nil || len(completion.ToolCalls) != len(results) {
+		return nil, unsupported("workflow Gemini tool results")
+	}
+	responses := make([]Object, 0, len(results))
+	for _, value := range arr(content["parts"]) {
+		part, err := object(value)
+		if err != nil {
+			return nil, err
+		}
+		if !present(part["functionCall"]) {
+			continue
+		}
+		callIndex := len(responses)
+		if callIndex >= len(results) {
+			return nil, unsupported("workflow Gemini tool results")
+		}
+		call, result := completion.ToolCalls[callIndex], results[callIndex]
+		nativeID, name := workflowGeminiID(part["functionCall"])
+		if call.ID == "" || result.CallID != call.ID || name == "" || name != call.Name || nativeID != "" && nativeID != call.ID {
+			return nil, unsupported("workflow Gemini tool results")
+		}
+		responses = append(responses, geminiFunctionResponse(name, nativeID, result.Content))
+	}
+	if len(responses) != len(results) {
+		return nil, unsupported("workflow Gemini tool results")
+	}
+	if len(responses) == 0 {
+		return []json.RawMessage{assistant}, nil
+	}
+	return []json.RawMessage{assistant, raw(Object{"role": raw("user"), "parts": raw(responses)})}, nil
 }
 
 func workflowEncoding(family wire.Format, generation *Generation) (Object, error) {

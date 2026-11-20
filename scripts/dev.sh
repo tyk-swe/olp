@@ -12,10 +12,14 @@ done
 for generated in console/src/lib/management/schema.d.ts console/src/lib/management/requirements.ts; do
   test -f "$generated" || { echo 'Console types are missing. Run make setup' >&2; exit 1; }
 done
-docker compose -f deploy/compose.dev.yaml up -d --wait
-export OLP_DATABASE_URL="postgres://olp:olp-local@127.0.0.1:${OLP_POSTGRES_PORT:-54321}/olp?sslmode=disable"
-export OLP_CACHE_VALKEY_URL="redis://:olp-local@127.0.0.1:${OLP_CACHE_VALKEY_PORT:-63792}/0"
-export OLP_VALKEY_URL="redis://:olp-local@127.0.0.1:${OLP_VALKEY_PORT:-63791}/0"
+compose=(docker compose -f deploy/compose.dev.yaml)
+"${compose[@]}" up -d --wait
+postgres_addr=$("${compose[@]}" port postgres 5432)
+valkey_addr=$("${compose[@]}" port valkey 6379)
+cache_addr=$("${compose[@]}" port cache 6379)
+export OLP_DATABASE_URL="postgres://olp:olp-local@$postgres_addr/olp?sslmode=disable"
+export OLP_VALKEY_URL="redis://:olp-local@$valkey_addr/0"
+export OLP_CACHE_VALKEY_URL="redis://:olp-local@$cache_addr/0"
 export OLP_LISTEN_ADDR=127.0.0.1:8082
 export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:9092
 export OLP_PUBLIC_ORIGIN=http://127.0.0.1:5173

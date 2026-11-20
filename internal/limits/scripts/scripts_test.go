@@ -146,6 +146,68 @@ func TestReserveRateRejectsMalformedResponses(t *testing.T) {
 	}
 }
 
+func TestReserveRateNamesTheSplitDimensionItRefused(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		detail string
+		want   limits.Dimension
+	}{
+		{"itpm", limits.DimensionInputTokens},
+		{"otpm", limits.DimensionOutputTokens},
+	} {
+		t.Run(test.detail, func(t *testing.T) {
+			t.Parallel()
+			client := &scripted{answer: func([]string) (any, error) {
+				return headReply(0, test.detail, 30_000, testWindow, 0), nil
+			}}
+			runner, err := NewRunner(client, "olp:test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.ReserveRate(t.Context(), RateReservation{
+				Lookup: "lookup_one_abc", LeaseID: "lease", Tokens: 50, InputTokens: 40, OutputTokens: 10,
+				InputTokensPerMinute: 2000, OutputTokensPerMinute: 500, TTL: time.Second,
+			})
+			exceeded, ok := errors.AsType[*limits.ExceededError](err)
+			if !ok || exceeded.Dimension != test.want || exceeded.RetryAfter != 30*time.Second {
+				t.Fatalf("ReserveRate refusal = %v, want %v after 30s", err, test.want)
+			}
+			commands := client.commands()
+			if len(commands) != 1 {
+				t.Fatalf("sent %v, want one command", commands)
+			}
+			lease := slices.Index(commands[0], "lease")
+			if lease < 0 || !slices.Equal(commands[0][lease:], []string{"lease", "1000", "0", "2000", "500", "40", "10"}) {
+				t.Fatalf("reservation args after the lease = %v", commands[0])
+			}
+		})
+	}
+}
+
+func TestUsageReportsTheSplitCounters(t *testing.T) {
+	t.Parallel()
+	runner, err := NewRunner(&scripted{answer: func([]string) (any, error) {
+		return []any{int64(3), int64(90), int64(2), int64(70), int64(20)}, nil
+	}}, "olp:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := runner.Usage(t.Context(), "lookup_one_abc")
+	want := Usage{RequestsThisMinute: 3, TokensThisMinute: 90, ConcurrentRequests: 2, InputTokensThisMinute: 70, OutputTokensThisMinute: 20}
+	if err != nil || usage != want {
+		t.Fatalf("Usage = %+v, %v; want %+v", usage, err, want)
+	}
+	short, err := NewRunner(&scripted{answer: func([]string) (any, error) {
+		return []any{int64(3), int64(90), int64(2)}, nil
+	}}, "olp:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := short.Usage(t.Context(), "lookup_one_abc"); !errors.Is(err, limits.ErrUnexpectedResponse) {
+		t.Fatalf("Usage with a three-counter reply = %v, want ErrUnexpectedResponse", err)
+	}
+}
+
 func TestSupplyLoadsMissingScripts(t *testing.T) {
 	t.Parallel()
 	refusal := errors.New("NOSCRIPT No matching script. Please use EVAL.")

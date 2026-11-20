@@ -4872,6 +4872,7 @@ const (
 	NotificationEventReportSpend               NotificationEvent = "report.spend"
 	NotificationEventRouteLatency              NotificationEvent = "route.latency"
 	NotificationEventRuntimeInstallFailed      NotificationEvent = "runtime.install_failed"
+	NotificationEventSpendSpike                NotificationEvent = "spend.spike"
 	NotificationEventWorkerStale               NotificationEvent = "worker.stale"
 )
 
@@ -4901,6 +4902,8 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventRouteLatency:
 		return true
 	case NotificationEventRuntimeInstallFailed:
+		return true
+	case NotificationEventSpendSpike:
 		return true
 	case NotificationEventWorkerStale:
 		return true
@@ -10327,13 +10330,15 @@ type ConfigurationSlotEntry struct {
 // ConfigurationSlotLimits defines model for ConfigurationSlotLimits.
 type ConfigurationSlotLimits struct {
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MaxConcurrency nullable.Nullable[int64]  `json:"max_concurrency"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int64]  `json:"max_concurrency"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int64]          `json:"requests_per_minute"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int64]          `json:"requests_per_minute"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -10405,13 +10410,15 @@ type ConfigurationWorkloadMappingScopes string
 // ConnectionLimits defines model for ConnectionLimits.
 type ConnectionLimits struct {
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -10822,7 +10829,7 @@ type CreateNotificationDestinationRequest_Secret struct {
 // CreateNotificationDestinationRequestType Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
 type CreateNotificationDestinationRequestType string
 
-// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, and spend.spike requires a project.
 type CreateNotificationRuleRequest struct {
 	// Configuration Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.
 	Configuration *map[string]interface{} `json:"configuration,omitempty"`
@@ -10831,7 +10838,7 @@ type CreateNotificationRuleRequest struct {
 	// Enabled Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent `json:"event"`
 	Name  string            `json:"name"`
 
@@ -11016,17 +11023,19 @@ type CredentialSlot struct {
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	Enabled        *bool                     `json:"enabled,omitempty"`
-	Id             *openapi_types.UUID       `json:"id,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled              *bool                     `json:"enabled,omitempty"`
+	Id                   *openapi_types.UUID       `json:"id,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	Name              *string                           `json:"name,omitempty"`
-	Priority          *int32                            `json:"priority,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name                  *string                           `json:"name,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	Priority              *int32                            `json:"priority,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -11044,20 +11053,22 @@ type CredentialSlotDetail struct {
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 
 	// DailyCostLimit Exact decimal amount in the installation currency.
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	Enabled        *bool                     `json:"enabled,omitempty"`
-	Etag           openapi_types.UUID        `json:"etag"`
-	Id             *openapi_types.UUID       `json:"id,omitempty"`
-	IsDefault      bool                      `json:"is_default"`
-	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	DailyCostLimit       nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled              *bool                     `json:"enabled,omitempty"`
+	Etag                 openapi_types.UUID        `json:"etag"`
+	Id                   *openapi_types.UUID       `json:"id,omitempty"`
+	InputTokensPerMinute nullable.Nullable[int64]  `json:"input_tokens_per_minute,omitempty"`
+	IsDefault            bool                      `json:"is_default"`
+	MaxConcurrency       nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MonthlyCostLimit Exact decimal amount in the installation currency.
-	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
-	Name              *string                           `json:"name,omitempty"`
-	Priority          *int32                            `json:"priority,omitempty"`
-	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
-	ProviderId        openapi_types.UUID                `json:"provider_id"`
-	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+	MonthlyCostLimit      nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name                  *string                           `json:"name,omitempty"`
+	OutputTokensPerMinute nullable.Nullable[int64]          `json:"output_tokens_per_minute,omitempty"`
+	Priority              *int32                            `json:"priority,omitempty"`
+	PriorityShares        nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	ProviderId            openapi_types.UUID                `json:"provider_id"`
+	RequestsPerMinute     nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
@@ -12649,7 +12660,7 @@ type NotificationDelivery struct {
 	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
 	DueAt               nullable.Nullable[time.Time]          `json:"due_at,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event         NotificationEvent            `json:"event"`
 	Id            openapi_types.UUID           `json:"id"`
 	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
@@ -12724,7 +12735,7 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 type NotificationEvent string
 
 // NotificationRule A notification rule subscribes a destination to an event. budget.threshold rules name a subject, window and threshold; key.expiring names an api_key subject and takes lead_time_seconds; generic events carry configuration only. Generic rules are capped at 1000 per installation.
@@ -12739,7 +12750,7 @@ type NotificationRule struct {
 	Enabled         bool                   `json:"enabled"`
 	Etag            openapi_types.UUID     `json:"etag"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent  `json:"event"`
 	Id    openapi_types.UUID `json:"id"`
 	Name  string             `json:"name"`
@@ -14437,9 +14448,11 @@ type ProviderProfilePlugin struct {
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
 type ProviderQuotaUsage struct {
-	ConcurrentRequests int64 `json:"concurrent_requests"`
-	RequestsThisMinute int64 `json:"requests_this_minute"`
-	TokensThisMinute   int64 `json:"tokens_this_minute"`
+	ConcurrentRequests     int64 `json:"concurrent_requests"`
+	InputTokensThisMinute  int64 `json:"input_tokens_this_minute"`
+	OutputTokensThisMinute int64 `json:"output_tokens_this_minute"`
+	RequestsThisMinute     int64 `json:"requests_this_minute"`
+	TokensThisMinute       int64 `json:"tokens_this_minute"`
 }
 
 // ProviderResourceContract defines model for ProviderResourceContract.
