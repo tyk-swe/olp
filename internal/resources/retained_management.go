@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -91,28 +92,32 @@ func (m *Management) retainedEvidence(r *http.Request, _ authz.Principal) (httpk
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, p, err := m.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = p.Authorize(authz.Settings); err != nil {
-		return httpkit.Reply{}, err
-	}
-	resource, err := m.retainedManagementResource(r, tx, p)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
+	return access.Transact(m.Access, r, func(tx pgx.Tx, p authz.Principal) (*Resource, error) {
+		if err := p.Authorize(authz.Settings); err != nil {
+			return nil, err
+		}
+		return m.retainedManagementResource(r, tx, p)
+	}, func(tx pgx.Tx, p authz.Principal, resource *Resource) (httpkit.Reply, access.Event, error) {
+		status, err := m.recordRetainedEvidence(r.Context(), tx, p, resource, input)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}),
+			access.Event{Action: "provider_resource.usage_evidence", Resource: "provider_resource", ID: resource.UUID.String()}, nil
+	})
+}
+
+func (m *Management) recordRetainedEvidence(ctx context.Context, tx pgx.Tx, p authz.Principal, resource *Resource, input retainedEvidenceInput) (string, error) {
 	var raw []byte
 	var operation string
-	if err = tx.QueryRow(r.Context(), `SELECT templates,operation FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, resource.UUID).Scan(&raw, &operation); errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
+	if err := tx.QueryRow(ctx, `SELECT templates,operation FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, resource.UUID).Scan(&raw, &operation); errors.Is(err, pgx.ErrNoRows) {
+		return "", httpkit.Fail(404, "settlement_not_found", "This resource has no retained settlement owner.")
 	} else if err != nil {
-		return httpkit.Reply{}, err
+		return "", err
 	}
 	var templates map[string]*usage.Event
-	if err = json.Unmarshal(raw, &templates); err != nil {
-		return httpkit.Reply{}, err
+	if err := json.Unmarshal(raw, &templates); err != nil {
+		return "", err
 	}
 	model := input.Model
 	if model == "" && len(templates) == 1 {
@@ -121,36 +126,16 @@ func (m *Management) retainedEvidence(r *http.Request, _ authz.Principal) (httpk
 		}
 	}
 	if templates[model] == nil {
-		return httpkit.Reply{}, httpkit.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
+		return "", httpkit.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
 	}
-	u := usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{InvocationCount: input.InvocationCount, TrainingTokens: input.TrainingTokens, StorageByteSeconds: input.StorageByteSeconds, CacheTokenSeconds: input.CacheTokenSeconds, ContainerSessions: input.ContainerSessions, InputTokens: input.InputTokens, OutputTokens: input.OutputTokens, CachedInputTokens: input.CachedInputTokens}}
-	var lines []RetainedEvidenceLine
-	add := func(component, tier string, v usage.AttemptUsage) {
-		lines = append(lines, RetainedEvidenceLine{Component: component, Model: model, MemoryTier: tier, Start: input.Start, End: input.End, Usage: v})
-	}
-	switch operation {
-	case "fine_tuning":
-		add("training", "", u)
-	case "vector_store":
-		add("storage", "", u)
-	case "context_cache":
-		add("cache_storage", "", u)
-	case "eval":
-		add("generation", "", u)
-	case "container":
-		for tier, count := range input.ContainerSessions {
-			v := u
-			v.ContainerSessions = map[string]int64{tier: count}
-			add("container", tier, v)
-		}
-	}
+	lines := retainedEvidenceLines(operation, model, input)
 	if len(lines) == 0 {
-		return httpkit.Reply{}, httpkit.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
+		return "", httpkit.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
 	}
 	store := New(m.Pool)
-	verified, terminatedAt, err := store.RetainedEvidenceTerminationTx(r.Context(), tx, resource.UUID)
+	verified, terminatedAt, err := store.RetainedEvidenceTerminationTx(ctx, tx, resource.UUID)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return "", err
 	}
 	observed := time.Now().UTC()
 	if verified && terminatedAt != nil {
@@ -158,23 +143,38 @@ func (m *Management) retainedEvidence(r *http.Request, _ authz.Principal) (httpk
 	}
 	// A client terminal flag cannot supply the remote-termination proof.
 	observation := RetainedObservation{Lines: lines, ObservedAt: observed, RemoteTerminated: verified, CoverageComplete: input.Terminal}
-	_, err = store.ApplyRetainedEvidenceTx(r.Context(), tx, resource.UUID, input.IdempotencyKey, input.EvidenceDigest, "operator_verified", p.Kind+":"+p.ID, observation, nil)
+	_, err = store.ApplyRetainedEvidenceTx(ctx, tx, resource.UUID, input.IdempotencyKey, input.EvidenceDigest, "operator_verified", p.Kind+":"+p.ID, observation, nil)
 	if errors.Is(err, ErrEvidenceConflict) {
-		return httpkit.Reply{}, httpkit.Fail(409, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
+		return "", httpkit.Fail(409, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
 	}
 	if errors.Is(err, ErrContract) {
-		return httpkit.Reply{}, httpkit.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
+		return "", httpkit.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
 	}
 	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider_resource.usage_evidence", "provider_resource", resource.UUID.String(), "success"); err != nil {
-		return httpkit.Reply{}, err
+		return "", err
 	}
 	var status string
-	err = tx.QueryRow(r.Context(), `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, resource.UUID).Scan(&status)
-	if err != nil {
-		return httpkit.Reply{}, err
+	err = tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1`, resource.UUID).Scan(&status)
+	return status, err
+}
+
+func retainedEvidenceLines(operation, model string, input retainedEvidenceInput) []RetainedEvidenceLine {
+	u := usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{InvocationCount: input.InvocationCount, TrainingTokens: input.TrainingTokens, StorageByteSeconds: input.StorageByteSeconds, CacheTokenSeconds: input.CacheTokenSeconds, ContainerSessions: input.ContainerSessions, InputTokens: input.InputTokens, OutputTokens: input.OutputTokens, CachedInputTokens: input.CachedInputTokens}}
+	line := func(component, tier string, v usage.AttemptUsage) RetainedEvidenceLine {
+		return RetainedEvidenceLine{Component: component, Model: model, MemoryTier: tier, Start: input.Start, End: input.End, Usage: v}
 	}
-	return httpkit.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}), tx.Commit(r.Context())
+	components := map[string]string{"fine_tuning": "training", "vector_store": "storage", "context_cache": "cache_storage", "eval": "generation"}
+	if component, ok := components[operation]; ok {
+		return []RetainedEvidenceLine{line(component, "", u)}
+	}
+	if operation != "container" {
+		return nil
+	}
+	lines := make([]RetainedEvidenceLine, 0, len(input.ContainerSessions))
+	for tier, count := range input.ContainerSessions {
+		v := u
+		v.ContainerSessions = map[string]int64{tier: count}
+		lines = append(lines, line("container", tier, v))
+	}
+	return lines
 }

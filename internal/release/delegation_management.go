@@ -49,61 +49,68 @@ func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (http
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var projectID *string
-	if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+		options, err := s.delegationOptions(r.Context(), tx, principal, keyID)
+		if err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{}, err
+		return httpkit.OK(struct {
+			Agents []delegationOption `json:"agents"`
+		}{Agents: options}), access.Event{}, nil
+	})
+}
+
+func (s *DelegationManagement) delegationOptions(ctx context.Context, tx pgx.Tx, principal authz.Principal, keyID string) ([]delegationOption, error) {
+	var projectID *string
+	if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		}
+		return nil, err
 	}
 	if projectID == nil {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return nil, httpkit.Forbidden()
 	}
 	if err := principal.Project(projectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
-	rows, err := tx.Query(r.Context(), "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
+	rows, err := tx.Query(ctx, "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
 	routes, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
-	toolsetRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
+	toolsetRows, err := tx.Query(ctx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
 	toolsets, err := pgx.CollectRows(toolsetRows, pgx.RowTo[string])
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
-	agentRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
+	agentRows, err := tx.Query(ctx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
 	agents, err := pgx.CollectRows(agentRows, pgx.RowTo[string])
 	if err != nil {
-		return httpkit.Reply{}, err
+		return nil, err
 	}
 	var current string
-	if err := tx.QueryRow(r.Context(), "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
-		return httpkit.Reply{}, err
+	if err := tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
+		return nil, err
 	}
 	s.Manager.mu.RLock()
 	defer s.Manager.mu.RUnlock()
 	state := s.Manager.authority
 	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+		return nil, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return nil, httpkit.Forbidden()
 	}
 	now := time.Now()
 	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
@@ -141,10 +148,7 @@ func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (http
 			}
 		}
 	}, func(left, right delegationOption) int { return cmp.Compare(left.ID, right.ID) })
-	return httpkit.Reply{Status: http.StatusOK, Body: struct {
-		Agents []delegationOption `json:"agents"`
-	}{Agents: append([]delegationOption{}, options...)}}, tx.Commit(r.Context())
-
+	return append([]delegationOption{}, options...), nil
 }
 
 func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
