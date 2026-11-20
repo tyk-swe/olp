@@ -12251,6 +12251,86 @@
         },
         "type": "object"
       },
+      "RouteContextWindowPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.",
+        "properties": {
+          "input_breakdown": {
+            "description": "Input tokens by category, summing to estimated_input_tokens. Null for a caller-supplied estimate.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteInputTokenBreakdown"
+              }
+            ]
+          },
+          "retained_context_unknown": {
+            "type": "boolean",
+            "description": "The request references provider-held or opaque context not included in the inline estimate."
+          },
+          "remaining_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Model context length less estimated input and any output bound used by the preview, per completion. Negative means over the window. Null if the limit, input or retained context is unknown."
+          }
+        },
+        "required": [
+          "input_breakdown",
+          "retained_context_unknown",
+          "remaining_tokens"
+        ]
+      },
+      "RouteInputTokenBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Counts for the prompt checked against the window. For batched completions, this is the largest prompt. Unclassified includes framing and counted material outside the named categories.",
+        "properties": {
+          "instructions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "conversation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_schemas": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_calls_results": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "media": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unclassified": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "instructions",
+          "conversation",
+          "tool_schemas",
+          "tool_calls_results",
+          "media",
+          "unclassified"
+        ]
+      },
       "RoutingDecision": {
         "properties": {
           "attempt": {
@@ -12266,6 +12346,9 @@
               "integer",
               "null"
             ]
+          },
+          "context_window": {
+            "$ref": "#/components/schemas/RouteContextWindowPreview"
           },
           "credential_slot_id": {
             "format": "uuid",

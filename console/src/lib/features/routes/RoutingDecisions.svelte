@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { formatDate } from '#lib/format.js';
+  import { formatDate, formatInteger } from '#lib/format.js';
   import {
+    inputBreakdownRows,
     orderedRows,
     type ExplanationRow
   } from '#lib/features/routes/routingExplanation.js';
@@ -8,6 +9,7 @@
   let { rows }: { rows: ExplanationRow[] } = $props();
   const ordered = $derived(orderedRows(rows));
   const attempted = $derived(rows.some((row) => row.attempt !== null));
+  const tokens = (value: number) => `${formatInteger(value)} tokens`;
 </script>
 
 <div class="routing-decisions" aria-label="Routing explanation">
@@ -52,7 +54,7 @@
               row.performance.observed_at
             ).toLocaleTimeString()}){:else}Not enough recent measurements{/if}
         </dd>
-        {#if row.estimate}<dt>Estimated input</dt>
+        {#if row.estimate && !row.contextWindow}<dt>Estimated input</dt>
           <dd>{row.estimate}</dd>{/if}
         {#if row.estimatedCost}<dt>Estimated cost</dt>
           <dd>
@@ -68,6 +70,60 @@
             : 'Unknown'}
         </dd>
       </dl>
+      {#if row.contextWindow}
+        {@const {
+          input_breakdown,
+          remaining_tokens,
+          retained_context_unknown
+        } = row.contextWindow}
+        <section class="context-window" aria-label="Context window">
+          <h4>Context window</h4>
+          <p>Planning estimates only. No billed usage.</p>
+          <dl>
+            <dt>Model limit</dt>
+            <dd>
+              {row.contextLimit == null ? 'Unknown' : tokens(row.contextLimit)}
+            </dd>
+            <dt>Estimated input</dt>
+            <dd>
+              {row.estimate ?? 'Unknown'}{#if row.estimate && !input_breakdown}
+                · caller estimate{/if}
+            </dd>
+            <dt>Output reservation</dt>
+            <dd>
+              {row.contextOutput == null
+                ? 'No bound applied'
+                : tokens(row.contextOutput)}
+            </dd>
+            <dt>
+              {row.contextOutput == null
+                ? 'Headroom after input'
+                : 'Remaining headroom'}
+            </dt>
+            <dd
+              class:over-limit={remaining_tokens != null &&
+                remaining_tokens < 0}
+            >
+              {#if remaining_tokens == null}Unknown
+              {:else if remaining_tokens < 0}{`${tokens(-remaining_tokens)} over the limit`}
+              {:else}{tokens(remaining_tokens)}{/if}
+            </dd>
+            {#if retained_context_unknown}
+              <dt>Provider-held context</dt>
+              <dd>Unknown and excluded from the input estimate</dd>
+            {/if}
+          </dl>
+          {#if input_breakdown}
+            <h5>Estimated input by category</h5>
+            <dl class="context-breakdown">
+              {#each inputBreakdownRows(input_breakdown) as part (part.label)}
+                <dt>{part.label}</dt>
+                <dd>{formatInteger(part.tokens)}</dd>
+              {/each}
+            </dl>
+          {/if}
+        </section>
+      {/if}
       <InteractionInspector
         inspection={row.interaction}
         incompatibility={row.incompatibility}
@@ -106,6 +162,26 @@
   }
   .excluded {
     opacity: 0.8;
+  }
+  .context-window {
+    border: 1px solid var(--border-hairline);
+    border-radius: 0.5rem;
+    margin: 0.75rem 0;
+    padding: 0.75rem 1rem;
+  }
+  .context-window h4,
+  .context-window h5 {
+    font-size: var(--text-caption);
+    margin: 0;
+  }
+  .context-window p {
+    font-size: var(--text-caption);
+  }
+  .context-breakdown {
+    font-variant-numeric: tabular-nums;
+  }
+  .over-limit {
+    font-weight: 700;
   }
   @media (max-width: 36rem) {
     dl {
