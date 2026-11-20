@@ -194,12 +194,16 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			if err != nil {
 				return err
 			}
-			if found && promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
-				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
-			}
 			in := t.input(projectID)
 			if !found {
 				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
+			}
+			if promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
+				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
+			}
+			same, err := sameTemplate(t, templateOf(stored.TemplateInput, nil))
+			if err != nil || same {
+				return err
 			}
 			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
 		})
