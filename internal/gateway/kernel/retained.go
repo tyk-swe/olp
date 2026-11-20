@@ -382,6 +382,8 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 	}
 	slot.RequestsPerMinute = tighterRetainedLimit(slot.RequestsPerMinute, liveSlot.RequestsPerMinute)
 	slot.TokensPerMinute = tighterRetainedLimit(slot.TokensPerMinute, liveSlot.TokensPerMinute)
+	slot.InputTokensPerMinute = tighterRetainedLimit(slot.InputTokensPerMinute, liveSlot.InputTokensPerMinute)
+	slot.OutputTokensPerMinute = tighterRetainedLimit(slot.OutputTokensPerMinute, liveSlot.OutputTokensPerMinute)
 	slot.MaxConcurrency = tighterRetainedLimit(slot.MaxConcurrency, liveSlot.MaxConcurrency)
 	slot.Supply = tighterRetainedSupply(slot.Supply, liveSlot.Supply)
 	if live.Limits != nil {
@@ -390,10 +392,12 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 			prior = *provider.Limits
 		}
 		provider.Limits = &routing.Limits{
-			RequestsPerMinute: tighterRetainedLimit(prior.RequestsPerMinute, live.Limits.RequestsPerMinute),
-			TokensPerMinute:   tighterRetainedLimit(prior.TokensPerMinute, live.Limits.TokensPerMinute),
-			MaxConcurrency:    tighterRetainedLimit(prior.MaxConcurrency, live.Limits.MaxConcurrency),
-			Supply:            tighterRetainedSupply(prior.Supply, live.Limits.Supply),
+			RequestsPerMinute:     tighterRetainedLimit(prior.RequestsPerMinute, live.Limits.RequestsPerMinute),
+			TokensPerMinute:       tighterRetainedLimit(prior.TokensPerMinute, live.Limits.TokensPerMinute),
+			InputTokensPerMinute:  tighterRetainedLimit(prior.InputTokensPerMinute, live.Limits.InputTokensPerMinute),
+			OutputTokensPerMinute: tighterRetainedLimit(prior.OutputTokensPerMinute, live.Limits.OutputTokensPerMinute),
+			MaxConcurrency:        tighterRetainedLimit(prior.MaxConcurrency, live.Limits.MaxConcurrency),
+			Supply:                tighterRetainedSupply(prior.Supply, live.Limits.Supply),
 		}
 	}
 	route.ContentPolicy = liveRoute.ContentPolicy

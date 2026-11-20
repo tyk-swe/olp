@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -149,6 +150,7 @@ type AttemptFailure struct {
 	overall      bool                // the route deadline, not the attempt deadline, expired
 	dispatched   bool                // the request reached the upstream before the failure
 	quota        string              // a quota this gateway enforces rejected the attempt
+	dimension    limits.Dimension    // the exhausted dimension of that quota, when it named one
 	contractCode string              // safe runtime interaction guard violation
 	policyCode   string              // local output policy refusal after upstream completion
 	noRetry      bool                // outcome uncertainty must not suggest client retries
@@ -223,9 +225,9 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 		// saying so would send the caller looking at the wrong system.
 		switch f.quota {
 		case quota.Connection:
-			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
+			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection " + f.exceededLimit() + " was exceeded.", RetryAfter: f.retryAfter}
 		case quota.Slot:
-			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
+			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential " + f.exceededLimit() + " was exceeded.", RetryAfter: f.retryAfter}
 		}
 		return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classBudget:
@@ -261,6 +263,16 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 		return fault.ServerError(http.StatusBadGateway, "upstream_rejected", message)
 	}
 	return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed.")
+}
+
+func (f *AttemptFailure) exceededLimit() string {
+	switch f.dimension {
+	case limits.DimensionInputTokens:
+		return "input token limit"
+	case limits.DimensionOutputTokens:
+		return "output token limit"
+	}
+	return "limit"
 }
 
 // forwardable reports whether an upstream client-error status is returned to
@@ -328,7 +340,7 @@ func (s *Server) execute(ctx context.Context, x *Call) *Outcome {
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*wire.Completion]{
-		estimate: x.attemptReservation,
+		demand: x.attemptDemand,
 		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *AttemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, fact)
 		},

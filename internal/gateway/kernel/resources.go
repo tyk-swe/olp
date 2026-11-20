@@ -242,7 +242,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *rout
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, quota.CombinedDemand(max(resourceEstimate, x.estimate)), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &Pin{Target: target, Provider: provider, attempt: attempt, Slot: *slot, Model: attempt.UpstreamModel, Hold: gate.hold}, nil
@@ -371,7 +371,7 @@ func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority key
 	if p.Hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, s.Now().Add(overall), "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(resourceEstimate), s.Now().Add(overall), "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

@@ -1745,13 +1745,13 @@ type pinnedLimitCounter struct {
 
 func (c pinnedLimitCounter) Do(_ context.Context, args ...string) (any, error) {
 	switch len(args) {
-	case 12:
+	case 16:
 		if c.used[args[3]] {
 			return []any{int64(2), int64(0), "rpm", int64(30000), int64(42), int64(0)}, nil
 		}
 		c.used[args[3]] = true
 		return []any{int64(2), int64(1), "ok", int64(0), int64(42), int64(0)}, nil
-	case 9:
+	case 11:
 		delete(c.used, args[3])
 		return int64(1), nil
 	default:
@@ -1780,7 +1780,7 @@ func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
 	}
 	h.gateway.health.ReleaseProbe(unsent.Provider.ID)
 	reserve := func(p *Pin) gateResult {
-		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, 1, time.Minute, "")
+		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, quota.CombinedDemand(1), time.Minute, "")
 	}
 	first := reserve(sent)
 	if first.verdict != gateAdmitted {

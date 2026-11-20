@@ -69,8 +69,10 @@ func limit(value *int64) int64 {
 func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error) {
 	id := uuid.Must(uuid.NewV7()).String()
 	reservation := scripts.RateReservation{
-		Lookup: r.Lookup, LeaseID: id, TTL: r.LeaseTTL, Tokens: r.Rate.Tokens,
+		Lookup: r.Lookup, LeaseID: id, TTL: r.LeaseTTL,
+		Tokens: r.Rate.Tokens, InputTokens: r.Rate.InputTokens, OutputTokens: r.Rate.OutputTokens,
 		RequestsPerMinute: limit(r.Rate.RequestsPerMinute), TokensPerMinute: limit(r.Rate.TokensPerMinute),
+		InputTokensPerMinute: limit(r.Rate.InputTokensPerMinute), OutputTokensPerMinute: limit(r.Rate.OutputTokensPerMinute),
 		MaxConcurrency: limit(r.Rate.MaxConcurrency), TrackConcurrency: r.Rate.TrackConcurrency,
 		Stated: r.Rate.reports(),
 	}
@@ -87,7 +89,11 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 			Lookup: r.Lookup, LeaseID: reservation.LeaseID, WindowID: granted.WindowID, Class: r.Rate.Share.Class,
 		},
 		tokens:           r.Rate.Tokens,
+		inputTokens:      r.Rate.InputTokens,
+		outputTokens:     r.Rate.OutputTokens,
 		countsTokens:     r.Rate.TokensPerMinute != nil,
+		countsInput:      r.Rate.InputTokensPerMinute != nil,
+		countsOutput:     r.Rate.OutputTokensPerMinute != nil,
 		countsRequest:    r.Rate.RequestsPerMinute != nil,
 		holdsConcurrency: granted.HoldsConcurrency,
 	}

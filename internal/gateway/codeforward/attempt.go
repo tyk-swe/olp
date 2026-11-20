@@ -167,7 +167,7 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, observation.ChatChoices)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, quota.CombinedDemand(observation.Estimate), codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}

@@ -52,7 +52,7 @@ func (s *Server) GatePinnedGeneration(ctx context.Context, x *Call, p *Pin, oper
 	p.attempt.Price = s.Deps.Runtime.RoutingInputs().Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, operation, s.Now())
 	p.attempt.Discount = s.Deps.Runtime.RoutingInputs().Discount(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, s.Now())
 	deadline, _ := ctx.Deadline()
-	gate := s.gateAttempt(ctx, x, p.attempt, &p.Provider, &p.Slot, x.estimate, deadline)
+	gate := s.gateAttempt(ctx, x, p.attempt, &p.Provider, &p.Slot, quota.CombinedDemand(x.estimate), deadline)
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}
@@ -79,7 +79,7 @@ func (s *Server) ReserveRetrieval(ctx context.Context, x *Call, authority keyaut
 func (s *Server) GatePinnedRetrieval(ctx context.Context, x *Call, p *Pin) *fault.Error {
 	x.pinnedSlot = &p.Slot
 	deadline, _ := ctx.Deadline()
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, resourceEstimate, deadline, "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(resourceEstimate), deadline, "")
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

@@ -133,6 +133,10 @@ func RateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, esti
 		message = "The API key requests per minute limit was exceeded."
 	case limits.DimensionTokens:
 		message = "The API key tokens per minute limit was exceeded."
+	case limits.DimensionInputTokens:
+		message = "The API key input tokens per minute limit was exceeded."
+	case limits.DimensionOutputTokens:
+		message = "The API key output tokens per minute limit was exceeded."
 	case limits.DimensionConcurrency:
 		message = "The API key concurrency limit was exceeded."
 	case limits.DimensionDailyCost, limits.DimensionWeeklyCost, limits.DimensionMonthlyCost:
@@ -464,8 +468,16 @@ func (a *Admission) Outage(keyID string, costBudget bool, cause error) *fault.Er
 }
 
 func SettleKey(ctx context.Context, lease *admission.Lease, dispatched bool, actual *int64, log *slog.Logger) {
+	var usage *admission.TokenUsage
+	if actual != nil {
+		usage = &admission.TokenUsage{Total: *actual}
+	}
+	SettleLease(ctx, lease, dispatched, usage, log)
+}
+
+func SettleLease(ctx context.Context, lease *admission.Lease, dispatched bool, usage *admission.TokenUsage, log *slog.Logger) {
 	if dispatched {
-		if err := lease.Settle(ctx, actual); err != nil {
+		if err := lease.SettleUsage(ctx, usage); err != nil {
 			log.Warn("limit reservation settlement failed", "error", err.Error())
 		}
 		return
@@ -477,6 +489,7 @@ func SettleKey(ctx context.Context, lease *admission.Lease, dispatched bool, act
 
 type TargetRefusal struct {
 	Quota      string
+	Dimension  limits.Dimension
 	RetryAfter time.Duration
 }
 
@@ -501,33 +514,48 @@ type TargetReservation struct {
 }
 
 // Settle reconciles and releases both leases once the attempt has ended.
-func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, actual *int64) {
+func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, usage *admission.TokenUsage) {
 	if t == nil {
 		return
 	}
-	SettleKey(ctx, t.connection, dispatched, actual, t.log)
-	SettleKey(ctx, t.slot, dispatched, actual, t.log)
+	SettleLease(ctx, t.connection, dispatched, usage, t.log)
+	SettleLease(ctx, t.slot, dispatched, usage, t.log)
 }
 
 func quotaRequest(lookup string, rate admission.RateLimits, ttl time.Duration) admission.Request {
 	return admission.Request{Lookup: lookup, LeaseTTL: ttl, Rate: rate}
 }
 
-func connectionRequest(provider *routing.Provider, estimate int64, ttl time.Duration, priority string) admission.Request {
+func connectionRequest(provider *routing.Provider, demand TokenDemand, ttl time.Duration, priority string) admission.Request {
 	if provider.Limits == nil {
 		return admission.Request{}
 	}
 	return quotaRequest(limits.ConnectionLookup(provider.ID), admission.RateLimits{
-		RequestsPerMinute: provider.Limits.RequestsPerMinute, TokensPerMinute: provider.Limits.TokensPerMinute, MaxConcurrency: provider.Limits.MaxConcurrency,
-		Tokens: estimate, Share: share(provider.Limits.Supply, priority),
+		RequestsPerMinute: provider.Limits.RequestsPerMinute, TokensPerMinute: provider.Limits.TokensPerMinute,
+		InputTokensPerMinute: provider.Limits.InputTokensPerMinute, OutputTokensPerMinute: provider.Limits.OutputTokensPerMinute,
+		MaxConcurrency: provider.Limits.MaxConcurrency,
+		Tokens:         demand.Total, InputTokens: demand.Input, OutputTokens: demand.Output,
+		Share: share(provider.Limits.Supply, priority),
 	}, ttl)
 }
 
-func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority string) admission.Request {
+func slotRequest(slot *routing.Slot, demand TokenDemand, ttl time.Duration, priority string) admission.Request {
 	return quotaRequest(limits.SlotLookup(slot.ID), admission.RateLimits{
-		RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, MaxConcurrency: slot.MaxConcurrency,
-		Tokens: estimate, Share: share(slot.Supply, priority),
+		RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute,
+		InputTokensPerMinute: slot.InputTokensPerMinute, OutputTokensPerMinute: slot.OutputTokensPerMinute,
+		MaxConcurrency: slot.MaxConcurrency,
+		Tokens:         demand.Total, InputTokens: demand.Input, OutputTokens: demand.Output,
+		Share: share(slot.Supply, priority),
 	}, ttl)
+}
+
+func connectionTokenLimited(provider *routing.Provider) bool {
+	return provider.Limits != nil && (provider.Limits.TokensPerMinute != nil ||
+		provider.Limits.InputTokensPerMinute != nil || provider.Limits.OutputTokensPerMinute != nil)
+}
+
+func slotTokenLimited(slot *routing.Slot) bool {
+	return slot.TokensPerMinute != nil || slot.InputTokensPerMinute != nil || slot.OutputTokensPerMinute != nil
 }
 
 // ReserveTarget admits one attempt against the provider connection quota and
@@ -535,19 +563,19 @@ func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
-func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
-	if provider.Limits != nil && provider.Limits.TokensPerMinute != nil {
+func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand TokenDemand, ttl time.Duration, priority string) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
+	if connectionTokenLimited(provider) {
 		if a.checkPendingTokenAccounting(ctx, provider.ID) != nil {
 			return nil, nil, true
 		}
 	}
-	if slot.TokensPerMinute != nil {
+	if slotTokenLimited(slot) {
 		if a.checkPendingTokenAccounting(ctx, slot.ID) != nil {
 			return nil, nil, true
 		}
 	}
-	connection := connectionRequest(provider, estimate, ttl, priority)
-	credential := slotRequest(slot, estimate, ttl, priority)
+	connection := connectionRequest(provider, demand, ttl, priority)
+	credential := slotRequest(slot, demand, ttl, priority)
 	if !connection.HasHardLimits() && !credential.HasHardLimits() {
 		return nil, nil, false
 	}
@@ -575,7 +603,7 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 		// is abandoned: the attempt never happened.
 		settleTargetRefund(ctx, reservation)
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			return nil, &TargetRefusal{Quota: step.quota, RetryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
+			return nil, &TargetRefusal{Quota: step.quota, Dimension: exceeded.Dimension, RetryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
 		}
 		a.Logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID, "error", err.Error())
 		return nil, nil, true

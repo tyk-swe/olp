@@ -197,7 +197,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *Cal
 	unmeterable := false
 slots:
 	for _, candidate := range s.slots(x, attempt, &provider) {
-		gate := s.gateAttempt(ctx, x, attempt, &provider, &candidate, estimate, deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, &candidate, quota.CombinedDemand(estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			slot, hold, found = candidate, gate.hold, true

@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -190,7 +191,7 @@ func (s *Server) settlePinnedHold(ctx context.Context, hold *dispatchHold) {
 		return
 	}
 	var latest *PinnedExchange
-	var total int64
+	settled := admission.TokenUsage{Credit: true}
 	var reconciled bool
 	for _, exchange := range hold.pinned {
 		exchange.end()
@@ -199,23 +200,29 @@ func (s *Server) settlePinnedHold(ctx context.Context, hold *dispatchHold) {
 		}
 		latest = exchange
 		fact := exchange.fact()
-		actual := quota.SettledAttemptTokens(fact, hold.estimate)
-		if actual == nil {
-			total = quota.AddBounded(total, hold.estimate)
+		usage := quota.SettledAttemptUsage(fact, hold.demand)
+		if usage == nil {
+			settled.Input = quota.AddBounded(settled.Input, hold.demand.Input)
+			settled.Output = quota.AddBounded(settled.Output, hold.demand.Output)
+			settled.Total = quota.AddBounded(settled.Total, hold.demand.Total)
+			settled.Credit = false
 			continue
 		}
 		reconciled = true
-		total = quota.AddBounded(total, *actual)
+		settled.Input = quota.AddBounded(settled.Input, usage.Input)
+		settled.Output = quota.AddBounded(settled.Output, usage.Output)
+		settled.Total = quota.AddBounded(settled.Total, usage.Total)
+		settled.Credit = settled.Credit && usage.Credit
 	}
 	if latest == nil {
 		s.ReleaseHold(ctx, hold)
 		return
 	}
-	var actual *int64
+	var usage *admission.TokenUsage
 	if reconciled {
-		actual = &total
+		usage = &settled
 	}
-	hold.settle(ctx, true, actual)
+	hold.settle(ctx, true, usage)
 	if hold.probed {
 		hold.probed = false
 		s.health.Record(hold.provider, *latest.fact(), true)

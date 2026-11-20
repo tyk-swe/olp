@@ -9,6 +9,13 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Added
 
+- Provider connections and credential slots take optional
+  `input_tokens_per_minute` and `output_tokens_per_minute` limits beside the
+  combined `tokens_per_minute`. Each configured dimension is reserved
+  atomically across replicas before dispatch and settles to the usage the
+  upstream reports, and a refusal names the exhausted dimension. Combined-only
+  configurations behave as before.
+
 - Installation branding now covers a brand color. The General settings tab
   takes a `#rrggbb` color with at least 4.5:1 contrast for white button text,
   and the console derives readable shades of it for every surface. The

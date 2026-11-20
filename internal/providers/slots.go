@@ -97,23 +97,25 @@ func loadSlots(ctx context.Context, q database.Queryer, providerID string) ([]sl
 const maxSlots = 64
 
 type slotInput struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Enabled             *bool    `json:"enabled"`
-	Priority            *int     `json:"priority"`
-	Weight              *int64   `json:"weight"`
-	CredentialVersionID *string  `json:"credential_version_id"`
-	AllowedAPIKeys      []string `json:"allowed_api_keys"`
-	AllowedModels       []string `json:"allowed_models"`
-	AllowedRoutes       []string `json:"allowed_routes"`
-	MaxConcurrency      *int64   `json:"max_concurrency"`
-	RequestsPerMinute   *int64   `json:"requests_per_minute"`
-	TokensPerMinute     *int64   `json:"tokens_per_minute"`
+	ID                    string   `json:"id"`
+	Name                  string   `json:"name"`
+	Enabled               *bool    `json:"enabled"`
+	Priority              *int     `json:"priority"`
+	Weight                *int64   `json:"weight"`
+	CredentialVersionID   *string  `json:"credential_version_id"`
+	AllowedAPIKeys        []string `json:"allowed_api_keys"`
+	AllowedModels         []string `json:"allowed_models"`
+	AllowedRoutes         []string `json:"allowed_routes"`
+	MaxConcurrency        *int64   `json:"max_concurrency"`
+	RequestsPerMinute     *int64   `json:"requests_per_minute"`
+	TokensPerMinute       *int64   `json:"tokens_per_minute"`
+	InputTokensPerMinute  *int64   `json:"input_tokens_per_minute"`
+	OutputTokensPerMinute *int64   `json:"output_tokens_per_minute"`
 	routing.Supply
 }
 
 func (in slotInput) limits() connection.Limits {
-	return connection.Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, Supply: in.Supply}
+	return connection.Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, InputTokensPerMinute: in.InputTokensPerMinute, OutputTokensPerMinute: in.OutputTokensPerMinute, Supply: in.Supply}
 }
 
 type slotWrite struct {
@@ -123,22 +125,24 @@ type slotWrite struct {
 }
 
 type slotReply struct {
-	ID                  string          `json:"id"`
-	Name                string          `json:"name"`
-	Enabled             bool            `json:"enabled"`
-	Priority            int             `json:"priority"`
-	Weight              int64           `json:"weight"`
-	CredentialVersionID *string         `json:"credential_version_id"`
-	AllowedAPIKeys      []string        `json:"allowed_api_keys"`
-	AllowedModels       []string        `json:"allowed_models"`
-	AllowedRoutes       []string        `json:"allowed_routes"`
-	MaxConcurrency      *int64          `json:"max_concurrency"`
-	RequestsPerMinute   *int64          `json:"requests_per_minute"`
-	TokensPerMinute     *int64          `json:"tokens_per_minute"`
-	DailyCostLimit      *string         `json:"daily_cost_limit"`
-	MonthlyCostLimit    *string         `json:"monthly_cost_limit"`
-	PriorityShares      *routing.Shares `json:"priority_shares"`
-	SaturationPercent   *int64          `json:"saturation_percent"`
+	ID                    string          `json:"id"`
+	Name                  string          `json:"name"`
+	Enabled               bool            `json:"enabled"`
+	Priority              int             `json:"priority"`
+	Weight                int64           `json:"weight"`
+	CredentialVersionID   *string         `json:"credential_version_id"`
+	AllowedAPIKeys        []string        `json:"allowed_api_keys"`
+	AllowedModels         []string        `json:"allowed_models"`
+	AllowedRoutes         []string        `json:"allowed_routes"`
+	MaxConcurrency        *int64          `json:"max_concurrency"`
+	RequestsPerMinute     *int64          `json:"requests_per_minute"`
+	TokensPerMinute       *int64          `json:"tokens_per_minute"`
+	InputTokensPerMinute  *int64          `json:"input_tokens_per_minute"`
+	OutputTokensPerMinute *int64          `json:"output_tokens_per_minute"`
+	DailyCostLimit        *string         `json:"daily_cost_limit"`
+	MonthlyCostLimit      *string         `json:"monthly_cost_limit"`
+	PriorityShares        *routing.Shares `json:"priority_shares"`
+	SaturationPercent     *int64          `json:"saturation_percent"`
 }
 
 func (row slotRow) reply() slotReply {
@@ -147,6 +151,7 @@ func (row slotRow) reply() slotReply {
 		CredentialVersionID: row.CredentialID,
 		AllowedAPIKeys:      orEmpty(row.Restrictions.AllowedAPIKeys), AllowedModels: orEmpty(row.Restrictions.AllowedModels), AllowedRoutes: orEmpty(row.Restrictions.AllowedRoutes),
 		MaxConcurrency: row.Limits.MaxConcurrency, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute,
+		InputTokensPerMinute: row.Limits.InputTokensPerMinute, OutputTokensPerMinute: row.Limits.OutputTokensPerMinute,
 		DailyCostLimit: row.Limits.DailyCostLimit, MonthlyCostLimit: row.Limits.MonthlyCostLimit, PriorityShares: row.Limits.PriorityShares, SaturationPercent: row.Limits.SaturationPercent,
 	}
 }
@@ -225,13 +230,19 @@ type slotHealth struct {
 const quotaTimeout = 2 * time.Second
 
 type quotaUsage struct {
-	RequestsThisMinute int64 `json:"requests_this_minute"`
-	TokensThisMinute   int64 `json:"tokens_this_minute"`
-	ConcurrentRequests int64 `json:"concurrent_requests"`
+	RequestsThisMinute     int64 `json:"requests_this_minute"`
+	TokensThisMinute       int64 `json:"tokens_this_minute"`
+	InputTokensThisMinute  int64 `json:"input_tokens_this_minute"`
+	OutputTokensThisMinute int64 `json:"output_tokens_this_minute"`
+	ConcurrentRequests     int64 `json:"concurrent_requests"`
 }
 
 func usageOf(u fleet.Usage) *quotaUsage {
-	return &quotaUsage{RequestsThisMinute: u.RequestsThisMinute, TokensThisMinute: u.TokensThisMinute, ConcurrentRequests: u.ConcurrentRequests}
+	return &quotaUsage{
+		RequestsThisMinute: u.RequestsThisMinute, TokensThisMinute: u.TokensThisMinute,
+		InputTokensThisMinute: u.InputTokensThisMinute, OutputTokensThisMinute: u.OutputTokensThisMinute,
+		ConcurrentRequests: u.ConcurrentRequests,
+	}
 }
 
 type slotQuota struct {

@@ -17,14 +17,17 @@ import (
 // and ranks after slots whose headroom is known.
 func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *routing.SupplyState {
 	var quotas []admission.QuotaProbe
-	probe := func(lookup string, rpm, tpm, concurrency *int64) int {
-		if rpm == nil && tpm == nil && concurrency == nil {
+	probe := func(lookup string, rpm, tpm, itpm, otpm, concurrency *int64) int {
+		if rpm == nil && tpm == nil && itpm == nil && otpm == nil && concurrency == nil {
 			return -1
 		}
 		if i := slices.IndexFunc(quotas, func(q admission.QuotaProbe) bool { return q.Lookup == lookup }); i >= 0 {
 			return i
 		}
-		quotas = append(quotas, admission.QuotaProbe{Lookup: lookup, RequestsPerMinute: rpm, TokensPerMinute: tpm, MaxConcurrency: concurrency})
+		quotas = append(quotas, admission.QuotaProbe{
+			Lookup: lookup, RequestsPerMinute: rpm, TokensPerMinute: tpm,
+			InputTokensPerMinute: itpm, OutputTokensPerMinute: otpm, MaxConcurrency: concurrency,
+		})
 		return len(quotas) - 1
 	}
 	type slotProbes struct {
@@ -35,9 +38,9 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 	for _, entry := range query.Slots {
 		probes := slotProbes{ID: entry.Slot.ID, connection: -1}
 		if quota := entry.Provider.Limits; quota != nil {
-			probes.connection = probe(limits.ConnectionLookup(entry.Provider.ID), quota.RequestsPerMinute, quota.TokensPerMinute, quota.MaxConcurrency)
+			probes.connection = probe(limits.ConnectionLookup(entry.Provider.ID), quota.RequestsPerMinute, quota.TokensPerMinute, quota.InputTokensPerMinute, quota.OutputTokensPerMinute, quota.MaxConcurrency)
 		}
-		probes.slot = probe(limits.SlotLookup(entry.Slot.ID), entry.Slot.RequestsPerMinute, entry.Slot.TokensPerMinute, entry.Slot.MaxConcurrency)
+		probes.slot = probe(limits.SlotLookup(entry.Slot.ID), entry.Slot.RequestsPerMinute, entry.Slot.TokensPerMinute, entry.Slot.InputTokensPerMinute, entry.Slot.OutputTokensPerMinute, entry.Slot.MaxConcurrency)
 		slots = append(slots, probes)
 	}
 	caps := make([]admission.CapProbe, len(query.Caps))

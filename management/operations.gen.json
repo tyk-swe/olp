@@ -2288,6 +2288,24 @@
                 "null"
               ]
             },
+            "input_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "daily_cost_limit": {
               "description": "Exact decimal amount in the installation currency.",
               "type": [
@@ -2692,6 +2710,20 @@
               ]
             },
             "tokens_per_minute": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "input_tokens_per_minute": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
               "format": "int64",
               "type": [
                 "integer",
@@ -10913,6 +10945,24 @@
               ]
             },
             "tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "input_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
               "default": null,
               "format": "int64",
               "minimum": 0,
@@ -28223,6 +28273,24 @@
                 "null"
               ]
             },
+            "input_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "daily_cost_limit": {
               "description": "Exact decimal amount in the installation currency.",
               "type": [
@@ -28627,6 +28695,20 @@
               ]
             },
             "tokens_per_minute": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "input_tokens_per_minute": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
               "format": "int64",
               "type": [
                 "integer",
@@ -33551,6 +33633,24 @@
               ]
             },
             "tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "input_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
               "default": null,
               "format": "int64",
               "minimum": 0,
@@ -46297,6 +46397,24 @@
               ]
             },
             "tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "input_tokens_per_minute": {
+              "default": null,
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output_tokens_per_minute": {
               "default": null,
               "format": "int64",
               "minimum": 0,
