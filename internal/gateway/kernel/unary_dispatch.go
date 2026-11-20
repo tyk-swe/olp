@@ -98,7 +98,6 @@ func (run unaryRun) send(fact events.AttemptFact) (unarySent, *attemptEnd) {
 		return unarySent{fact: fact, plan: plan, cancel: cancel, timer: timer}, ended(classCredential, nil)
 	}
 	parallel := s.startParallel(sending, x, cancel)
-	// The exchange stamps the status and first byte on the fact as they arrive.
 	observed := fact
 	exchange := &unaryExchange{now: s.Now, dispatched: s.markSessionDispatched, ctx: sending, x: x, state: state, plan: plan, client: client, bound: bound, fact: &observed, bodyCap: run.replyLimit(plan), inject: run.trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
