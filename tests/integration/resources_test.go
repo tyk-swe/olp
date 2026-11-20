@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -199,12 +200,17 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 	if _, err := resources.New(pool).PutDurableContract(ctx, contract("unsealed"), payload); !errors.Is(err, resources.ErrContract) {
 		t.Fatalf("storing a payload without a key ring: %v, want %v", err, resources.ErrContract)
 	}
-	stored, err := store.PutDurableContract(ctx, contract("sealed"), payload)
+	sealed := contract("sealed")
+	stored, err := store.PutDurableContract(ctx, sealed, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, stored.ID); err != nil || !bytes.Equal(got, payload) {
 		t.Fatalf("the owner reading its payload: %q, %v", got, err)
+	}
+	var conflict *pgconn.PgError
+	if _, err := store.PutDurableContract(ctx, sealed, payload); !errors.As(err, &conflict) || conflict.Code != "23505" {
+		t.Fatalf("storing a second live mapping for a native file: %v, want a unique violation", err)
 	}
 
 	refusals := map[string]struct {
@@ -230,14 +236,27 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 		t.Fatalf("sealed payloads kept after deletion: %d, %v", kept, err)
 	}
 
-	revoked, err := store.PutDurableContract(ctx, contract("revoked"), payload)
+	replacementPayload := []byte(`{"native":"a replacement file"}`)
+	replacement, err := store.PutDurableContract(ctx, sealed, replacementPayload)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if replacement.ID == stored.ID {
+		t.Fatalf("replacement reused the deleted gateway ID %q", stored.ID)
+	}
+	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, replacement.ID); err != nil || !bytes.Equal(got, replacementPayload) {
+		t.Fatalf("reading the replacement payload: %q, %v", got, err)
+	}
+	if _, _, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, stored.ID); !errors.Is(err, resources.ErrNotFound) {
+		t.Fatalf("reading the deleted payload after replacement: %v, want %v", err, resources.ErrNotFound)
+	}
+	if mapped, err := store.GetByUpstreamIncludingDeleted(ctx, stored.NativeIdentity()); err != nil || mapped.ID != replacement.ID {
+		t.Fatalf("projecting the reused native file identifier: %+v, %v, want %q", mapped, err, replacement.ID)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE olp.api_keys SET revoked_at=now() WHERE id=$1`, fixture.keyID); err != nil {
 		t.Fatal(err)
 	}
-	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, revoked.ID); !errors.Is(err, resources.ErrNotFound) || got != nil {
+	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, replacement.ID); !errors.Is(err, resources.ErrNotFound) || got != nil {
 		t.Fatalf("a revoked key reading its payload: %q, %v, want %v", got, err, resources.ErrNotFound)
 	}
 }
@@ -1101,7 +1120,14 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	if sent := upstream.sent("DELETE /files/file-provider-owned"); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
 	}
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
 	g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 404)
+	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("owner lists files %v, want only %s", got, replacement.ID)
+	}
 }
 
 func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
@@ -1671,9 +1697,21 @@ func TestVectorStoresHideProviderIdentifiersBindFilesReplayCreationAndIsolateKey
 	if got := g.call(t, "owner", "DELETE", own, "", "", 200); got.ID != store.ID || !got.Deleted {
 		t.Fatalf("store delete = %+v", got)
 	}
-	g.call(t, "owner", "GET", own, "", "", 404)
 	if sent := upstream.sent("DELETE /vector_stores/vs_" + providerOwned); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
+	}
+	replacement := submit("owner", stores, "application/json", `{"name":"notes"}`, uuid.NewString(), 200)
+	if replacement.ID == "" || replacement.ID == store.ID {
+		t.Fatalf("creation with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
+	g.call(t, "owner", "GET", own, "", "", 404)
+	g.call(t, "owner", "GET", own+"/files/"+attached.ID, "", "", 404)
+	if got := g.call(t, "owner", "GET", stores, "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("owner lists stores %v, want only %s", got, replacement.ID)
+	}
+	replayedAfterDelete, _ := g.send(t, "POST", stores, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json", "Idempotency-Key": creation}, `{"name":"notes"}`, 409)
+	if got := replayedAfterDelete.Get("X-OLP-Resource-ID"); got != store.ID {
+		t.Fatalf("replaying the first creation returned %q, want the original %q", got, store.ID)
 	}
 }
 
