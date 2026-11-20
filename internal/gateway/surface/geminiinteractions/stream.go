@@ -2,6 +2,7 @@ package geminiinteractions
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -36,17 +37,26 @@ func (b binding) previousID() string {
 	return ""
 }
 
-// A relay binds the stream to its stored resource on the first event, so the
-// resource, its identifier and the commit flag change as frames arrive.
 type relay struct {
-	turn      *turn
-	exchange  *kernel.PinnedExchange
-	binding   binding
-	state     *geminilifecycle.InteractionStream
-	limit     int
+	turn     turn
+	pin      *kernel.Pin
+	exchange *kernel.PinnedExchange
+	binding  binding
+	state    *geminilifecycle.InteractionStream
+	limit    int
+}
+
+type relayed struct {
 	local     *resources.Resource
 	localID   string
 	committed bool
+}
+
+func (b binding) unrelayed() relayed {
+	if b.existing != nil {
+		return relayed{local: b.existing, localID: b.existing.ID}
+	}
+	return relayed{localID: b.upstream}
 }
 
 type localRefusal struct{ cause error }
@@ -55,56 +65,55 @@ func (e *localRefusal) Error() string { return "interaction projection or persis
 
 func (e *localRefusal) Unwrap() error { return e.cause }
 
-func (t *turn) relay(ctx context.Context, response *kernel.PinnedResponse, b binding) (bool, error) {
+func (t turn) relay(ctx context.Context, pin *kernel.Pin, response *kernel.PinnedResponse, b binding) (bool, error) {
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return false, errors.New("provider did not return Interaction SSE")
 	}
-	r := t.newRelay(response.Exchange, b)
-	err = sse.Decode(response.Body, r.limit, func(frame sse.Frame) error { return r.forward(ctx, frame) })
+	r := t.newRelay(pin, response.Exchange, b)
+	seen := b.unrelayed()
+	err = sse.Decode(response.Body, r.limit, func(frame sse.Frame) error {
+		next, err := r.forward(ctx, frame, seen)
+		seen = next
+		return err
+	})
 	if err == nil && r.state.Done {
-		return r.committed, nil
+		return seen.committed, nil
 	}
 	r.interrupt(ctx, err)
 	if err == nil {
-		return r.committed, errors.New("Interaction SSE ended before terminal event")
+		return seen.committed, errors.New("Interaction SSE ended before terminal event")
 	}
-	return r.committed, err
+	return seen.committed, err
 }
 
-func (t *turn) newRelay(exchange *kernel.PinnedExchange, b binding) *relay {
-	limit := int(t.kernel.Config.MaxEventBytes)
-	if limit <= 0 {
-		limit = 1 << 20
-	}
-	localID := b.upstream
-	if b.existing != nil {
-		localID = b.existing.ID
-	}
-	return &relay{
-		turn: t, exchange: exchange, binding: b, limit: limit, local: b.existing, localID: localID,
+func (t turn) newRelay(pin *kernel.Pin, exchange *kernel.PinnedExchange, b binding) relay {
+	return relay{
+		turn: t, pin: pin, exchange: exchange, binding: b, limit: cmp.Or(max(int(t.kernel.Config.MaxEventBytes), 0), 1<<20),
 		state: &geminilifecycle.InteractionStream{ID: b.upstream, Created: b.resumed, Resumed: b.resumed},
 	}
 }
 
-func (r *relay) forward(ctx context.Context, frame sse.Frame) error {
+func (r relay) forward(ctx context.Context, frame sse.Frame, seen relayed) (relayed, error) {
 	event, err := r.accept(frame)
 	if err != nil {
-		return err
+		return seen, err
 	}
-	r.account(event)
-	if err := r.persist(ctx, event); err != nil {
-		return &localRefusal{cause: err}
-	}
-	projected, err := r.project(event)
+	named := r.account(event, seen)
+	bound, err := r.persist(ctx, event, named)
 	if err != nil {
-		return err
+		return named, &localRefusal{cause: err}
+	}
+	projected, err := r.project(event, bound)
+	if err != nil {
+		return bound, err
 	}
 	output := encode(frame, projected)
 	if len(output) > r.limit {
-		return errors.New("projected Interaction event exceeds byte limit")
+		return bound, errors.New("projected Interaction event exceeds byte limit")
 	}
-	return r.write(output, event)
+	committed, err := r.write(output, event, bound.committed)
+	return relayed{local: bound.local, localID: bound.localID, committed: committed}, err
 }
 
 func (r *relay) accept(frame sse.Frame) (geminilifecycle.InteractionEvent, error) {
@@ -124,16 +133,20 @@ func (r *relay) accept(frame sse.Frame) (geminilifecycle.InteractionEvent, error
 	return event, nil
 }
 
-func (r *relay) account(event geminilifecycle.InteractionEvent) {
-	if !r.binding.store && r.local == nil {
-		r.localID = r.state.ID
-	}
+func (r relay) account(event geminilifecycle.InteractionEvent, seen relayed) relayed {
 	if object, ok := event.Source.Root().Lookup("interaction"); ok {
 		kernel.RecordInteractionUsage(r.exchange, object)
 	}
-	if !r.state.Done {
-		return
+	if r.state.Done {
+		r.complete(event)
 	}
+	if !r.binding.store && seen.local == nil {
+		return relayed{localID: r.state.ID, committed: seen.committed}
+	}
+	return seen
+}
+
+func (r relay) complete(event geminilifecycle.InteractionEvent) {
 	x := r.turn.x
 	if !x.ResourceCall() && failed(event) {
 		r.exchange.Complete(kernel.ClassUpstreamServer)
@@ -143,34 +156,38 @@ func (r *relay) account(event geminilifecycle.InteractionEvent) {
 	r.exchange.Complete(kernel.ClassSuccess)
 }
 
-func (r *relay) persist(ctx context.Context, event geminilifecycle.InteractionEvent) error {
-	t := r.turn
-	if r.binding.store && r.local == nil {
-		initial := event.Status
-		if initial == "" {
-			initial = "created"
-		}
-		local, err := t.kernel.StoreInteraction(ctx, r.exchange, t.pin, t.authority.ID, r.state.ID, initial, r.binding.parent, !r.state.Done)
-		if err != nil {
-			return err
-		}
-		r.local, r.localID = local, local.ID
+func (r relay) persist(ctx context.Context, event geminilifecycle.InteractionEvent, seen relayed) (relayed, error) {
+	bound, err := r.bind(ctx, event, seen)
+	if err != nil {
+		return seen, err
 	}
 	observed := event.Status
 	if event.Type == "error" {
 		observed = "failed"
 	}
-	if r.local == nil || observed == "" {
-		return nil
+	if bound.local == nil || observed == "" {
+		return bound, nil
 	}
 	object, _ := event.Source.Root().Lookup("interaction")
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
-	_, err := t.kernel.ObserveInteraction(commitCtx, t.authority.ID, r.local.ID, observed, object)
-	return err
+	_, err = r.turn.kernel.ObserveInteraction(commitCtx, r.turn.authority.ID, bound.local.ID, observed, object)
+	return bound, err
 }
 
-func (r *relay) project(event geminilifecycle.InteractionEvent) ([]byte, error) {
+func (r relay) bind(ctx context.Context, event geminilifecycle.InteractionEvent, seen relayed) (relayed, error) {
+	if !r.binding.store || seen.local != nil {
+		return seen, nil
+	}
+	t := r.turn
+	local, err := t.kernel.StoreInteraction(ctx, r.exchange, r.pin, t.authority.ID, r.state.ID, cmp.Or(event.Status, "created"), r.binding.parent, !r.state.Done)
+	if err != nil {
+		return seen, err
+	}
+	return relayed{local: local, localID: local.ID, committed: seen.committed}, nil
+}
+
+func (r relay) project(event geminilifecycle.InteractionEvent, seen relayed) ([]byte, error) {
 	source := event.Source
 	if failed(event) {
 		redacted, err := fault.RedactNativeFailureDocument(source, r.turn.x.Sensitive())
@@ -180,21 +197,21 @@ func (r *relay) project(event geminilifecycle.InteractionEvent) ([]byte, error) 
 		source = redacted
 	}
 	safe := geminilifecycle.InteractionEvent{Source: source, Type: event.Type, ID: event.ID, Status: event.Status}
-	projected, err := safe.WithProjection(r.localID, r.binding.previousID(), r.turn.x.Route.Slug)
+	projected, err := safe.WithProjection(seen.localID, r.binding.previousID(), r.turn.x.Route.Slug)
 	if err != nil {
 		return nil, err
 	}
-	if r.local != nil && containsNativeResourceID(projected, r.state.ID) {
+	if seen.local != nil && containsNativeResourceID(projected, r.state.ID) {
 		return nil, errors.New("Interaction event contains an unbound native resource identity")
 	}
 	return projected, nil
 }
 
-func (r *relay) write(output []byte, event geminilifecycle.InteractionEvent) error {
+func (r relay) write(output []byte, event geminilifecycle.InteractionEvent, committed bool) (bool, error) {
 	t := r.turn
 	controller := http.NewResponseController(t.w)
 	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
-	if !r.committed {
+	if !committed {
 		t.w.Header().Set("Content-Type", "text/event-stream")
 		t.w.Header().Set("Cache-Control", "no-store")
 		t.x.ResponseHeaders(t.w.Header(), true)
@@ -202,17 +219,16 @@ func (r *relay) write(output []byte, event geminilifecycle.InteractionEvent) err
 			t.w.Header().Set("X-Should-Retry", "false")
 		}
 		t.w.WriteHeader(http.StatusOK)
-		r.committed = true
 		r.exchange.Delivery(usage.ClientUnobserved)
 	}
 	if n, err := t.w.Write(output); err != nil || n != len(output) {
 		if n > 0 {
 			r.exchange.Delivery(usage.ClientPartial)
 		}
-		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	if err := controller.Flush(); err != nil {
-		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
+		return true, fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	t.x.Delivered(t.kernel.Now())
 	switch {
@@ -223,10 +239,10 @@ func (r *relay) write(output []byte, event geminilifecycle.InteractionEvent) err
 	default:
 		r.exchange.Delivery(usage.ClientPartial)
 	}
-	return nil
+	return true, nil
 }
 
-func (r *relay) interrupt(ctx context.Context, err error) {
+func (r relay) interrupt(ctx context.Context, err error) {
 	_, local := errors.AsType[*localRefusal](err)
 	switch {
 	case errors.Is(err, fault.ErrClientWrite), errors.Is(ctx.Err(), context.Canceled):

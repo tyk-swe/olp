@@ -22,20 +22,24 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 	mux.HandleFunc("POST /gemini/v1beta/interactions/{id}/cancel", s.resource)
 }
 
-// A turn's pin, status and outcome are assigned in place because the deferred
-// settlement must read them even when a step panics.
 type turn struct {
 	surface
 	w         http.ResponseWriter
 	r         *http.Request
 	x         *kernel.Call
 	authority keyauthority.Authority
-	pin       *kernel.Pin
-	status    int
-	out       *kernel.Outcome
+	end       *turnEnd
 }
 
-func (s surface) begin(w http.ResponseWriter, r *http.Request, stored bool) (*turn, bool) {
+// turnEnd is the one thing a turn writes after it is built. The deferred
+// settlement reads it even when a step panics.
+type turnEnd struct {
+	pin    *kernel.Pin
+	status int
+	out    *kernel.Outcome
+}
+
+func (s surface) begin(w http.ResponseWriter, r *http.Request, stored bool) (turn, bool) {
 	x, authority, ok := s.kernel.Enter(w, r, wire.GeminiInteractions, stored, func(r *http.Request) (keyauthority.Authority, *fault.Error) {
 		if _, e := kernel.GeminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
 			return keyauthority.Authority{}, e
@@ -43,13 +47,13 @@ func (s surface) begin(w http.ResponseWriter, r *http.Request, stored bool) (*tu
 		return s.kernel.Gate.Authenticate(r, "inference")
 	})
 	if !ok {
-		return nil, false
+		return turn{}, false
 	}
-	return &turn{surface: s, w: w, r: r, x: x, authority: authority, status: http.StatusInternalServerError}, true
+	return turn{surface: s, w: w, r: r, x: x, authority: authority, end: &turnEnd{status: http.StatusInternalServerError}}, true
 }
 
-func (t *turn) refuse(e *fault.Error) {
-	t.x.Failure, t.status = e, e.Status
+func (t turn) refuse(e *fault.Error) {
+	t.x.Failure, t.end.status = e, e.Status
 	if !t.x.ResourceCall() && t.x.Dispatched() && t.x.Strict() && e.Status >= 500 {
 		final := *e
 		final.NoRetry = true
@@ -59,7 +63,7 @@ func (t *turn) refuse(e *fault.Error) {
 	fault.WriteSurfaceError(t.w, e, "gemini")
 }
 
-func (t *turn) supports(provider *routing.Provider, model string) bool {
+func (t turn) supports(provider *routing.Provider, model string) bool {
 	return provider.ProfileID == profile && provider.Supports(model, "generation", "gemini", t.x.Mode())
 }
 
