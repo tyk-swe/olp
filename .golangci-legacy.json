@@ -88,7 +88,6 @@
     "internal/gateway/kernel/realtime.go Server.relayRealtime",
     "internal/gateway/kernel/realtime_calls.go Server.createWebRTCCall",
     "internal/gateway/kernel/realtime_calls.go Server.realtimeCallsCreate",
-    "internal/gateway/kernel/responses_stream.go Server.streamStoredResponse",
     "internal/gateway/kernel/retained_native.go retainedInputMetadata",
     "internal/gateway/kernel/retrieval.go Server.queryRetrieval",
     "internal/gateway/kernel/workflow_approval.go workflowPauseFrames",
