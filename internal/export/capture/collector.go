@@ -64,6 +64,7 @@ type Collector struct {
 	maxBytes  int
 	include   []Include
 	redactor  *guardrails.Engine
+	expiresAt *time.Time
 
 	mu        sync.Mutex
 	state     state
@@ -92,13 +93,13 @@ func (c *Collector) CaptureDocument(document map[string]json.RawMessage) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.state == collecting {
+	if c.state == collecting && beforeExpiry(c.expiresAt, time.Now()) {
 		c.input = inputOf(document)
 	}
 }
 
 func (c *Collector) CaptureResponse(family wire.Format, body []byte) {
-	if !c.capturesResponse() {
+	if !c.capturesResponse() || !beforeExpiry(c.expiresAt, time.Now()) {
 		return
 	}
 	output, calls, err := protocols.CaptureResponse(family, body, c.includes(Output), c.includes(ToolCalls))
@@ -118,7 +119,7 @@ func (c *Collector) CaptureStreamFrame(family wire.Format, frame []byte) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.state != collecting {
+	if c.state != collecting || !beforeExpiry(c.expiresAt, time.Now()) {
 		return
 	}
 	if c.stream == nil {
@@ -172,6 +173,10 @@ func (c *Collector) spoil() {
 
 func (c *Collector) Finish(ctx context.Context, identity Identity, at time.Time) bool {
 	defer c.release()
+	if !beforeExpiry(c.expiresAt, time.Now()) {
+		c.manager.drop(false)
+		return false
+	}
 	record, err := c.record(ctx, identity, at)
 	switch {
 	case errors.Is(err, errClosed):
@@ -183,7 +188,7 @@ func (c *Collector) Finish(ctx context.Context, identity Identity, at time.Time)
 		c.manager.drop(c.redactor != nil)
 		return false
 	}
-	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record})
+	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record}, c.expiresAt)
 }
 
 func (c *Collector) record(ctx context.Context, identity Identity, at time.Time) ([]byte, error) {

@@ -57,7 +57,10 @@ Capture controls select the sampling rule, captured fields, scope, byte bounds
 and ordered local redactors. Rows display their immutable revision pins. An
 unrelated edit preserves those pins, while **Refresh pinned revisions on save**
 deliberately adopts the current active revisions. An empty redactor list is
-labelled unredacted so the risk is visible before saving. A row can still be
+labelled unredacted so the risk is visible before saving. Set **Capture expiry**
+to 1, 4, or 24 hours for temporary capture. The **Expires** column shows the
+deadline in UTC. Editing another setting does not extend the deadline, and
+expiry does not delete captured records. A row can still be
 disabled while the owner-level capture switch is off. The storage and failure
 boundary is described under
 [payload capture](../operate/observability.md#payload-capture).

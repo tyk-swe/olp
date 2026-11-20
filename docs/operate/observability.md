@@ -166,6 +166,17 @@ route-only policies require installation settings authority. Delivery is
 best-effort from bounded memory. `payload_captured` means queued, not delivered.
 Payloads never enter PostgreSQL, Valkey, durable export staging, logs or spans.
 
+Set `expires_at` to an RFC 3339 timestamp to limit how long a policy captures.
+The API returns the deadline in UTC. At that instant, each replica stops
+selecting the policy and drops any in-flight payload that has not yet been
+queued, without affecting inference. Records queued before the deadline can
+still be delivered. Expiry does not delete records or change sink retention.
+
+Policies without a deadline continue to capture while enabled. PATCH
+`expires_at` to change the deadline or send `null` to remove it. Omit the field
+to leave the deadline unchanged, including when toggling a policy. Explicit
+expiry updates are recorded as `capture_policy.expiry.update` in the audit log.
+
 ### Publish and refresh redactors
 
 `redact` is an ordered array of up to 128 distinct guardrail definition names.

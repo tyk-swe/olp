@@ -8695,14 +8695,17 @@ type CaptureConfiguration struct {
 
 // CapturePolicy defines model for CapturePolicy.
 type CapturePolicy struct {
-	Enabled        bool                                  `json:"enabled"`
-	EndUserDigests []string                              `json:"end_user_digests"`
-	Etag           openapi_types.UUID                    `json:"etag"`
-	Id             openapi_types.UUID                    `json:"id"`
-	Include        []CapturePolicyInclude                `json:"include"`
-	KeyIds         []openapi_types.UUID                  `json:"key_ids"`
-	MaxBytes       int32                                 `json:"max_bytes"`
-	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Enabled        bool               `json:"enabled"`
+	EndUserDigests []string           `json:"end_user_digests"`
+	Etag           openapi_types.UUID `json:"etag"`
+
+	// ExpiresAt UTC deadline for collecting and enqueueing payloads. Null means no expiry.
+	ExpiresAt nullable.Nullable[time.Time]          `json:"expires_at"`
+	Id        openapi_types.UUID                    `json:"id"`
+	Include   []CapturePolicyInclude                `json:"include"`
+	KeyIds    []openapi_types.UUID                  `json:"key_ids"`
+	MaxBytes  int32                                 `json:"max_bytes"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 
 	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
 	Redact []string `json:"redact"`
@@ -10613,12 +10616,15 @@ type CreateBudgetIncreaseRequestWindow string
 
 // CreateCapturePolicyRequest defines model for CreateCapturePolicyRequest.
 type CreateCapturePolicyRequest struct {
-	Enabled        *bool                                 `json:"enabled,omitempty"`
-	EndUserDigests *[]string                             `json:"end_user_digests,omitempty"`
-	Include        []CreateCapturePolicyRequestInclude   `json:"include"`
-	KeyIds         *[]openapi_types.UUID                 `json:"key_ids,omitempty"`
-	MaxBytes       int32                                 `json:"max_bytes"`
-	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Enabled        *bool     `json:"enabled,omitempty"`
+	EndUserDigests *[]string `json:"end_user_digests,omitempty"`
+
+	// ExpiresAt RFC 3339 capture deadline, returned in UTC. Omit or send null for no expiry.
+	ExpiresAt nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
+	Include   []CreateCapturePolicyRequestInclude   `json:"include"`
+	KeyIds    *[]openapi_types.UUID                 `json:"key_ids,omitempty"`
+	MaxBytes  int32                                 `json:"max_bytes"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 
 	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
 	Redact      *[]string                 `json:"redact,omitempty"`
@@ -16994,11 +17000,14 @@ type UpdateCaptureConfigurationRequest struct {
 
 // UpdateCapturePolicyRequest defines model for UpdateCapturePolicyRequest.
 type UpdateCapturePolicyRequest struct {
-	Enabled        *bool                                `json:"enabled,omitempty"`
-	EndUserDigests *[]string                            `json:"end_user_digests,omitempty"`
-	Include        *[]UpdateCapturePolicyRequestInclude `json:"include,omitempty"`
-	KeyIds         *[]openapi_types.UUID                `json:"key_ids,omitempty"`
-	MaxBytes       *int32                               `json:"max_bytes,omitempty"`
+	Enabled        *bool     `json:"enabled,omitempty"`
+	EndUserDigests *[]string `json:"end_user_digests,omitempty"`
+
+	// ExpiresAt RFC 3339 capture deadline, returned in UTC. Omit to keep the current deadline or send null to remove it.
+	ExpiresAt nullable.Nullable[time.Time]         `json:"expires_at,omitempty"`
+	Include   *[]UpdateCapturePolicyRequestInclude `json:"include,omitempty"`
+	KeyIds    *[]openapi_types.UUID                `json:"key_ids,omitempty"`
+	MaxBytes  *int32                               `json:"max_bytes,omitempty"`
 
 	// Redact Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture.
 	Redact      *[]string           `json:"redact,omitempty"`

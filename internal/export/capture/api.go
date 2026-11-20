@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -72,25 +74,27 @@ type createRequest struct {
 	EndUsers    []string    `json:"end_user_digests"`
 	MaxBytes    int         `json:"max_bytes"`
 	Enabled     *bool       `json:"enabled"`
+	ExpiresAt   *time.Time  `json:"expires_at"`
 }
 
 func (c createRequest) settings() Settings {
 	return Settings{
 		ProjectID: c.ProjectID, Route: c.Route, SinkID: c.SinkID, SampleRatio: c.SampleRatio, Include: c.Include,
 		Redact: orEmpty(c.Redact), KeyIDs: orEmpty(c.KeyIDs), EndUsers: orEmpty(c.EndUsers), MaxBytes: c.MaxBytes,
-		Enabled: c.Enabled == nil || *c.Enabled,
+		Enabled: c.Enabled == nil || *c.Enabled, ExpiresAt: c.ExpiresAt,
 	}
 }
 
 type updateRequest struct {
-	SinkID      *string     `json:"sink"`
-	SampleRatio *string     `json:"sample_ratio"`
-	Include     []Include   `json:"include"`
-	Redact      redactNames `json:"redact"`
-	KeyIDs      []string    `json:"key_ids"`
-	EndUsers    []string    `json:"end_user_digests"`
-	MaxBytes    *int        `json:"max_bytes"`
-	Enabled     *bool       `json:"enabled"`
+	SinkID      *string                      `json:"sink"`
+	SampleRatio *string                      `json:"sample_ratio"`
+	Include     []Include                    `json:"include"`
+	Redact      redactNames                  `json:"redact"`
+	KeyIDs      []string                     `json:"key_ids"`
+	EndUsers    []string                     `json:"end_user_digests"`
+	MaxBytes    *int                         `json:"max_bytes"`
+	Enabled     *bool                        `json:"enabled"`
+	ExpiresAt   nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
 }
 
 func (u updateRequest) apply(s Settings) Settings {
@@ -98,12 +102,31 @@ func (u updateRequest) apply(s Settings) Settings {
 		ProjectID: s.ProjectID, Route: s.Route, SinkID: valueOr(u.SinkID, s.SinkID), SampleRatio: valueOr(u.SampleRatio, s.SampleRatio),
 		Include: patched(u.Include, s.Include), Redact: patched([]string(u.Redact), s.Redact), KeyIDs: patched(u.KeyIDs, s.KeyIDs),
 		EndUsers: patched(u.EndUsers, s.EndUsers), MaxBytes: valueOr(u.MaxBytes, s.MaxBytes), Enabled: valueOr(u.Enabled, s.Enabled),
+		ExpiresAt: u.expiry(s.ExpiresAt),
 	}
+}
+
+func (u updateRequest) expiry(current *time.Time) *time.Time {
+	if !u.ExpiresAt.IsSpecified() {
+		return current
+	}
+	at, err := u.ExpiresAt.Get()
+	if err != nil {
+		return nil
+	}
+	return &at
+}
+
+func (u updateRequest) action() string {
+	if u.ExpiresAt.IsSpecified() {
+		return "capture_policy.expiry.update"
+	}
+	return "capture_policy.update"
 }
 
 func (u updateRequest) disablesOnly() bool {
 	return u.Enabled != nil && !*u.Enabled && u.SinkID == nil && u.SampleRatio == nil && u.Include == nil &&
-		u.Redact == nil && u.KeyIDs == nil && u.EndUsers == nil && u.MaxBytes == nil
+		u.Redact == nil && u.KeyIDs == nil && u.EndUsers == nil && u.MaxBytes == nil && !u.ExpiresAt.IsSpecified()
 }
 
 type resolved struct {
@@ -226,7 +249,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		}
 		id := httpkit.NewID()
 		if _, err := tx.Exec(r.Context(), createPolicySQL, id, scope.project, settings.Route, scope.sink, settings.SampleRatio, settings.Include,
-			settings.Redact, settings.MaxBytes, settings.Enabled, httpkit.NewID(), p.UserID(), settings.KeyIDs, settings.EndUsers); err != nil {
+			settings.Redact, settings.MaxBytes, settings.Enabled, httpkit.NewID(), p.UserID(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := storePins(r.Context(), tx, id, pins); err != nil {
@@ -257,14 +280,14 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err := tx.Exec(r.Context(), updatePolicySQL, current.ID, sink, settings.SampleRatio, settings.Include, settings.Redact,
-			settings.MaxBytes, settings.Enabled, httpkit.NewID(), settings.KeyIDs, settings.EndUsers); err != nil {
+			settings.MaxBytes, settings.Enabled, httpkit.NewID(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		policy, err := readPolicy(r.Context(), tx, getPolicySQL, current.ID)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Detail(policy, policy.ETag), access.Event{Action: "capture_policy.update", Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
+		return httpkit.Detail(policy, policy.ETag), access.Event{Action: input.action(), Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
 	})
 }
 
@@ -324,6 +347,10 @@ func readPolicy(ctx context.Context, q database.Queryer, query, id string) (Poli
 func decodePolicy(raw []byte) (Policy, error) {
 	var p Policy
 	err := json.Unmarshal(raw, &p)
+	if p.ExpiresAt != nil {
+		utc := p.ExpiresAt.UTC()
+		p.ExpiresAt = &utc
+	}
 	return p, err
 }
 
