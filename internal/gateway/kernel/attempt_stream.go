@@ -18,18 +18,18 @@ import (
 
 type attemptClock struct{ idle, limit *time.Timer }
 
-// Both timers start stopped: the idle one is armed by the first delivered
-// frame and the limit once the provider's reply is known to be a stream.
 func (run attemptRun) streamClock(plan attemptPlan) attemptClock {
 	if !run.x.generation.parsed.Stream {
 		return attemptClock{}
 	}
+	return attemptClock{idle: run.unarmedTimer(plan, 2), limit: run.unarmedTimer(plan, 3)}
+}
+
+func (run attemptRun) unarmedTimer(plan attemptPlan, reason int32) *time.Timer {
 	state, cancel := run.state, plan.cancel
-	idle := time.AfterFunc(maxStreamDuration, func() { state.reason.CompareAndSwap(0, 2); cancel() })
-	idle.Stop()
-	limit := time.AfterFunc(maxStreamDuration, func() { state.reason.CompareAndSwap(0, 3); cancel() })
-	limit.Stop()
-	return attemptClock{idle: idle, limit: limit}
+	timer := time.AfterFunc(maxStreamDuration, func() { state.reason.CompareAndSwap(0, reason); cancel() })
+	timer.Stop()
+	return timer
 }
 
 func (clock attemptClock) stop() {
