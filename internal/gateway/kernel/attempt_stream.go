@@ -196,7 +196,7 @@ func (stream attemptStream) clientFrame(provided []byte, seen events.AttemptFact
 	}
 	frame := stateful
 	if x.family == wire.Responses {
-		mapped, err := s.mapGenerationReferenceFrame(stream.ctx, x, responseNativeIdentity(x, &fact, ""), stateful)
+		mapped, err := s.mapGenerationReferenceFrame(stream.ctx, x, liveResult(responseNativeIdentity(x, &fact, "")), stateful)
 		if err != nil {
 			return nil, fact, &responseLocalRefusal{cause: err}
 		}

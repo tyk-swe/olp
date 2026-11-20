@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -199,12 +200,17 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 	if _, err := resources.New(pool).PutDurableContract(ctx, contract("unsealed"), payload); !errors.Is(err, resources.ErrContract) {
 		t.Fatalf("storing a payload without a key ring: %v, want %v", err, resources.ErrContract)
 	}
-	stored, err := store.PutDurableContract(ctx, contract("sealed"), payload)
+	sealed := contract("sealed")
+	stored, err := store.PutDurableContract(ctx, sealed, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, stored.ID); err != nil || !bytes.Equal(got, payload) {
 		t.Fatalf("the owner reading its payload: %q, %v", got, err)
+	}
+	var conflict *pgconn.PgError
+	if _, err := store.PutDurableContract(ctx, sealed, payload); !errors.As(err, &conflict) || conflict.Code != "23505" {
+		t.Fatalf("storing a second live mapping for a native file: %v, want a unique violation", err)
 	}
 
 	refusals := map[string]struct {
@@ -230,14 +236,27 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 		t.Fatalf("sealed payloads kept after deletion: %d, %v", kept, err)
 	}
 
-	revoked, err := store.PutDurableContract(ctx, contract("revoked"), payload)
+	replacementPayload := []byte(`{"native":"a replacement file"}`)
+	replacement, err := store.PutDurableContract(ctx, sealed, replacementPayload)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if replacement.ID == stored.ID {
+		t.Fatalf("replacement reused the deleted gateway ID %q", stored.ID)
+	}
+	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, replacement.ID); err != nil || !bytes.Equal(got, replacementPayload) {
+		t.Fatalf("reading the replacement payload: %q, %v", got, err)
+	}
+	if _, _, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, stored.ID); !errors.Is(err, resources.ErrNotFound) {
+		t.Fatalf("reading the deleted payload after replacement: %v, want %v", err, resources.ErrNotFound)
+	}
+	if mapped, err := store.GetByUpstreamIncludingDeleted(ctx, stored.NativeIdentity()); err != nil || mapped.ID != replacement.ID {
+		t.Fatalf("projecting the reused native file identifier: %+v, %v, want %q", mapped, err, replacement.ID)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE olp.api_keys SET revoked_at=now() WHERE id=$1`, fixture.keyID); err != nil {
 		t.Fatal(err)
 	}
-	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, revoked.ID); !errors.Is(err, resources.ErrNotFound) || got != nil {
+	if _, got, err := store.ReadDurableContract(ctx, resources.KindStrictFile, fixture.keyID, replacement.ID); !errors.Is(err, resources.ErrNotFound) || got != nil {
 		t.Fatalf("a revoked key reading its payload: %q, %v, want %v", got, err, resources.ErrNotFound)
 	}
 }
@@ -980,6 +999,7 @@ func (u *retainedUpstream) sent(request string) []upstreamCall {
 type retainedObject struct {
 	ID, Status, Model  string
 	InputFileID        string `json:"input_file_id"`
+	OutputFileID       string `json:"output_file_id"`
 	ProcessingStatus   string `json:"processing_status"`
 	VectorStoreID      string `json:"vector_store_id"`
 	PreviousResponseID string `json:"previous_response_id"`
@@ -1034,7 +1054,19 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	const slug, model = "stored-batch", "batch-model"
-	upstream := &retainedUpstream{replies: openAIReplies}
+	const output = "file-" + providerOwned + "-output"
+	upstream := &retainedUpstream{replies: func(request string, nth int) map[string]string {
+		replies := openAIReplies(request, nth)
+		const read = "GET /batches/batch_provider-owned"
+		if request == read && nth > 1 {
+			batch := strings.Replace(replies[read], "in_progress", "completed", 1)
+			replies[read] = strings.TrimSuffix(batch, "}") + `,"output_file_id":"` + output + `"}`
+		}
+		if request == "POST /files" && nth == 3 {
+			replies[request] = strings.Replace(replies[request], "file-"+providerOwned, output, 1)
+		}
+		return replies
+	}}
 	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
 		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
 	})
@@ -1101,7 +1133,194 @@ func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCre
 	if sent := upstream.sent("DELETE /files/file-provider-owned"); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want only the owner's", len(sent))
 	}
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
 	g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 404)
+	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("owner lists files %v, want only %s", got, replacement.ID)
+	}
+
+	batchPath := "/v1/batches/" + batch.ID
+	finished := g.call(t, "owner", "GET", batchPath, "", "", 200)
+	if finished.OutputFileID == "" {
+		t.Fatal("completed batch returned no output file identifier")
+	}
+	if err := g.store.Tombstone(t.Context(), finished.OutputFileID); err != nil {
+		t.Fatal(err)
+	}
+	g.call(t, "owner", "GET", "/v1/batches", "", "", 200)
+	if got := g.call(t, "owner", "GET", "/v1/files", "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("reading batch history recreated its deleted output, listed files %v", got)
+	}
+	newUpload := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if newUpload.ID == "" || newUpload.ID == finished.OutputFileID {
+		t.Fatalf("upload with the batch output's old provider ID returned %q, want a new gateway ID", newUpload.ID)
+	}
+	if got := g.call(t, "owner", "GET", batchPath, "", "", 200); got.OutputFileID != finished.OutputFileID {
+		t.Fatalf("batch output changed to %q, want the original gateway ID %q", got.OutputFileID, finished.OutputFileID)
+	}
+}
+
+func TestAStoredResponseKeepsItsCitedFileWhenTheProviderReusesTheFileID(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug = "cited-files"
+	upstream := &retainedUpstream{replies: func(request string, nth int) map[string]string {
+		replies := openAIReplies(request, 1)
+		first := strings.Replace(replies["POST /responses"], `"annotations":[]`,
+			`"annotations":[{"type":"file_citation","index":0,"file_id":"file-`+providerOwned+`","filename":"batch.jsonl"}]`, 1)
+		later := strings.ReplaceAll(first, "resp_provider-owned-1", "resp_provider-owned-2")
+		replies["GET /responses/resp_provider-owned-1"], replies["GET /responses/resp_provider-owned-2"] = first, later
+		replies["POST /responses"] = first
+		if nth > 1 {
+			replies["POST /responses"] = later
+		}
+		return replies
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: "citing-model", kind: "azure_openai", operations: []string{"generation", "batch"}, upstream: upstream,
+	})
+	g.key(t, "owner")
+	ask := func(method, path, body string) (string, string) {
+		t.Helper()
+		_, raw := g.send(t, method, path, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}, body, 200)
+		var response struct {
+			ID     string
+			Output []struct {
+				Content []struct {
+					Annotations []struct {
+						FileID string `json:"file_id"`
+					}
+				}
+			}
+		}
+		if err := json.Unmarshal(raw, &response); err != nil || len(response.Output) != 1 || len(response.Output[0].Content) != 1 || len(response.Output[0].Content[0].Annotations) != 1 {
+			t.Fatalf("%s %s returned %s, want one cited file: %v", method, path, raw, err)
+		}
+		return response.ID, response.Output[0].Content[0].Annotations[0].FileID
+	}
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" +
+		`{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}` + "\n\r\n--b--\r\n"
+	create := `{"model":"` + slug + `","input":"hi","store":true}`
+
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	first, cited := ask("POST", "/v1/responses", create)
+	if file.ID == "" || cited != file.ID {
+		t.Fatalf("the first response cites %q, want the uploaded file %q", cited, file.ID)
+	}
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
+
+	if _, cited := ask("GET", "/v1/responses/"+first, ""); cited != file.ID {
+		t.Fatalf("the first response now cites %q, want the file it was created with %q", cited, file.ID)
+	}
+	second, cited := ask("POST", "/v1/responses", create)
+	if cited != replacement.ID {
+		t.Fatalf("a response created after the reuse cites %q, want the replacement %q", cited, replacement.ID)
+	}
+	if _, cited := ask("GET", "/v1/responses/"+second, ""); cited != replacement.ID {
+		t.Fatalf("the later response reads back citing %q, want the replacement %q", cited, replacement.ID)
+	}
+}
+
+func TestAFineTuningJobKeepsItsFilesWhenTheProviderReusesTheFileID(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		field      string
+		uploadedBy bool
+	}{
+		"training file": {field: `"training_file":"file-` + providerOwned + `"`, uploadedBy: true},
+		"result file":   {field: `"result_files":["file-` + providerOwned + `"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			const (
+				slug  = "tuned-files"
+				model = "tuning-model"
+			)
+			upstream := &retainedUpstream{replies: func(request string, _ int) map[string]string {
+				replies := openAIReplies(request, 1)
+				replies["GET /fine_tuning/jobs/ftjob-reused"] = `{"id":"ftjob-reused","object":"fine_tuning.job","created_at":1,"status":"succeeded","model":"` + model + `",` + tc.field + `}`
+				return replies
+			}}
+			g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+				slug: slug, model: model, kind: "azure_openai", operations: []string{"batch", "fine_tuning"}, upstream: upstream,
+			})
+			keyID := g.key(t, "owner")
+			form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" +
+				`{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + slug + `","messages":[{"role":"user","content":"hi"}]}}` + "\n\r\n--b--\r\n"
+
+			uploaded := func() string {
+				if !tc.uploadedBy {
+					return ""
+				}
+				return g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200).ID
+			}()
+			seeded := g.fixture.resource("fine_tuning_job", keyID, "ftjob-reused")
+			seeded.RouteSlug, seeded.ProviderRevisionID, seeded.RouteRevisionID = slug, g.providerRevisionID, g.routeRevisionID
+			seeded.SlotID, seeded.TargetID, seeded.CredentialID = g.slotID, g.targetID, &g.credentialID
+			seeded.State, seeded.ContractVersion = "running", new(retainedapi.Revision)
+			seeded.Metadata = json.RawMessage(`{"upstream_model":"` + model + `"}`)
+			job, err := g.store.Put(t.Context(), seeded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := func() string {
+				t.Helper()
+				_, raw := g.send(t, "GET", "/v1/fine_tuning/jobs/"+job.ID, map[string]string{"Authorization": "Bearer owner"}, "", 200)
+				var decoded struct {
+					TrainingFile string   `json:"training_file"`
+					ResultFiles  []string `json:"result_files"`
+				}
+				if err := json.Unmarshal(raw, &decoded); err != nil {
+					t.Fatalf("job read returned %s: %v", raw, err)
+				}
+				return decoded.TrainingFile + strings.Join(decoded.ResultFiles, ",")
+			}
+			original := read()
+			if original == "" || uploaded != "" && original != uploaded {
+				t.Fatalf("the job names file %q, want the uploaded file %q", original, uploaded)
+			}
+			g.call(t, "owner", "DELETE", "/v1/files/"+original, "", "", 200)
+			replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+			if replacement.ID == "" || replacement.ID == original {
+				t.Fatalf("upload with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+			}
+			if got := read(); got != original {
+				t.Fatalf("the job now names file %q, want the file it named before the reuse %q", got, original)
+			}
+		})
+	}
+}
+
+func TestStrictBatchKeepsItsOriginalInputWhenTheProviderReusesAFileID(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "strict-batch", "batch-model"
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", profile: "azure-v1-chat", version: "/openai/v1", fidelity: routing.FidelityStrict,
+		operations: []string{"generation", "batch"}, upstream: http.StripPrefix("/openai", &retainedUpstream{replies: openAIReplies}),
+	})
+	g.key(t, "owner")
+	line := `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + model + `","messages":[{"role":"user","content":"hi"}]}}`
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" + line + "\n\r\n--b--\r\n"
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	submission := `{"input_file_id":"` + file.ID + `","endpoint":"/v1/chat/completions","completion_window":"24h"}`
+	batch := g.call(t, "owner", "POST", "/v1/batches", "application/json", submission, 200)
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
+	replacement := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	if replacement.ID == "" || replacement.ID == file.ID {
+		t.Fatalf("replacement ID = %q, want a new gateway ID", replacement.ID)
+	}
+	if got := g.call(t, "owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.InputFileID != file.ID {
+		t.Fatalf("batch input changed to %q, want the original gateway ID %q", got.InputFileID, file.ID)
+	}
 }
 
 func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolateKeys(t *testing.T) {
@@ -1674,9 +1893,21 @@ func TestVectorStoresHideProviderIdentifiersBindFilesReplayCreationAndIsolateKey
 	if got := g.call(t, "owner", "DELETE", own, "", "", 200); got.ID != store.ID || !got.Deleted {
 		t.Fatalf("store delete = %+v", got)
 	}
-	g.call(t, "owner", "GET", own, "", "", 404)
 	if sent := upstream.sent("DELETE /vector_stores/vs_" + providerOwned); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
+	}
+	replacement := submit("owner", stores, "application/json", `{"name":"notes"}`, uuid.NewString(), 200)
+	if replacement.ID == "" || replacement.ID == store.ID {
+		t.Fatalf("creation with a reused provider ID returned %q, want a new gateway ID", replacement.ID)
+	}
+	g.call(t, "owner", "GET", own, "", "", 404)
+	g.call(t, "owner", "GET", own+"/files/"+attached.ID, "", "", 404)
+	if got := g.call(t, "owner", "GET", stores, "", "", 200).identifiers(); !slices.Equal(got, []string{replacement.ID}) {
+		t.Fatalf("owner lists stores %v, want only %s", got, replacement.ID)
+	}
+	replayedAfterDelete, _ := g.send(t, "POST", stores, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json", "Idempotency-Key": creation}, `{"name":"notes"}`, 409)
+	if got := replayedAfterDelete.Get("X-OLP-Resource-ID"); got != store.ID {
+		t.Fatalf("replaying the first creation returned %q, want the original %q", got, store.ID)
 	}
 }
 
@@ -2986,8 +3217,9 @@ func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWor
 		}
 		return object.ID
 	}
+	const form = "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	file := created("/v1/files", "multipart/form-data; boundary=b", form, "file")
 	store := created("/v1/vector_stores", "application/json", `{"name":"notes"}`, "store")
-	file := created("/v1/files", "multipart/form-data; boundary=b", "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n", "file")
 	created("/v1/vector_stores/"+store+"/files", "application/json", `{"file_id":"`+file+`"}`, "attachment")
 
 	const search, compact = "/search", "/v1/responses/compact"
@@ -3081,6 +3313,20 @@ func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWor
 			}
 		})
 	}
+
+	t.Run("a fresh search uses the live mapping after provider ID reuse", func(t *testing.T) {
+		provider.answers("DELETE /files/"+providerFile, 200, `{"id":"`+providerFile+`","deleted":true}`)
+		g.call(t, "owner", "DELETE", "/v1/files/"+file, "", "", 200)
+		replacement := created("/v1/files", "multipart/form-data; boundary=b", form, "replacement-file")
+		if replacement == file {
+			t.Fatalf("replacement reused deleted gateway file ID %q", file)
+		}
+		provider.answers(searched, 200, found(providerFile))
+		_, raw := g.send(t, "POST", "/v1/vector_stores/"+store+search, map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}, question, 200)
+		if !strings.Contains(string(raw), `"file_id":"`+replacement+`"`) {
+			t.Fatalf("search returned %s, want replacement file %q", raw, replacement)
+		}
+	})
 
 	unasked := func(path, route, want string) {
 		t.Helper()
