@@ -7,7 +7,11 @@ type FieldKey =
   | 'minimum_samples'
   | 'cooldown_seconds'
   | 'lead_days'
-  | 'lead_time_seconds';
+  | 'lead_time_seconds'
+  | 'baseline_days'
+  | 'minimum_history_days'
+  | 'increase_percent'
+  | 'minimum_increase';
 type ConfigurationField = {
   key: FieldKey;
   label: string;
@@ -126,6 +130,29 @@ export const notificationEvents: Record<NotificationEvent, EventDefinition> = {
     label: 'Spend report',
     scope: 'project',
     fields: []
+  },
+  'spend.spike': {
+    event: 'spend.spike',
+    label: 'Daily spend spike',
+    scope: 'project',
+    fields: [
+      { key: 'baseline_days', label: 'Baseline days', inputmode: 'numeric' },
+      {
+        key: 'minimum_history_days',
+        label: 'Minimum history days',
+        inputmode: 'numeric'
+      },
+      {
+        key: 'increase_percent',
+        label: 'Increase percent',
+        inputmode: 'decimal'
+      },
+      {
+        key: 'minimum_increase',
+        label: 'Minimum increase',
+        inputmode: 'decimal'
+      }
+    ]
   }
 };
 
@@ -240,6 +267,8 @@ export function createRuleInput(
   const configuration = Object.keys(parsed.configuration).length
     ? { configuration: parsed.configuration }
     : {};
+  if (draft.event === 'spend.spike' && !draft.projectId)
+    return { kind: 'invalid', message: 'Choose a project.' };
   if (draft.event === 'key.expiring') {
     if (!draft.subjectId)
       return { kind: 'invalid', message: 'Choose an API key.' };

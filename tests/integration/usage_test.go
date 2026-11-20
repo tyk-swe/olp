@@ -1196,6 +1196,114 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 	}
 }
 
+func TestSpendSpikeNotifications(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	receiver, bodies := notificationReceiver(t)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health(singleton,pending_events,lag_events,checked_at)
+ VALUES(true,0,0,now()) ON CONFLICT(singleton) DO UPDATE SET pending_events=0,lag_events=0,checked_at=now()`); err != nil {
+		t.Fatal(err)
+	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	seed := func(keyID string, day time.Time, cost string, unpriced int) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.attempt_usage_hourly
+		(bucket,route_slug,provider_id,upstream_model,operation,surface,api_key_id,
+		request_count,provider_request_count,model_request_count,target_request_count,
+		input_tokens,output_tokens,cached_input_tokens,media_units,estimated_cost,currency,
+		request_unpriced_count,provider_unpriced_count,model_unpriced_count,target_unpriced_count,
+		request_incomplete_count,provider_incomplete_count,model_incomplete_count,target_incomplete_count)
+		VALUES($1,'spike',$2,$3,'generation','openai',$4,2,2,2,2,0,0,0,0,$5::numeric,'USD',$6,$6,$6,$6,0,0,0,0)`,
+			day.Add(time.Hour), fixture.providerID, vendor.Model, keyID, cost, unpriced); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := func(keyID, baselineCost string, baselineDays int, yesterdayCost string, yesterdayUnpriced int) {
+		for i := 1; i <= baselineDays; i++ {
+			seed(keyID, yesterday.AddDate(0, 0, -i), baselineCost, 0)
+		}
+		seed(keyID, yesterday, yesterdayCost, yesterdayUnpriced)
+	}
+	spikeRule := func(projectID string) string {
+		t.Helper()
+		destination, rule := uuid.NewString(), uuid.NewString()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES($1,'spike',$2,$3,$1,$4)`, destination, receiver.URL, projectID, fixture.ownerID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,destination_id,etag,created_by,created_at)
+ VALUES($1,'spike',$2,'spend.spike',$3,$1,$4,$5)`, rule, projectID, destination, fixture.ownerID, today.AddDate(0, 0, -60)); err != nil {
+			t.Fatal(err)
+		}
+		return rule
+	}
+	extraProject := func() (string, string) {
+		t.Helper()
+		projectID, keyID := uuid.NewString(), uuid.NewString()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1::uuid,$1::text,$1::uuid,$2)`,
+			projectID, fixture.ownerID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id)
+ VALUES($1::uuid,$1::text,decode(repeat('00',32),'hex'),'spike',$2,'{}',$1::uuid,$3)`, keyID, fixture.ownerID, projectID); err != nil {
+			t.Fatal(err)
+		}
+		return projectID, keyID
+	}
+
+	fired := spikeRule(fixture.projectID)
+	history(fixture.keyID, "20", 7, "150", 0)
+
+	quietProject, quietKey := extraProject()
+	quiet := spikeRule(quietProject)
+	history(quietKey, "20", 7, "22", 0)
+
+	shortProject, shortKey := extraProject()
+	shortHistory := spikeRule(shortProject)
+	history(shortKey, "20", 3, "150", 0)
+
+	unpricedProject, unpricedKey := extraProject()
+	unpriced := spikeRule(unpricedProject)
+	history(unpricedKey, "20", 7, "150", 1)
+
+	smallProject, smallKey := extraProject()
+	smallChange := spikeRule(smallProject)
+	history(smallKey, "2", 7, "4", 0)
+
+	deliverNotifications(t, pool, nil)
+	deliverNotifications(t, pool, nil)
+
+	for rule, want := range map[string]int{fired: 1, quiet: 0, shortHistory: 0, unpriced: 0, smallChange: 0} {
+		var deliveries int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.notification_deliveries WHERE rule_id=$1`, rule).Scan(&deliveries); err != nil {
+			t.Fatal(err)
+		}
+		if deliveries != want {
+			t.Errorf("rule %s queued %d deliveries, want %d", rule, deliveries, want)
+		}
+	}
+	var status, usagePath string
+	var daysUsed int
+	var amountsMatch bool
+	if err := pool.QueryRow(t.Context(), `SELECT status,payload->>'usage_path',(payload->>'baseline_days_used')::int,
+ (payload->>'actual_spend')::numeric=150 AND (payload->>'baseline_spend')::numeric=20 AND (payload->>'increase_percent')::numeric=650
+ FROM olp.notification_deliveries WHERE rule_id=$1`, fired).Scan(&status, &usagePath, &daysUsed, &amountsMatch); err != nil {
+		t.Fatal(err)
+	}
+	if status != "delivered" || !amountsMatch || daysUsed != 7 {
+		t.Errorf("spike delivery status=%s amounts match=%t days=%d, want delivered 150 over 20 (650%%, 7 days)",
+			status, amountsMatch, daysUsed)
+	}
+	if !strings.Contains(usagePath, "project_id="+fixture.projectID) || !strings.Contains(usagePath, yesterday.Format("2006-01-02")) {
+		t.Errorf("usage path %q does not link the fired project and day", usagePath)
+	}
+	if got, want := received(bodies), []string{"spend.spike resolved=false"}; !slices.Equal(got, want) {
+		t.Errorf("receiver got %v, want %v", got, want)
+	}
+}
+
 func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

@@ -8,9 +8,10 @@ import (
 )
 
 type eventSpec struct {
-	subject       subjectShape
-	projectScoped bool
-	configuration ruleConfiguration
+	subject         subjectShape
+	projectScoped   bool
+	projectRequired bool
+	configuration   ruleConfiguration
 }
 
 type ruleConfiguration interface {
@@ -66,6 +67,10 @@ var events = map[contract.NotificationEvent]eventSpec{
 	contract.NotificationEventReportSpend: {
 		projectScoped: true,
 		configuration: evaluated(resolveSpendReport, func(c spendReportConfig) evaluator { return c.claim }),
+	},
+	contract.NotificationEventSpendSpike: {
+		projectScoped: true, projectRequired: true,
+		configuration: evaluated(resolveSpendSpike, func(c spendSpikeConfig) evaluator { return c.claim }),
 	},
 	contract.NotificationEventBudgetExhausted: {
 		projectScoped: true,
