@@ -12,84 +12,94 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-func (run *attemptRun) prepare() *attemptEnd {
-	s, x, a := run.server, run.x, run.target
-	if err := s.bindExchange(x, run.provider, run.slot, a.UpstreamModel, run.config, run.state).validateBaseEndpoint(run.provider.Endpoint); err != nil {
-		return ended(ClassConnect, nil)
+func (run attemptRun) prepare() (attemptPlan, *attemptEnd) {
+	s, x, a, state := run.server, run.x, run.target, run.state
+	if err := s.bindExchange(x, run.provider, run.slot, a.UpstreamModel, run.connector, state).validateBaseEndpoint(run.provider.Endpoint); err != nil {
+		return attemptPlan{}, ended(ClassConnect, nil)
 	}
 	prepared, err := x.generationRequest(run.provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
-		return ended(ClassProtocol, nil)
+		return attemptPlan{}, ended(ClassProtocol, nil)
 	}
 	x.guard.input = prepared.guardrailSegments
 	for _, decision := range prepared.policyDecisions {
 		recordDecision(x, decision)
 	}
-	run.config, run.format, run.contract = prepared.config, prepared.wire, prepared.plan
-	run.body = run.config.WrapRequest(prepared.document.Bytes(), a.UpstreamModel)
-	run.reader = providerinvoke.NewResponseReader(run.config, run.format, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
-	responseRequest, err := wire.NewRequest(run.format, x.generation.parsed.Route, run.reader.Streaming(), prepared.document)
+	reader := providerinvoke.NewResponseReader(prepared.config, prepared.wire, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
+	responseRequest, err := wire.NewRequest(prepared.wire, x.generation.parsed.Route, reader.Streaming(), prepared.document)
 	if err != nil {
-		return ended(ClassProtocol, nil)
+		return attemptPlan{}, ended(ClassProtocol, nil)
 	}
-	run.codec = protocols.PrepareResponse(responseRequest, x.generation.parsed, x.named().Slug, protocols.EmbeddingEncoding(x.generation.parsed, run.provider.ParameterDefaults))
+	codec := protocols.PrepareResponse(responseRequest, x.generation.parsed, x.named().Slug, protocols.EmbeddingEncoding(x.generation.parsed, run.provider.ParameterDefaults))
 	deadline, _ := run.ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return ended(ClassTimeout, &AttemptFailure{overall: true})
+		return attemptPlan{}, ended(ClassTimeout, &AttemptFailure{overall: true})
 	}
-	run.sending, run.cancel = context.WithCancel(run.traced)
-	run.firstByte = time.AfterFunc(min(a.Timeout, remaining), func() { run.state.reason.CompareAndSwap(0, 1); run.cancel() })
-	return nil
+	sending, cancel := context.WithCancel(run.traced)
+	firstByte := time.AfterFunc(min(a.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
+	return attemptPlan{
+		config: prepared.config, format: prepared.wire, contract: prepared.plan, reader: reader, codec: codec,
+		body:    prepared.config.WrapRequest(prepared.document.Bytes(), a.UpstreamModel),
+		sending: sending, cancel: cancel, firstByte: firstByte,
+	}, nil
 }
 
-func (run *attemptRun) send() *attemptEnd {
+func (run attemptRun) send(plan attemptPlan, fact events.AttemptFact) (attemptSent, *attemptEnd) {
 	s, x, a := run.server, run.x, run.target
-	endpoint, err := run.config.URL(run.format, a.UpstreamModel, run.reader.Streaming())
+	unsent := attemptSent{plan: plan, config: plan.config, fact: fact}
+	endpoint, err := plan.config.URL(plan.format, a.UpstreamModel, plan.reader.Streaming())
 	if err != nil {
-		return ended(ClassProtocol, nil)
+		return unsent, ended(ClassProtocol, nil)
 	}
-	exchange := s.bindExchange(x, run.provider, run.slot, a.UpstreamModel, run.config, run.state)
-	req, err := exchange.request(run.sending, http.MethodPost, endpoint, bytes.NewReader(run.body), make(http.Header))
+	exchange := s.bindExchange(x, run.provider, run.slot, a.UpstreamModel, plan.config, run.state)
+	req, err := exchange.request(plan.sending, http.MethodPost, endpoint, bytes.NewReader(plan.body), make(http.Header))
 	if err != nil {
-		return ended(ClassConnect, nil)
+		return unsent, ended(ClassConnect, nil)
 	}
 	run.trace.InjectUpstream(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	req.Header.Set("Accept", run.reader.Accept())
-	if run.contract == nil {
-		run.config = forwardAnthropicBeta(req.Header, x, run.format, run.config)
+	req.Header.Set("Accept", plan.reader.Accept())
+	config := run.sendingConfig(plan, req.Header)
+	exchange.config = config
+	if end := run.authenticate(plan, exchange, req); end != nil {
+		return unsent, end
 	}
-	exchange.config = run.config
-	if end := run.authenticate(exchange, req); end != nil {
-		return end
-	}
-	client, err := exchange.dispatchClient(run.sending)
+	client, err := exchange.dispatchClient(plan.sending)
 	if err != nil {
-		return ended(classCredential, nil)
+		return unsent, ended(classCredential, nil)
 	}
-	if end := run.announce(); end != nil {
-		return end
+	parallel, end := run.announce(plan)
+	announced := attemptSent{plan: plan, config: config, fact: fact, parallel: parallel}
+	if end != nil {
+		return announced, end
 	}
 	resp, err := exchange.do(client, req)
 	if err != nil {
-		return ended(run.state.classify(err, false), nil)
+		return announced, ended(run.state.classify(err, false), nil)
 	}
-	run.response = resp
-	return run.accept()
+	return run.accept(attemptSent{plan: plan, config: config, fact: fact, parallel: parallel, response: resp})
 }
 
-func (run *attemptRun) authenticate(exchange *boundExchange, req *http.Request) *attemptEnd {
-	err := exchange.authenticate(run.sending, req, run.body)
+func (run attemptRun) sendingConfig(plan attemptPlan, header http.Header) connectors.Config {
+	if plan.contract != nil {
+		return plan.config
+	}
+	return forwardAnthropicBeta(header, run.x, plan.format, plan.config)
+}
+
+func (run attemptRun) authenticate(plan attemptPlan, exchange *boundExchange, req *http.Request) *attemptEnd {
+	err := exchange.authenticate(plan.sending, req, plan.body)
 	switch {
 	case err == nil:
 		return nil
-	case run.sending.Err() != nil:
+	case plan.sending.Err() != nil:
 		return ended(run.state.classify(err, false), nil)
 	case errors.Is(err, connectors.ErrSigningUnavailable):
 		// The plugin couldn't sign the request, which says nothing
@@ -100,38 +110,40 @@ func (run *attemptRun) authenticate(exchange *boundExchange, req *http.Request) 
 	return ended(classCredential, nil)
 }
 
-func (run *attemptRun) announce() *attemptEnd {
+func (run attemptRun) announce(plan attemptPlan) (*parallelGuardrail, *attemptEnd) {
 	s, x := run.server, run.x
-	if run.contract != nil && run.contract.ToolContinuation() {
-		if err := s.claimToolWork(run.sending, x, run.contract, run.target, run.slot); err != nil {
-			return ended(ClassProtocol, &AttemptFailure{contractCode: "continuation_unavailable", noRetry: true})
+	if plan.contract != nil && plan.contract.ToolContinuation() {
+		if err := s.claimToolWork(plan.sending, x, plan.contract, run.target, run.slot); err != nil {
+			return nil, ended(ClassProtocol, &AttemptFailure{contractCode: "continuation_unavailable", noRetry: true})
 		}
 	}
-	run.parallel = s.startParallel(run.sending, x, run.cancel)
+	parallel := s.startParallel(plan.sending, x, plan.cancel)
 	if x.workflow == nil {
-		return nil
+		return parallel, nil
 	}
-	if e := s.markSessionDispatched(run.sending, x); e != nil {
-		return ended(ClassConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
+	if e := s.markSessionDispatched(plan.sending, x); e != nil {
+		return parallel, ended(ClassConnect, &AttemptFailure{contractCode: e.Code, noRetry: true})
 	}
-	return nil
+	return parallel, nil
 }
 
-func (run *attemptRun) accept() *attemptEnd {
-	s, resp := run.server, run.response
-	received := s.Now().Sub(run.fact.StartedAt)
-	run.fact.FirstByte = &received
-	run.fact.Status = resp.StatusCode
+func (run attemptRun) accept(sent attemptSent) (attemptSent, *attemptEnd) {
+	s, resp := run.server, sent.response
+	received := s.Now().Sub(sent.fact.StartedAt)
+	fact := sent.fact
+	fact.FirstByte = &received
+	fact.Status = resp.StatusCode
+	answered := attemptSent{plan: sent.plan, config: sent.config, fact: fact, parallel: sent.parallel, response: resp}
 	if resp.StatusCode == http.StatusOK {
 		run.state.accepted = true
-		return nil
+		return answered, nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-	status, rejection := run.config.Rejection(resp.StatusCode, raw)
+	status, rejection := sent.config.Rejection(resp.StatusCode, raw)
 	f := &AttemptFailure{Status: status, upstream: run.x.redacted(openai.ParseErrorBody(rejection))}
 	class := run.state.rejected(status, f.upstream)
 	if class == classRateLimit {
 		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
 	}
-	return ended(class, f)
+	return answered, ended(class, f)
 }
