@@ -26,15 +26,18 @@ func TestManagementCLIListPages(t *testing.T) {
 		name, path, filter, value, flag, start, want string
 		args                                         []string
 		cursors                                      []string
+		pages                                        []string
 	}{
 		{name: "default single page", path: "/api/v1/providers", filter: "search", value: "staging", args: []string{"providers", "list"},
-			cursors: []string{""}, want: first},
+			cursors: []string{""}, pages: []string{first}, want: first},
 		{name: "false stays single page", path: "/api/v1/providers", filter: "search", value: "staging", args: []string{"providers", "list"},
-			flag: "--all-pages=false", cursors: []string{""}, want: first},
+			flag: "--all-pages=false", cursors: []string{""}, pages: []string{first}, want: first},
 		{name: "providers", path: "/api/v1/providers", filter: "search", value: "staging & preview", args: []string{"providers", "list"},
-			flag: "--all-pages=true", cursors: []string{"", cursor}, want: combined},
+			flag: "--all-pages=true", cursors: []string{"", cursor}, pages: []string{first, last}, want: combined},
+		{name: "empty providers", path: "/api/v1/providers", filter: "search", value: "no matches", args: []string{"providers", "list"},
+			flag: "--all-pages=true", cursors: []string{""}, pages: []string{`{"items":[],"next_cursor":null}`}, want: `{"items":[]}`},
 		{name: "keys from explicit cursor", path: "/api/v1/api-keys", filter: "created_by", value: "b6e5d9a9-f090-4a97-bdb6-6ade78caede2", args: []string{"api", "list_api_keys"},
-			flag: "--all-pages=true", start: start, cursors: []string{start, cursor}, want: combined},
+			flag: "--all-pages=true", start: start, cursors: []string{start, cursor}, pages: []string{first, last}, want: combined},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -53,7 +56,7 @@ func TestManagementCLIListPages(t *testing.T) {
 				if r.Method != http.MethodGet || r.URL.Path != test.path || r.URL.Query().Encode() != wantQuery.Encode() || r.Header.Get("Authorization") != "Bearer fixture-token" {
 					t.Errorf("page %d: got %s %s, want GET %s?%s with management authorization", page+1, r.Method, r.URL, test.path, wantQuery.Encode())
 				}
-				io.WriteString(w, []string{first, last}[page])
+				io.WriteString(w, test.pages[page])
 			}))
 			defer server.Close()
 			args := append(slices.Clone(test.args), "--query", test.filter+"="+test.value, "--query", "limit=25")

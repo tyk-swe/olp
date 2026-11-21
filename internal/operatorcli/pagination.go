@@ -77,6 +77,9 @@ func (w pageWalk) collect(ctx context.Context, args management.Arguments, seen [
 	if err != nil {
 		return nil, commandFailure(management.InvalidResponse, err)
 	}
+	if page.NextCursor == nil && len(items) == 0 {
+		return page.Items, nil
+	}
 	all := slices.Concat(items, page.Items)
 	if page.NextCursor == nil {
 		return all, nil
