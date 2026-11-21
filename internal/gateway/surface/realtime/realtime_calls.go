@@ -89,7 +89,7 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *fault.Error) 
 		reader := multipart.NewReader(body, params["boundary"])
 		for {
 			part, err := reader.NextPart()
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF {
 				break
 			}
 			if err != nil {
