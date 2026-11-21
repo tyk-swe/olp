@@ -15,14 +15,17 @@ import (
 
 type Evaluator func(*http.Request, authz.Principal, guardrails.Pinned, guardrails.Application) (guardrails.Result, error)
 
+type BatchEvaluator func(*http.Request, authz.Principal, []guardrails.Pinned, []guardrails.Application) ([]guardrails.Result, error)
+
 type API struct {
-	server   *access.Server
-	publish  guardrails.Publisher
-	evaluate Evaluator
+	server        *access.Server
+	publish       guardrails.Publisher
+	evaluate      Evaluator
+	evaluateBatch BatchEvaluator
 }
 
-func NewAPI(server *access.Server, publish guardrails.Publisher, evaluate Evaluator) *API {
-	return &API{server: server, publish: publish, evaluate: evaluate}
+func NewAPI(server *access.Server, publish guardrails.Publisher, evaluate Evaluator, evaluateBatch BatchEvaluator) *API {
+	return &API{server: server, publish: publish, evaluate: evaluate, evaluateBatch: evaluateBatch}
 }
 
 func (a *API) Register(mux *http.ServeMux) {
@@ -34,6 +37,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "POST /api/v1/guardrail-policies/{policy_id}/activate", guardrails.Activation(a.server, a.publish, lineage{}, "policy_id", "guardrail_policies"))
 	a.server.Route(mux, "GET /api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}", a.revision)
 	a.server.Route(mux, "POST /api/v1/guardrails/evaluate", a.apply, access.MaxBody(guardrails.MaxContentBytes))
+	a.server.Route(mux, "POST /api/v1/guardrails/run-fixtures", a.runFixtures, access.MaxBody(maxFixtureRunBytes))
 }
 
 func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

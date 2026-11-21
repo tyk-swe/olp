@@ -3565,6 +3565,120 @@ func (e GuardrailEvidencePhase) Valid() bool {
 	}
 }
 
+// Defines values for GuardrailFixtureExpected.
+const (
+	GuardrailFixtureExpectedAllow  GuardrailFixtureExpected = "allow"
+	GuardrailFixtureExpectedBlock  GuardrailFixtureExpected = "block"
+	GuardrailFixtureExpectedRedact GuardrailFixtureExpected = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureExpected enum.
+func (e GuardrailFixtureExpected) Valid() bool {
+	switch e {
+	case GuardrailFixtureExpectedAllow:
+		return true
+	case GuardrailFixtureExpectedBlock:
+		return true
+	case GuardrailFixtureExpectedRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixturePhase.
+const (
+	GuardrailFixturePhaseInput  GuardrailFixturePhase = "input"
+	GuardrailFixturePhaseOutput GuardrailFixturePhase = "output"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixturePhase enum.
+func (e GuardrailFixturePhase) Valid() bool {
+	switch e {
+	case GuardrailFixturePhaseInput:
+		return true
+	case GuardrailFixturePhaseOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureOutcomeOutcome.
+const (
+	GuardrailFixtureOutcomeOutcomeAllow  GuardrailFixtureOutcomeOutcome = "allow"
+	GuardrailFixtureOutcomeOutcomeBlock  GuardrailFixtureOutcomeOutcome = "block"
+	GuardrailFixtureOutcomeOutcomeRedact GuardrailFixtureOutcomeOutcome = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureOutcomeOutcome enum.
+func (e GuardrailFixtureOutcomeOutcome) Valid() bool {
+	switch e {
+	case GuardrailFixtureOutcomeOutcomeAllow:
+		return true
+	case GuardrailFixtureOutcomeOutcomeBlock:
+		return true
+	case GuardrailFixtureOutcomeOutcomeRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureResultExpected.
+const (
+	GuardrailFixtureResultExpectedAllow  GuardrailFixtureResultExpected = "allow"
+	GuardrailFixtureResultExpectedBlock  GuardrailFixtureResultExpected = "block"
+	GuardrailFixtureResultExpectedRedact GuardrailFixtureResultExpected = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureResultExpected enum.
+func (e GuardrailFixtureResultExpected) Valid() bool {
+	switch e {
+	case GuardrailFixtureResultExpectedAllow:
+		return true
+	case GuardrailFixtureResultExpectedBlock:
+		return true
+	case GuardrailFixtureResultExpectedRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureResultPhase.
+const (
+	GuardrailFixtureResultPhaseInput  GuardrailFixtureResultPhase = "input"
+	GuardrailFixtureResultPhaseOutput GuardrailFixtureResultPhase = "output"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureResultPhase enum.
+func (e GuardrailFixtureResultPhase) Valid() bool {
+	switch e {
+	case GuardrailFixtureResultPhaseInput:
+		return true
+	case GuardrailFixtureResultPhaseOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureRunInputSynthetic.
+const (
+	GuardrailFixtureRunInputSyntheticTrue GuardrailFixtureRunInputSynthetic = true
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureRunInputSynthetic enum.
+func (e GuardrailFixtureRunInputSynthetic) Valid() bool {
+	switch e {
+	case GuardrailFixtureRunInputSyntheticTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GuardrailPolicyEntryAction.
 const (
 	GuardrailPolicyEntryActionAnnotate GuardrailPolicyEntryAction = "annotate"
@@ -6597,13 +6711,13 @@ func (e RouteFidelityMode) Valid() bool {
 
 // Defines values for RouteFixtureFileSynthetic.
 const (
-	True RouteFixtureFileSynthetic = true
+	RouteFixtureFileSyntheticTrue RouteFixtureFileSynthetic = true
 )
 
 // Valid indicates whether the value is a known member of the RouteFixtureFileSynthetic enum.
 func (e RouteFixtureFileSynthetic) Valid() bool {
 	switch e {
-	case True:
+	case RouteFixtureFileSyntheticTrue:
 		return true
 	default:
 		return false
@@ -11876,6 +11990,65 @@ type GuardrailEvidenceOutcome string
 
 // GuardrailEvidencePhase defines model for GuardrailEvidence.Phase.
 type GuardrailEvidencePhase string
+
+// GuardrailFixture defines model for GuardrailFixture.
+type GuardrailFixture struct {
+	Expected             GuardrailFixtureExpected `json:"expected"`
+	ExpectedRedactedText *string                  `json:"expected_redacted_text,omitempty"`
+	Id                   string                   `json:"id"`
+	Phase                GuardrailFixturePhase    `json:"phase"`
+	Text                 string                   `json:"text"`
+}
+
+// GuardrailFixtureExpected defines model for GuardrailFixture.Expected.
+type GuardrailFixtureExpected string
+
+// GuardrailFixturePhase defines model for GuardrailFixture.Phase.
+type GuardrailFixturePhase string
+
+// GuardrailFixtureOutcome defines model for GuardrailFixtureOutcome.
+type GuardrailFixtureOutcome struct {
+	Matched bool                           `json:"matched"`
+	Outcome GuardrailFixtureOutcomeOutcome `json:"outcome"`
+}
+
+// GuardrailFixtureOutcomeOutcome defines model for GuardrailFixtureOutcome.Outcome.
+type GuardrailFixtureOutcomeOutcome string
+
+// GuardrailFixtureReport defines model for GuardrailFixtureReport.
+type GuardrailFixtureReport struct {
+	BaselinePolicyRevisionId  openapi_types.UUID       `json:"baseline_policy_revision_id"`
+	CandidatePolicyRevisionId openapi_types.UUID       `json:"candidate_policy_revision_id"`
+	Passed                    bool                     `json:"passed"`
+	Results                   []GuardrailFixtureResult `json:"results"`
+}
+
+// GuardrailFixtureResult defines model for GuardrailFixtureResult.
+type GuardrailFixtureResult struct {
+	Baseline  GuardrailFixtureOutcome        `json:"baseline"`
+	Candidate GuardrailFixtureOutcome        `json:"candidate"`
+	Expected  GuardrailFixtureResultExpected `json:"expected"`
+	Id        string                         `json:"id"`
+	Passed    bool                           `json:"passed"`
+	Phase     GuardrailFixtureResultPhase    `json:"phase"`
+}
+
+// GuardrailFixtureResultExpected defines model for GuardrailFixtureResult.Expected.
+type GuardrailFixtureResultExpected string
+
+// GuardrailFixtureResultPhase defines model for GuardrailFixtureResult.Phase.
+type GuardrailFixtureResultPhase string
+
+// GuardrailFixtureRunInput defines model for GuardrailFixtureRunInput.
+type GuardrailFixtureRunInput struct {
+	BaselinePolicyRevisionId  openapi_types.UUID                `json:"baseline_policy_revision_id"`
+	CandidatePolicyRevisionId openapi_types.UUID                `json:"candidate_policy_revision_id"`
+	Fixtures                  []GuardrailFixture                `json:"fixtures"`
+	Synthetic                 GuardrailFixtureRunInputSynthetic `json:"synthetic"`
+}
+
+// GuardrailFixtureRunInputSynthetic defines model for GuardrailFixtureRunInput.Synthetic.
+type GuardrailFixtureRunInputSynthetic bool
 
 // GuardrailListResponse defines model for GuardrailListResponse.
 type GuardrailListResponse struct {
@@ -20514,6 +20687,9 @@ type CreateGuardrailJSONRequestBody = CreateGuardrailRequest
 
 // EvaluateGuardrailsJSONRequestBody defines body for EvaluateGuardrails for application/json ContentType.
 type EvaluateGuardrailsJSONRequestBody = GuardrailApplyInput
+
+// RunGuardrailFixturesJSONRequestBody defines body for RunGuardrailFixtures for application/json ContentType.
+type RunGuardrailFixturesJSONRequestBody = GuardrailFixtureRunInput
 
 // UpdateGuardrailJSONRequestBody defines body for UpdateGuardrail for application/json ContentType.
 type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest

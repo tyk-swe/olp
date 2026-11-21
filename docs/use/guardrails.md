@@ -285,6 +285,56 @@ guardrails when the header limit is reached.
 Each attempt records its own input and output decisions; request history keeps
 the combined evidence across attempts.
 
+## Run fixtures in CI
+
+Keep a small file of invented examples next to your pipeline and run it against
+two pinned revisions of one policy before you attach the candidate. The file is
+read by the `olp` command on your machine and is never stored by OLP. Use only
+synthetic text, never production prompts, credentials, real identifiers or
+personal data.
+
+```json
+{
+  "synthetic": true,
+  "fixtures": [
+    {"id": "allow-case", "phase": "input", "text": "a friendly note", "expected": "allow"},
+    {"id": "block-case", "phase": "input", "text": "a blocked-word here", "expected": "block"},
+    {"id": "redact-case", "phase": "output", "text": "code secret-123 end", "expected": "redact", "expected_redacted_text": "code [hidden] end"}
+  ]
+}
+```
+
+Run it with a management token that holds the `playground` scope and can view
+the policy project.
+
+```sh
+olp guardrails run-fixtures --file guardrail-fixtures.json \
+  --baseline-revision BASELINE_POLICY_REVISION_UUID \
+  --candidate-revision CANDIDATE_POLICY_REVISION_UUID
+```
+
+The command prints one line per fixture with its ID, the baseline and
+candidate outcomes, the expected outcome and whether the candidate matched,
+then a count of passing fixtures. With `--output REPORT` it also writes the
+JSON report returned by `POST /api/v1/guardrails/run-fixtures`. Neither form
+contains fixture text, expected redacted text, patterns or transformed text,
+and the command exits nonzero when the candidate misses an expectation or the
+run cannot be evaluated, naming the failing fixture IDs. The baseline outcome
+is reported for comparison and does not gate the run.
+
+A suite holds at most 32 uniquely named fixtures in a 256 KiB file, with at
+most 8192 bytes of text per fixture. Only the unary `input` and `output`
+phases run, and only policy entries over the deterministic built-in types
+`builtin.regex`, `builtin.pii`, `builtin.secrets` and `builtin.keywords` are
+supported, apart from `mask` entries whose placeholders are not repeatable.
+Both revisions are loaded, authorized and checked against these bounds
+before any fixture is evaluated, so an out-of-scope revision, an oversized
+suite or an unsupported evaluator fails the whole run with no partial pass
+and no external evaluator call. Evaluation uses the same engine as the
+console playground, runs in memory, and never changes policies, attachments
+or any stored fixture library. Repeating a suite against the same two
+revisions returns the same outcomes and exit status.
+
 ## Migration and qualification
 
 Configuration export writes `openllmproxy.dev/config/v2`. Version 1 import is

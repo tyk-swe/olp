@@ -60,6 +60,9 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 	if args[0] == "config" {
 		return runner.configuration(ctx, args[1:])
 	}
+	if args[0] == "guardrails" && args[1] == "run-fixtures" {
+		return runner.guardrailFixtures(ctx, args[2:])
+	}
 	jsonErrors := runner.Getenv("OLP_CLI_ERROR_FORMAT") == "json"
 	failure := runner.generated(ctx, args, jsonErrors)
 	if failure == nil {
@@ -266,6 +269,9 @@ func (runner Runner) help(group string) error {
 	fmt.Fprintln(runner.Out, "Contract-required mutation keys must be explicit; retry an uncertain write with the same key and payload.")
 	if group == "configuration" {
 		fmt.Fprintln(runner.Out, "config export [--output FILE]\nconfig plan --file DOCUMENT [--bindings-file FILE] [--code-bindings-file FILE] [--output PLAN]\nconfig apply --plan-file PLAN [--bindings-file FILE] [--code-bindings-file FILE] [--idempotency-key KEY]")
+	}
+	if group == "guardrails" {
+		fmt.Fprintln(runner.Out, "guardrails run-fixtures --file FIXTURES --baseline-revision REVISION_ID --candidate-revision REVISION_ID [--output REPORT]")
 	}
 	for _, op := range management.Operations() {
 		if group != "api" && op.Group != group {
