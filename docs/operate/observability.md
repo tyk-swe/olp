@@ -351,6 +351,15 @@ categories, never response bodies/URLs/secrets. Disabled rules/destinations paus
 unsent delivery. Grant-lapse evidence identifies the affected version/slots and
 observed principal, never token material or refresh error.
 
+For maintenance, edit a project-scoped route latency webhook rule and set a
+**Notification silence** with a start and end in UTC. The start is inclusive and
+the end is exclusive. You can cancel a scheduled or active silence early. The
+rule keeps evaluating while silenced. New triggers and cooldown repeats are
+not queued, but already queued deliveries and recoveries for announced
+incidents still send. After the silence, a fresh breaching measurement can
+announce an incident that is still open. Incidents that recovered without ever
+being announced do not send a trigger or recovery.
+
 Notifications need Valkey only for limiter-dependent signals. Capability
 `notifications_active` means configured, not healthy; check notification task
 checkpoints and delivery status counters.

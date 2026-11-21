@@ -24,6 +24,7 @@ const evaluatedRuleLimit = 1000
 
 type signalEnv struct {
 	now         time.Time
+	silenceNow  time.Time
 	fleet       *fleet.State
 	reference   *catalog.Signed
 	log         *slog.Logger
@@ -87,7 +88,7 @@ func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, erro
 	if err := tx.QueryRow(ctx, signalClockSQL).Scan(&now); err != nil {
 		return 0, err
 	}
-	env := signalEnv{now: now, fleet: w.Fleet, reference: w.Catalog, log: w.Log, newID: w.NewID, workerClock: w.Now}
+	env := signalEnv{now: now, silenceNow: w.Now(), fleet: w.Fleet, reference: w.Catalog, log: w.Log, newID: w.NewID, workerClock: w.Now}
 	claimed := 0
 	for _, rule := range rules {
 		count, err := rule.evaluate(ctx, tx, rule.rule, env)
@@ -117,7 +118,7 @@ func readEvaluatedRules(ctx context.Context, tx pgx.Tx) ([]evaluatedRule, error)
 func scanEvaluatedRule(row pgx.CollectableRow) (evaluatedRule, error) {
 	var rule signalRule
 	var raw json.RawMessage
-	if err := row.Scan(&rule.id, &rule.event, &rule.name, &rule.project, &raw, &rule.createdAt); err != nil {
+	if err := row.Scan(&rule.id, &rule.event, &rule.name, &rule.project, &raw, &rule.createdAt, &rule.silence.startsAt, &rule.silence.endsAt); err != nil {
 		return evaluatedRule{}, err
 	}
 	configuration, ok := events[rule.event].configuration.(evaluable)
@@ -198,9 +199,10 @@ func activeSignalSubjects(ctx context.Context, tx pgx.Tx, ruleID string) ([]stri
 }
 
 type signalState struct {
-	active        bool
-	incident      int64
-	lastTriggerAt *time.Time
+	active         bool
+	incident       int64
+	lastTriggerAt  *time.Time
+	triggerPending bool
 }
 
 type signalChange int
@@ -260,6 +262,7 @@ type signalRule struct {
 	event     contract.NotificationEvent
 	project   *string
 	createdAt time.Time
+	silence   silenceWindow
 }
 
 type notificationSignal struct {
@@ -300,14 +303,14 @@ func claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, source signalS
 		return 0, err
 	}
 	var current signalState
-	if err := tx.QueryRow(ctx, lockSignalStateSQL, rule.id, signal.subject).Scan(&current.active, &current.incident, &current.lastTriggerAt); err != nil {
+	if err := tx.QueryRow(ctx, lockSignalStateSQL, rule.id, signal.subject).Scan(&current.active, &current.incident, &current.lastTriggerAt, &current.triggerPending); err != nil {
 		return 0, err
 	}
-	next, err := transitionSignal(current, signal.reading, source.announce, env.now, cooldown)
+	next, err := rule.transition(current, signal.reading, source.announce, env, cooldown)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(ctx, updateSignalStateSQL, rule.id, signal.subject, next.state.active, next.state.incident, next.state.lastTriggerAt); err != nil {
+	if _, err := tx.Exec(ctx, updateSignalStateSQL, rule.id, signal.subject, next.state.active, next.state.incident, next.state.lastTriggerAt, next.state.triggerPending); err != nil {
 		return 0, err
 	}
 	if !source.announce.announces(next.change) {
@@ -350,7 +353,8 @@ type signalPayload struct {
 	Evidence    map[string]any `json:"evidence"`
 }
 
-const signalRulesSQL = `SELECT r.id::text,r.event,r.name,r.project_id::text,r.configuration,r.created_at
+const signalRulesSQL = `SELECT r.id::text,r.event,r.name,r.project_id::text,r.configuration,r.created_at,
+ CASE WHEN d.type='webhook' THEN r.silence_starts_at END, CASE WHEN d.type='webhook' THEN r.silence_ends_at END
  FROM olp.notification_rules r JOIN olp.notification_destinations d ON d.id=r.destination_id
  WHERE r.enabled AND d.enabled AND r.event=ANY($1)
  ORDER BY r.id LIMIT $2`
@@ -359,9 +363,9 @@ const signalClockSQL = `SELECT now()`
 
 const createSignalStateSQL = `INSERT INTO olp.notification_signal_states(rule_id,subject) VALUES($1,$2) ON CONFLICT DO NOTHING`
 
-const lockSignalStateSQL = `SELECT active,incident,last_trigger_at FROM olp.notification_signal_states WHERE rule_id=$1 AND subject=$2 FOR UPDATE`
+const lockSignalStateSQL = `SELECT active,incident,last_trigger_at,trigger_pending FROM olp.notification_signal_states WHERE rule_id=$1 AND subject=$2 FOR UPDATE`
 
-const updateSignalStateSQL = `UPDATE olp.notification_signal_states SET active=$3,incident=$4,last_trigger_at=$5,checked_at=now() WHERE rule_id=$1 AND subject=$2`
+const updateSignalStateSQL = `UPDATE olp.notification_signal_states SET active=$3,incident=$4,last_trigger_at=$5,trigger_pending=$6,checked_at=now() WHERE rule_id=$1 AND subject=$2`
 
 const insertSignalDeliverySQL = `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
  VALUES($1,$2,$3,$4,$5,$6,'pending') ON CONFLICT DO NOTHING`

@@ -2498,6 +2498,11 @@ func TestStreamExportSuccessClearsFailureEvidence(t *testing.T) {
 
 func deliverNotifications(t *testing.T, pool *pgxpool.Pool, circuits *fleet.State) {
 	t.Helper()
+	deliverNotificationsAt(t, pool, circuits, time.Now)
+}
+
+func deliverNotificationsAt(t *testing.T, pool *pgxpool.Pool, circuits *fleet.State, now func() time.Time) {
+	t.Helper()
 	const progressSQL = `SELECT COALESCE(max(successes_total),0),COALESCE(max(failures_total),0) FROM olp.worker_task_health WHERE task='notification_delivery'`
 	var before, failures int64
 	if err := pool.QueryRow(t.Context(), progressSQL).Scan(&before, &failures); err != nil {
@@ -2508,7 +2513,7 @@ func deliverNotifications(t *testing.T, pool *pgxpool.Pool, circuits *fleet.Stat
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Fleet: circuits, Keys: keys, Installation: installation,
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: now, Fleet: circuits, Keys: keys, Installation: installation,
 			Log:    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelWarn})),
 			Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
 	}()
@@ -2533,9 +2538,12 @@ func deliverNotifications(t *testing.T, pool *pgxpool.Pool, circuits *fleet.Stat
 }
 
 type notificationBody struct {
-	Event    string `json:"event"`
-	Resolved bool   `json:"resolved"`
-	APIKeyID string `json:"api_key_id"`
+	Event       string `json:"event"`
+	Resolved    bool   `json:"resolved"`
+	APIKeyID    string `json:"api_key_id"`
+	RuleName    string `json:"rule_name"`
+	Subject     string `json:"subject"`
+	IncidentKey string `json:"incident_key"`
 }
 
 func notificationReceiver(t *testing.T) (*httptest.Server, <-chan notificationBody) {
@@ -2770,14 +2778,19 @@ func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, strin
 
 func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
+	return notificationManagementAs(t, pool, f.ownerID)
+}
+
+func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
+	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
 	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
 		t.Fatal(err)
 	}
-	token := "notification-session"
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+	token := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), userID, auth.Digest(secrets.SessionDigest, token)); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
