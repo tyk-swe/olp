@@ -17,6 +17,14 @@ func count(v json.RawMessage) (int64, bool) {
 	return n, e == nil && n >= 0
 }
 
+func position(v json.RawMessage) (int, bool) {
+	if !present(v) {
+		return 0, false
+	}
+	n, e := strconv.Atoi(string(v))
+	return n, e == nil && n >= 0
+}
+
 func nativeUsage(f Object, family string) (*wire.Usage, error) {
 	if f == nil {
 		return nil, nil

@@ -29,11 +29,11 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 	for position, value := range values {
 		index := position
 		if indexed {
-			n, ok := operations.Int(operations.Member(value, "index"))
-			if !ok || n < 0 || n >= int64(request.inputs) || seen[int(n)] {
+			n, ok := operations.Position(operations.Member(value, "index"))
+			if !ok || n >= request.inputs || seen[n] {
 				return out, operations.Violation("/data/index", "input_identity")
 			}
-			index = int(n)
+			index = n
 			seen[index] = true
 			value = operations.Member(value, "embedding")
 		}

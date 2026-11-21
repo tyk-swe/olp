@@ -200,11 +200,11 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	}
 	seen := map[int]bool{}
 	for _, item := range items.Elements() {
-		index, ok := operations.Int(operations.Member(item, "index"))
-		if !ok || index < 0 || index >= int64(len(request.documents.Elements())) || seen[int(index)] {
+		index, ok := operations.Position(operations.Member(item, "index"))
+		if !ok || index >= len(request.documents.Elements()) || seen[index] {
 			return out, operations.Violation("/results/index", "document_identity")
 		}
-		seen[int(index)] = true
+		seen[index] = true
 		if !operations.Number(operations.Member(item, scoreName)) {
 			return out, operations.Violation("/results/score", "native_score")
 		}

@@ -40,7 +40,7 @@ func (t *streamTranslator) chatFrame(f Object) error {
 	}
 	for _, v := range arr(f["choices"]) {
 		choice, _ := object(v)
-		idx, _ := count(choice["index"])
+		idx, _ := position(choice["index"])
 		if idx != 0 {
 			return protocolError("translation requires one candidate")
 		}
@@ -53,9 +53,9 @@ func (t *streamTranslator) chatFrame(f Object) error {
 		}
 		for _, v := range arr(delta["tool_calls"]) {
 			call, _ := object(v)
-			index, _ := count(call["index"])
+			index, _ := position(call["index"])
 			fun, _ := optionalObject(call["function"])
-			if e := t.toolDelta(int(index), str(call["id"]), str(fun["name"]), str(fun["arguments"])); e != nil {
+			if e := t.toolDelta(index, str(call["id"]), str(fun["name"]), str(fun["arguments"])); e != nil {
 				return e
 			}
 		}
@@ -73,12 +73,12 @@ func (t *streamTranslator) responsesFrame(f Object) error {
 	}
 	switch str(f["type"]) {
 	case "response.function_call_arguments.done":
-		index, _ := count(f["output_index"])
-		call, present := t.calls[int(index)]
+		index, _ := position(f["output_index"])
+		call, present := t.calls[index]
 		if !present {
 			return protocolError("Responses argument snapshot has no tool call")
 		}
-		return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.id), "name": raw(call.name), "arguments": f["arguments"]})
+		return t.responseToolSnapshot(index, Object{"type": raw("function_call"), "call_id": raw(call.id), "name": raw(call.name), "arguments": f["arguments"]})
 	case "response.output_item.done":
 		item, _ := object(f["item"])
 		if t.target == wire.Anthropic || t.target == wire.Chat {
@@ -86,11 +86,11 @@ func (t *streamTranslator) responsesFrame(f Object) error {
 				return err
 			}
 		}
-		index, _ := count(f["output_index"])
-		if err := t.responseToolSnapshot(int(index), item); err != nil {
+		index, _ := position(f["output_index"])
+		if err := t.responseToolSnapshot(index, item); err != nil {
 			return err
 		}
-		return t.responseMessageSnapshot(int(index), item)
+		return t.responseMessageSnapshot(index, item)
 	case "response.completed", "response.incomplete":
 		response, _ := object(f["response"])
 		if t.target == wire.Anthropic || t.target == wire.Chat {
@@ -109,11 +109,11 @@ func (t *streamTranslator) responsesFrame(f Object) error {
 		}
 		return nil
 	case "response.refusal.delta":
-		index, _ := count(f["output_index"])
-		return t.responseRefusalDelta(int(index), str(f["delta"]))
+		index, _ := position(f["output_index"])
+		return t.responseRefusalDelta(index, str(f["delta"]))
 	case "response.output_text.delta":
-		index, _ := count(f["output_index"])
-		return t.responseTextDelta(int(index), str(f["delta"]))
+		index, _ := position(f["output_index"])
+		return t.responseTextDelta(index, str(f["delta"]))
 	case "response.output_item.added":
 		item, _ := optionalObject(f["item"])
 		if t.target == wire.Anthropic || t.target == wire.Chat {
@@ -122,18 +122,18 @@ func (t *streamTranslator) responsesFrame(f Object) error {
 			}
 		}
 		if str(item["type"]) == "function_call" {
-			index, _ := count(f["output_index"])
-			return t.toolDelta(int(index), str(item["call_id"]), str(item["name"]), str(item["arguments"]))
+			index, _ := position(f["output_index"])
+			return t.toolDelta(index, str(item["call_id"]), str(item["name"]), str(item["arguments"]))
 		}
 	case "response.function_call_arguments.delta":
-		index, _ := count(f["output_index"])
-		return t.toolDelta(int(index), "", "", str(f["delta"]))
+		index, _ := position(f["output_index"])
+		return t.toolDelta(index, "", "", str(f["delta"]))
 	}
 	return nil
 }
 
 func (t *streamTranslator) anthropicFrame(f Object) error {
-	index, _ := count(f["index"])
+	index, _ := position(f["index"])
 	switch str(f["type"]) {
 	case "message_start":
 		m, _ := object(f["message"])
@@ -148,7 +148,7 @@ func (t *streamTranslator) anthropicFrame(f Object) error {
 			if value, err := object(b["input"]); err == nil && len(value) > 0 {
 				input = string(b["input"])
 			}
-			return t.toolDelta(int(index), str(b["id"]), str(b["name"]), input)
+			return t.toolDelta(index, str(b["id"]), str(b["name"]), input)
 		}
 	case "content_block_delta":
 		d, _ := object(f["delta"])
@@ -156,7 +156,7 @@ func (t *streamTranslator) anthropicFrame(f Object) error {
 		case "text_delta":
 			return t.textDelta(str(d["text"]))
 		case "input_json_delta":
-			return t.toolDelta(int(index), "", "", str(d["partial_json"]))
+			return t.toolDelta(index, "", "", str(d["partial_json"]))
 		}
 	}
 	return nil
@@ -168,7 +168,7 @@ func (t *streamTranslator) geminiFrame(f Object) error {
 	}
 	for _, v := range arr(f["candidates"]) {
 		candidate, _ := object(v)
-		index, _ := count(candidate["index"])
+		index, _ := position(candidate["index"])
 		if index != 0 {
 			return protocolError("translation requires one candidate")
 		}

@@ -214,7 +214,7 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit wire.Emit, o
 }
 
 func (t *streamTranslator) bedrockFrame(f Object) error {
-	index, _ := count(f["contentBlockIndex"])
+	index, _ := position(f["contentBlockIndex"])
 	switch str(f["type"]) {
 	case "messageStart":
 		return t.start("")
@@ -222,7 +222,7 @@ func (t *streamTranslator) bedrockFrame(f Object) error {
 		start, _ := optionalObject(f["start"])
 		call, _ := optionalObject(start["toolUse"])
 		if call != nil {
-			return t.toolDelta(int(index), str(call["toolUseId"]), str(call["name"]), "")
+			return t.toolDelta(index, str(call["toolUseId"]), str(call["name"]), "")
 		}
 	case "contentBlockDelta":
 		delta, _ := optionalObject(f["delta"])
@@ -231,7 +231,7 @@ func (t *streamTranslator) bedrockFrame(f Object) error {
 		}
 		call, _ := optionalObject(delta["toolUse"])
 		if call != nil {
-			return t.toolDelta(int(index), "", "", str(call["input"]))
+			return t.toolDelta(index, "", "", str(call["input"]))
 		}
 	}
 	return nil
