@@ -20,7 +20,7 @@ func (w wireEvent) decode() (*Event, error) {
 	if w.CacheResult != "" && w.CacheResult != "hit" && w.CacheResult != "semantic-hit" && w.CacheResult != "miss" && w.CacheResult != "bypass" {
 		return nil, errors.New("invalid cache result")
 	}
-	event := &Event{CacheResult: w.CacheResult, Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
+	event := &Event{CacheLookupReason: w.CacheLookupReason, CacheResult: w.CacheResult, Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
 	var err error
 	if event.EventID, err = requiredUUID("event_id", w.EventID); err != nil {
 		return nil, err

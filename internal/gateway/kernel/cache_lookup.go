@@ -42,7 +42,8 @@ type cacheSearch struct {
 	entry      *cache.Entry
 	vector     []float32
 	similarity *float64
-	bypass     string
+	bypass     bool
+	reason     usage.CacheLookupReason
 }
 
 func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
@@ -54,7 +55,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	if subject.generates {
 		x.guard.input = subject.segments
 	}
-	if cacheRetentionRequested(subject.document) || cacheNonSingleCandidateRequested(subject.document) {
+	if cacheRetentionRequested(subject.document) || x.bypassNonSingleCacheCandidate(subject.document) {
 		c.result = "bypass"
 		return nil
 	}
@@ -77,8 +78,11 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	}
 	found := s.searchCache(ctx, x, address)
 	c.ticket, c.vector, c.similarity = found.ticket, found.vector, found.similarity
-	if found.bypass != "" {
-		c.result, c.reason = "bypass", found.bypass
+	if found.reason != "" {
+		x.noteCacheLookupReason(found.reason)
+	}
+	if found.bypass {
+		c.result, c.backendIssue = "bypass", true
 		return nil
 	}
 	if found.entry == nil {
@@ -202,7 +206,7 @@ func (s *Server) searchCache(ctx context.Context, x *Call, address cacheAddress)
 	c := x.cache
 	exact, err := s.exactCache(ctx, c, address)
 	if err != nil {
-		return cacheSearch{bypass: "unavailable"}
+		return cacheSearch{bypass: true, reason: usage.CacheLookupUnavailable}
 	}
 	if c.policy.Mode != "semantic" || exact.entry != nil {
 		return exact
@@ -211,7 +215,7 @@ func (s *Server) searchCache(ctx context.Context, x *Call, address cacheAddress)
 	ticket := exact.ticket
 	ticket.VectorSpace = vectorSpace
 	if err != nil {
-		return cacheSearch{ticket: ticket, vector: vector, bypass: "embedding"}
+		return cacheSearch{ticket: ticket, vector: vector, bypass: true}
 	}
 	if c.controls.NoCache {
 		return cacheSearch{ticket: ticket, vector: vector}
@@ -220,7 +224,7 @@ func (s *Server) searchCache(ctx context.Context, x *Call, address cacheAddress)
 	defer cancel()
 	entry, similarity, err := s.Deps.Cache.Nearest(lookup, ticket, vector, c.policy, c.controls)
 	if err != nil {
-		return cacheSearch{ticket: ticket, vector: vector, bypass: "unavailable"}
+		return cacheSearch{ticket: ticket, vector: vector, bypass: true}
 	}
 	if entry == nil {
 		return cacheSearch{ticket: ticket, vector: vector}
@@ -233,7 +237,10 @@ func (s *Server) exactCache(ctx context.Context, c *responseCacheCall, address c
 	defer cancel()
 	if c.controls.NoCache {
 		ticket, err := s.Deps.Cache.Begin(lookup, address.space, address.canonical)
-		return cacheSearch{ticket: ticket}, err
+		if err != nil {
+			return cacheSearch{}, err
+		}
+		return cacheSearch{ticket: ticket, reason: usage.CacheLookupRefresh}, nil
 	}
 	ticket, entry, err := s.Deps.Cache.Lookup(lookup, address.space, address.canonical, c.controls)
 	return cacheSearch{ticket: ticket, entry: entry}, err

@@ -10425,6 +10425,16 @@
           },
           {
             "properties": {
+              "cache_lookup_reason": {
+                "description": "Reason observed when deciding whether to look up an exact response cache entry. Absent for ordinary misses, hits, and bypasses without a recorded reason.",
+                "type": "string",
+                "enum": [
+                  "no_store",
+                  "refresh",
+                  "multiple_choices",
+                  "backend_unavailable"
+                ]
+              },
               "attempts": {
                 "items": {
                   "$ref": "#/components/schemas/AttemptResponse"
