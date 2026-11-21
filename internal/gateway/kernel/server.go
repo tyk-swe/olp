@@ -185,7 +185,6 @@ type Server struct {
 	counted         func(estimate.Family)
 	webrtcMu        sync.Mutex
 	webrtcExposures map[string]time.Time
-	retrievalQuery  http.HandlerFunc
 }
 
 const UpstreamHeaderTimeout = 5 * time.Minute
@@ -240,13 +239,11 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
-// Register mounts the OpenAI surface on the public mux.
 // GeminiActions are the Gemini model actions a surface serves, keyed by the
 // name after the colon in /models/{model}:{action}.
 type GeminiActions map[string]http.HandlerFunc
 
-func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions, retrievalQuery http.HandlerFunc) {
-	s.retrievalQuery = retrievalQuery
+func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions) {
 	if s.code != nil {
 		s.code.Register(mux)
 	}
@@ -259,7 +256,6 @@ func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions, retri
 		Workflow: s.workflowCapability,
 	})
 	s.registerNative(mux, catalog, actions)
-	s.registerRetained(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(wire.Chat))
 	mux.HandleFunc("POST /v1/responses", s.inference(wire.Responses))
 	mux.HandleFunc("GET /v1/models", catalog.List)

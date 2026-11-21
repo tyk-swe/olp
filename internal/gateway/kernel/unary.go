@@ -27,7 +27,7 @@ type unaryCall struct {
 	route, surface string
 }
 
-func (x *Call) operationName() string {
+func (x *Call) OperationName() string {
 	if x.operationOverride != "" {
 		return x.operationOverride
 	}
@@ -131,7 +131,7 @@ func (x *Call) unaryAdmission(provider *routing.Provider, targetID, model string
 }
 
 func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
-	template, _ := x.Snapshot().OperationTemplate(x.Route.Slug, targetID, x.operationName())
+	template, _ := x.Snapshot().OperationTemplate(x.Route.Slug, targetID, x.OperationName())
 	if template == nil {
 		return unaryAdmission{}, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
 	}
@@ -213,24 +213,24 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 	}
 	budgetRoute := *x.Route
 	budgetRoute.CallerCostExempt = x.callerCostExempt()
-	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
+	if !operationregistry.PolicyFor(x.OperationName()).BoundedWork {
 		if err := UnboundedWorkLimits(x.AdmissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
 			return err
 		}
 	}
-	session := s.planning(x, unaryPlanning, x.Route, x.operationName(), x.surfaceName(), "unary")
-	session.unbounded = !operationregistry.PolicyFor(x.operationName()).BoundedWork
+	session := s.planning(x, unaryPlanning, x.Route, x.OperationName(), x.surfaceName(), "unary")
+	session.unbounded = !operationregistry.PolicyFor(x.OperationName()).BoundedWork
 	options := s.selectionOptions(ctx, x)
 	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		// Decisions does not expose a provider-enforced output bound. An input
 		// estimate alone cannot enforce a token or spend cap on this request.
-		if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
+		if !operationregistry.PolicyFor(x.OperationName()).BoundedWork {
 			authority := x.AdmissionAuthority(x.authority)
 			if err := UnboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
 				session.semantic = err
 				return nil, err
 			}
-			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.Route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
+			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.Route, x.keyID, x.OperationName(), x.surfaceName(), x.mode, x.affinity) {
 				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
 					continue
 				}

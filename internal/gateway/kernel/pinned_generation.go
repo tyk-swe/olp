@@ -34,6 +34,8 @@ func (x *Call) Dispatched() bool { return x.dispatched }
 
 func (x *Call) Authority() keyauthority.Authority { return x.authority }
 
+func (x *Call) KeyID() string { return x.keyID }
+
 func (x *Call) RoutingControls(r *http.Request, authority keyauthority.Authority) *fault.Error {
 	var e *fault.Error
 	x.preferences, x.priority, e = routingControls(r, authority.Policy)
@@ -64,7 +66,7 @@ func (s *Server) GatePinnedGeneration(ctx context.Context, x *Call, p *Pin, oper
 
 func (s *Server) SettleGeneration(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.SettlePinnedHold(ctx, p.Hold)
 	}
 	s.SettleAdmission(ctx, x)
 }
@@ -107,23 +109,20 @@ func (s *Server) ReleaseLease(ctx context.Context, x *Call) {
 
 func (s *Server) SettleBedrock(ctx context.Context, x *Call, p *Pin) {
 	actual := x.settledTokens()
-	s.settlePinnedHold(ctx, p.Hold)
+	s.SettlePinnedHold(ctx, p.Hold)
 	s.recordCost(x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, actual, s.Log)
 }
 
 func (s *Server) EnterRetrieval(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
 	x, authority, done := s.StateBegin(w, r, wire.File)
-	x.operationOverride = "retrieval"
-	x.mode = "unary"
-	x.actor = "api_key_resource"
-	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+	x.BeginRetainedWork("retrieval")
 	return x, authority, done
 }
 
 func (s *Server) SelectRetrievalPin(ctx context.Context, x *Call, route *routing.Route, estimate int64, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
 	x.estimate = estimate
-	return s.selectBoundPinSurface(ctx, x, route, "retrieval", "openai", "unary", resourceDemand(x), nil, qualified)
+	return s.SelectBoundPinSurface(ctx, x, route, "retrieval", "openai", "unary", ResourceDemand(x), nil, qualified)
 }
 
 func (s *Server) ReserveRetrieval(ctx context.Context, x *Call, authority keyauthority.Authority, route *routing.Route) *fault.Error {
@@ -147,7 +146,7 @@ func (s *Server) GatePinnedRetrieval(ctx context.Context, x *Call, p *Pin) *faul
 
 func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.SettlePinnedHold(ctx, p.Hold)
 	}
 	quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.Log)
 }

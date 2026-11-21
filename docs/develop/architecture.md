@@ -149,8 +149,8 @@ provider completion.
 ## Gateway packages
 
 `internal/gateway/kernel` is the execution kernel. It owns the `Call`, the route
-leg, the attempt loop, settlement and the retained generic engine, whose routes
-many surfaces share and which has not been extracted into its own package yet.
+leg, the attempt loop, settlement, the generation routes and the retained steps
+that read call or pin state, which surfaces call but never reach into.
 A package under `internal/gateway/surface/` owns the routes of one surface and
 calls the kernel through its exported API. `internal/gateway` itself is the
 assembly, whose `Register` mounts the kernel and each surface. The other
@@ -171,7 +171,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
 | `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
 | `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
-| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, the native and generation dispatch, and the retained generic engine, which is the one group of surface-shaped routes that has not moved into its own package yet | every package above |
+| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, the native and generation dispatch, and the retained steps that read call or pin state, such as retained dispatch, page admission and result projection | every package above |
 | `gateway/healthprobes` | The health probe worker. It picks the opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/bedrock` | Bedrock Converse and Invoke under `/bedrock/model/{model}` | `fault`, `kernel` |
@@ -186,6 +186,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
 | `gateway/surface/guardrails` | Standalone guardrail evaluation under `/v1/guardrails/apply` | `fault`, `kernel` |
 | `gateway/surface/passthrough` | Pass-through routes under `/native/{dialect}/routes/{route}/` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/retained` | Retained provider resources from the `retainedapi` catalog, such as fine-tuning jobs, vector stores, conversations, containers, evals, Anthropic skills, Gemini cached contents and agents, and Vertex tuning jobs, plus `/v1/vector_stores/{id}/search` and `/v1/responses/compact` | `fault`, `ingress`, `kernel`, `quota` |
 | `gateway/surface/playground` | The console playground, which runs a route for a signed-in member through `kernel.MemberGeneration`. The composition root registers its two handlers on the management API | `fault`, `kernel`, `publishedprompt` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
@@ -193,7 +194,9 @@ no entry for, so a new gateway package declares its imports when it is added.
 A surface package follows `surface/anthropicstate`. It exports one
 `Register(k *kernel.Server, mux *http.ServeMux)`, keeps its handlers on an
 unexported `surface` type that holds the kernel, and is added to `Register` in
-`internal/gateway/gateway.go`. The kernel never names a surface or a vendor
+`internal/gateway/gateway.go`. A surface that serves a route another surface
+owns takes that handler as an argument, as `retained.Register` takes the
+retrieval query for vector store search. The kernel never names a surface or a vendor
 flag for one. A surface that needs something from a shared step sets a general
 field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
 kernel's tests register the same assembly, so the refusal matrix in
@@ -214,7 +217,7 @@ not name yet, add the step to the kernel and call it.
 
 A step takes what it needs as arguments and returns what it found, so its
 dependencies are in its signature. The request value is built once and is not
-written again. `kernel/retained_request.go` is the example. The only state a
+written again. `surface/retained/request.go` is the example. The only state a
 handler writes is what its deferred settlement must still read when a step
 panics, such as the pin and the status, and that state lives in one small type
 that says so, like `retainedEnd`.

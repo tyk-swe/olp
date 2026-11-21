@@ -1,11 +1,16 @@
-package kernel
+package retained
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"maps"
+	"net/http"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -28,9 +33,9 @@ func (q retainedRequest) change() {
 		q.reply.fail(err)
 		return
 	}
-	ctx, cancel := s.StateDeadline(q.r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(q.r.Context(), route)
 	defer cancel()
-	if err := s.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
+	if err := s.kernel.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
 		q.reply.fail(err)
 		return
 	}
@@ -44,8 +49,8 @@ func (q retainedRequest) change() {
 		q.reply.fail(err)
 		return
 	}
-	defer s.settleFence(ctx, mutation.Close)
-	end.status = s.retainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, q.endpoint, resource, q.parent, endpoint, body, q.input.contentType, mutation, q.reply.fail)
+	defer s.kernel.SettleFence(ctx, mutation.Close)
+	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, q.endpoint, resource, q.parent, endpoint, body, q.input.contentType, mutation, q.reply.fail)
 }
 
 func addressing(ancestors map[string]string, upstreamID string) map[string]string {
@@ -60,7 +65,7 @@ func (q retainedRequest) addressed() (*resources.Resource, *fault.Error) {
 		return nil, err
 	}
 	if resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
-		return nil, PinUnavailable()
+		return nil, kernel.PinUnavailable()
 	}
 	return resource, nil
 }
@@ -72,7 +77,7 @@ func (q retainedRequest) owned() (*resources.Resource, *fault.Error) {
 		}
 		return q.parent, nil
 	}
-	lifecycle, err := q.server.Deps.Resources.OpenOwned(q.r.Context(), q.endpoint.Kind, q.x.keyID, q.r.PathValue("id"))
+	lifecycle, err := q.server.kernel.Deps.Resources.OpenOwned(q.r.Context(), q.endpoint.Kind, q.x.KeyID(), q.r.PathValue("id"))
 	if err != nil {
 		return nil, retainedMissing()
 	}
@@ -83,39 +88,39 @@ func (q retainedRequest) owned() (*resources.Resource, *fault.Error) {
 	return resource, nil
 }
 
-func (q retainedRequest) use() RetainedUse {
+func (q retainedRequest) use() kernel.RetainedUse {
 	switch e := q.endpoint; {
 	case e.Metered && (e.Action == "update" || e.Action == "patch"):
-		return RetainedNewWork
+		return kernel.RetainedNewWork
 	case e.Action == "delete" || e.Action == "cancel" || e.Action == "list":
-		return RetainedHousekeeping
+		return kernel.RetainedHousekeeping
 	}
-	return RetainedRetrieval
+	return kernel.RetainedRetrieval
 }
 
-func (q retainedRequest) resolve(resource *resources.Resource) (*Pin, *routing.Route, *fault.Error) {
+func (q retainedRequest) resolve(resource *resources.Resource) (*kernel.Pin, *routing.Route, *fault.Error) {
 	e := q.endpoint
-	pin, route, err := q.server.ResolveResource(q.r.Context(), q.x, q.authority, resource, e.Operation, q.use())
+	pin, route, err := q.server.kernel.ResolveResource(q.r.Context(), q.x, q.authority, resource, e.Operation, q.use())
 	q.reply.end.pin = pin
 	if err != nil {
 		return nil, nil, err
 	}
 	q.x.Route = route
 	if !pin.Provider.Connector().Supports(e.Operation, e.Surface, "unary") {
-		return nil, nil, PinUnavailable()
+		return nil, nil, kernel.PinUnavailable()
 	}
 	if e.Action != "delete" {
 		if err := q.x.GuardrailSurfaceGate(route); err != nil {
 			return nil, nil, err
 		}
 	}
-	if RetainedUnsettled(resource.State) {
+	if kernel.RetainedUnsettled(resource.State) {
 		return nil, nil, fault.ServerError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted.")
 	}
 	return pin, route, nil
 }
 
-func (q retainedRequest) rewriteChange(pin *Pin, route *routing.Route, resource *resources.Resource) ([]byte, *fault.Error) {
+func (q retainedRequest) rewriteChange(pin *kernel.Pin, route *routing.Route, resource *resources.Resource) ([]byte, *fault.Error) {
 	if q.input.source.Root().Kind() != oif.Object {
 		return q.input.body, nil
 	}
@@ -124,7 +129,7 @@ func (q retainedRequest) rewriteChange(pin *Pin, route *routing.Route, resource 
 	if e.Kind == "eval" && e.Action == "update" {
 		inputParent = resource
 	}
-	fields, err := retainedInputMetadata(pin, route, q.x.keyID, e, q.input.source, inputParent)
+	fields, err := retainedInputMetadata(pin, route, q.x.KeyID(), e, q.input.source, inputParent)
 	if err != nil {
 		return nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
 	}
@@ -144,4 +149,24 @@ func (q retainedRequest) rewriteChange(pin *Pin, route *routing.Route, resource 
 		return nil, fault.InvalidRequest("invalid_request", "The resource correlation metadata could not be bound.", nil)
 	}
 	return body, nil
+}
+
+func (s surface) fenceRetainedMutation(ctx context.Context, r *http.Request, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
+	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
+		return nil, nil
+	}
+	key := r.Header.Get("Idempotency-Key")
+	if key == "" || len(key) > 128 {
+		return nil, fault.InvalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
+	}
+	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
+	digest := sha256.Sum256(payload)
+	lifecycle, err := s.kernel.Deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
+	if err != nil {
+		if errors.Is(err, resources.ErrSubmissionConflict) {
+			return nil, fault.ServerError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
+		}
+		return nil, fault.ServerError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
+	}
+	return lifecycle, nil
 }

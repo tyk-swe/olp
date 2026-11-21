@@ -52,9 +52,9 @@ func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options 
 // Attribution labels never take part.
 func (x *Call) features() *routing.Features {
 	if x.generation.parsed == nil {
-		return routing.DescribeRequest(x.operationName(), nil, nil)
+		return routing.DescribeRequest(x.OperationName(), nil, nil)
 	}
-	return routing.DescribeRequest(x.operationName(), x.generation.parsed, x.sourceDemand(""))
+	return routing.DescribeRequest(x.OperationName(), x.generation.parsed, x.sourceDemand(""))
 }
 
 type planningKind uint8

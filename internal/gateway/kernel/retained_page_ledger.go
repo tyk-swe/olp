@@ -16,7 +16,7 @@ import (
 // settlement reads it when a later step panics. Route leases stay separate from
 // the caller's page lease, so each route's cost budget grows and settles with
 // only its own reads and never the whole page total.
-type retainedPageLedger struct {
+type RetainedPageLedger struct {
 	server      *Server
 	x           *Call
 	authority   keyauthority.Authority
@@ -33,15 +33,15 @@ type retainedRouteAccount struct {
 	lastRead                 *PinnedExchange
 }
 
-type retainedReadCost struct {
+type RetainedReadCost struct {
 	bound, charge rates.Cost
 }
 
-func newRetainedPageLedger(s *Server, x *Call, authority keyauthority.Authority, callerCosts bool) *retainedPageLedger {
-	return &retainedPageLedger{server: s, x: x, authority: authority, callerCosts: callerCosts, routes: map[string]*retainedRouteAccount{}}
+func NewRetainedPageLedger(s *Server, x *Call, authority keyauthority.Authority, callerCosts bool) *RetainedPageLedger {
+	return &RetainedPageLedger{server: s, x: x, authority: authority, callerCosts: callerCosts, routes: map[string]*retainedRouteAccount{}}
 }
 
-func (g *retainedPageLedger) route(slug string) *retainedRouteAccount {
+func (g *RetainedPageLedger) route(slug string) *retainedRouteAccount {
 	if account := g.routes[slug]; account != nil {
 		return account
 	}
@@ -50,7 +50,7 @@ func (g *retainedPageLedger) route(slug string) *retainedRouteAccount {
 	return account
 }
 
-func (g *retainedPageLedger) settle(ctx context.Context) {
+func (g *RetainedPageLedger) Settle(ctx context.Context) {
 	zero := int64(0)
 	for _, account := range g.routes {
 		if account.lease == nil {
@@ -64,22 +64,22 @@ func (g *retainedPageLedger) settle(ctx context.Context) {
 	}
 }
 
-func (g *retainedPageLedger) reserve(ctx context.Context, entry retainedListEntry, overall time.Duration) (retainedReadCost, *fault.Error) {
-	s, x, p, route := g.server, g.x, entry.pin, entry.route
-	if entry.admission.billing != retainedFree && !g.callerCosts {
+func (g *RetainedPageLedger) Reserve(ctx context.Context, entry RetainedListEntry, overall time.Duration) (RetainedReadCost, *fault.Error) {
+	s, x, p, route := g.server, g.x, entry.Pin, entry.Route
+	if entry.Admission.billing != retainedFree && !g.callerCosts {
 		if failure := s.admitRetainedPageCost(ctx, x, g.authority, overall); failure != nil {
-			return retainedReadCost{}, failure
+			return RetainedReadCost{}, failure
 		}
 		g.callerCosts = true
 	}
 	if refusal := g.admitRoute(ctx, entry, overall); refusal != nil {
-		return retainedReadCost{}, refusal
+		return RetainedReadCost{}, refusal
 	}
 	x.Route = route
 	bound := x.attemptCostBound(p.attempt)
-	cost := retainedReadCost{bound: bound, charge: x.attemptChargeBound(p.attempt, bound)}
+	cost := RetainedReadCost{bound: bound, charge: x.attemptChargeBound(p.attempt, bound)}
 	if costErr := s.reserveRetainedCost(ctx, x, p, route); costErr != nil {
-		return retainedReadCost{}, costErr
+		return RetainedReadCost{}, costErr
 	}
 	account := g.route(route.Slug)
 	if account.lease == nil || cost.bound.IsZero() && cost.charge.IsZero() {
@@ -87,24 +87,24 @@ func (g *retainedPageLedger) reserve(ctx context.Context, entry retainedListEntr
 	}
 	total, totalCharge := account.reserved.Add(cost.bound), account.reservedCharge.Add(cost.charge)
 	if costErr := s.growCost(ctx, account.lease, total.String(), totalCharge.String(), x.request.accountingID(), time.Duration(route.OverallTimeout)*time.Millisecond); costErr != nil {
-		return retainedReadCost{}, costErr
+		return RetainedReadCost{}, costErr
 	}
 	account.reserved, account.reservedCharge = total, totalCharge
 	return cost, nil
 }
 
-func (g *retainedPageLedger) admitRoute(ctx context.Context, entry retainedListEntry, overall time.Duration) *fault.Error {
-	account := g.route(entry.route.Slug)
-	if account.admitted && (entry.admission.billing == retainedFree || account.costsAdmitted) {
+func (g *RetainedPageLedger) admitRoute(ctx context.Context, entry RetainedListEntry, overall time.Duration) *fault.Error {
+	account := g.route(entry.Route.Slug)
+	if account.admitted && (entry.Admission.billing == retainedFree || account.costsAdmitted) {
 		return nil
 	}
-	authority := entry.admission.authority(g.authority, g.x.callerCostExempt())
+	authority := entry.Admission.authority(g.authority, g.x.callerCostExempt())
 	authority.Attribution = g.x.attribution
 	if account.admitted {
 		// Earlier free reads reserved only this route's rates.
 		authority = retainedCostAuthority(authority)
 	}
-	lease, gateErr := g.server.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, ResourceEstimate, overall, quota.CostReservation{}, &g.costChecked)
+	lease, gateErr := g.server.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.Route.Slug, ResourceEstimate, overall, quota.CostReservation{}, &g.costChecked)
 	if gateErr != nil {
 		return gateErr
 	}
@@ -115,15 +115,15 @@ func (g *retainedPageLedger) admitRoute(ctx context.Context, entry retainedListE
 		account.lease = lease
 	}
 	account.admitted = true
-	account.costsAdmitted = account.costsAdmitted || entry.admission.billing != retainedFree
+	account.costsAdmitted = account.costsAdmitted || entry.Admission.billing != retainedFree
 	return nil
 }
 
-func (g *retainedPageLedger) answered(slug string, exchange *PinnedExchange) {
+func (g *RetainedPageLedger) Answered(slug string, exchange *PinnedExchange) {
 	g.route(slug).lastRead = exchange
 }
 
-func (g *retainedPageLedger) spent(slug string, cost retainedReadCost) {
+func (g *RetainedPageLedger) Spent(slug string, cost RetainedReadCost) {
 	account := g.route(slug)
 	account.actual, account.actualCharge = account.actual.Add(cost.bound), account.actualCharge.Add(cost.charge)
 }

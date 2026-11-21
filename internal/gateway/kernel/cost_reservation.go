@@ -220,7 +220,7 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+	if x.media != nil || x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
 		u := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}
 		if x.media != nil {
 			var ok bool
@@ -237,14 +237,14 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 			}
 		}
 		bound, _ := rev.Charge(u, x.request.startedAt, true, priced,
-			string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
+			string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.OperationName())
 		return bound
 	}
 	var input, reply int64
 	generation := false
 	if x.generation.parsed == nil && x.unary == nil {
 		input = max(ResourceEstimate, x.estimate)
-		if x.operationName() == "generation" || x.operationName() == "realtime" {
+		if x.OperationName() == "generation" || x.OperationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 			generation = true
 		}
@@ -257,7 +257,7 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 		generation = reply > 0
 	}
 	bound, _ := rev.ChargeBound(input, reply, generation, x.request.startedAt, costBound,
-		string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
+		string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.OperationName())
 	return bound
 }
 
@@ -265,7 +265,7 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 // dispatched attempt: the same worst case under the same pinned price and
 // discount, or false when the request cannot be bounded.
 func (x *Call) targetCostBound(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
-	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
+	if !operationregistry.PolicyFor(x.OperationName()).BoundedWork {
 		return rates.Cost{}, false
 	}
 	if x.callerCostExempt() || price == nil {
@@ -281,12 +281,12 @@ func (x *Call) targetCostBound(provider routing.Provider, target routing.Target,
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
 	}
-	if x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+	if x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
 		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {
 		input, reply := max(ResourceEstimate, x.estimate), int64(0)
-		if x.operationName() == "generation" || x.operationName() == "realtime" {
+		if x.OperationName() == "generation" || x.OperationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 		}
 		return price.CostBound(input, reply, reply > 0, x.request.startedAt, discount)
@@ -335,7 +335,7 @@ func (x *Call) settledCost() rates.Cost { return x.costOf("") }
 // a capped owner, or over every attempt when owner is empty.
 func (x *Call) costOf(owner string) rates.Cost {
 	var total rates.Cost
-	operation := x.operationName()
+	operation := x.OperationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
 		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
@@ -365,7 +365,7 @@ func (x *Call) responseCost() (rates.Cost, bool) {
 	}
 	var total rates.Cost
 	billable := false
-	operation := x.operationName()
+	operation := x.OperationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
 		if !fact.UsageObserved && !fact.BillingUncertain {
@@ -429,7 +429,7 @@ func (s *Server) SettleAdmission(ctx context.Context, x *Call) {
 // rate still prices a committed or provider-unpriced attempt.
 func (s *Server) settledCharge(x *Call) rates.Cost {
 	var total rates.Cost
-	operation := x.operationName()
+	operation := x.OperationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
 		if fact.BudgetExempt || !fact.UsageObserved {

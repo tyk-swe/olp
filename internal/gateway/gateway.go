@@ -17,11 +17,12 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/surface/openaistate"
 	"github.com/tyk-swe/olp/internal/gateway/surface/passthrough"
 	"github.com/tyk-swe/olp/internal/gateway/surface/realtime"
+	"github.com/tyk-swe/olp/internal/gateway/surface/retained"
 	"github.com/tyk-swe/olp/internal/gateway/surface/retrieval"
 )
 
 func Register(k *kernel.Server, mux *http.ServeMux) {
-	k.RegisterKernel(mux, geministate.Actions(k), retrieval.Handler(k))
+	k.RegisterKernel(mux, geministate.Actions(k))
 	anthropicstate.Register(k, mux)
 	cloudbatches.Register(k, mux)
 	geminiinteractions.Register(k, mux)
@@ -29,6 +30,7 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 	guardrails.Register(k, mux)
 	geminilive.Register(k, mux)
 	retrieval.Register(k, mux)
+	retained.Register(k, mux, retrieval.Handler(k))
 	media.Register(k, mux)
 	nativeduplex.Register(k, mux)
 	openaistate.Register(k, mux)

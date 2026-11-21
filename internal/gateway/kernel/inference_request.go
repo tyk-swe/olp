@@ -251,7 +251,7 @@ func (q inferenceRequest) plan(caller inferenceCaller, parsed *wire.Request) *fa
 	if e := q.prepareWorkflow(caller.token); e != nil {
 		return e
 	}
-	if s.Deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
+	if s.Deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.OperationName() == "generation" {
 		x.captureContext = ctx
 		x.capture = s.Deps.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 	}

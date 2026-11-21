@@ -380,28 +380,28 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 	s := &Server{Now: func() time.Time { return now }, Deps: Dependencies{Admission: &quota.Admission{
 		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },
 	}}}
-	prepare := func(model string) retainedListEntry {
+	prepare := func(model string) RetainedListEntry {
 		t.Helper()
 		pin := &Pin{Provider: provider, Model: model, attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: model}}
-		admission, err := s.prepareRetainedAdmission(x, pin, false)
+		admission, err := s.PrepareRetainedAdmission(x, pin, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return retainedListEntry{pin: pin, admission: admission}
+		return RetainedListEntry{Pin: pin, Admission: admission}
 	}
 	free, paid := prepare("free"), prepare("paid")
 	for _, tc := range []struct {
 		name    string
-		entries []retainedListEntry
+		entries []RetainedListEntry
 		limit   int
 		blocked bool
 	}{
-		{"free page with paid continuation", []retainedListEntry{free, paid}, 1, false},
-		{"mixed page", []retainedListEntry{free, paid}, 2, true},
-		{"paid page with free continuation", []retainedListEntry{paid, free}, 1, true},
+		{"free page with paid continuation", []RetainedListEntry{free, paid}, 1, false},
+		{"mixed page", []RetainedListEntry{free, paid}, 2, true},
+		{"paid page with free continuation", []RetainedListEntry{paid, free}, 1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			failure := s.reserveRetainedPage(context.Background(), x, budgeted(), tc.entries, tc.limit, time.Second)
+			failure := s.ReserveRetainedPage(context.Background(), x, budgeted(), tc.entries, tc.limit, time.Second)
 			if tc.blocked && (failure == nil || failure.Code != "cost_accounting_incomplete") {
 				t.Fatalf("paid page admission = %v", failure)
 			}
