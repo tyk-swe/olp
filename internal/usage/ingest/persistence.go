@@ -105,8 +105,8 @@ const insertRequestSQL = `INSERT INTO olp.requests
 const insertAttemptSQL = `INSERT INTO olp.attempts
         (id, request_id, request_started_at, ordinal, provider_id, upstream_model,
          started_at, completed_at, status_code, error_class, committed, latency_ms,
-         first_byte_ms, routing,guardrail_decisions)
-    VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14,$15::jsonb)
+         first_byte_ms, routing, guardrail_decisions, provider_request_id)
+    VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, NULLIF($16, ''))
     ON CONFLICT (request_id, ordinal) DO NOTHING`
 
 const insertAnchorSQL = `INSERT INTO olp.usage_request_anchors (request_id, request_started_at)
@@ -367,7 +367,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *usage.Event, validate
 			ev.RequestStartedAt, attempt.Ordinal, attempt.Attempt.ProviderID,
 			attempt.Attempt.UpstreamModel, attempt.Attempt.StartedAt, attemptCompletedAt,
 			attempt.StatusCode, attempt.Attempt.ErrorClass, attempt.Attempt.Committed,
-			attemptLatency, attempt.FirstByteMS, routing, guardrailJSON(attempt.Attempt.GuardrailDecisions)); err != nil {
+			attemptLatency, attempt.FirstByteMS, routing, guardrailJSON(attempt.Attempt.GuardrailDecisions), attempt.Attempt.ProviderRequestID); err != nil {
 			return fmt.Errorf("persist request metadata attempt: %w", err)
 		}
 	}

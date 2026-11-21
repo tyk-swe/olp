@@ -118,6 +118,7 @@ type AttemptFact struct {
 	Ordinal            int
 	TargetID           string
 	ProviderID         string
+	ProviderRequestID  string
 	ProviderRevisionID string
 	UpstreamModel      string
 	SlotID             string

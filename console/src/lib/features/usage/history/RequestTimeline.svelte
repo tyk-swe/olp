@@ -16,6 +16,7 @@
     RequestAttempt,
     RequestDetail
   } from '#lib/features/usage/history/api.js';
+  import ProviderRequestID from './ProviderRequestID.svelte';
   let { detail }: { detail: CreateQueryResult<RequestDetail> } = $props();
 
   const cacheReasonLabels = new Map([
@@ -313,6 +314,14 @@
               >
             </div>
             <dl>
+              {#if attempt.provider_request_id}
+                <div class="provider-request-id">
+                  <dt>Provider request ID</dt>
+                  <dd>
+                    <ProviderRequestID id={attempt.provider_request_id} />
+                  </dd>
+                </div>
+              {/if}
               <div>
                 <dt>Started</dt>
                 <dd>{formatDate(attempt.started_at)}</dd>
@@ -668,6 +677,9 @@
   dd {
     overflow-wrap: anywhere;
     margin: 0.25rem 0 0;
+  }
+  .provider-request-id {
+    grid-column: 1 / -1;
   }
   .timeline-section {
     margin-top: 2rem;

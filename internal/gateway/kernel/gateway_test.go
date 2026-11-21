@@ -2099,6 +2099,98 @@ func TestAProviderFailureFallsBackOnATransformedRouteAndIsFinalWithNoRetryHintOn
 	}
 }
 
+type messagesTransport func(*http.Request) (*http.Response, error)
+
+func (f messagesTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestNativeMessagesProviderRequestIDsStayWithTheirAttempts(t *testing.T) {
+	const (
+		failedID  = "req_Unavailable123"
+		successID = "req_Served456"
+		gatewayID = "gateway-messages-1"
+	)
+	official := connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")
+	for _, tc := range []struct {
+		name, endpoint string
+		firstHeader    []string
+		refuse         bool
+		wantFirst      string
+		wantSecond     string
+	}{
+		{name: "official fallback", endpoint: official, firstHeader: []string{failedID}, wantFirst: failedID, wantSecond: successID},
+		{name: "custom host", endpoint: "https://custom.example/v1", firstHeader: []string{failedID}},
+		{name: "duplicate header", endpoint: official, firstHeader: []string{failedID, failedID}, wantSecond: successID},
+		{name: "combined header", endpoint: official, firstHeader: []string{failedID + ", " + successID}, wantSecond: successID},
+		{name: "oversized header", endpoint: official, firstHeader: []string{"req_" + strings.Repeat("A", 125)}, wantSecond: successID},
+		{name: "wrong format", endpoint: official, firstHeader: []string{"sk_secret"}, wantSecond: successID},
+		{name: "missing header", endpoint: official, wantSecond: successID},
+		{name: "local refusal", endpoint: official, refuse: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := strictRelease(t, newHarness(t, Config{}), func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Fidelity.Mode = routing.FidelityTransformed
+				snapshot.Routes[routeSlug] = route
+				for id, provider := range snapshot.Providers {
+					provider.Endpoint, provider.Kind = tc.endpoint, connectors.KindAnthropic
+					provider.ProfileID, provider.ProfileRevision = "", ""
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "anthropic", Mode: "unary"}}
+					snapshot.Providers[id] = provider
+				}
+			})
+			var calls atomic.Int32
+			h.gateway.client.Transport = messagesTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != tc.endpoint+"/messages" {
+					return nil, fmt.Errorf("unexpected upstream URL %s", r.URL)
+				}
+				stub := http.Header{"Content-Type": {"application/json"}, "X-Request-Id": {"req_OtherHeader"}}
+				if calls.Add(1) == 1 {
+					stub["Request-Id"] = tc.firstHeader
+					return &http.Response{StatusCode: 503, Header: stub, Request: r, Body: io.NopCloser(strings.NewReader(
+						`{"type":"error","error":{"type":"overloaded_error","message":"unavailable"},"request_id":"req_BodyID"}`))}, nil
+				}
+				stub.Set("Request-Id", successID)
+				return &http.Response{StatusCode: 200, Header: stub, Request: r, Body: io.NopCloser(strings.NewReader(
+					`{"id":"msg_1","type":"message","role":"assistant","model":"model-b","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))}, nil
+			})
+			headers := map[string]string{"Anthropic-Version": "2023-06-01", "X-Request-Id": gatewayID, "Request-Id": "req_ClientSupplied"}
+			if tc.refuse {
+				headers["X-OLP-Routing"] = "{"
+			}
+			resp := h.do(t.Context(), "POST", "/anthropic/v1/messages", fullKey,
+				[]byte(`{"model":"`+routeSlug+`","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`), headers)
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := h.sink.last(t)
+			if resp.Header.Get("X-Request-Id") != gatewayID || resp.Header.Get("Request-Id") != gatewayID || env.RequestID != gatewayID {
+				t.Fatalf("gateway request ID changed: headers=%v request=%q", resp.Header, env.RequestID)
+			}
+			if tc.refuse {
+				if resp.StatusCode != 400 || calls.Load() != 0 || len(env.Attempts) != 0 {
+					t.Fatalf("local refusal returned %d, sent %d calls and recorded %d attempts", resp.StatusCode, calls.Load(), len(env.Attempts))
+				}
+				return
+			}
+			if resp.StatusCode != 200 || calls.Load() != 2 || bytes.Contains(body, []byte(successID)) || bytes.Contains(body, []byte(failedID)) {
+				t.Fatalf("fallback returned %d with %d calls: %s", resp.StatusCode, calls.Load(), body)
+			}
+			if len(env.Attempts) != 2 || env.Attempts[0].Status != 503 || env.Attempts[1].Status != 200 {
+				t.Fatalf("unexpected attempts: %+v", env.Attempts)
+			}
+			event, err := events.UsageEvent(env)
+			if err != nil || event == nil {
+				t.Fatalf("usage event unavailable: %v", err)
+			}
+			if event.Attempts[0].ProviderRequestID != tc.wantFirst || event.Attempts[1].ProviderRequestID != tc.wantSecond {
+				t.Errorf("provider request IDs = %q and %q, want %q and %q", event.Attempts[0].ProviderRequestID, event.Attempts[1].ProviderRequestID, tc.wantFirst, tc.wantSecond)
+			}
+		})
+	}
+}
+
 func TestRequestsTheGatewayCannotUnderstandAreRefusedBeforeAnyProviderAndRecorded(t *testing.T) {
 	image := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAAAAAA"}}]}]}`
 	approval := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}],"olp_approval":{"approved":true}}`

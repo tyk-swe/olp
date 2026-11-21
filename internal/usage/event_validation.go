@@ -144,6 +144,12 @@ func validCacheLookupReason(reason CacheLookupReason, result string) bool {
 	}
 }
 
+var providerRequestIDPattern = regexp.MustCompile(`^req_[A-Za-z0-9]{1,124}$`)
+
+func ValidProviderRequestID(id string) bool {
+	return len(id) <= 128 && providerRequestIDPattern.MatchString(id)
+}
+
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
@@ -169,6 +175,8 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 		return nil, fmt.Errorf("%w: attempt %d completed before it started", ErrInvalidEvent, index)
 	case !validStatus(attempt.StatusCode):
 		return nil, fmt.Errorf("%w: attempt %d status outside the HTTP range", ErrInvalidEvent, index)
+	case attempt.ProviderRequestID != "" && !ValidProviderRequestID(attempt.ProviderRequestID):
+		return nil, fmt.Errorf("%w: attempt %d has an invalid provider request ID", ErrInvalidEvent, index)
 	}
 	// Every attempt carries its own evidence; an attempt without it cannot be
 	// classified as billable, not billable, or uncertain, and an unclassified

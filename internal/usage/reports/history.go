@@ -100,6 +100,7 @@ type AttemptDetail struct {
 	Ordinal                 int32                 `json:"ordinal"`
 	ProviderID              string                `json:"provider_id"`
 	ProviderName            string                `json:"provider_name"`
+	ProviderRequestID       *string               `json:"provider_request_id,omitempty"`
 	UpstreamModel           string                `json:"upstream_model"`
 	StartedAt               time.Time             `json:"started_at"`
 	CompletedAt             *time.Time            `json:"completed_at"`
@@ -322,7 +323,7 @@ func ReadRequestExport(ctx context.Context, q database.Queryer, filters RequestF
 	return items, rows.Err()
 }
 
-const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider_id::text, p.name,
+const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider_id::text, p.name, a.provider_request_id,
         a.upstream_model, a.started_at, a.completed_at, a.status_code::int, a.error_class,
         a.committed, a.latency_ms::bigint, a.first_byte_ms::bigint, f.charge_status,
         f.usage_observed, f.usage_complete, f.input_tokens, f.output_tokens, f.cached_input_tokens,
@@ -362,7 +363,7 @@ func GetRequest(ctx context.Context, q database.Queryer, id string) (RequestDeta
 		var routing []byte
 		var attemptToolCalls *string
 		if err = rows.Scan(&routing, &attempt.ID, &attempt.Ordinal, &attempt.ProviderID,
-			&attempt.ProviderName, &attempt.UpstreamModel, &attempt.StartedAt, &attempt.CompletedAt,
+			&attempt.ProviderName, &attempt.ProviderRequestID, &attempt.UpstreamModel, &attempt.StartedAt, &attempt.CompletedAt,
 			&attempt.StatusCode, &attempt.ErrorClass, &attempt.Committed, &attempt.LatencyMS,
 			&attempt.FirstByteMS, &attempt.ChargeStatus, &attempt.UsageObserved,
 			&attempt.UsageComplete, &attempt.InputTokens, &attempt.OutputTokens,

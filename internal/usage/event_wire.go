@@ -100,6 +100,7 @@ type wireAttempt struct {
 	ID                 *string               `json:"id"`
 	Ordinal            *uint16               `json:"ordinal"`
 	ProviderID         *string               `json:"provider_id"`
+	ProviderRequestID  string                `json:"provider_request_id"`
 	UpstreamModel      *string               `json:"upstream_model"`
 	StartedAt          *time.Time            `json:"started_at"`
 	CompletedAt        *time.Time            `json:"completed_at"`

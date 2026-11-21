@@ -156,6 +156,9 @@ func (run attemptRun) fail(fact events.AttemptFact, parallel *parallelGuardrail,
 		failed.Interaction.UpstreamState = f.Acceptance
 	}
 	failed.Class = f.class
+	if failed.LocalRefusal || f.class == classPolicy {
+		failed.ProviderRequestID = ""
+	}
 	if end.delivered != "" {
 		failed.Class = end.delivered
 	} else if failed.LocalRefusal && run.state.settled {
