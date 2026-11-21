@@ -3,7 +3,9 @@ import { apiClient } from '#lib/management/client.js';
 import {
   type CursorPage,
   ensureOk,
+  requestOutcome,
   unwrap,
+  unwrapOutcome,
   unwrapPage,
   createHeaders,
   ifMatch,
@@ -25,6 +27,53 @@ export type CreateNotificationRuleInput =
 export type UpdateNotificationRuleInput =
   Schemas['UpdateNotificationRuleRequest'];
 export type NotificationDelivery = Schemas['NotificationDelivery'];
+export type DestinationTestView =
+  | Schemas['NotificationDestinationTest']
+  | { status: 'pending' | 'missing'; failure?: never };
+
+const testPath =
+  '/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}';
+
+export async function sendDestinationTest(
+  destinationId: string,
+  actionId: string
+): Promise<DestinationTestView> {
+  const outcome = await requestOutcome(() =>
+    apiClient.POST(testPath, {
+      params: {
+        path: {
+          notification_destination_id: destinationId,
+          action_id: actionId
+        }
+      },
+      signal: AbortSignal.timeout(3000)
+    })
+  );
+  if (
+    outcome.kind === 'unavailable' ||
+    outcome.kind === 'canceled' ||
+    outcome.kind === 'invalid-response' ||
+    (outcome.kind === 'failure' && outcome.problem.problem.status >= 500)
+  ) {
+    return { status: 'pending' };
+  }
+  return unwrapOutcome(outcome);
+}
+
+export async function readDestinationTest(
+  destinationId: string,
+  actionId: string
+): Promise<DestinationTestView> {
+  const response = await apiClient.GET(testPath, {
+    params: {
+      path: { notification_destination_id: destinationId, action_id: actionId }
+    },
+    signal: AbortSignal.timeout(5000)
+  });
+  return response.response.status === 404
+    ? { status: 'missing' }
+    : unwrap(response);
+}
 
 export async function listNotificationDestinations(
   signal?: AbortSignal

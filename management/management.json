@@ -5402,6 +5402,37 @@
         ],
         "type": "object"
       },
+      "NotificationDestinationTest": {
+        "description": "Result of a single test attempt, separate from incident delivery history.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationTestStatus"
+          },
+          "failure": {
+            "description": "Sanitized failure code when available.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "NotificationTestStatus": {
+        "description": "Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.",
+        "enum": [
+          "pending",
+          "delivered",
+          "failed",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
       "NotificationDelivery": {
         "description": "Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.",
         "properties": {
@@ -36211,6 +36242,227 @@
               }
             },
             "description": "Egress policy or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}": {
+      "get": {
+        "operationId": "get_notification_destination_test",
+        "description": "Read the current test result without sending.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "post": {
+        "operationId": "send_notification_destination_test",
+        "description": "Send one test from a saved, enabled webhook or email destination. Reusing an action ID returns the existing result without sending or consuming the rate limit.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Disabled destination or unsupported destination type"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many new tests for this destination",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         },
         "security": [

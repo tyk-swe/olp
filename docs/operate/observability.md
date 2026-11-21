@@ -318,6 +318,16 @@ requires SMTPS or STARTTLS. Egress is checked at creation and on every dial.
 No channel follows redirects; refused redirects record `redirect`. Email is
 sent as quoted-printable text. SMTP replies record `smtp_4xx`/`smtp_5xx`.
 
+Use **Send test** on a saved, enabled webhook or email destination to check it
+without running a rule. The action uses the same permissions as editing the
+destination. The test result and audit events are separate from incident
+delivery history. Each destination allows three new tests per minute.
+
+If the console shows **Result pending**, it checks the same test again. API
+clients can GET the test using the original action UUID or replay the POST with
+that UUID without sending again. **Delivery unconfirmed** means the receiver
+may have accepted the test. Confirming a new test can deliver another message.
+
 Rules subscribe to immutable events: budget thresholds/exhaustion, key expiry,
 grant lapse, circuits/error rate/credentials, latency, retirement, runtime failure,
 stale workers and spend reports. [OpenAPI](../../management/management.json) owns event

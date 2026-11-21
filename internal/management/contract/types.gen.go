@@ -4930,6 +4930,30 @@ func (e NotificationEvent) Valid() bool {
 	}
 }
 
+// Defines values for NotificationTestStatus.
+const (
+	NotificationTestStatusDelivered   NotificationTestStatus = "delivered"
+	NotificationTestStatusFailed      NotificationTestStatus = "failed"
+	NotificationTestStatusPending     NotificationTestStatus = "pending"
+	NotificationTestStatusUnconfirmed NotificationTestStatus = "unconfirmed"
+)
+
+// Valid indicates whether the value is a known member of the NotificationTestStatus enum.
+func (e NotificationTestStatus) Valid() bool {
+	switch e {
+	case NotificationTestStatusDelivered:
+		return true
+	case NotificationTestStatusFailed:
+		return true
+	case NotificationTestStatusPending:
+		return true
+	case NotificationTestStatusUnconfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ObservabilityRunEvidenceEvidenceOrigin.
 const (
 	ObservabilityRunEvidenceEvidenceOriginGatewayObserved ObservabilityRunEvidenceEvidenceOrigin = "gateway_observed"
@@ -12920,6 +12944,16 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// NotificationDestinationTest Result of a single test attempt, separate from incident delivery history.
+type NotificationDestinationTest struct {
+	// Failure Sanitized failure code when available.
+	Failure *string            `json:"failure,omitempty"`
+	Id      openapi_types.UUID `json:"id"`
+
+	// Status Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.
+	Status NotificationTestStatus `json:"status"`
+}
+
 // NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 type NotificationEvent string
 
@@ -12971,6 +13005,9 @@ type NotificationSilence struct {
 	EndsAt   time.Time `json:"ends_at"`
 	StartsAt time.Time `json:"starts_at"`
 }
+
+// NotificationTestStatus Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.
+type NotificationTestStatus string
 
 // ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
 type ObservabilityRunEvidence struct {

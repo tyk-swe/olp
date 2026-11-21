@@ -19,10 +19,11 @@ import (
 type Server struct {
 	access *access.Server
 	egress egress.Policy
+	sender *Sender
 }
 
 func NewManagement(auth *access.Server, policy egress.Policy) *Server {
-	return &Server{access: auth, egress: policy}
+	return &Server{access: auth, egress: policy, sender: NewSender(policy)}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -41,6 +42,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	} {
 		s.access.Route(mux, pattern, handler)
 	}
+	s.access.Route(mux, "POST /api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}", s.sendTest, access.Deadline(testClaimLifetime))
+	s.access.Route(mux, "GET /api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}", s.testStatus)
 }
 
 func notificationOperation(projectID *string) authz.Operation {
@@ -226,14 +229,15 @@ func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p authz.Princi
 	if err := tx.QueryRow(ctx, res.lockSQL, id).Scan(&locked.etag, &locked.projectID); err != nil {
 		return revision{}, err
 	}
-	if err := p.Project(locked.projectID, authz.View); err != nil {
-		return revision{}, err
+	return locked, authorizeChange(p, locked.projectID)
+}
+
+func authorizeChange(p authz.Principal, projectID *string) error {
+	if err := p.Project(projectID, authz.View); err != nil {
+		return err
 	}
-	if err := p.Authorize(notificationOperation(locked.projectID)); err != nil {
-		return revision{}, err
+	if err := p.Authorize(notificationOperation(projectID)); err != nil {
+		return err
 	}
-	if err := p.Project(locked.projectID, authz.Change); err != nil {
-		return revision{}, err
-	}
-	return locked, nil
+	return p.Project(projectID, authz.Change)
 }
