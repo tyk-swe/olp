@@ -47,7 +47,7 @@ func (x *Call) envelope(out *Outcome, status int, completedAt time.Time) events.
 		UserID:      x.userID,
 		Family:      string(x.family),
 		Mode:        x.mode,
-		Operation:   x.operationName(),
+		Operation:   x.OperationName(),
 		Surface:     x.surfaceName(),
 		Outcome:     "failure",
 		Status:      status,

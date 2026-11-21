@@ -1,11 +1,7 @@
 package kernel
 
 import (
-	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"net/http"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -15,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *Server) prepareRetainedAccounting(x *Call, p *Pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint) *fault.Error {
+func (s *Server) PrepareRetainedAccounting(x *Call, p *Pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint) *fault.Error {
 	if !e.Metered {
 		return nil
 	}
@@ -64,33 +60,13 @@ func retainedEvalPricingSupported(price *rates.RoutingPrice, card *rates.Routing
 	return explicit == nil || len(explicit.Tiers) == 0
 }
 
-func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
-	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
-		return nil, nil
-	}
-	key := r.Header.Get("Idempotency-Key")
-	if key == "" || len(key) > 128 {
-		return nil, fault.InvalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
-	}
-	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
-	digest := sha256.Sum256(payload)
-	lifecycle, err := s.Deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
-	if err != nil {
-		if errors.Is(err, resources.ErrSubmissionConflict) {
-			return nil, fault.ServerError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
-		}
-		return nil, fault.ServerError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
-	}
-	return lifecycle, nil
-}
-
 func (s *Server) retainedUnboundedLimits(x *Call, p *Pin) *fault.Error {
 	if x.Route == nil {
 		return fault.ServerError(503, "provider_state_unavailable", "A retained operation requires a pinned route.")
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
-	if x.operationName() == "fine_tuning" || x.operationName() == "eval" {
+	if x.OperationName() == "fine_tuning" || x.OperationName() == "eval" {
 		return s.UnboundedPinLimits(authority, p, x.Route)
 	}
 	monetary := func(provider *routing.Provider, slot *routing.Slot, route *routing.Route) bool {

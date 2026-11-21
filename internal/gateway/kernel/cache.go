@@ -76,7 +76,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 		return nil
 	}
 	// New endpoint contracts require explicit cache qualification.
-	if x.prompt != nil || x.family == wire.Completions || !operationregistry.PolicyFor(x.operationName()).CacheEligible {
+	if x.prompt != nil || x.family == wire.Completions || !operationregistry.PolicyFor(x.OperationName()).CacheEligible {
 		return nil
 	}
 	if x.Route.Cache == nil && x.request.cacheDirectives == "" {
@@ -92,7 +92,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 	}
 	p := x.Route.Cache.Effective()
 	x.cache.policy = p
-	if !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
+	if !slices.Contains(p.Operations, x.OperationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
 		return nil
 	}
 	if c.NoStore {
@@ -352,7 +352,7 @@ func (s *Server) storeCache(x *Call, out *Outcome, status int) {
 		return
 	}
 	f := x.facts[len(x.facts)-1]
-	if f.Class != ClassSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.operationName() != "moderation" {
+	if f.Class != ClassSuccess || f.TargetID != c.target || !f.UsageComplete || f.Usage == nil && x.OperationName() != "moderation" {
 		return
 	}
 	if out.Completion != nil {

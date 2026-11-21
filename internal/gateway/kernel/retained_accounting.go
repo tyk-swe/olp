@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -39,7 +40,7 @@ type retainedOperation struct {
 	billing retainedBilling
 }
 
-type retainedAdmissionPlan struct {
+type RetainedAdmissionPlan struct {
 	attempt routing.Attempt
 	billing retainedBilling
 }
@@ -53,7 +54,7 @@ func retainedOperationForAction(action string) retainedOperation {
 	}
 }
 
-func (p retainedAdmissionPlan) authority(authority keyauthority.Authority, costExempt bool) keyauthority.Authority {
+func (p RetainedAdmissionPlan) authority(authority keyauthority.Authority, costExempt bool) keyauthority.Authority {
 	if p.billing == retainedFree {
 		return quota.RequestRateAuthority(authority, false)
 	}
@@ -71,18 +72,18 @@ func (x *Call) unpricedRetainedControl() bool {
 	return x.retainedAdmission == nil && x.retained.billing != retainedMeteredWork
 }
 
-type retainedListEntry struct {
-	resource  *resources.Resource
-	pin       *Pin
-	route     *routing.Route
-	admission retainedAdmissionPlan
+type RetainedListEntry struct {
+	Resource  *resources.Resource
+	Pin       *Pin
+	Route     *routing.Route
+	Admission RetainedAdmissionPlan
 }
 
 // A continuation candidate has no effect on the caller's page admission until
 // it is actually read. Refills can acquire cost admission before a paid read.
-func retainedPageFreeControl(entries []retainedListEntry, limit int) bool {
+func RetainedPageFreeControl(entries []RetainedListEntry, limit int) bool {
 	for _, entry := range entries[:min(len(entries), limit)] {
-		if entry.admission.billing != retainedFree {
+		if entry.Admission.billing != retainedFree {
 			return false
 		}
 	}
@@ -99,11 +100,7 @@ func (s *Server) admitRetainedPageCost(ctx context.Context, x *Call, authority k
 	if failure != nil {
 		return failure
 	}
-	if x.lease == nil {
-		x.lease = lease
-	} else {
-		x.lease.Join(lease)
-	}
+	x.JoinLease(lease)
 	return nil
 }
 
@@ -138,25 +135,61 @@ func (x *Call) HousekeepingOperation(operation string) {
 	x.retained = retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage}
 }
 
+func (x *Call) BeginRetainedResource(operation string) {
+	x.operationOverride = operation
+	x.mode = "unary"
+	x.actor = "api_key_resource"
+}
+
+func (x *Call) BeginRetainedAction(operation, action string) {
+	x.BeginRetainedResource(operation)
+	x.retained = retainedOperationForAction(action)
+}
+
+func (x *Call) BeginRetainedWork(operation string) {
+	x.BeginRetainedResource(operation)
+	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+}
+
+func (x *Call) MarkRetainedDisplayChange() {
+	x.retained = retainedOperation{use: RetainedHousekeeping}
+}
+
+func (x *Call) EstimateRetainedBody(bodyBytes int) {
+	x.estimate = int64(bodyBytes)
+}
+
+func (x *Call) JoinLease(lease *admission.Lease) {
+	if x.lease == nil {
+		x.lease = lease
+		return
+	}
+	x.lease.Join(lease)
+}
+
+func (x *Call) BindRetainedAdmission(p *Pin, plan RetainedAdmissionPlan) {
+	x.retainedAdmission = &plan
+	p.attempt = plan.attempt
+}
+
 func (s *Server) AdmitRetainedRequest(ctx context.Context, x *Call, a keyauthority.Authority, p *Pin, route *routing.Route, deferred bool) *fault.Error {
-	admission, err := s.prepareRetainedAdmission(x, p, deferred)
+	admission, err := s.PrepareRetainedAdmission(x, p, deferred)
 	if err != nil {
 		return err
 	}
-	x.retainedAdmission = &admission
-	p.attempt = admission.attempt
+	x.BindRetainedAdmission(p, admission)
 	if err := s.ReserveState(ctx, x, a, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
 		return err
 	}
 	if err := s.reserveRetainedCost(ctx, x, p, route); err != nil {
 		return err
 	}
-	return s.gateRetainedSlot(ctx, x, p, route)
+	return s.GateRetainedSlot(ctx, x, p, route)
 }
 
-func (s *Server) reserveRetainedPage(ctx context.Context, x *Call, authority keyauthority.Authority, entries []retainedListEntry, limit int, ttl time.Duration) *fault.Error {
+func (s *Server) ReserveRetainedPage(ctx context.Context, x *Call, authority keyauthority.Authority, entries []RetainedListEntry, limit int, ttl time.Duration) *fault.Error {
 	authority.Attribution = x.attribution
-	if retainedPageFreeControl(entries, limit) {
+	if RetainedPageFreeControl(entries, limit) {
 		authority = quota.RequestRateAuthority(authority, false)
 	}
 	lease, failure := s.Deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(ResourceEstimate, x.estimate), ttl)
@@ -164,42 +197,42 @@ func (s *Server) reserveRetainedPage(ctx context.Context, x *Call, authority key
 	return failure
 }
 
-func (s *Server) prepareRetainedAdmission(x *Call, p *Pin, deferred bool) (retainedAdmissionPlan, *fault.Error) {
+func (s *Server) PrepareRetainedAdmission(x *Call, p *Pin, deferred bool) (RetainedAdmissionPlan, *fault.Error) {
 	if p.Provider.CredentialSource == "caller" {
-		return retainedAdmissionPlan{}, PolicyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
+		return RetainedAdmissionPlan{}, PolicyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
 	}
 	if deferred {
 		if err := s.retainedUnboundedLimits(x, p); err != nil {
-			return retainedAdmissionPlan{}, err
+			return RetainedAdmissionPlan{}, err
 		}
 	}
 	if x.routingInputs == nil && s.Deps.Runtime != nil {
 		x.routingInputs = s.Deps.Runtime.RoutingInputs()
 	}
 	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
-		return retainedAdmissionPlan{}, fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
+		return RetainedAdmissionPlan{}, fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	attempt := p.attempt
-	attempt.Price = x.routingInputs.Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, x.operationName(), x.request.startedAt)
+	attempt.Price = x.routingInputs.Price(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, p.Model, x.OperationName(), x.request.startedAt)
 	attempt.Discount = x.routingInputs.Discount(string(p.Provider.Kind), p.Provider.ID, p.Provider.VendorID, x.request.startedAt)
 	if x.retained.use == RetainedHousekeeping {
 		bound := x.attemptCostBound(attempt)
 		charge := x.attemptChargeBound(attempt, bound)
 		if bound.IsZero() && charge.IsZero() {
-			return retainedAdmissionPlan{attempt: attempt, billing: retainedFree}, nil
+			return RetainedAdmissionPlan{attempt: attempt, billing: retainedFree}, nil
 		}
 	}
-	return retainedAdmissionPlan{attempt: attempt, billing: retainedPriced}, nil
+	return RetainedAdmissionPlan{attempt: attempt, billing: retainedPriced}, nil
 }
 
 func (s *Server) SettleRetained(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.SettlePinnedHold(ctx, p.Hold)
 	}
 	s.SettleAdmission(ctx, x)
 }
 
-func observeRetainedUsage(exchange *PinnedExchange, source oif.Document, generation bool) error {
+func ObserveRetainedUsage(exchange *PinnedExchange, source oif.Document, generation bool) error {
 	fact := exchange.fact()
 	if !generation {
 		// A completed control/search request has no generated tokens. Its

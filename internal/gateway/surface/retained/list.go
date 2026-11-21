@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -24,8 +25,8 @@ type retainedListQuery struct {
 }
 
 type retainedListing struct {
-	server    *Server
-	x         *Call
+	server    surface
+	x         *kernel.Call
 	authority keyauthority.Authority
 	endpoint  retainedapi.Endpoint
 	query     retainedListQuery
@@ -36,13 +37,13 @@ type retainedScan struct {
 	pending   []*resources.Resource
 	lastBatch bool
 	exhausted bool
-	ready     []retainedListEntry
+	ready     []kernel.RetainedListEntry
 	overall   time.Duration
 }
 
 type retainedPage struct {
 	items     []json.RawMessage
-	delivered []*PinnedExchange
+	delivered []*kernel.PinnedExchange
 	last      *resources.Resource
 	more      bool
 }
@@ -50,7 +51,7 @@ type retainedPage struct {
 type retainedListItem struct {
 	resource  *resources.Resource
 	projected json.RawMessage
-	exchange  *PinnedExchange
+	exchange  *kernel.PinnedExchange
 }
 
 type retainedAccepted struct {
@@ -59,24 +60,24 @@ type retainedAccepted struct {
 	projected   json.RawMessage
 }
 
-func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *Call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
+func (s surface) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *kernel.Call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
 	query, refusal := readRetainedListQuery(r, e)
 	if refusal != nil {
 		fail(refusal)
 		return refusal.Status
 	}
 	l := retainedListing{server: s, x: x, authority: a, endpoint: e, query: query}
-	scan, refusal := l.fill(r.Context(), retainedScan{cursor: query.cursor, ready: make([]retainedListEntry, 0, query.limit+1)}, query.limit)
+	scan, refusal := l.fill(r.Context(), retainedScan{cursor: query.cursor, ready: make([]kernel.RetainedListEntry, 0, query.limit+1)}, query.limit)
 	if refusal != nil {
 		fail(refusal)
 		return refusal.Status
 	}
-	ledger := newRetainedPageLedger(s, x, a, !retainedPageFreeControl(scan.ready, query.limit))
+	ledger := kernel.NewRetainedPageLedger(s.kernel, x, a, !kernel.RetainedPageFreeControl(scan.ready, query.limit))
 	ctx, cancel := retainedPageDeadline(r.Context(), scan)
-	defer ledger.settle(ctx)
+	defer ledger.Settle(ctx)
 	defer cancel()
 	if len(scan.ready) > 0 {
-		if gateErr := s.reserveRetainedPage(ctx, x, a, scan.ready, query.limit, scan.overall); gateErr != nil {
+		if gateErr := s.kernel.ReserveRetainedPage(ctx, x, a, scan.ready, query.limit, scan.overall); gateErr != nil {
 			fail(gateErr)
 			return gateErr.Status
 		}
@@ -91,7 +92,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		fail(encodeErr)
 		return encodeErr.Status
 	}
-	s.WriteStateJSONStatus(w, x, body, http.StatusOK, page.delivered...)
+	s.kernel.WriteStateJSONStatus(w, x, body, http.StatusOK, page.delivered...)
 	return http.StatusOK
 }
 
@@ -129,7 +130,7 @@ func readRetainedListQuery(r *http.Request, e retainedapi.Endpoint) (retainedLis
 	if refusal != nil {
 		return retainedListQuery{}, refusal
 	}
-	return retainedListQuery{limit: limit, cursor: asked.Get(cursorParam), ascending: order == "asc", route: strings.TrimSpace(r.Header.Get(StateRouteHeader))}, nil
+	return retainedListQuery{limit: limit, cursor: asked.Get(cursorParam), ascending: order == "asc", route: strings.TrimSpace(r.Header.Get(kernel.StateRouteHeader))}, nil
 }
 
 func retainedPageSize(raw string) (int, *fault.Error) {
@@ -168,7 +169,7 @@ func (l retainedListing) fill(ctx context.Context, from retainedScan, target int
 func (l retainedListing) advance(ctx context.Context, from retainedScan, target int) (retainedScan, *fault.Error) {
 	scan := from
 	if len(scan.pending) == 0 {
-		rows, err := l.server.Deps.Resources.ListLifecycleOrdered(ctx, l.endpoint.Kind, l.x.keyID, 101, scan.cursor, l.query.ascending, l.query.route)
+		rows, err := l.server.kernel.Deps.Resources.ListLifecycleOrdered(ctx, l.endpoint.Kind, l.x.KeyID(), 101, scan.cursor, l.query.ascending, l.query.route)
 		if errors.Is(err, resources.ErrNotFound) {
 			return scan, fault.InvalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil)
 		}
@@ -192,7 +193,7 @@ func (l retainedListing) advance(ctx context.Context, from retainedScan, target 
 		if !readable {
 			continue
 		}
-		timeout := time.Duration(entry.route.OverallTimeout) * time.Millisecond
+		timeout := time.Duration(entry.Route.OverallTimeout) * time.Millisecond
 		if len(scan.ready) == 0 || timeout < scan.overall {
 			scan.overall = timeout
 		}
@@ -206,33 +207,33 @@ func (l retainedListing) advance(ctx context.Context, from retainedScan, target 
 	return scan, nil
 }
 
-func (l retainedListing) candidate(ctx context.Context, resource *resources.Resource) (retainedListEntry, bool, *fault.Error) {
+func (l retainedListing) candidate(ctx context.Context, resource *resources.Resource) (kernel.RetainedListEntry, bool, *fault.Error) {
 	s, x := l.server, l.x
-	if RetainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
-		return retainedListEntry{}, false, nil
+	if kernel.RetainedUnsettled(resource.State) || resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
+		return kernel.RetainedListEntry{}, false, nil
 	}
-	p, route, resolveErr := s.ResolveResource(ctx, x, l.authority, resource, l.endpoint.Operation, RetainedRetrieval)
+	p, route, resolveErr := s.kernel.ResolveResource(ctx, x, l.authority, resource, l.endpoint.Operation, kernel.RetainedRetrieval)
 	if resolveErr != nil {
 		if resolveErr.Status != http.StatusNotFound && resolveErr.Status != http.StatusConflict {
-			return retainedListEntry{}, false, resolveErr
+			return kernel.RetainedListEntry{}, false, resolveErr
 		}
-		return retainedListEntry{}, false, nil
+		return kernel.RetainedListEntry{}, false, nil
 	}
 	x.Route = route
 	if gateErr := x.GuardrailSurfaceGate(route); gateErr != nil {
-		return retainedListEntry{}, false, gateErr
+		return kernel.RetainedListEntry{}, false, gateErr
 	}
-	admission, policyErr := s.prepareRetainedAdmission(x, p, false)
+	admission, policyErr := s.kernel.PrepareRetainedAdmission(x, p, false)
 	if policyErr != nil {
-		return retainedListEntry{}, false, policyErr
+		return kernel.RetainedListEntry{}, false, policyErr
 	}
-	return retainedListEntry{resource: resource, pin: p, route: route, admission: admission}, true, nil
+	return kernel.RetainedListEntry{Resource: resource, Pin: p, Route: route, Admission: admission}, true, nil
 }
 
 // collect reads entries until the page is full, refilling the scan after a
 // provider lost a resource so a page never returns empty with a continuation
 // while live resources remain.
-func (l retainedListing) collect(ctx context.Context, ledger *retainedPageLedger, from retainedScan) (retainedPage, *fault.Error) {
+func (l retainedListing) collect(ctx context.Context, ledger *kernel.RetainedPageLedger, from retainedScan) (retainedPage, *fault.Error) {
 	scan, page, next, size := from, retainedPage{items: make([]json.RawMessage, 0, l.query.limit)}, 0, 256
 	for len(page.items) < l.query.limit && (next < len(scan.ready) || !scan.exhausted) {
 		if next >= len(scan.ready) {
@@ -256,7 +257,7 @@ func (l retainedListing) collect(ctx context.Context, ledger *retainedPageLedger
 			continue
 		}
 		size += len(item.projected) + 1
-		if size > retainedBodyLimit {
+		if size > kernel.RetainedBodyLimit {
 			return page, fault.ServerError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page.")
 		}
 		page.items = append(page.items, item.projected)
@@ -269,116 +270,115 @@ func (l retainedListing) collect(ctx context.Context, ledger *retainedPageLedger
 
 // read admits one entry, reads it from its provider and returns what the page
 // shows for it. gone reports a resource its provider no longer has.
-func (l retainedListing) read(ctx context.Context, ledger *retainedPageLedger, entry retainedListEntry, overall time.Duration) (retainedListItem, bool, *fault.Error) {
-	s, x, resource, p, route := l.server, l.x, entry.resource, entry.pin, entry.route
-	x.retainedAdmission = &entry.admission
-	p.attempt = entry.admission.attempt
+func (l retainedListing) read(ctx context.Context, ledger *kernel.RetainedPageLedger, entry kernel.RetainedListEntry, overall time.Duration) (retainedListItem, bool, *fault.Error) {
+	s, x, resource, p, route := l.server, l.x, entry.Resource, entry.Pin, entry.Route
+	x.BindRetainedAdmission(p, entry.Admission)
 	x.Route = route
-	cost, refusal := ledger.reserve(ctx, entry, overall)
+	cost, refusal := ledger.Reserve(ctx, entry, overall)
 	if refusal != nil {
 		return retainedListItem{}, false, refusal
 	}
-	if gateErr := s.gateRetainedSlot(ctx, x, p, route); gateErr != nil {
+	if gateErr := s.kernel.GateRetainedSlot(ctx, x, p, route); gateErr != nil {
 		return retainedListItem{}, false, gateErr
 	}
 	native, gone, refusal := l.ask(ctx, entry)
 	if refusal != nil {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.kernel.SettlePinnedHold(ctx, p.Hold)
 		return retainedListItem{}, false, refusal
 	}
 	if gone {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.kernel.SettlePinnedHold(ctx, p.Hold)
 		return retainedListItem{}, true, l.forget(ctx, resource)
 	}
-	ledger.answered(route.Slug, native.Exchange)
+	ledger.Answered(route.Slug, native.Exchange)
 	accepted, refusal := l.accept(ctx, resource, native)
-	s.settlePinnedHold(ctx, p.Hold)
+	s.kernel.SettlePinnedHold(ctx, p.Hold)
 	if refusal != nil {
 		return retainedListItem{}, false, refusal
 	}
-	ledger.spent(route.Slug, cost)
+	ledger.Spent(route.Slug, cost)
 	if refusal := l.commit(ctx, resource, accepted); refusal != nil {
 		return retainedListItem{}, false, refusal
 	}
 	return retainedListItem{resource: resource, projected: accepted.projected, exchange: native.Exchange}, false, nil
 }
 
-func (l retainedListing) ask(ctx context.Context, entry retainedListEntry) (*PinnedResponse, bool, *fault.Error) {
-	e, p := l.endpoint, entry.pin
+func (l retainedListing) ask(ctx context.Context, entry kernel.RetainedListEntry) (*kernel.PinnedResponse, bool, *fault.Error) {
+	e, p := l.endpoint, entry.Pin
 	object := retainedapi.Endpoint{Family: e.Family, Action: "get", Method: "GET", Pattern: e.Path + "/{id}"}
-	endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(object, map[string]string{"id": entry.resource.UpstreamID}), nil)
+	endpoint, urlErr := p.Provider.Connector().ResourceURL(p.Model, retainedUpstreamPath(object, map[string]string{"id": entry.Resource.UpstreamID}), nil)
 	if urlErr != nil {
-		return nil, false, PinUnavailable()
+		return nil, false, kernel.PinUnavailable()
 	}
-	native, callErr := l.server.PinnedDo(ctx, l.x, p, http.MethodGet, endpoint, nil, "")
+	native, callErr := l.server.kernel.PinnedDo(ctx, l.x, p, http.MethodGet, endpoint, nil, "")
 	if callErr == nil {
 		return native, false, nil
 	}
 	if callErr.Status == http.StatusNotFound {
 		return nil, true, nil
 	}
-	return nil, false, RetainedPublicError(UpstreamError(callErr), callErr.Status)
+	return nil, false, kernel.RetainedPublicError(kernel.UpstreamError(callErr), callErr.Status)
 }
 
 func (l retainedListing) forget(ctx context.Context, resource *resources.Resource) *fault.Error {
-	commitCtx, commitCancel := ResourceCommitContext(ctx)
+	commitCtx, commitCancel := kernel.ResourceCommitContext(ctx)
 	defer commitCancel()
-	if err := l.server.Deps.Resources.Tombstone(commitCtx, resource.ID); err != nil {
+	if err := l.server.kernel.Deps.Resources.Tombstone(commitCtx, resource.ID); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled.")
 	}
 	return nil
 }
 
-func (l retainedListing) accept(ctx context.Context, resource *resources.Resource, native *PinnedResponse) (retainedAccepted, *fault.Error) {
+func (l retainedListing) accept(ctx context.Context, resource *resources.Resource, native *kernel.PinnedResponse) (retainedAccepted, *fault.Error) {
 	s, e := l.server, l.endpoint
 	invalid := fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource.")
 	uncommitted := fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
-	body, readErr := native.ReadBody(s.RetainedResponseLimit())
+	body, readErr := native.ReadBody(s.kernel.RetainedResponseLimit())
 	native.Body.Close()
 	if readErr != nil || !retainedNames(e, body, resource.UpstreamID) {
 		return retainedAccepted{}, invalid
 	}
 	object := retainedapi.Endpoint{Family: e.Family, Action: "get"}
-	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
+	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: kernel.RetainedBodyLimit})
 	if parseErr != nil {
 		return retainedAccepted{}, invalid
 	}
-	if err := resources.EnrichRetained(resource, object, source, s.Now()); err != nil {
+	if err := resources.EnrichRetained(resource, object, source, s.kernel.Now()); err != nil {
 		return retainedAccepted{}, uncommitted
 	}
-	observation, observeErr := resources.ObserveRetained(resource, object, source, s.Now())
+	observation, observeErr := resources.ObserveRetained(resource, object, source, s.kernel.Now())
 	if observeErr != nil {
 		return retainedAccepted{}, uncommitted
 	}
-	rewrite, referenceErr := retainedapi.PrepareRewrite(source, retainedResponseRefs(object, source))
+	rewrite, referenceErr := retainedapi.PrepareRewrite(source, kernel.RetainedResponseRefs(object, source))
 	if referenceErr != nil {
 		return retainedAccepted{}, invalid
 	}
-	projected, projectErr := s.projectRetainedGeneric(ctx, resource, object, source, rewrite)
+	projected, projectErr := s.kernel.ProjectRetainedGeneric(ctx, resource, object, source, rewrite)
 	if projectErr != nil {
-		return retainedAccepted{}, retainedProjectionError(native.Exchange, projectErr)
+		return retainedAccepted{}, kernel.RetainedProjectionError(native.Exchange, projectErr)
 	}
-	_ = observeRetainedUsage(native.Exchange, source, false)
-	native.Exchange.Complete(ClassSuccess)
+	_ = kernel.ObserveRetainedUsage(native.Exchange, source, false)
+	native.Exchange.Complete(kernel.ClassSuccess)
 	return retainedAccepted{source: source, observation: observation, projected: projected}, nil
 }
 
 func retainedNames(e retainedapi.Endpoint, body []byte, upstreamID string) bool {
 	object := e
 	object.Action = "get"
-	ids, err := retainedCreateIDs(object, body)
+	ids, err := kernel.RetainedCreateIDs(object, body)
 	return err == nil && len(ids) == 1 && ids[0] == upstreamID
 }
 
 func (l retainedListing) commit(ctx context.Context, resource *resources.Resource, accepted retainedAccepted) *fault.Error {
 	s := l.server
 	object := retainedapi.Endpoint{Family: l.endpoint.Family, Action: "get"}
-	commitCtx, commitCancel := ResourceCommitContext(ctx)
+	commitCtx, commitCancel := kernel.ResourceCommitContext(ctx)
 	defer commitCancel()
-	if err := s.persistRetainedResult(commitCtx, resource, object, accepted.source); err != nil {
+	if err := s.kernel.PersistRetainedResult(commitCtx, resource, object, accepted.source); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
-	if err := s.Deps.Resources.RecordRetainedObservation(commitCtx, resource, accepted.observation, nil); err != nil {
+	if err := s.kernel.Deps.Resources.RecordRetainedObservation(commitCtx, resource, accepted.observation, nil); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
 	return nil
@@ -412,7 +412,7 @@ func (p retainedPage) document(e retainedapi.Endpoint) map[string]any {
 }
 
 func retainedItemIdentity(item json.RawMessage, field string) string {
-	parsed, _ := oif.ParseJSON(item, oif.Limits{MaxBytes: retainedBodyLimit})
+	parsed, _ := oif.ParseJSON(item, oif.Limits{MaxBytes: kernel.RetainedBodyLimit})
 	identity, _ := parsed.Root().Lookup(field)
 	text, _ := identity.Text()
 	return text

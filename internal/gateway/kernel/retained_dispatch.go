@@ -33,16 +33,16 @@ type retainedAnswer struct {
 	referenceErr error
 }
 
-func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *Call, p *Pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
+func (s *Server) RetainedDispatch(w http.ResponseWriter, r *http.Request, x *Call, p *Pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
 	deletion := e.Action == "delete" && resource.Kind == "context_cache"
 	fence, err := s.dispatchFence(r.Context(), resource, lifecycle, deletion)
 	if err != nil {
-		s.settleFence(r.Context(), fence.Reject)
+		s.SettleFence(r.Context(), fence.Reject)
 		fail(fault.ServerError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
 		return 503
 	}
 	if deletion {
-		defer s.settleFence(r.Context(), fence.Close)
+		defer s.SettleFence(r.Context(), fence.Close)
 	}
 	c := retainedExchange{server: s, x: x, endpoint: e, resource: resource, parent: parent, fence: fence, deletion: deletion}
 
@@ -91,7 +91,7 @@ func (s *Server) dispatchFence(ctx context.Context, resource *resources.Resource
 }
 
 func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) *fault.Error {
-	if err := recordRetainedRejection(ctx, c.fence, failure); err != nil {
+	if err := RecordRetainedRejection(ctx, c.fence, failure); err != nil {
 		return err
 	}
 	if c.resource != nil && c.endpoint.Action != "create" && failure.Status == http.StatusNotFound {
@@ -104,8 +104,8 @@ func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) 
 	return RetainedPublicError(UpstreamError(failure), failure.Status)
 }
 
-func recordRetainedRejection(ctx context.Context, fence *resources.Lifecycle, failure *AttemptFailure) *fault.Error {
-	if fence == nil || !retainedRejectedWithoutWork(failure) {
+func RecordRetainedRejection(ctx context.Context, fence *resources.Lifecycle, failure *AttemptFailure) *fault.Error {
+	if fence == nil || !failure.rejectedWithoutWork() {
 		return nil
 	}
 	commit, cancel := ResourceCommitContext(ctx)
@@ -121,7 +121,7 @@ func (c retainedExchange) answer(native *PinnedResponse, body []byte, commit con
 	if c.endpoint.Action == "content" {
 		return a
 	}
-	parsed, parseErr := oif.ParseJSON(c.document(native, body), oif.Limits{MaxBytes: retainedBodyLimit})
+	parsed, parseErr := oif.ParseJSON(c.document(native, body), oif.Limits{MaxBytes: RetainedBodyLimit})
 	rewrite, referenceErr := c.references(parsed, parseErr)
 	return retainedAnswer{native: native, body: body, commit: commit, parsed: parsed, parseErr: parseErr, rewrite: rewrite, referenceErr: referenceErr}
 }
@@ -137,7 +137,7 @@ func (c retainedExchange) references(parsed oif.Document, parseErr error) (retai
 	var rewrite retainedapi.PreparedRewrite
 	var referenceErr error
 	if parseErr == nil && parsed.Root().Kind() == oif.Object {
-		rewrite, referenceErr = retainedapi.PrepareRewrite(parsed, retainedResponseRefs(c.endpoint, parsed))
+		rewrite, referenceErr = retainedapi.PrepareRewrite(parsed, RetainedResponseRefs(c.endpoint, parsed))
 	}
 	if c.endpoint.Action == "delete" && !retainedDeleteIdentityMatches(c.endpoint, parsed, c.resource, c.parent) {
 		return rewrite, resources.ErrContract
@@ -148,7 +148,7 @@ func (c retainedExchange) references(parsed oif.Document, parseErr error) (retai
 func (c retainedExchange) forget(w http.ResponseWriter, a retainedAnswer) (bool, *fault.Error) {
 	s := c.server
 	if a.parseErr == nil && a.parsed.Root().Kind() == oif.Object && a.referenceErr == nil {
-		_ = observeRetainedUsage(a.native.Exchange, a.parsed, false)
+		_ = ObserveRetainedUsage(a.native.Exchange, a.parsed, false)
 		a.native.Exchange.Complete(ClassSuccess)
 	}
 	if putErr := s.Deps.Resources.Tombstone(a.commit, c.resource.ID); putErr != nil {
@@ -172,7 +172,7 @@ func (c retainedExchange) forget(w http.ResponseWriter, a retainedAnswer) (bool,
 
 func (c retainedExchange) deliverContent(w http.ResponseWriter, a retainedAnswer) int {
 	s, x, native, response := c.server, c.x, a.native, a.body
-	_ = observeRetainedUsage(native.Exchange, oif.Document{}, false)
+	_ = ObserveRetainedUsage(native.Exchange, oif.Document{}, false)
 	native.Exchange.Complete(ClassSuccess)
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -231,7 +231,7 @@ func (c retainedExchange) bind(a retainedAnswer) (*resources.PreparedCreation, *
 		}
 		return nil, c.resource, nil
 	}
-	ids, idErr := retainedCreateIDs(e, a.body)
+	ids, idErr := RetainedCreateIDs(e, a.body)
 	if idErr != nil {
 		return nil, nil, fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity.")
 	}
@@ -265,7 +265,7 @@ func (c retainedExchange) record(ctx context.Context, a retainedAnswer, creation
 	if observeErr != nil {
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Resource usage evidence could not be committed.")
 	}
-	if s.persistRetainedResult(a.commit, resource, e, a.parsed) != nil {
+	if s.PersistRetainedResult(a.commit, resource, e, a.parsed) != nil {
 		native.Exchange.Interrupt(ClassProtocol, true)
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
@@ -274,7 +274,7 @@ func (c retainedExchange) record(ctx context.Context, a retainedAnswer, creation
 		return nil, refusal
 	}
 	if e.Action != "delete" {
-		_ = observeRetainedUsage(native.Exchange, a.parsed, false)
+		_ = ObserveRetainedUsage(native.Exchange, a.parsed, false)
 		native.Exchange.Complete(ClassSuccess)
 	}
 	if s.Deps.Resources.RecordRetainedObservation(a.commit, resource, observation, nil) != nil {
@@ -289,14 +289,14 @@ func (c retainedExchange) record(ctx context.Context, a retainedAnswer, creation
 }
 
 func (c retainedExchange) project(ctx context.Context, a retainedAnswer, resource *resources.Resource) ([]byte, *fault.Error) {
-	projected, projectErr := c.server.projectRetainedGeneric(ctx, resource, c.endpoint, a.parsed, a.rewrite)
+	projected, projectErr := c.server.ProjectRetainedGeneric(ctx, resource, c.endpoint, a.parsed, a.rewrite)
 	if projectErr == nil {
 		return projected, nil
 	}
 	if c.endpoint.Action == "delete" {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity.")
 	}
-	return nil, retainedProjectionError(a.native.Exchange, projectErr)
+	return nil, RetainedProjectionError(a.native.Exchange, projectErr)
 }
 
 func retainedDeleteIdentityMatches(e retainedapi.Endpoint, document oif.Document, resource, parent *resources.Resource) bool {
@@ -310,4 +310,25 @@ func retainedDeleteIdentityMatches(e retainedapi.Endpoint, document oif.Document
 	}
 	id, valid := identity.Text()
 	return valid && expected != nil && id == expected.UpstreamID
+}
+
+func (s *Server) PersistRetainedResult(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) error {
+	if r == nil || e.Action == "list" || e.Action == "delete" {
+		return nil
+	}
+	// Create results were already committed with their submission identities.
+	// Empty item creations intentionally leave a deleted placeholder.
+	if e.Action != "create" {
+		save := s.Deps.Resources.SaveRetainedResult
+		if e.Metered && (e.Action == "update" || e.Action == "patch") {
+			save = s.Deps.Resources.SaveRetainedMutationResult
+		}
+		if err := save(ctx, r); err != nil {
+			return err
+		}
+	}
+	if e.Operation == "fine_tuning" {
+		return s.Deps.Resources.DiscoverRetainedModels(ctx, r, source)
+	}
+	return nil
 }

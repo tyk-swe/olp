@@ -29,14 +29,6 @@ import (
 
 const StateRouteHeader = "X-OLP-Route"
 
-func (s *Server) registerRetained(mux *http.ServeMux) {
-	if s.Deps.Resources == nil {
-		return
-	}
-	s.registerRetainedLifecycle(mux)
-	s.registerRetainedGeneric(mux)
-}
-
 const ResourceEstimate = 100
 
 // Once a provider has accepted durable work, its owner mapping must outlive
@@ -47,7 +39,7 @@ func ResourceCommitContext(ctx context.Context) (context.Context, context.Cancel
 	return context.WithTimeout(context.WithoutCancel(ctx), resourceCommitTimeout)
 }
 
-func (s *Server) settleFence(ctx context.Context, settle func(context.Context) error) {
+func (s *Server) SettleFence(ctx context.Context, settle func(context.Context) error) {
 	commit, cancel := ResourceCommitContext(ctx)
 	defer cancel()
 	if err := settle(commit); err != nil {
@@ -68,7 +60,7 @@ type Pin struct {
 	Hold     *dispatchHold
 }
 
-func readBounded(r io.Reader, limit int64) ([]byte, error) {
+func ReadBounded(r io.Reader, limit int64) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, err
@@ -130,20 +122,20 @@ func (s *Server) SelectPin(ctx context.Context, x *Call, route *routing.Route, o
 }
 
 func (s *Server) SelectPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
-	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, resourceDemand(x), nil, qualified)
+	return s.SelectBoundPinSurface(ctx, x, route, operation, surface, mode, ResourceDemand(x), nil, qualified)
 }
 
 func (s *Server) SelectGenerationPin(ctx context.Context, x *Call, route *routing.Route, surface, mode string, replyBound int64, qualified func(*routing.Provider, string) bool) (*Pin, *fault.Error) {
-	return s.selectBoundPinSurface(ctx, x, route, "generation", surface, mode, quota.GenerationDemand(x.estimate, replyBound, 1), nil, qualified)
+	return s.SelectBoundPinSurface(ctx, x, route, "generation", surface, mode, quota.GenerationDemand(x.estimate, replyBound, 1), nil, qualified)
 }
 
-func resourceDemand(x *Call) quota.TokenDemand {
+func ResourceDemand(x *Call) quota.TokenDemand {
 	return quota.CombinedDemand(max(ResourceEstimate, x.estimate))
 }
 
-type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
+type RetainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
 
-func (s *Server) selectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, demand quota.TokenDemand, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*Pin, *fault.Error) {
+func (s *Server) SelectBoundPinSurface(ctx context.Context, x *Call, route *routing.Route, operation, surface, mode string, demand quota.TokenDemand, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...RetainedSlotQualifier) (*Pin, *fault.Error) {
 	if e := s.CheckRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -366,7 +358,7 @@ func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority key
 
 func (s *Server) ResourceSettle(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
-		s.settlePinnedHold(ctx, p.Hold)
+		s.SettlePinnedHold(ctx, p.Hold)
 	}
 	s.SettleCaps(ctx, x)
 	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.Log)
@@ -858,7 +850,7 @@ func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata js
 
 func (e *PinnedExchange) CompleteRetainedControl() {
 	if e.request.retainedAdmission != nil {
-		_ = observeRetainedUsage(e, oif.Document{}, false)
+		_ = ObserveRetainedUsage(e, oif.Document{}, false)
 	}
 	e.Complete(ClassSuccess)
 }

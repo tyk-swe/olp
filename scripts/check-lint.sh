@@ -54,6 +54,7 @@ declare -A gateway_imports=(
   [surface/media]="fault kernel"
   [surface/openaistate]="fault generationrefs ingress kernel"
   [surface/passthrough]="fault ingress kernel"
+  [surface/retained]="fault ingress kernel quota"
   [surface/bedrock]="fault kernel"
   [surface/realtime]="fault ingress kernel quota realtimeresponses"
   [surface/nativeduplex]="fault ingress kernel"

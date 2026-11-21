@@ -1,7 +1,6 @@
-package kernel
+package retained
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/url"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -20,11 +20,11 @@ func retainedSubmissionFields() [2]string {
 }
 
 func retainedGeminiFileID(raw string) (string, error) {
-	if ValidGeminiFileID(raw) {
+	if kernel.ValidGeminiFileID(raw) {
 		return raw, nil
 	}
 	local := strings.TrimPrefix(raw, "files/")
-	if local != raw && ValidGeminiFileID(local) {
+	if local != raw && kernel.ValidGeminiFileID(local) {
 		return local, nil
 	}
 	uri, err := url.Parse(raw)
@@ -32,13 +32,13 @@ func retainedGeminiFileID(raw string) (string, error) {
 		return "", resources.ErrNotFound
 	}
 	local = strings.TrimPrefix(uri.Path, "/gemini/v1beta/files/")
-	if local == uri.Path || !ValidGeminiFileID(local) {
+	if local == uri.Path || !kernel.ValidGeminiFileID(local) {
 		return "", resources.ErrNotFound
 	}
 	return local, nil
 }
 
-func retainedGeminiFileURI(r *resources.Resource, p *Pin) (string, error) {
+func retainedGeminiFileURI(r *resources.Resource, p *kernel.Pin) (string, error) {
 	var metadata struct {
 		URI  string `json:"uri"`
 		Name string `json:"name"`
@@ -97,7 +97,7 @@ func walkRetainedEvalModels(value oif.Value, path string, visit func(string, str
 	return nil
 }
 
-func retainedEvalModelAllowed(p *Pin, route *routing.Route, owner, model string) bool {
+func retainedEvalModelAllowed(p *kernel.Pin, route *routing.Route, owner, model string) bool {
 	if model == "" || route == nil || !slices.Contains(route.Operations, "generation") || !p.Slot.Allows(model, route.Slug, owner) || !p.Provider.Supports(model, "eval", "openai", "unary") || !p.Provider.Supports(model, "generation", "openai", "unary") {
 		return false
 	}
@@ -108,7 +108,7 @@ func retainedEvalModelAllowed(p *Pin, route *routing.Route, owner, model string)
 
 // Qualify every declared model before choosing a credential. A slot usable for
 // the route target alone need not be allowed to invoke its sampling or graders.
-func retainedEvalSlots(route *routing.Route, owner string, source oif.Document, parent *resources.Resource) (retainedSlotQualifier, error) {
+func retainedEvalSlots(route *routing.Route, owner string, source oif.Document, parent *resources.Resource) (kernel.RetainedSlotQualifier, error) {
 	var models []string
 	if parent != nil {
 		var metadata struct {
@@ -128,7 +128,7 @@ func retainedEvalSlots(route *routing.Route, owner string, source oif.Document, 
 		return nil, err
 	}
 	return func(provider *routing.Provider, slot *routing.Slot, model string) bool {
-		candidate := &Pin{Provider: *provider, Slot: *slot, Model: model}
+		candidate := &kernel.Pin{Provider: *provider, Slot: *slot, Model: model}
 		for _, declared := range models {
 			if !retainedEvalModelAllowed(candidate, route, owner, declared) {
 				return false
@@ -211,7 +211,7 @@ func validateEvalSource(root oif.Value, e retainedapi.Endpoint) error {
 // dictionary. Its value is a gateway-generated identity, never a caller hint.
 func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body []byte) ([]byte, error) {
 	if r != nil && e.Kind == "vertex_tuning_job" && e.Action == "create" {
-		source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
+		source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: kernel.RetainedBodyLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -233,7 +233,7 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 	if r == nil || e.Action != "create" && e.Action != "update" || !slices.Contains([]string{"fine_tuning_job", "vector_store", "eval", "eval_run"}, e.Kind) {
 		return body, nil
 	}
-	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: retainedBodyLimit})
+	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: kernel.RetainedBodyLimit})
 	if err != nil {
 		return nil, err
 	}
@@ -253,25 +253,4 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 		return nil, err
 	}
 	return bound.Bytes(), nil
-}
-
-func (s *Server) persistRetainedResult(ctx context.Context, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) error {
-	if r == nil || e.Action == "list" || e.Action == "delete" {
-		return nil
-	}
-	// Create results were already committed with their submission identities.
-	// Empty item creations intentionally leave a deleted placeholder.
-	if e.Action != "create" {
-		save := s.Deps.Resources.SaveRetainedResult
-		if e.Metered && (e.Action == "update" || e.Action == "patch") {
-			save = s.Deps.Resources.SaveRetainedMutationResult
-		}
-		if err := save(ctx, r); err != nil {
-			return err
-		}
-	}
-	if e.Operation == "fine_tuning" {
-		return s.Deps.Resources.DiscoverRetainedModels(ctx, r, source)
-	}
-	return nil
 }
