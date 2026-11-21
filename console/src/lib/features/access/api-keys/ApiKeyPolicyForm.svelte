@@ -16,6 +16,7 @@
 
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
+  import ApiKeyOverlaps from './ApiKeyOverlaps.svelte';
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
@@ -37,6 +38,7 @@
 
   let {
     editing,
+    overlaps,
     busy,
     submitError,
     canManage: permissionToManage,
@@ -47,6 +49,7 @@
     onClearError
   }: {
     editing: ApiKey | null;
+    overlaps: ApiKey['active_overlaps'];
     busy: string;
     submitError: string;
     canManage: boolean;
@@ -219,6 +222,7 @@
         </div>{/if}
     </div>
   </section>
+  <ApiKeyOverlaps overlaps={overlaps ?? []} />
   <section aria-labelledby="scope-heading">
     <h2 id="scope-heading">What this key can reach</h2>
     <fieldset class="checks">

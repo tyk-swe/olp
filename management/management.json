@@ -362,10 +362,25 @@
                 "expires_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "last_observed_use": {
+                  "type": ["string", "null"],
+                  "format": "date-time",
+                  "description": "Key detail only. Latest observed admitted HTTP generation request using this overlap, or null when none was recorded."
+                },
+                "observation_status": {
+                  "type": "string",
+                  "enum": ["ok", "degraded"],
+                  "description": "Key detail only. Degraded means that uses of this overlap may have been missed."
+                },
+                "last_recording_error_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time",
+                  "description": "Key detail only. Latest request timestamp affected by a recording failure, or null."
                 }
               }
             },
-            "description": "Previous secret lookup segments and their remaining authentication deadlines. Digests and secrets are never returned."
+            "description": "Previous secret lookup segments and their remaining authentication deadlines. Key detail also includes best-effort observation evidence. Digests and secrets are never returned."
           },
           "route_limits": {
             "anyOf": [

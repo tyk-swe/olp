@@ -131,6 +131,7 @@ type TaskAttemptAdmitter interface {
 }
 
 type Dependencies struct {
+	ObserveOverlap              func(string, keyauthority.SecretOverlap, time.Time)
 	Egress                      *egress.Policy
 	Getenv                      func(string) string
 	Log                         *slog.Logger
@@ -653,6 +654,7 @@ func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
 // the request unpinned so accounting resolves the card at fact time.
 func (s *Server) BindAuthority(x *Call, authority keyauthority.Authority) {
 	x.authority = authority
+	x.authority.SecretOverlap = nil
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
@@ -670,6 +672,12 @@ func (s *Server) BindAuthority(x *Call, authority keyauthority.Authority) {
 				x.cardRev = revision
 			}
 		}
+	}
+}
+
+func (s *Server) ObserveAdmittedGeneration(x *Call, authority keyauthority.Authority) {
+	if s.Deps.ObserveOverlap != nil && authority.SecretOverlap != nil {
+		s.Deps.ObserveOverlap(authority.ID, *authority.SecretOverlap, x.request.startedAt)
 	}
 }
 

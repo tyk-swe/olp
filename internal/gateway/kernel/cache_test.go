@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -216,6 +217,66 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOverlapObservationCountsAdmittedCacheHits(t *testing.T) {
+	h, _ := cacheHarness(t)
+	const oldKey = "olp_dummy_old"
+	const oldLookup = "dummy"
+	before := time.Now().UTC()
+	var clock atomic.Int64
+	clock.Store(before.UnixNano())
+	h.gateway.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+
+	h.rt.mu.Lock()
+	current := h.rt.keys[fullKey]
+	h.rt.keys[oldKey] = current
+	previous := h.rt.keys[oldKey]
+	previous.SecretOverlap = &keyauthority.SecretOverlap{LookupID: oldLookup, ExpiresAt: before.Add(time.Hour)}
+	h.rt.keys[oldKey] = previous
+	h.rt.mu.Unlock()
+
+	type observation struct {
+		key, lookup string
+		at          time.Time
+	}
+	observations := make(chan observation, 4)
+	h.gateway.Deps.ObserveOverlap = func(id string, overlap keyauthority.SecretOverlap, at time.Time) {
+		observations <- observation{key: id, lookup: overlap.LookupID, at: at}
+	}
+	for _, tc := range []struct {
+		key   string
+		model string
+		code  int
+	}{
+		{fullKey, routeSlug, http.StatusOK},
+		{"olp_dummy_wrong", routeSlug, http.StatusUnauthorized},
+		{oldKey, "not-published", http.StatusNotFound},
+	} {
+		resp, _ := h.chat(tc.key, nil, fmt.Sprintf(`,"model":%q`, tc.model))
+		if resp.StatusCode != tc.code {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, tc.code)
+		}
+	}
+	select {
+	case got := <-observations:
+		t.Fatalf("recorded an observation without admitted overlap use: %+v", got)
+	default:
+	}
+	observedAt := before.Add(time.Second)
+	clock.Store(observedAt.UnixNano())
+	resp, _ := h.chat(oldKey, map[string]string{"X-OLP-Cache": "only-if-cached"})
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-OLP-Cache") != "hit" {
+		t.Fatalf("overlap request did not serve from cache: %d %q", resp.StatusCode, resp.Header.Get("X-OLP-Cache"))
+	}
+	select {
+	case got := <-observations:
+		if got.key != h.keyID || got.lookup != oldLookup || !got.at.Equal(observedAt) {
+			t.Fatalf("unexpected observation: %+v", got)
+		}
+	default:
+		t.Fatal("admitted cache hit did not record overlap use")
 	}
 }
 

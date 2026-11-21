@@ -98,6 +98,18 @@ counters, cost owner and retained-resource identity. Revocation denies all.
 Expiry is checked even without refresh; realtime closes expired versions on its
 five-second check. Admitted HTTP work keeps its original accounting.
 
+The key detail page and `GET /api/v1/api-keys/{id}` show the last observed use
+of each active overlap. This covers new HTTP generation requests on the regular
+inference gateway that pass key and route admission, including cache hits. It
+does not cover Code Mode, session reauthentication or retained-resource calls.
+Recording happens in the background, so evidence can lag or be incomplete.
+**No use observed** does not mean all clients have switched.
+
+If recording fails, the detail shows **Observation unavailable (recording
+failed)** or marks the previous timestamp **May be stale (recording failed)**.
+A recording failure does not interrupt inference. The warning stays with
+that overlap, even if a later use is recorded.
+
 `rotation_interval_days` (1–3650, null clears) schedules reminders from creation
 or last rotation; it neither rotates nor expires a key. Reads expose
 `rotation_due_at` and public `active_overlaps`. Subscribe to `key.expiring` with

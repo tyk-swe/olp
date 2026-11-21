@@ -63,6 +63,9 @@ func (s surface) serve(w http.ResponseWriter, r *http.Request, family wire.Forma
 		return
 	}
 	defer cancel()
+	if operation == "generation" {
+		s.kernel.ObserveAdmittedGeneration(x, authority)
+	}
 	t.answer(ctx, pin, body)
 }
 

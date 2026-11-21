@@ -86,6 +86,7 @@ type Management struct {
 	AgentGrants    *personal.Store
 	IdentityClient *http.Client
 	Access         *access.Server
+	KeyOverlaps    *apikeys.OverlapRecorder
 	Identity       *identity.Server
 	Egress         *egress.Policy
 	Limits         *sharedLimits
@@ -170,7 +171,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	codeadmin.NewAPI(m.Access).Register(mux)
 	settings.NewAPI(m.Access).Register(mux)
 	budgets.NewAPI(m.Access).Register(mux)
-	apikeys.NewAPI(m.Access).Register(mux)
+	apikeys.NewAPI(m.Access, m.KeyOverlaps).Register(mux)
 	auditlog.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	playgroundAPI := playground.NewAPI(m.Gateway)
@@ -225,6 +226,7 @@ type managementInputs struct {
 	limiter      *admission.Limiter
 	shared       *sharedLimits
 	gateway      *kernel.Server
+	keyOverlaps  *apikeys.OverlapRecorder
 	agentTasks   *tasks.Store
 	agentPeers   *a2a.Peers
 	agentGrants  *personal.Store
@@ -267,7 +269,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	return Management{
 		AgentTasks: in.agentTasks, AgentPeers: in.agentPeers, AgentGrants: in.agentGrants,
 		Access: control, Identity: signIn, IdentityClient: identityClient, Egress: core.policy, Limits: in.shared, Runtime: core.rt,
-		Gateway: in.gateway, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
+		Gateway: in.gateway, KeyOverlaps: in.keyOverlaps, ResponseCache: core.responseCache, Media: in.media, Spool: in.spool, Health: in.health,
 		Log: log, PluginRuntime: pluginRuntime, PluginHost: core.pluginHost, Unconfined: core.unconfined,
 		Catalog: in.catalog, CatalogKeys: in.catalogKeys, PluginIndex: in.pluginIndex,
 	}, nil

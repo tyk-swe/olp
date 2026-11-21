@@ -185,6 +185,7 @@
 {:else if isForm}
   <ApiKeyPolicyForm
     {editing}
+    overlaps={loaded.data?.active_overlaps}
     busy={busy || (policyBusy ? 'routing' : '')}
     publicationBlocked={policyDirty || policyBusy}
     {submitError}

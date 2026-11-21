@@ -6,9 +6,14 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 )
 
-type API struct{ server *access.Server }
+type API struct {
+	server   *access.Server
+	overlaps *OverlapRecorder
+}
 
-func NewAPI(server *access.Server) *API { return &API{server: server} }
+func NewAPI(server *access.Server, overlaps *OverlapRecorder) *API {
+	return &API{server: server, overlaps: overlaps}
+}
 
 func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/api-keys", a.apiKeys)

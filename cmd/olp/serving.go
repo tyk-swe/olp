@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -64,6 +65,7 @@ type serving struct {
 	gateway    *kernel.Server
 	prober     *kernel.Server
 	accounting *delivery.Delivery
+	overlaps   *apikeys.OverlapRecorder
 	agents     agentPlane
 	monitor    *agents.TaskMonitor
 }
@@ -82,10 +84,15 @@ func newServing(f foundation) (serving, error) {
 		return serving{}, err
 	}
 	accounting := f.accounting()
+	var overlaps *apikeys.OverlapRecorder
+	if c.Mode.Inference() && stores.pool != nil {
+		overlaps = apikeys.NewOverlapRecorder(stores.pool, f.log)
+		inference.deps.ObserveOverlap = overlaps.Observe
+	}
 	if c.Mode.Management() || c.Mode.Inference() {
 		gw = kernel.New(f.accounted(inference.deps, accounting), assembly.config)
 	}
-	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, agents: plane, monitor: inference.monitor}
+	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, overlaps: overlaps, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
 		gateway.Register(gw, f.public)
 	}

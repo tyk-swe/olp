@@ -131,10 +131,20 @@ const keyFields = `'run_limits',k.policy->'run_limits','allowed_toolsets',COALES
  'allowed_agents',COALESCE(NULLIF(k.policy->'allowed_agents','null'::jsonb),'[]'::jsonb),
  'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
  'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
- 'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object('lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)) ORDER BY o.expires_at) FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb),
  'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes',
  'regional_limits',COALESCE(NULLIF(k.policy->'regional_limits','null'::jsonb),'{}'::jsonb),'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(NULLIF(k.policy->'allowed_attribution_keys','null'::jsonb),'[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'forbid_response_cache',COALESCE(k.policy->'forbid_response_cache','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits,'cost_basis',COALESCE(k.policy->>'cost_basis','cost')`
 const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
+
+const overlapErrorAt = `GREATEST(o.last_recording_error_at, ($2::jsonb->>o.lookup_id)::timestamptz)`
+const overlapDetailFields = `,'last_observed_use',o.last_observed_use,
+ 'last_recording_error_at',` + overlapErrorAt + `,
+ 'observation_status',CASE WHEN ` + overlapErrorAt + ` IS NULL THEN 'ok' ELSE 'degraded' END`
+
+func keyOverlapsSQL(detailFields string) string {
+	return `,'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+ 'lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)` + detailFields + `) ORDER BY o.expires_at)
+ FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb)`
+}
 
 // keyJSON renders one API key row, whose alias must be k, as the management
 // contract's key detail. The budget is live accounting: accrued spend and
@@ -142,12 +152,12 @@ const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.cre
 // rollups, the amounts they are measured against come from the stored policy,
 // and enforcement_active tells the console whether this installation admits
 // requests against them at all.
-func (a *API) keyJSON() string {
+func (a *API) keyJSON(overlapFields string) string {
 	enforcement := "false"
 	if a.server.LimitsEnforced() {
 		enforcement = "true"
 	}
-	return `jsonb_build_object(` + keyFields + `,'budget',olp.budget_allowances(k.id,k.effective_limits,jsonb_set(jsonb_set(jsonb_set(` + ledger.KeyBudgetSQL("k") +
+	return `jsonb_build_object(` + keyFields + keyOverlapsSQL(overlapFields) + `,'budget',olp.budget_allowances(k.id,k.effective_limits,jsonb_set(jsonb_set(jsonb_set(` + ledger.KeyBudgetSQL("k") +
 		`||jsonb_build_object('enforcement_active',` + enforcement +
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)),'{weekly,limit}',COALESCE(k.policy->'weekly_cost_limit','null'::jsonb))))`
 }
@@ -164,7 +174,7 @@ func (a *API) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply
 			return httpkit.Reply{}, err
 		}
 	}
-	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+a.keyJSON()+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
+	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+a.keyJSON("")+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -179,7 +189,8 @@ func (a *API) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) 
 	var data []byte
 	var etag string
 	var projectID *string
-	if err = a.server.Pool.QueryRow(r.Context(), "SELECT "+a.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
+	failures := a.overlaps.pendingFailures(id)
+	if err = a.server.Pool.QueryRow(r.Context(), "SELECT "+a.keyJSON(overlapDetailFields)+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id, failures).Scan(&data, &etag, &projectID); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := p.Project(projectID, authz.View); err != nil {
