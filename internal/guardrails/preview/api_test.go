@@ -260,3 +260,35 @@ func TestPreviewExplainsStaticSurfaceLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeSafePreviewKeepsStreamingConflicts(t *testing.T) {
+	d := guardrails.Revision{ID: "revision", GuardrailID: "check", Type: "typesafe",
+		Configuration: json.RawMessage(`{"route":"decision-route"}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+	engine, err := guardrails.Compile([]guardrails.Entry{
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Output, Action: guardrails.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.OutputStream, Action: guardrails.Block},
+	}, map[string]guardrails.Revision{d.ID: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := routing.Route{Operations: []string{"generation"}, Behavior: routing.Behavior{ToolExecution: "gateway"}}
+	const window = 1024
+	if err := engine.ValidateStream(window); err == nil {
+		t.Fatal("serving unexpectedly accepted the stream")
+	}
+	for _, surface := range []string{"cohere-chat-v2", "mistral-fim"} {
+		t.Run(surface, func(t *testing.T) {
+			profile, err := compatibility(route, selection{operation: "generation", surface: surface, mode: "streaming"}, window)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := engine.Preview(profile, func(guardrails.Placement) bool { return true })
+			if len(entries) != 3 || len(entries[0].Notes) != 0 ||
+				!slices.Equal(entries[1].Notes, []guardrails.CompatibilityNote{guardrails.StreamingUnavailable}) ||
+				!slices.Equal(entries[2].Notes, []guardrails.CompatibilityNote{guardrails.StreamingUnavailable}) {
+				t.Fatalf("expected an input exception and both output conflicts, got %+v", entries)
+			}
+		})
+	}
+}

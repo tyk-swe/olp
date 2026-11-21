@@ -25,16 +25,17 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 		if family == wire.GeminiInteractions || (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) {
 			return guardrails.Compatibility{Uninspected: true}, nil
 		}
-		if !interaction.HasGuardrailInputCoverage(family) {
-			return guardrails.Compatibility{Uninspected: true, TypeSafeInput: route.ToolExecution == "gateway"}, nil
-		}
+		uninspected := !interaction.HasGuardrailInputCoverage(family)
 		if in.mode == "streaming" {
 			return guardrails.Compatibility{
 				StreamWindow: window, RetainsOutput: in.retainsOutput,
+				Uninspected: uninspected, TypeSafeInput: route.ToolExecution == "gateway",
 				StreamTextRewriteUnavailable: !family.CanRewriteGuardrailStreamText(),
 			}, nil
 		}
-		return guardrails.Compatibility{RetainsOutput: in.retainsOutput}, nil
+		return guardrails.Compatibility{
+			RetainsOutput: in.retainsOutput, Uninspected: uninspected, TypeSafeInput: route.ToolExecution == "gateway",
+		}, nil
 	}
 	if dialect, ok := operationregistry.Lookup(in.surface); ok && dialect.Operation.ID == in.operation && in.mode == "unary" {
 		if route.Fidelity.Strict() || operationregistry.PolicyFor(in.operation).TransformedUnary {

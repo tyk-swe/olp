@@ -49,24 +49,17 @@ func (e *Engine) Preview(c Compatibility, visible func(Placement) bool) []Previe
 			}
 		}
 	})
-	profile := c.forEntries(entries)
+	uninspected := c.Uninspected && (!c.TypeSafeInput || !onlyTypeSafe(entries))
 	return slices.AppendSeq([]PreviewEntry{}, func(yield func(PreviewEntry) bool) {
 		for _, r := range entries {
-			if !yield(r.preview(profile)) {
+			if !yield(r.preview(c, uninspected)) {
 				return
 			}
 		}
 	})
 }
 
-func (c Compatibility) forEntries(entries []compiledEntry) Compatibility {
-	if c.TypeSafeInput && onlyTypeSafe(entries) {
-		return Compatibility{}
-	}
-	return c
-}
-
-func (r compiledEntry) preview(c Compatibility) PreviewEntry {
+func (r compiledEntry) preview(c Compatibility, uninspected bool) PreviewEntry {
 	mode := "enforce"
 	if r.entry.Monitor {
 		mode = "monitor"
@@ -74,13 +67,13 @@ func (r compiledEntry) preview(c Compatibility) PreviewEntry {
 	return PreviewEntry{
 		PolicyID: r.placement.PolicyID, PolicyRevisionID: r.placement.PolicyRevisionID,
 		GuardrailID: r.entry.GuardrailID, RevisionID: r.entry.RevisionID,
-		Scope: r.placement.Scope, Phase: r.entry.Phase, Mode: mode, Notes: r.notes(c),
+		Scope: r.placement.Scope, Phase: r.entry.Phase, Mode: mode, Notes: r.notes(c, uninspected),
 	}
 }
 
-func (r compiledEntry) notes(c Compatibility) []CompatibilityNote {
+func (r compiledEntry) notes(c Compatibility, uninspected bool) []CompatibilityNote {
 	return slices.AppendSeq([]CompatibilityNote{}, func(yield func(CompatibilityNote) bool) {
-		if c.Uninspected {
+		if uninspected {
 			if r.enforcesUnavailable() {
 				yield(SurfaceUninspected)
 			}
