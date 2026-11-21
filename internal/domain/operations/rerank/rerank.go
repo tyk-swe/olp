@@ -3,6 +3,7 @@
 package rerank
 
 import (
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -148,11 +149,11 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		}
 	}
 	if top, present := root.Lookup(topName); present && !operations.Optional(top) {
-		value, ok := operations.Int(top)
-		if !ok || value < 1 || value > 1<<31 {
+		value, ok := operations.Position(top)
+		if !ok || value < 1 || value > math.MaxInt32 {
 			return r, operations.Invalid(topName, "Use a positive bounded native result count.")
 		}
-		r.top = int(value)
+		r.top = value
 	}
 	if value, present := root.Lookup(returnName); present {
 		if value.Kind() != oif.Boolean {
