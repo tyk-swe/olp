@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"github.com/tyk-swe/olp/management"
@@ -24,6 +26,11 @@ type Runner struct {
 }
 
 var groups = map[string]string{"keys": "api-keys", "config": "configuration"}
+
+var (
+	errInvalidJSONInput = errors.New("input file must contain JSON")
+	errLargeJSONInput   = errors.New("JSON input exceeds 4 MiB or cannot be read")
+)
 
 // Handles identifies client command groups without loading process configuration.
 func Handles(command string) bool {
@@ -53,6 +60,18 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 	if args[0] == "config" {
 		return runner.configuration(ctx, args[1:])
 	}
+	jsonErrors := runner.Getenv("OLP_CLI_ERROR_FORMAT") == "json"
+	failure := runner.generated(ctx, args, jsonErrors)
+	if failure == nil {
+		return nil
+	}
+	if !jsonErrors {
+		return failure.cause
+	}
+	return failure
+}
+
+func (runner Runner) generated(ctx context.Context, args []string, jsonErrors bool) *commandError {
 	group := args[0]
 	if alias, ok := groups[group]; ok {
 		group = alias
@@ -64,46 +83,73 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 		}
 	}
 	if len(found) != 1 {
-		return errors.New("unknown or ambiguous command; use olp " + args[0] + " help for contract operation IDs")
+		return commandFailure(management.InvalidInput, errors.New("unknown or ambiguous command; use olp "+args[0]+" help for contract operation IDs"))
 	}
-	op := found[0]
 	options, positional, err := parseOptions(args[2:])
 	if err != nil {
-		return err
+		return commandFailure(management.InvalidInput, err)
 	}
 	if err := checkOptions(options, "body-file", "if-match", "idempotency-key", "output", "format", "path", "query"); err != nil {
-		return err
+		return commandFailure(management.InvalidInput, err)
 	}
 	format := options.one("format")
 	if format != "" && format != "json" && (format != "csv" || group != "usage") {
-		return errors.New("--format must be json, or csv for usage")
+		return commandFailure(management.InvalidInput, errors.New("--format must be json, or csv for usage"))
 	}
+	op := found[0]
+	input, err := generatedArguments(op, options, positional)
+	if err != nil {
+		return commandFailure(management.InvalidInput, err)
+	}
+	if path := options.one("body-file"); path != "" {
+		body, err := readJSON(path)
+		if errors.Is(err, errInvalidJSONInput) || errors.Is(err, errLargeJSONInput) {
+			return commandFailure(management.InvalidInput, err)
+		}
+		if err != nil {
+			return commandFailure(management.Local, err)
+		}
+		input.Body = body
+	}
+	client, err := runner.client()
+	if err != nil {
+		return commandFailure(management.Local, err)
+	}
+	result, failure := client.CallClassified(ctx, op, input)
+	if failure != nil {
+		return callFailure(failure)
+	}
+	return runner.generatedOutput(result, format, options.one("output"), jsonErrors)
+}
+
+func generatedArguments(op management.Operation, options options, positional []string) (management.Arguments, error) {
 	input := management.Arguments{Path: map[string]string{}, Query: map[string]any{}, IfMatch: options.one("if-match"), IdempotencyKey: options.one("idempotency-key")}
+	pathValues := positional
 	for _, p := range op.Parameters {
-		if p.In == "path" && len(positional) > 0 {
-			input.Path[p.Name], positional = positional[0], positional[1:]
+		if p.In == "path" && len(pathValues) > 0 {
+			input.Path[p.Name], pathValues = pathValues[0], pathValues[1:]
 		}
 	}
-	if len(positional) != 0 {
-		return errors.New("too many positional path parameters")
+	if len(pathValues) != 0 {
+		return management.Arguments{}, errors.New("too many positional path parameters")
 	}
 	for _, pair := range options["path"] {
 		name, value, ok := strings.Cut(pair, "=")
 		if !ok || name == "" {
-			return errors.New("--path requires NAME=VALUE")
+			return management.Arguments{}, errors.New("--path requires NAME=VALUE")
 		}
 		if _, exists := input.Path[name]; exists {
-			return errors.New("duplicate path parameter")
+			return management.Arguments{}, errors.New("duplicate path parameter")
 		}
 		input.Path[name] = value
 	}
 	for _, pair := range options["query"] {
 		name, value, ok := strings.Cut(pair, "=")
 		if !ok || name == "" {
-			return errors.New("--query requires NAME=VALUE")
+			return management.Arguments{}, errors.New("--query requires NAME=VALUE")
 		}
 		if _, exists := input.Query[name]; exists {
-			return errors.New("duplicate scalar query parameter")
+			return management.Arguments{}, errors.New("duplicate scalar query parameter")
 		}
 		var scalar any = value
 		for _, parameter := range op.Parameters {
@@ -115,27 +161,39 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 				scalar = json.Number(value)
 			case "boolean":
 				if value != "true" && value != "false" {
-					return fmt.Errorf("--query %s requires true or false", name)
+					return management.Arguments{}, fmt.Errorf("--query %s requires true or false", name)
 				}
 				scalar = value == "true"
 			}
 		}
 		input.Query[name] = scalar
 	}
-	if path := options.one("body-file"); path != "" {
-		input.Body, err = readJSON(path)
-		if err != nil {
-			return err
-		}
+	return input, nil
+}
+
+func (runner Runner) generatedOutput(result management.Response, format, path string, jsonErrors bool) *commandError {
+	if !jsonErrors {
+		runner.writeETags(result)
 	}
-	client, err := runner.client()
+	data, err := formatResponse(result.Body, format)
 	if err != nil {
-		return err
+		return commandFailure(management.InvalidResponse, err)
 	}
-	result, err := client.Call(ctx, op, input)
-	if err != nil {
-		return err
+	if jsonErrors && path == "" {
+		brokenPipe := make(chan os.Signal, 1)
+		signal.Notify(brokenPipe, syscall.SIGPIPE)
+		defer signal.Stop(brokenPipe)
 	}
+	if err := runner.output(path, data); err != nil {
+		return commandFailure(management.Local, err)
+	}
+	if jsonErrors {
+		runner.writeETags(result)
+	}
+	return nil
+}
+
+func (runner Runner) writeETags(result management.Response) {
 	if result.ETag != "" {
 		fmt.Fprintln(runner.Err, "ETag:", result.ETag)
 	}
@@ -145,16 +203,16 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 	if result.ParentETag != "" {
 		fmt.Fprintln(runner.Err, "OLP-Parent-ETag:", result.ParentETag)
 	}
-	data := []byte(result.Body)
+}
+
+func formatResponse(body json.RawMessage, format string) ([]byte, error) {
 	if format == "csv" {
-		data, err = usageCSV(result.Body)
-		if err != nil {
-			return err
-		}
-	} else if len(data) > 0 {
-		data = append(data, '\n')
+		return usageCSV(body)
 	}
-	return runner.output(options.one("output"), data)
+	if len(body) > 0 {
+		return append(body, '\n'), nil
+	}
+	return body, nil
 }
 
 func (runner Runner) client() (*management.Client, error) {
@@ -259,11 +317,14 @@ func readJSON(path string) (json.RawMessage, error) {
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
-	if err != nil || len(data) > 4<<20 {
+	if err != nil {
 		return nil, errors.New("JSON input exceeds 4 MiB or cannot be read")
 	}
+	if len(data) > 4<<20 {
+		return nil, errLargeJSONInput
+	}
 	if !json.Valid(data) {
-		return nil, errors.New("input file must contain JSON")
+		return nil, errInvalidJSONInput
 	}
 	return data, nil
 }

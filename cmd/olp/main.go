@@ -27,7 +27,9 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
-		fmt.Fprintln(os.Stderr, "olp:", err)
+		if !operatorcli.WriteJSONError(os.Stderr, err) {
+			fmt.Fprintln(os.Stderr, "olp:", err)
+		}
 		os.Exit(1)
 	}
 }

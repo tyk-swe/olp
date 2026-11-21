@@ -204,8 +204,8 @@ type Response struct {
 	ParentETag         string
 }
 
-// APIError deliberately excludes server-controlled details, which may contain
-// rejected write-only input. Code and status identify the problem safely.
+// APIError carries the server's problem code and HTTP status, without the
+// detail field, which may contain rejected write-only input.
 type APIError struct {
 	Status int
 	Code   string
@@ -219,41 +219,41 @@ func (err *APIError) Error() string {
 // each logical mutation's explicit idempotency key and retains it across an
 // uncertain response; this transport never creates a new mutation identity.
 func (client *Client) Call(ctx context.Context, operation Operation, args Arguments) (Response, error) {
+	result, failure := client.CallClassified(ctx, operation, args)
+	if failure != nil {
+		return Response{}, failure.Unwrap()
+	}
+	return result, nil
+}
+
+func (client *Client) CallClassified(ctx context.Context, operation Operation, args Arguments) (Response, *CallError) {
 	req, err := operation.Request(ctx, args)
 	if err != nil {
-		return Response{}, err
+		return Response{}, &CallError{Kind: InvalidInput, cause: err}
 	}
 	secret, err := ReadTokenFile(client.tokenFile)
 	if err != nil {
-		return Response{}, err
+		return Response{}, &CallError{Kind: Local, cause: err}
 	}
 	req.URL = client.endpoint.ResolveReference(req.URL)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := client.http.Do(req)
 	if err != nil {
-		return Response{}, errors.New("management API request failed")
+		return Response{}, &CallError{Kind: Transport, cause: errors.New("management API request failed")}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
 	if err != nil {
-		return Response{}, errors.New("management API response could not be read")
+		return Response{}, responseError(resp.StatusCode, errors.New("management API response could not be read"))
 	}
 	if len(data) > MaxResponseBytes {
-		return Response{}, errors.New("management API response exceeds 16 MiB")
+		return Response{}, responseError(resp.StatusCode, errors.New("management API response exceeds 16 MiB"))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var problem struct {
-			Type string `json:"type"`
-		}
-		json.Unmarshal(data, &problem)
-		code := strings.TrimPrefix(problem.Type, "https://openllmproxy.dev/problems/")
-		if code == problem.Type || strings.ContainsAny(code, " /\\\r\n\t") || len(code) > 100 {
-			code = "request_failed"
-		}
-		return Response{}, &APIError{Status: resp.StatusCode, Code: code}
+		return Response{}, apiError(resp.StatusCode, data)
 	}
 	if len(data) > 0 && !json.Valid(data) {
-		return Response{}, errors.New("management API response must be JSON")
+		return Response{}, responseError(resp.StatusCode, errors.New("management API response must be JSON"))
 	}
 	metadata := operation.ResponseMetadata(resp.Header)
 	return Response{Status: resp.StatusCode, ETag: metadata["etag"], Body: data,
