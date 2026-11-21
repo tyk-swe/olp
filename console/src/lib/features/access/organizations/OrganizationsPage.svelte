@@ -4,9 +4,11 @@
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
-  import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { personOptions } from '#lib/features/access/entityOptions.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutationIntents } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import DirectProjectMembers from './DirectProjectMembers.svelte';
+  import OrganizationMembers from './OrganizationMembers.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -16,8 +18,8 @@
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import * as api from './api';
 
-  const createIntent = useMutationIntent();
-  const projectIntent = useMutationIntent();
+  const write = useAction();
+  const intents = useMutationIntents();
 
   const access = useRole();
   const client = useQueryClient();
@@ -27,12 +29,6 @@
   let newName = $state('');
   let projectName = $state('');
   let renameProject = $state('');
-  let userId = $state('');
-  let role = $state<'manager' | 'viewer'>('viewer');
-  let projectUser = $state('');
-  let projectRole = $state<'manager' | 'viewer'>('viewer');
-  let busy = $state(false);
-  let problem = $state('');
   const organizations = createQuery(() => ({
     queryKey: organizationKeys.root,
     queryFn: ({ signal }) => api.listOrganizations(signal)
@@ -91,14 +87,15 @@
       return;
     await run(action);
   }
-  async function run(action: () => Promise<unknown>) {
-    if (busy) return;
-    busy = true;
-    problem = '';
-    try {
-      await action();
-      notify('Saved.');
-      try {
+  function run<T>(
+    send: () => Promise<T>,
+    after?: (value: T) => void | Promise<void>
+  ) {
+    return write.run(
+      send,
+      async (value) => {
+        await after?.(value);
+        notify('Saved.');
         await Promise.all([
           client.invalidateQueries(
             { queryKey: organizationKeys.root },
@@ -109,14 +106,14 @@
             { throwOnError: true }
           )
         ]);
-      } catch (cause) {
-        problem = `Saved, but refreshing failed. ${errorMessage(cause)}`;
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Saved, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause)
       }
-    } catch (e) {
-      problem = errorMessage(e);
-    } finally {
-      busy = false;
-    }
+    );
   }
 </script>
 
@@ -125,28 +122,26 @@
   title="Organizations"
   description="Group projects under shared management and budgets. Installation roles still determine which operations each person can perform."
 />
-{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
+{#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
 
 {#if canCreate}
   <form
     onsubmit={(e) => {
       e.preventDefault();
-      void run(async () => {
-        const submission = createIntent.prepare(newName.trim());
-        const o = await api.createOrganization(
-          submission.input,
-          submission.requestId
-        );
-        createIntent.reset();
-        newName = '';
-        client.setQueryData<api.Organization[]>(
-          organizationKeys.root,
-          (current = []) => [...current.filter((item) => item.id !== o.id), o]
-        );
-        selected = o.id;
-        selected = o.id;
-        newName = '';
-      });
+      void run(
+        () =>
+          intents.submit('create-organization', newName.trim(), (input, id) =>
+            api.createOrganization(input, id)
+          ),
+        (o) => {
+          newName = '';
+          client.setQueryData<api.Organization[]>(
+            organizationKeys.root,
+            (current = []) => [...current.filter((item) => item.id !== o.id), o]
+          );
+          selected = o.id;
+        }
+      );
     }}
   >
     <label class="form-field"
@@ -154,262 +149,205 @@
         required
         maxlength="100"
         bind:value={newName}
-        disabled={busy}
+        disabled={write.busy}
       /></label
     >
-    <button class="button button-primary" disabled={busy}
+    <button class="button button-primary" disabled={write.busy}
       >Create organization</button
     >
   </form>
 {/if}
-{#if organizations.isPending}<p>
-    Loading organizations…
-  </p>{:else if organizations.isError}<Callout tone="danger">
-    {errorMessage(organizations.error)}
-  </Callout>
-  <button
-    class="button button-secondary"
-    onclick={() => organizations.refetch()}>Retry</button
-  >{:else if organization}
-  <label class="form-field"
-    >Organization<select bind:value={selected}
-      ><option value="" disabled>Choose an organization</option
-      >{#each organizations.data ?? [] as o (o.id)}<option value={o.id}
-          >{o.name}</option
-        >{/each}</select
-    ></label
-  >
-  <p>
-    {editable
-      ? 'You can manage this organization.'
-      : 'You have read-only access to this organization.'}
-  </p>
-  {#if editable}<form
-      onsubmit={(e) => {
-        e.preventDefault();
-        void run(async () => {
-          await api.renameOrganization(
-            selected,
-            name.trim(),
-            organization.etag
-          );
-          name = '';
-        });
-      }}
+<QueryView
+  query={organizations}
+  loading="Loading organizations…"
+  failure={errorMessage(organizations.error)}
+  emptyWhen={!organization}
+>
+  {#snippet empty()}
+    <EmptyState title="No organizations yet"
+      >Organizations group projects and people under one owner.</EmptyState
     >
-      <label class="form-field"
-        >Rename organization<input
-          required
-          maxlength="100"
-          placeholder={organization.name}
-          bind:value={name}
-          disabled={busy}
-        /></label
-      ><button class="button button-secondary" disabled={busy}>Save name</button
-      >
-    </form>{/if}
-  {#key selected}<AggregateBudgetPanel
-      organizationId={selected}
-      {editable}
-    />{/key}
-  <section class="section" aria-labelledby="organization-members">
-    <h2 id="organization-members">Organization members</h2>
-    <p class="section-help">
-      Managers inherit management of every contained project. Direct project
-      memberships remain independent. Add existing users by their user ID.
+  {/snippet}
+  {#if organization}
+    <label class="form-field"
+      >Organization<select bind:value={selected}
+        ><option value="" disabled>Choose an organization</option
+        >{#each organizations.data ?? [] as o (o.id)}<option value={o.id}
+            >{o.name}</option
+          >{/each}</select
+      ></label
+    >
+    <p>
+      {editable
+        ? 'You can manage this organization.'
+        : 'You have read-only access to this organization.'}
     </p>
-    {#if members.isError}<p class="inline-problem" role="alert">
-        {errorMessage(members.error)}
-      </p>{/if}
-    {#each members.data ?? [] as m (m.user_id)}<p>
-        {m.email} · {m.role} · installation {m.installation_role}
-        {#if editable}<button
-            class="button button-secondary"
-            disabled={busy}
-            onclick={() =>
-              removeMember(m.email, 'organization', () =>
-                api.removeOrganizationMember(
-                  selected,
-                  m.user_id,
-                  organization.etag
-                )
-              )}>Remove {m.email}</button
-          >{/if}
-      </p>{/each}
     {#if editable}<form
         onsubmit={(e) => {
           e.preventDefault();
-          void run(async () => {
-            await api.putOrganizationMember(
-              selected,
-              userId.trim(),
-              role,
-              organization.etag
-            );
-            userId = '';
-          });
+          void run(
+            () =>
+              api.renameOrganization(selected, name.trim(), organization.etag),
+            () => {
+              name = '';
+            }
+          );
         }}
       >
         <label class="form-field"
-          >Person<EntityPicker
-            id="organization-member"
-            source={personOptions}
-            required
-            bind:value={userId}
-            emptyLabel="Choose someone"
-            disabled={busy}
-          /></label
-        ><label class="form-field"
-          >Role<select bind:value={role} disabled={busy}
-            ><option value="viewer">Viewer</option><option value="manager"
-              >Manager</option
-            ></select
-          ></label
-        ><button class="button button-primary" disabled={busy}
-          >Add to organization</button
-        >
-      </form>{/if}
-  </section>
-  <section class="section" aria-labelledby="organization-projects">
-    <h2 id="organization-projects">Projects</h2>
-    {#if projects.isError}<p class="inline-problem" role="alert">
-        {errorMessage(projects.error)}
-      </p>{/if}
-    {#if editable}<form
-        onsubmit={(e) => {
-          e.preventDefault();
-          void run(async () => {
-            const submission = projectIntent.prepare({
-              organization: selected,
-              name: projectName.trim()
-            });
-            const p = await api.createOrganizationProject(
-              submission.input.organization,
-              submission.input.name,
-              submission.requestId
-            );
-            projectIntent.reset();
-            projectName = '';
-            client.setQueryData<
-              Awaited<ReturnType<typeof api.organizationProjects>>
-            >(
-              organizationKeys.projects(submission.input.organization),
-              (current = []) => [
-                ...current.filter((item) => item.id !== p.id),
-                p
-              ]
-            );
-            if (selected === submission.input.organization) projectId = p.id;
-          });
-        }}
-      >
-        <label class="form-field"
-          >New project name<input
+          >Rename organization<input
             required
             maxlength="100"
-            bind:value={projectName}
-            disabled={busy}
+            placeholder={organization.name}
+            bind:value={name}
+            disabled={write.busy}
           /></label
-        ><button class="button button-primary" disabled={busy}
-          >Create organization project</button
+        ><button class="button button-secondary" disabled={write.busy}
+          >Save name</button
         >
       </form>{/if}
-    {#if project}<label class="form-field"
-        >Organization project<select bind:value={projectId}
-          >{#each projects.data ?? [] as p (p.id)}<option value={p.id}
-              >{p.name}</option
-            >{/each}</select
-        ></label
-      >
-      <p>
-        Use Project policies, API keys and Notifications to manage this
-        project's controls.
-      </p>
+    {#key selected}<AggregateBudgetPanel
+        organizationId={selected}
+        {editable}
+      />{/key}
+    <OrganizationMembers
+      {members}
+      {editable}
+      busy={write.busy}
+      onRemove={(member) =>
+        removeMember(member.email, 'organization', () =>
+          api.removeOrganizationMember(
+            selected,
+            member.user_id,
+            organization.etag
+          )
+        )}
+      onAdd={(memberId, memberRole) =>
+        run(() =>
+          api.putOrganizationMember(
+            selected,
+            memberId,
+            memberRole,
+            organization.etag
+          )
+        )}
+    />
+    <section class="section" aria-labelledby="organization-projects">
+      <h2 id="organization-projects">Projects</h2>
+      {#if projects.isError}<p class="inline-problem" role="alert">
+          {errorMessage(projects.error)}
+        </p>{/if}
       {#if editable}<form
           onsubmit={(e) => {
             e.preventDefault();
-            void run(async () => {
-              await api.renameProject(
-                selected,
-                projectId,
-                renameProject.trim(),
-                project.etag
-              );
-              renameProject = '';
-            });
+            const target = selected;
+            void run(
+              () =>
+                intents.submit(
+                  'create-project',
+                  {
+                    organization: target,
+                    name: projectName.trim()
+                  },
+                  (input, requestId) =>
+                    api.createOrganizationProject(
+                      input.organization,
+                      input.name,
+                      requestId
+                    )
+                ),
+              (p) => {
+                projectName = '';
+                client.setQueryData<
+                  Awaited<ReturnType<typeof api.organizationProjects>>
+                >(organizationKeys.projects(target), (current = []) => [
+                  ...current.filter((item) => item.id !== p.id),
+                  p
+                ]);
+                if (selected === target) projectId = p.id;
+              }
+            );
           }}
         >
           <label class="form-field"
-            >Rename project<input
+            >New project name<input
               required
               maxlength="100"
-              placeholder={project.name}
-              bind:value={renameProject}
-              disabled={busy}
+              bind:value={projectName}
+              disabled={write.busy}
             /></label
-          ><button class="button button-secondary" disabled={busy}
-            >Save project name</button
+          ><button class="button button-primary" disabled={write.busy}
+            >Create organization project</button
           >
         </form>{/if}
-      <h3>Direct project members</h3>
-      <p>Organization memberships above apply in addition to this list.</p>
-      {#if directMembers.isError}<p class="inline-problem" role="alert">
-          {errorMessage(directMembers.error)}
-        </p>{/if}
-      {#each directMembers.data ?? [] as m (m.user_id)}<p>
-          {m.email} · {m.project_role}{#if editable}<button
-              class="button button-secondary"
-              disabled={busy}
-              onclick={() =>
-                removeMember(m.email, 'project', () =>
-                  api.removeProjectMember(
+      {#if project}<label class="form-field"
+          >Organization project<select bind:value={projectId}
+            >{#each projects.data ?? [] as p (p.id)}<option value={p.id}
+                >{p.name}</option
+              >{/each}</select
+          ></label
+        >
+        <p>
+          Use Project policies, API keys and Notifications to manage this
+          project's controls.
+        </p>
+        {#if editable}<form
+            onsubmit={(e) => {
+              e.preventDefault();
+              void run(
+                () =>
+                  api.renameProject(
                     selected,
                     projectId,
-                    m.user_id,
+                    renameProject.trim(),
                     project.etag
-                  )
-                )}>Remove project member {m.email}</button
-            >{/if}
-        </p>{/each}
-      {#if editable}<form
-          onsubmit={(e) => {
-            e.preventDefault();
-            void run(async () => {
-              await api.putProjectMember(
+                  ),
+                () => {
+                  renameProject = '';
+                }
+              );
+            }}
+          >
+            <label class="form-field"
+              >Rename project<input
+                required
+                maxlength="100"
+                placeholder={project.name}
+                bind:value={renameProject}
+                disabled={write.busy}
+              /></label
+            ><button class="button button-secondary" disabled={write.busy}
+              >Save project name</button
+            >
+          </form>{/if}
+        <DirectProjectMembers
+          members={directMembers}
+          {editable}
+          busy={write.busy}
+          onRemove={(member) =>
+            removeMember(member.email, 'project', () =>
+              api.removeProjectMember(
                 selected,
                 projectId,
-                projectUser.trim(),
-                projectRole,
+                member.user_id,
                 project.etag
-              );
-              projectUser = '';
-            });
-          }}
-        >
-          <label class="form-field"
-            >Person<EntityPicker
-              id="organization-project-member"
-              source={personOptions}
-              required
-              bind:value={projectUser}
-              emptyLabel="Choose someone"
-              disabled={busy}
-            /></label
-          ><label class="form-field"
-            >Role<select bind:value={projectRole} disabled={busy}
-              ><option value="viewer">Viewer</option><option value="manager"
-                >Manager</option
-              ></select
-            ></label
-          ><button class="button button-primary" disabled={busy}
-            >Add to project</button
-          >
-        </form>{/if}
-    {:else}<p>No projects in this organization.</p>{/if}
-  </section>
-{:else}<EmptyState title="No organizations yet"
-    >Organizations group projects and people under one owner.</EmptyState
-  >{/if}
+              )
+            )}
+          onAdd={(memberId, memberRole) =>
+            run(() =>
+              api.putProjectMember(
+                selected,
+                projectId,
+                memberId,
+                memberRole,
+                project.etag
+              )
+            )}
+        />
+      {:else}<p>No projects in this organization.</p>{/if}
+    </section>
+  {/if}
+</QueryView>
 
 <style>
   form {

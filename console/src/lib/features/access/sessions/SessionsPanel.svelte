@@ -1,5 +1,7 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -14,7 +16,6 @@
   import { listUsers } from '#lib/features/access/users/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
@@ -27,8 +28,8 @@
   const canManage = $derived(access.can('sessions.manage'));
   let selectedUser = $state('');
   const pagination = $state(emptyCursorHistory());
-  let busy = $state('');
-  let error = $state('');
+  const revoke = useAction();
+  const exit = useAction(undefined, 'authentication');
 
   const users = createQuery(() => ({
     queryKey: userKeys.roster,
@@ -61,25 +62,28 @@
       }))
     )
       return;
-    busy = `session-${id}`;
-    error = '';
-    try {
-      if (current) {
-        await authLifecycle.endCurrentSession((signal) => logout(signal));
-        return;
-      }
-      await revokeSession(id);
-      await sessions.refetch();
-      notify('Session revoked.');
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = '';
+    if (current) {
+      await exit.run(
+        () => authLifecycle.endCurrentSession((signal) => logout(signal)),
+        undefined,
+        { key: id }
+      );
+      return;
     }
+    await revoke.run(
+      () => revokeSession(id),
+      async (_value, active) => {
+        await sessions.refetch();
+        if (active()) notify('Session revoked.');
+      },
+      { key: id, fallback: 'The session could not be revoked.' }
+    );
   }
 </script>
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+{#if revoke.error || exit.error}<div class="inline-problem" role="alert">
+    {revoke.error || exit.error}
+  </div>{/if}
 
 <div class="toolbar">
   <div>
@@ -102,17 +106,16 @@
   {/if}
 </div>
 
-{#if sessions.isPending}
-  <div class="loading-state" role="status">Loading sessions…</div>
-{:else if sessions.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(sessions.error)}
-  </div>
-{:else if !sessions.data?.items.length && pagination.history.length === 0}
-  <EmptyState title="No active sessions"
-    >Nobody is signed in that matches this view.</EmptyState
-  >
-{:else}
+<QueryView
+  query={sessions}
+  loading="Loading sessions…"
+  emptyWhen={!sessions.data?.items.length && pagination.history.length === 0}
+>
+  {#snippet empty()}
+    <EmptyState title="No active sessions"
+      >Nobody is signed in that matches this view.</EmptyState
+    >
+  {/snippet}
   <ScrollTable label="Sessions">
     <table class="data-table">
       <thead
@@ -138,8 +141,8 @@
                   class="button button-secondary button-danger"
                   type="button"
                   onclick={() => removeSession(session.id, session.current)}
-                  disabled={Boolean(busy)}
-                  >{busy === `session-${session.id}`
+                  disabled={revoke.busy || exit.busy}
+                  >{revoke.key === session.id || exit.key === session.id
                     ? 'Revoking…'
                     : session.current
                       ? 'Sign out'
@@ -155,7 +158,7 @@
     {...cursorPaginationProps(pagination, sessions.data?.nextCursor)}
     label="Session pages"
   />
-{/if}
+</QueryView>
 
 <style>
   h2 {

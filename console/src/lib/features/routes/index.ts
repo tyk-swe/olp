@@ -2,6 +2,7 @@ export { default as RoutingDecisions } from './RoutingDecisions.svelte';
 export { default as RoutingPolicyEditor } from './RoutingPolicyEditor.svelte';
 export { default as RoutingPreferencesForm } from './RoutingPreferencesForm.svelte';
 export {
+  type ActiveRoute,
   type RouteDraftValidation,
   activateRoute,
   createRouteDraft,

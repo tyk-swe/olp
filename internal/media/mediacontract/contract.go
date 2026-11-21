@@ -267,41 +267,9 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 }
 
 func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
-	if len(in.CallerParts) == 0 || len(in.Parts) < len(in.CallerParts) {
-		return Bound{}, reject("target_capability", "/request", "multipart_source", "The ordered caller multipart source is missing.")
-	}
-	seen := map[string]bool{}
-	for index, caller := range in.CallerParts {
-		outbound := in.Parts[index]
-		seen[caller.Name] = true
-		if caller.Name != outbound.Name || caller.Blob != outbound.Blob || caller.Filename != outbound.Filename || caller.ContentType != outbound.ContentType || (caller.Text == nil) != (outbound.Text == nil) {
-			return Bound{}, reject("target_capability", "/request", "source_order", "A caller multipart member changed position or identity.")
-		}
-		if caller.Text != nil {
-			if caller.Name == "model" {
-				if *caller.Text != in.Route || *outbound.Text != t.model {
-					return Bound{}, reject("resource_affinity", "/model", "serving_binding", "The multipart model binding is invalid.")
-				}
-			} else if *caller.Text != *outbound.Text {
-				return Bound{}, reject("target_capability", "/request", "source_identity", "A caller multipart text value changed.")
-			}
-		}
-	}
-	var defaultParts []Part
-	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
-		if seen[name] || seen[name+"[]"] {
-			continue
-		}
-		defaultParts = append(defaultParts, multipartDefaultParts(name, t.defaults[name])...)
-	}
-	if len(defaultParts) != len(in.Parts)-len(in.CallerParts) {
-		return Bound{}, reject("target_capability", "/defaults", "absent_only_default", "Multipart defaults are incomplete or unexpected.")
-	}
-	for i, want := range defaultParts {
-		got := in.Parts[len(in.CallerParts)+i]
-		if got.Name != want.Name || got.Text == nil || *got.Text != *want.Text || got.Blob.Valid() {
-			return Bound{}, reject("target_capability", "/defaults", "absent_only_default", "A multipart default changed its native value.")
-		}
+	defaultParts, err := t.multipartDefaults(in)
+	if err != nil {
+		return Bound{}, err
 	}
 	modelSeen, fileCount, maskCount, imageCount := false, 0, 0, 0
 	parts := make([]Part, len(in.Parts))
@@ -371,6 +339,46 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	return bound, nil
 }
 
+
+func (t *Template) multipartDefaults(in Input) ([]Part, error) {
+	if len(in.CallerParts) == 0 || len(in.Parts) < len(in.CallerParts) {
+		return nil, reject("target_capability", "/request", "multipart_source", "The ordered caller multipart source is missing.")
+	}
+	seen := map[string]bool{}
+	for index, caller := range in.CallerParts {
+		outbound := in.Parts[index]
+		seen[caller.Name] = true
+		if caller.Name != outbound.Name || caller.Blob != outbound.Blob || caller.Filename != outbound.Filename || caller.ContentType != outbound.ContentType || (caller.Text == nil) != (outbound.Text == nil) {
+			return nil, reject("target_capability", "/request", "source_order", "A caller multipart member changed position or identity.")
+		}
+		if caller.Text != nil {
+			if caller.Name == "model" {
+				if *caller.Text != in.Route || *outbound.Text != t.model {
+					return nil, reject("resource_affinity", "/model", "serving_binding", "The multipart model binding is invalid.")
+				}
+			} else if *caller.Text != *outbound.Text {
+				return nil, reject("target_capability", "/request", "source_identity", "A caller multipart text value changed.")
+			}
+		}
+	}
+	var defaultParts []Part
+	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
+		if seen[name] || seen[name+"[]"] {
+			continue
+		}
+		defaultParts = append(defaultParts, multipartDefaultParts(name, t.defaults[name])...)
+	}
+	if len(defaultParts) != len(in.Parts)-len(in.CallerParts) {
+		return nil, reject("target_capability", "/defaults", "absent_only_default", "Multipart defaults are incomplete or unexpected.")
+	}
+	for i, want := range defaultParts {
+		got := in.Parts[len(in.CallerParts)+i]
+		if got.Name != want.Name || got.Text == nil || *got.Text != *want.Text || got.Blob.Valid() {
+			return nil, reject("target_capability", "/defaults", "absent_only_default", "A multipart default changed its native value.")
+		}
+	}
+	return defaultParts, nil
+}
 func RepeatedMultipartDefault(name string) bool {
 	return slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name)
 }

@@ -21,79 +21,10 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, errors.New("invalid cache result")
 	}
 	event := &Event{CacheLookupReason: w.CacheLookupReason, CacheResult: w.CacheResult, Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
+	if err := w.decodeAuthority(event); err != nil {
+		return nil, err
+	}
 	var err error
-	if event.EventID, err = requiredUUID("event_id", w.EventID); err != nil {
-		return nil, err
-	}
-	if event.RequestID, err = requiredUUID("request_id", w.RequestID); err != nil {
-		return nil, err
-	}
-	if event.RuntimeGenerationID, err = requiredUUID("runtime_generation_id", w.RuntimeGenerationID); err != nil {
-		return nil, err
-	}
-	if w.Origin != nil && *w.Origin != OriginCaller {
-		if !w.Origin.known() {
-			return nil, errors.New("request metadata field origin is not supported")
-		}
-		event.Origin = *w.Origin
-	}
-	if event.Origin.Keyless() {
-		if w.APIKeyID != nil && *w.APIKeyID != "" {
-			return nil, fmt.Errorf("request metadata field api_key_id must be empty for %s requests", event.Origin)
-		}
-	} else if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
-		return nil, err
-	}
-	if w.AgentPrincipalID != nil {
-		event.AgentPrincipalID = *w.AgentPrincipalID
-	}
-	if w.MemberPrincipalID != nil {
-		event.MemberPrincipalID = *w.MemberPrincipalID
-	}
-	if w.DelegationPairDigest != nil {
-		event.DelegationPairDigest = *w.DelegationPairDigest
-	}
-	if err := validateDelegation(event); err != nil {
-		return nil, err
-	}
-	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
-		return nil, err
-	}
-	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
-		return nil, err
-	}
-	if (event.ParentRequestID != nil) != (event.Origin.derivesFromParent() || event.EvaluatorGuardrailID != nil) {
-		return nil, errors.New("request metadata field parent_request_id belongs to child work requests")
-	}
-	if w.EndUserDigest != nil {
-		event.EndUserDigest = *w.EndUserDigest
-		if event.EndUserDigest != "" && (!authority.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
-			return nil, errors.New("request metadata field end_user_digest is invalid")
-		}
-	}
-	if w.Attribution != nil {
-		event.Attribution = *w.Attribution
-		if err := attribution.Validate(event.Attribution); err != nil {
-			return nil, fmt.Errorf("request metadata field attribution is invalid: %w", err)
-		}
-	}
-	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
-		return nil, err
-	}
-	event.GuardrailDecisions = w.GuardrailDecisions
-	if w.PolicyDecisions != nil {
-		for i, d := range *w.PolicyDecisions {
-			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
-				return nil, fmt.Errorf("request metadata field policy_decisions %d is incomplete", i)
-			}
-			event.PolicyDecisions = append(event.PolicyDecisions, contentpolicy.Decision{
-				RuleID: *d.RuleID, Phase: *d.Phase, Action: *d.Action, Outcome: *d.Outcome,
-			})
-		}
-		if err := contentpolicy.ValidateDecisions(event.PolicyDecisions); err != nil {
-			return nil, fmt.Errorf("request metadata field policy_decisions is invalid: %w", err)
-		}
-	}
 	if event.BudgetGroupID, err = optionalUUID("budget_group_id", w.BudgetGroupID); err != nil {
 		return nil, err
 	}
@@ -362,4 +293,81 @@ func (w wireRouting) decode() (*Routing, error) {
 		return nil, err
 	}
 	return routing, nil
+}
+
+func (w wireEvent) decodeAuthority(event *Event) error {
+	var err error
+	if event.EventID, err = requiredUUID("event_id", w.EventID); err != nil {
+		return err
+	}
+	if event.RequestID, err = requiredUUID("request_id", w.RequestID); err != nil {
+		return err
+	}
+	if event.RuntimeGenerationID, err = requiredUUID("runtime_generation_id", w.RuntimeGenerationID); err != nil {
+		return err
+	}
+	if w.Origin != nil && *w.Origin != OriginCaller {
+		if !w.Origin.known() {
+			return errors.New("request metadata field origin is not supported")
+		}
+		event.Origin = *w.Origin
+	}
+	if event.Origin.Keyless() {
+		if w.APIKeyID != nil && *w.APIKeyID != "" {
+			return fmt.Errorf("request metadata field api_key_id must be empty for %s requests", event.Origin)
+		}
+	} else if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
+		return err
+	}
+	if w.AgentPrincipalID != nil {
+		event.AgentPrincipalID = *w.AgentPrincipalID
+	}
+	if w.MemberPrincipalID != nil {
+		event.MemberPrincipalID = *w.MemberPrincipalID
+	}
+	if w.DelegationPairDigest != nil {
+		event.DelegationPairDigest = *w.DelegationPairDigest
+	}
+	if err := validateDelegation(event); err != nil {
+		return err
+	}
+	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
+		return err
+	}
+	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
+		return err
+	}
+	if (event.ParentRequestID != nil) != (event.Origin.derivesFromParent() || event.EvaluatorGuardrailID != nil) {
+		return errors.New("request metadata field parent_request_id belongs to child work requests")
+	}
+	if w.EndUserDigest != nil {
+		event.EndUserDigest = *w.EndUserDigest
+		if event.EndUserDigest != "" && (!authority.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
+			return errors.New("request metadata field end_user_digest is invalid")
+		}
+	}
+	if w.Attribution != nil {
+		event.Attribution = *w.Attribution
+		if err := attribution.Validate(event.Attribution); err != nil {
+			return fmt.Errorf("request metadata field attribution is invalid: %w", err)
+		}
+	}
+	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+		return err
+	}
+	event.GuardrailDecisions = w.GuardrailDecisions
+	if w.PolicyDecisions != nil {
+		for i, d := range *w.PolicyDecisions {
+			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
+				return fmt.Errorf("request metadata field policy_decisions %d is incomplete", i)
+			}
+			event.PolicyDecisions = append(event.PolicyDecisions, contentpolicy.Decision{
+				RuleID: *d.RuleID, Phase: *d.Phase, Action: *d.Action, Outcome: *d.Outcome,
+			})
+		}
+		if err := contentpolicy.ValidateDecisions(event.PolicyDecisions); err != nil {
+			return fmt.Errorf("request metadata field policy_decisions is invalid: %w", err)
+		}
+	}
+	return nil
 }

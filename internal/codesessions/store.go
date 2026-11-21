@@ -8,7 +8,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -16,7 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -282,361 +280,7 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 	if !connection && !out.Authority.AllowsAttribution(in.Attribution) {
 		return out, codemode.Refuse(409, "code_attribution_changed")
 	}
-	if connection {
-		if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET socket_bound=true WHERE id=$1 AND NOT socket_bound`, out.Binding.RootID); err != nil {
-			return out, err
-		}
-		decisionSelection := func() codeSelection {
-			if rootSelection != nil && rootSelection.account.ID == selection.account.ID {
-				return *rootSelection
-			}
-			return selection
-		}()
-		if err = recordCodeDecision(ctx, tx, in, out.Binding, nil, decisionSelection, codemode.DecisionConnection); err != nil {
-			return out, err
-		}
-		return out, tx.Commit(ctx)
-	}
-	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
-	out.Attempt = codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
-	if in.Bound != nil {
-		if err = in.Bound.Validate(); err != nil {
-			return out, err
-		}
-		out.Attempt.ReservedTokens = in.Bound.Tokens
-		out.Attempt.BoundEvidence = &in.Bound.Evidence
-	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model,created_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16,statement_timestamp()) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
-	if err != nil {
-		return out, err
-	}
-	decisionSelection, decisionReason := func() (codeSelection, codemode.DecisionReason) {
-		if recoverySelection != nil && recoverySelection.account.ID == selection.account.ID {
-			return *recoverySelection, codemode.DecisionChosen
-		}
-		if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
-			return *rootSelection, reason
-		}
-		return selection, reason
-	}()
-	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, decisionReason); err != nil {
-		return out, err
-	}
-	if err = reserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
-		return out, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return out, err
-	}
-	return out, nil
-}
-
-func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Binding, *codeSelection, error) {
-	identity := in.Operation.Identity
-	b, err := codeConversation(ctx, tx, in, identity.Conversation)
-	if err == nil {
-		if err = liveCodeTree(ctx, tx, b); err != nil {
-			return b, nil, err
-		}
-		if identity.Parent != "" {
-			var parent string
-			if err = tx.QueryRow(ctx, `SELECT conversation FROM olp.code_bindings WHERE id=$1`, b.ParentID).Scan(&parent); err != nil || parent != identity.Parent {
-				return b, nil, codemode.Refuse(409, "code_parent_conflict")
-			}
-		}
-		return b, nil, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return b, nil, err
-	}
-	b = codemode.Binding{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
-	b.RootID = b.ID
-	var root *codeSelection
-	if identity.Parent != "" {
-		parent, err := codeConversation(ctx, tx, in, identity.Parent)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return b, nil, codemode.Refuse(409, "code_parent_unresolved")
-		}
-		if err != nil {
-			return b, nil, err
-		}
-		if err = liveCodeTree(ctx, tx, parent); err != nil {
-			return b, nil, err
-		}
-		b.ParentID = &parent.ID
-		b.RootID = parent.RootID
-		b.AccountID = parent.AccountID
-		b.Principal = parent.Principal
-	} else {
-		selection, err := codeAccount(ctx, tx, in, "", "", nil, in.Route.AllowanceOrdering)
-		if err != nil {
-			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
-				type hintResult struct {
-					selection codeSelection
-					err       error
-				}
-				hints := slices.Collect(func(yield func(hintResult) bool) {
-					for _, model := range in.Route.Models {
-						hinted := in.withOperation(codemode.Operation{Name: "connect_model", Model: model, Identity: in.Operation.Identity})
-						candidate, hintErr := codeAccount(ctx, tx, hinted, "", "", nil, in.Route.AllowanceOrdering)
-						if !yield(hintResult{selection: candidate, err: hintErr}) || hintErr == nil {
-							return
-						}
-						if _, ok := errors.AsType[*codemode.Refusal](hintErr); !ok {
-							return
-						}
-					}
-				})
-				for _, hint := range hints {
-					if hint.err == nil {
-						return b, nil, codemode.Refuse(400, "code_connection_model_required")
-					}
-					if _, ok := errors.AsType[*codemode.Refusal](hint.err); !ok {
-						return b, nil, hint.err
-					}
-				}
-				if len(selection.candidates) == 0 {
-					deadlines := slices.Collect(func(yield func(*time.Time) bool) {
-						for _, hint := range hints {
-							if len(hint.selection.candidates) == 0 {
-								continue
-							}
-							refusal, _ := errors.AsType[*codemode.Refusal](hint.err)
-							if !yield(refusal.RetryAt) {
-								return
-							}
-						}
-					})
-					if len(deadlines) > 0 {
-						return b, nil, &codemode.Refusal{Status: 400, Code: "code_connection_model_required", RetryAt: codemode.EarliestRecovery(time.Now(), deadlines...)}
-					}
-				}
-			}
-			return b, nil, err
-		}
-		root = &selection
-		b.AccountID = selection.account.ID
-		b.Principal = selection.account.Principal
-	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,account_id,principal,socket_bound)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`, b.ID, b.ProjectID, b.RouteID, b.APIKeyID, b.Conversation, b.ParentID, b.RootID, b.AccountID, b.Principal, in.Operation.Name == "connect" || in.Operation.Name == "connect_model").Scan(&b.CreatedAt)
-	return b, root, err
-}
-
-func codeConversation(ctx context.Context, tx pgx.Tx, in Admission, conversation string) (codemode.Binding, error) {
-	return scanBinding(tx.QueryRow(ctx, `SELECT `+bindingColumns+` FROM olp.code_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3`, in.Route.ID, in.APIKeyID, conversation))
-}
-
-// liveCodeTree refuses a binding whose tree is retired, and holds its root
-// against retirement until the transaction ends.
-func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
-	var retired bool
-	if err := tx.QueryRow(ctx, `SELECT retired_at IS NOT NULL FROM olp.code_bindings WHERE id=$1 FOR SHARE`, b.RootID).Scan(&retired); err != nil {
-		return err
-	}
-	if retired || b.RetiredAt != nil {
-		return codemode.Refuse(410, "code_binding_retired")
-	}
-	return nil
-}
-
-// codePins returns the pins of a conversation tree in the order it made them.
-func codePins(ctx context.Context, tx pgx.Tx, root string) ([]codemode.Pin, error) {
-	rows, err := tx.Query(ctx, `SELECT model,coalesce(target_model,model),account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY seq`, root)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (codemode.Pin, error) {
-		var p codemode.Pin
-		err := row.Scan(&p.Model, &p.TargetModel, &p.AccountID, &p.Principal, &p.CreatedAt)
-		return p, err
-	})
-}
-
-// codeTree lists a conversation tree's accounts, its own first and then its
-// pins' in the order it made them, with the principal each serves it as.
-func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]string) {
-	tree := []string{b.AccountID}
-	principals := map[string]string{b.AccountID: b.Principal}
-	for _, p := range pins {
-		if _, ok := principals[p.AccountID]; !ok {
-			tree = append(tree, p.AccountID)
-			principals[p.AccountID] = p.Principal
-		}
-	}
-	return tree, principals
-}
-
-// codePin pins an admission's model, which the binding's tree has not served
-// yet, to the account that serves it. A tree keeps one account of each
-// adapter, so the model goes to the tree's own account when that serves it,
-// else to another account the tree uses, else to the first available account
-// of an adapter the tree does not use yet. Nothing fails over: a tree account
-// that cools refuses a new model it serves as it refuses its pinned ones.
-func codePin(ctx context.Context, tx pgx.Tx, in Admission, b codemode.Binding, pins []codemode.Pin, bandOrdered bool) (codemode.Pin, codeSelection, error) {
-	tree, principals := codeTree(b, pins)
-	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree, bandOrdered)
-	if err != nil {
-		return codemode.Pin{}, selection, err
-	}
-	account := selection.account
-	pin := codemode.Pin{Model: in.Operation.PublicModel(), TargetModel: in.Operation.Model, AccountID: account.ID, Principal: account.Principal}
-	if principal, ok := principals[account.ID]; ok {
-		pin.Principal = principal
-	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter,target_model)
-		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+`,$7 FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
-		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID, pin.TargetModel).Scan(&pin.CreatedAt)
-	return pin, selection, err
-}
-
-type codeCandidate struct {
-	account       codemode.Account
-	outcome       codemode.Candidate
-	cooldownRetry *time.Time
-	assessment    *codemode.BandAssessment
-}
-
-type codeSelection struct {
-	account    codemode.Account
-	candidates []codemode.Candidate
-	assessment *codemode.BandAssessment
-}
-
-func (s codeSelection) chosen() (codemode.Candidate, bool) {
-	index := slices.IndexFunc(s.candidates, func(candidate codemode.Candidate) bool {
-		return candidate.AccountID == s.account.ID
-	})
-	if index < 0 {
-		return codemode.Candidate{}, false
-	}
-	return s.candidates[index], true
-}
-
-func codeBandAssessment(bandOrdered bool, allowance *codemode.Allowance, family string, now time.Time) (*codemode.BandAssessment, codemode.Band, *time.Time) {
-	if !bandOrdered {
-		return nil, "", nil
-	}
-	assessed := codemode.AssessBand(allowance, family, now)
-	return &assessed, assessed.Band, assessed.SoonestReset
-}
-
-// codeAccount selects the pool account that serves an admission: an eligible
-// one of the admission's providers, so its adapter serves the request's path
-// and the gateway can reach it. It is the account id when given, else the
-// first of tree that serves the model, else the first available account of an
-// adapter no account of tree has. An account of tree serves only while no
-// earlier one has its adapter, now or as the root's pins recorded it, since a
-// republish can change or drop an account's connection; a selected account
-// that is unavailable refuses the admission.
-func codeAccount(ctx context.Context, tx pgx.Tx, in Admission, id, root string, tree []string, bandOrdered bool) (codeSelection, error) {
-	family := ""
-	effectiveOrdering := bandOrdered && family != ""
-	var none codeSelection
-	if _, paid := in.Route.PaidTargets[in.Operation.Model]; paid {
-		return none, codemode.Refuse(503, "code_account_unavailable")
-	}
-	required := []string{in.Operation.Model}
-	if in.Operation.Name == "connect" {
-		required = in.Route.Models
-	}
-	if id != "" && (in.Operation.Name == "connect" || in.Operation.Name == "connect_model") {
-		required = []string{}
-	}
-	cooldownModels := func() []string {
-		if in.Operation.Name != "connect" {
-			return []string{in.Operation.Model}
-		}
-		if id != "" {
-			return []string{}
-		}
-		return in.Route.Models
-	}()
-	requiredJSON, err := json.Marshal(required)
-	if err != nil {
-		return none, err
-	}
-	routeID, err := uuid.Parse(in.Route.ID)
-	if err != nil {
-		return none, err
-	}
-	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a,$11,$12),(a.health IN ('unavailable','quota_limited') AND NOT coalesce(a.unavailable_until<=now(),false)),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight,a.unavailable_until,EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=ANY($10::text[]))),(SELECT max(cd.retry_at) FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=ANY($10::text[]))),a.extra_usage_enabled,a.cycle_anchor::text
-		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
-		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
-		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
-		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
-		AND ($4<>'' OR NOT a.draining)
-		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND `+grants.LiveCondition+`
-		AND ($9::uuid IS NULL OR NOT EXISTS(SELECT 1 FROM olp.code_recovery_chain($9) rejected WHERE rejected.account_id=a.id AND rejected.nonexecution))
-		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
-		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
-			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
-			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
-				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), cooldownModels, effectiveOrdering, family)
-	if err != nil {
-		return none, err
-	}
-	now := time.Now().UTC()
-	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (codeCandidate, error) {
-		var candidate codeCandidate
-		var weight int64
-		var cooling bool
-		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.outcome.Available, &candidate.outcome.Cooldown, &candidate.outcome.Position, &weight, &candidate.account.UnavailableUntil, &cooling, &candidate.cooldownRetry, &candidate.account.ExtraUsageEnabled, &candidate.account.CycleAnchor); err != nil {
-			return candidate, err
-		}
-		accountID, err := uuid.Parse(candidate.account.ID)
-		if err != nil {
-			return candidate, err
-		}
-		assessment, band, resetAt := codeBandAssessment(effectiveOrdering, candidate.account.Allowance, family, now)
-		outcome := codemode.Candidate{AccountID: candidate.account.ID, Available: candidate.outcome.Available && !cooling, Cooldown: candidate.outcome.Cooldown || cooling, Position: candidate.outcome.Position, Score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation)), Band: band, ResetAt: resetAt}
-		return codeCandidate{account: candidate.account, outcome: outcome, cooldownRetry: candidate.cooldownRetry, assessment: assessment}, nil
-	})
-	if err != nil {
-		return none, err
-	}
-	checkCapacity := codeGeneration(in.Operation.Name) || id == "" && root == ""
-	chosen, outcomes, err := chooseCodeAccount(ctx, tx, checkCapacity, candidates)
-	if err != nil {
-		return none, err
-	}
-	if !chosen.Eligible() {
-		if len(candidates) == 0 {
-			return none, codemode.Refuse(503, "code_account_unavailable")
-		}
-		if slices.ContainsFunc(outcomes, func(c codemode.Candidate) bool { return c.Position == chosen.Position && c.Busy }) {
-			return codeSelection{candidates: outcomes}, codeAccountBusy()
-		}
-		deadlines := slices.Collect(func(yield func(*time.Time) bool) {
-			for _, candidate := range candidates {
-				if candidate.outcome.Position != chosen.Position {
-					continue
-				}
-				if (candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited") && candidate.account.UnavailableUntil == nil {
-					if !yield(nil) {
-						return
-					}
-					continue
-				}
-				unavailableUntil := func() *time.Time {
-					if candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited" {
-						return candidate.account.UnavailableUntil
-					}
-					return nil
-				}()
-				if !yield(codemode.BlockingDeadline(now, unavailableUntil, candidate.cooldownRetry, candidate.account.Allowance, effectiveOrdering, family)) {
-					return
-				}
-			}
-		})
-		return codeSelection{candidates: outcomes}, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, deadlines...)}
-	}
-	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {
-		return candidate.account.ID == chosen.AccountID
-	})
-	return codeSelection{account: candidates[index].account, candidates: outcomes, assessment: candidates[index].assessment}, nil
+	return commitCodeAdmission(ctx, tx, in, out, connection, selection, reason, rootSelection, recoverySelection)
 }
 
 // MarkDispatched is the irreversible pre-send transition. Network ambiguity
@@ -700,4 +344,56 @@ func (s *Store) RecordRefusal(ctx context.Context, route codemode.Route, keyID, 
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, httpkit.NewID(), route.ProjectID, route.ID, keyID, code, digest)
 	return err
+}
+
+func commitCodeAdmission(ctx context.Context, tx pgx.Tx, in Admission, out Permit, connection bool, selection codeSelection, reason codemode.DecisionReason, rootSelection, recoverySelection *codeSelection) (Permit, error) {
+	var err error
+	if connection {
+		if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET socket_bound=true WHERE id=$1 AND NOT socket_bound`, out.Binding.RootID); err != nil {
+			return out, err
+		}
+		decisionSelection := func() codeSelection {
+			if rootSelection != nil && rootSelection.account.ID == selection.account.ID {
+				return *rootSelection
+			}
+			return selection
+		}()
+		if err = recordCodeDecision(ctx, tx, in, out.Binding, nil, decisionSelection, codemode.DecisionConnection); err != nil {
+			return out, err
+		}
+		return out, tx.Commit(ctx)
+	}
+	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
+	out.Attempt = codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
+	if in.Bound != nil {
+		if err = in.Bound.Validate(); err != nil {
+			return out, err
+		}
+		out.Attempt.ReservedTokens = in.Bound.Tokens
+		out.Attempt.BoundEvidence = &in.Bound.Evidence
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16,statement_timestamp()) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
+	if err != nil {
+		return out, err
+	}
+	decisionSelection, decisionReason := func() (codeSelection, codemode.DecisionReason) {
+		if recoverySelection != nil && recoverySelection.account.ID == selection.account.ID {
+			return *recoverySelection, codemode.DecisionChosen
+		}
+		if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
+			return *rootSelection, reason
+		}
+		return selection, reason
+	}()
+	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, decisionReason); err != nil {
+		return out, err
+	}
+	if err = reserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
+		return out, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return out, err
+	}
+	return out, nil
 }

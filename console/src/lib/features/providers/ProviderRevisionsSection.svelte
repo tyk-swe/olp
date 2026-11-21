@@ -6,19 +6,15 @@
   import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
-    emptyCursorHistory,
-    resetCursor
+    emptyCursorHistory
   } from '#lib/listing/pagination.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import {
-    getProviderRevision,
-    listProviderRevisionModelPage,
     listProviderRevisionPage,
     type ProviderRevisionDiff
   } from '#lib/features/providers/revisions.js';
   import { type Provider } from '#lib/features/providers/providers.js';
-  import { formatDate, stateLabel } from '#lib/format.js';
+  import { formatDate } from '#lib/format.js';
   import type { ProviderEditor } from './providerEditor.svelte';
 
   let { current, editor }: { current: Provider; editor: ProviderEditor } =
@@ -28,9 +24,7 @@
   const canManage = $derived(editor.canManage);
   const refreshPending = $derived(editorView.refreshPending);
   const pagination = $state(emptyCursorHistory());
-  const modelPagination = $state(emptyCursorHistory());
   let viewed = $state<{ id: string; revision: number } | null>(null);
-  const viewedId = $derived(viewed?.id ?? '');
   let revisionFrom = $state('');
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
@@ -39,26 +33,6 @@
     queryKey: providerKeys.revisions(current.id, pagination.cursor),
     queryFn: ({ signal }) =>
       listProviderRevisionPage(current.id, pagination.cursor, signal)
-  }));
-  const revisionDetail = createQuery(() => ({
-    queryKey: providerKeys.revision(current.id, viewedId),
-    queryFn: ({ signal }) => getProviderRevision(current.id, viewedId, signal),
-    enabled: Boolean(viewedId)
-  }));
-  const revisionModels = createQuery(() => ({
-    queryKey: providerKeys.revisionModels(
-      current.id,
-      viewedId,
-      modelPagination.cursor
-    ),
-    queryFn: ({ signal }) =>
-      listProviderRevisionModelPage(
-        current.id,
-        viewedId,
-        modelPagination.cursor,
-        signal
-      ),
-    enabled: Boolean(viewedId)
   }));
 
   $effect(() => {
@@ -96,10 +70,10 @@
   }
 
   function view(revisionId: string, revision: number) {
-    resetCursor(modelPagination);
     viewed = { id: revisionId, revision };
   }
   import ProviderRevisionComparison from '#lib/features/providers/ProviderRevisionComparison.svelte';
+  import ProviderRevisionDetail from './ProviderRevisionDetail.svelte';
 </script>
 
 <section
@@ -217,158 +191,11 @@
 </section>
 
 {#if viewed}
-  {@const revision = viewed.revision}
-  <SecretDialog
-    eyebrow="Immutable revision"
-    title={`Revision ${revision}`}
-    description="Configuration and model inventory captured when this revision was activated. Credential material is never returned."
-    size="wide"
+  <ProviderRevisionDetail
+    providerId={current.id}
+    {viewed}
     onClose={() => (viewed = null)}
-  >
-    {#snippet children(close)}
-      {#if revisionDetail.isPending}<p class="inline-status" role="status">
-          Loading revision…
-        </p>
-      {:else if revisionDetail.isError}<div class="inline-problem" role="alert">
-          {errorMessage(revisionDetail.error)}
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={() => revisionDetail.refetch()}>Retry</button
-          >
-        </div>
-      {:else if revisionDetail.data}
-        {@const detail = revisionDetail.data}
-        <dl class="revision-fields">
-          <div>
-            <dt>Name</dt>
-            <dd>{detail.name}</dd>
-          </div>
-          <div>
-            <dt>Connector</dt>
-            <dd>{stateLabel(detail.configuration.kind)}</dd>
-          </div>
-          <div>
-            <dt>Authentication</dt>
-            <dd>{detail.configuration.auth_mode}</dd>
-          </div>
-          <div>
-            <dt>Endpoint</dt>
-            <dd>{detail.configuration.endpoint ?? 'Connector default'}</dd>
-          </div>
-          <div>
-            <dt>Cloud region</dt>
-            <dd>{detail.configuration.cloud_region ?? 'Not set'}</dd>
-          </div>
-          <div>
-            <dt>Cloud project</dt>
-            <dd>{detail.configuration.cloud_project ?? 'Not set'}</dd>
-          </div>
-          <div>
-            <dt>Deployment</dt>
-            <dd>{detail.configuration.deployment ?? 'Not set'}</dd>
-          </div>
-          <div>
-            <dt>API version</dt>
-            <dd>{detail.configuration.api_version ?? 'Not set'}</dd>
-          </div>
-          <div>
-            <dt>Models</dt>
-            <dd>
-              {detail.model_count} total · {detail.enabled_model_count} enabled
-            </dd>
-          </div>
-          <div>
-            <dt>Capabilities</dt>
-            <dd>
-              {detail.capability_count} total · {detail.certified_capability_count}
-              certified
-            </dd>
-          </div>
-          <div>
-            <dt>Connector available</dt>
-            <dd>{detail.connector_ready ? 'Yes' : 'No'}</dd>
-          </div>
-          <div>
-            <dt>Credential metadata</dt>
-            <dd>
-              {detail.historical_credential_version == null
-                ? 'Workload identity'
-                : `Version ${detail.historical_credential_version}`}
-            </dd>
-          </div>
-          <div>
-            <dt>Activated</dt>
-            <dd>
-              {formatDate(detail.activated_at)} by
-              <code>{detail.activated_by}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>Source ETag</dt>
-            <dd><code>{detail.source_etag}</code></dd>
-          </div>
-        </dl>
-      {/if}
-
-      <h3 class="revision-models-heading">Models and capabilities</h3>
-      {#if revisionModels.isPending}<p class="inline-status" role="status">
-          Loading revision models…
-        </p>
-      {:else if revisionModels.isError}<div class="inline-problem" role="alert">
-          {errorMessage(revisionModels.error)}
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={() => revisionModels.refetch()}>Retry</button
-          >
-        </div>
-      {:else if !revisionModels.data?.items.length && modelPagination.history.length === 0}
-        <p class="muted">This revision carried no models.</p>
-      {:else}
-        <ul class="revision-models">
-          {#each revisionModels.data?.items ?? [] as model (model.id)}<li>
-              <div class="revision-model-name">
-                <strong>{model.display_name}</strong>
-                <code>{model.upstream_model}</code>
-                <span class="badge {model.enabled ? 'success' : 'warning'}"
-                  >{model.enabled ? 'enabled' : 'not enabled'}</span
-                >
-              </div>
-              {#if model.discovered_at}<small
-                  >Discovered {formatDate(model.discovered_at)}</small
-                >{/if}
-              <div class="revision-capabilities">
-                {#each model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
-                    class:certified={capability.source === 'certified'}
-                    ><code
-                      >{capability.operation}/{capability.surface}/{capability.mode}</code
-                    >
-                    · {capability.source}{#if capability.certified_at}
-                      · {formatDate(capability.certified_at)}{/if}</span
-                  >{:else}<span class="muted">No capabilities recorded.</span
-                  >{/each}
-              </div>
-            </li>{/each}
-        </ul>
-        <CursorPagination
-          {...cursorPaginationProps(
-            modelPagination,
-            revisionModels.data?.nextCursor
-          )}
-          label="Revision model pages"
-        />
-      {/if}
-      <div class="dialog-actions">
-        <button
-          class="button button-primary"
-          type="button"
-          data-autofocus
-          onclick={close}>Close revision</button
-        >
-      </div>
-    {/snippet}
-  </SecretDialog>
+  />
 {/if}
 
 <style>
@@ -454,75 +281,6 @@
     background: none;
     color: var(--foreground-hover);
   }
-  .revision-fields {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.65rem 1rem;
-    margin: 0;
-  }
-  .revision-fields dt {
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  .revision-fields dd {
-    margin: 0.15rem 0 0;
-    overflow-wrap: anywhere;
-  }
-  .revision-models-heading {
-    margin: 1.35rem 0 0.5rem;
-    font-size: var(--text-body);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
-  .revision-models {
-    display: grid;
-    gap: 0.6rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .revision-models li {
-    display: grid;
-    gap: 0.3rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border-hairline);
-    border-radius: var(--radius-control);
-    background: var(--canvas);
-  }
-  .revision-model-name {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .revision-capabilities {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-  }
-  .revision-capabilities span:not(.muted) {
-    padding: 0.3rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    color: var(--warning);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  .revision-capabilities span.certified {
-    color: var(--success);
-  }
-  .dialog-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 1.25rem;
-  }
   .revision-row small {
     color: var(--foreground-muted);
     overflow-wrap: anywhere;
@@ -534,9 +292,6 @@
   @media (max-width: 42rem) {
     .revision-row {
       display: grid;
-    }
-    .revision-fields {
-      grid-template-columns: 1fr;
     }
   }
 </style>

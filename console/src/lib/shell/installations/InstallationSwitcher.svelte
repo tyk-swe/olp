@@ -3,9 +3,10 @@
   import { errorMessage } from '#lib/management/http.js';
   import { OVERVIEW } from '#lib/shell/navigation.js';
   import {
+    addBookmark,
     bookmarkOrigin,
-    readInstallations,
-    saveInstallations,
+    removeBookmark,
+    storedBookmarks,
     type InstallationBookmark
   } from './installations';
   let { name }: { name: string } = $props();
@@ -17,52 +18,40 @@
   let menu = $state<HTMLDetailsElement>();
   onMount(() => {
     origin = window.location.origin;
-    try {
-      const stored = readInstallations(window.localStorage);
-      for (const entry of stored) {
-        try {
-          bookmarkOrigin(entry.origin, origin, bookmarks);
-          bookmarks.push(entry);
-        } catch {
-          /* Ignore stale bookmarks that would share installation cookies. */
-        }
-      }
-    } catch {
+    const stored = storedBookmarks(() => window.localStorage, origin);
+    if (!stored.ok) {
       error = 'Installation bookmarks are unavailable in this browser.';
+      return;
     }
+    bookmarks = stored.value;
   });
 
   function add(event: SubmitEvent) {
     event.preventDefault();
     error = '';
-    try {
-      const target = bookmarkOrigin(bookmarkURL, origin, bookmarks);
-      const label = bookmarkName.trim();
-      if (!label || label.length > 100)
-        throw new Error('Use a name of 1–100 characters.');
-      const next = [
-        ...bookmarks.filter((entry) => entry.origin !== target),
-        { name: label, origin: target }
-      ];
-      if (next.length > 20)
-        throw new Error('Keep at most 20 installation bookmarks.');
-      saveInstallations(window.localStorage, next);
-      bookmarks = next;
-      bookmarkName = bookmarkURL = '';
-    } catch (cause) {
-      error = errorMessage(cause);
+    const result = addBookmark(
+      () => window.localStorage,
+      origin,
+      bookmarks,
+      bookmarkName,
+      bookmarkURL
+    );
+    if (!result.ok) {
+      error = errorMessage(result.error);
+      return;
     }
+    bookmarks = result.value;
+    bookmarkName = bookmarkURL = '';
   }
 
   function remove(target: string) {
-    try {
-      const next = bookmarks.filter((entry) => entry.origin !== target);
-      saveInstallations(window.localStorage, next);
-      bookmarks = next;
-      error = '';
-    } catch (cause) {
-      error = errorMessage(cause);
+    const result = removeBookmark(() => window.localStorage, bookmarks, target);
+    if (!result.ok) {
+      error = errorMessage(result.error);
+      return;
     }
+    bookmarks = result.value;
+    error = '';
   }
 
   function switchTo(target: string) {

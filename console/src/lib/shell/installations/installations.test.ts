@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  addBookmark,
   bookmarkOrigin,
   installationOrigin,
   readInstallations,
-  saveInstallations
+  removeBookmark,
+  saveInstallations,
+  storedBookmarks
 } from './installations';
 
 describe('installation bookmarks', () => {
@@ -110,5 +113,106 @@ describe('installation bookmarks', () => {
         getItem: (requested) => (requested === key ? value : null)
       })
     ).toEqual(bookmarks);
+  });
+});
+
+describe('installation bookmark helpers', () => {
+  it('reads bookmarks through the accessor only inside the result capture', () => {
+    const getItem = vi
+      .fn()
+      .mockReturnValue(
+        JSON.stringify([
+          { name: 'Other', origin: 'https://other.example.test' }
+        ])
+      );
+    const result = storedBookmarks(
+      () => ({ getItem }),
+      'https://current.example.test'
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: [{ name: 'Other', origin: 'https://other.example.test' }]
+    });
+    expect(getItem).toHaveBeenCalledOnce();
+  });
+
+  it('reports a storage failure as a result instead of throwing', () => {
+    const result = storedBookmarks(() => {
+      throw new Error('storage blocked');
+    }, 'https://current.example.test');
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('drops stored bookmarks that would share a hostname with the current installation', () => {
+    const result = storedBookmarks(
+      () => ({
+        getItem: () =>
+          JSON.stringify([
+            { name: 'Same host', origin: 'https://current.example.test:8443' },
+            { name: 'Other', origin: 'https://other.example.test' }
+          ])
+      }),
+      'https://current.example.test'
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: [{ name: 'Other', origin: 'https://other.example.test' }]
+    });
+  });
+
+  it('adds and persists a validated bookmark, returning the saved list', () => {
+    const setItem = vi.fn();
+    const result = addBookmark(
+      () => ({ setItem }),
+      'https://current.example.test',
+      [{ name: 'Old', origin: 'https://old.example.test' }],
+      ' New ',
+      'https://NEW.example.test:443/'
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: [
+        { name: 'Old', origin: 'https://old.example.test' },
+        { name: 'New', origin: 'https://new.example.test' }
+      ]
+    });
+    expect(setItem).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an invalid bookmark without touching storage', () => {
+    const setItem = vi.fn();
+    const result = addBookmark(
+      () => ({ setItem }),
+      'https://current.example.test',
+      [],
+      '   ',
+      'https://new.example.test'
+    );
+
+    expect(result.ok).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('removes and persists a bookmark', () => {
+    const setItem = vi.fn();
+    const bookmarks = [
+      { name: 'Old', origin: 'https://old.example.test' },
+      { name: 'Other', origin: 'https://other.example.test' }
+    ];
+    const result = removeBookmark(
+      () => ({ setItem }),
+      bookmarks,
+      'https://old.example.test'
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: [{ name: 'Other', origin: 'https://other.example.test' }]
+    });
+    expect(setItem).toHaveBeenCalledOnce();
   });
 });

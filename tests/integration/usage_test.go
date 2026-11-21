@@ -2758,9 +2758,10 @@ func pagerDutyReceiver(t *testing.T, pool *pgxpool.Pool, f usageFixture, event s
 }
 
 type apiResult struct {
-	status int
-	etag   string
-	body   []byte
+	status   int
+	etag     string
+	location string
+	body     []byte
 }
 
 func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, string) {
@@ -2783,6 +2784,13 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 
 func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
+	return managementHTTPAs(t, pool, userID, func(mux *http.ServeMux, server *access.Server) {
+		notifications.NewManagement(server, egress.Policy{}).Register(mux)
+	})
+}
+
+func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register func(*http.ServeMux, *access.Server)) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
+	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
@@ -2794,7 +2802,7 @@ func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) f
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), egress.Policy{}).Register(mux)
+	register(mux, access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))
@@ -2826,7 +2834,7 @@ func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) f
 		if err != nil {
 			t.Fatal(err)
 		}
-		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), body: raw}
+		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), location: response.Header.Get("Location"), body: raw}
 	}
 }
 

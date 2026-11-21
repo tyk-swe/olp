@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -18,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func installTestGuardrail(t *testing.T, h *harness, phase guardrails.Phase, action guardrails.Action, kind guardrails.Kind, configuration string) {
@@ -217,6 +221,36 @@ func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
 	}
 }
 
+func TestMigratedInputBlocksCanonicalToolSchema(t *testing.T) {
+	h := strictHarness(t, nil)
+	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", `{"rules":[{"id":"schema","pattern":"\"type\":\"string\""}]}`)
+	current := h.rt.release
+	snapshot := current.Snapshot().Clone()
+	definition := snapshot.Guardrails.Definitions["revision"]
+	definition.LegacyRuleID = "schema"
+	snapshot.Guardrails.Definitions["revision"] = definition
+	credentials := map[string][]byte{}
+	for _, provider := range snapshot.Providers {
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				credentials[*slot.CredentialID], _ = current.Credential(*slot.CredentialID)
+			}
+		}
+	}
+	installed, err := release.NewRelease(current.ID, current.Sequence, snapshot, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = installed
+	resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"term":{"type":"string"}}}}}]`)
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "content_policy_blocked" {
+		t.Fatalf("migrated input did not block canonical tool schema: %d %v", resp.StatusCode, body)
+	}
+	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
+		t.Fatalf("blocked request reached providers: %d", calls)
+	}
+}
+
 func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing.T) {
 	evaluations := 0
 	evaluator := guardrails.EvaluatorFunc(func(context.Context, guardrails.Revision, guardrails.Spec, guardrails.Evaluation) (guardrails.Verdict, error) {
@@ -350,4 +384,243 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	if text := streamedText(t, raw); resp.StatusCode != 200 || text != "email alice@example.com" || strings.Contains(string(raw), "[OLP_") {
 		t.Fatalf("unmasked stream: %d %s", resp.StatusCode, raw)
 	}
+}
+
+func installModelGuardrailScenario(t *testing.T, h *harness, kind guardrails.Kind, configuration string, configureEval func(snapshot *routing.Snapshot, evalProvider *routing.Provider, evalRoute *routing.Route)) {
+	t.Helper()
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+		mainRoute := snapshot.Routes[routeSlug]
+		evalRouteID := uuid.NewString()
+		evalRoute := routing.Route{
+			ID: evalRouteID, RoutingID: evalRouteID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
+			Slug: "judge", Operations: []string{"generation"}, MaxAttempts: 1, OverallTimeout: 5000,
+			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+			Targets:  []routing.Target{{ID: uuid.NewString(), RoutingID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Priority: 0, Weight: 1, Timeout: 2000}},
+		}
+		mainRoute.Targets = mainRoute.Targets[:1]
+		snapshot.Routes[routeSlug] = mainRoute
+		snapshot.Guardrails = &guardrails.Registry{
+			Definitions: map[string]guardrails.Revision{
+				"eval-rev": {
+					ID: "eval-rev", GuardrailID: "model-guard", ProjectID: "installation", Name: "Model Guard",
+					Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 2000, OnError: guardrails.FailClosed,
+				},
+			},
+			Policies: map[string]guardrails.PolicyRevision{
+				"eval-pol": {
+					ID: "eval-pol", PolicyID: "policy", ProjectID: "installation",
+					Entries: []guardrails.Entry{{GuardrailID: "model-guard", RevisionID: "eval-rev", Phase: guardrails.Input, Action: guardrails.Block}},
+				},
+			},
+			Attachments: []guardrails.Attachment{
+				{ID: "eval-att", Scope: "route", ScopeID: mainRoute.ID, PolicyRevisionID: "eval-pol"},
+			},
+		}
+		configureEval(snapshot, &b, &evalRoute)
+		snapshot.Providers[a.ID] = a
+		snapshot.Providers[b.ID] = b
+		snapshot.Routes[evalRoute.Slug] = evalRoute
+	})
+}
+
+func findEnvelope(t *testing.T, envs []events.Envelope, route string) events.Envelope {
+	t.Helper()
+	for _, env := range envs {
+		if env.Route == route {
+			return env
+		}
+	}
+	t.Fatalf("missing envelope for route %q in %+v", route, envs)
+	return events.Envelope{}
+}
+
+func TestModelGuardrailRoutingAndAccounting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name          string
+		kind          guardrails.Kind
+		config        string
+		configureEval func(snapshot *routing.Snapshot, evalProvider *routing.Provider, evalRoute *routing.Route)
+		blockReply    http.HandlerFunc
+		passReply     http.HandlerFunc
+		wantCategory  string
+		expectUsage   bool
+	}{
+		{
+			name:   "generation",
+			kind:   "decision_model",
+			config: `{"route":"judge","rule":{"pointer":"/blocked","equals":true,"category":"policy.decision","prompt":"Judge input"}}`,
+			configureEval: func(_ *routing.Snapshot, _ *routing.Provider, _ *routing.Route) {
+			},
+			blockReply:   completion(modelB, `{"blocked":true}`),
+			passReply:    completion(modelB, `{"blocked":false}`),
+			wantCategory: "policy.decision",
+			expectUsage:  true,
+		},
+		{
+			name:   "moderation",
+			kind:   "decision_model",
+			config: `{"route":"judge","rule":{"pointer":"/results/0/flagged","equals":true,"category":"policy.moderation"}}`,
+			configureEval: func(_ *routing.Snapshot, b *routing.Provider, r *routing.Route) {
+				b.Kind = connectors.KindOpenAI
+				b.ProfileID, b.ProfileRevision = "openai-moderation", connectors.ProfileRevision
+				b.Capabilities = []routing.Capability{{Model: modelB, Operation: "moderation", Surface: "openai", Mode: "unary"}}
+				r.Operations = []string{"moderation"}
+				r.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
+			},
+			blockReply:   status(http.StatusOK, `{"id":"modr-1","model":"`+modelB+`","results":[{"flagged":true,"categories":{"harassment":true},"category_scores":{"harassment":0.95}}]}`),
+			passReply:    status(http.StatusOK, `{"id":"modr-2","model":"`+modelB+`","results":[{"flagged":false,"categories":{"harassment":false},"category_scores":{"harassment":0.01}}]}`),
+			wantCategory: "policy.moderation",
+		},
+		{
+			name:   "classification",
+			kind:   "decision_model",
+			config: `{"route":"judge","rule":{"pointer":"/0/label","equals":"TOXIC","category":"policy.classification"}}`,
+			configureEval: func(_ *routing.Snapshot, b *routing.Provider, r *routing.Route) {
+				b.Kind = connectors.KindOpenAICompatible
+				b.ProfileID, b.ProfileRevision = "tei-classification", connectors.ProfileRevision
+				b.Capabilities = []routing.Capability{{Model: modelB, Operation: "classification", Surface: "native", Mode: "unary"}}
+				r.Operations = []string{"classification"}
+				r.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
+			},
+			blockReply:   status(http.StatusOK, `[{"label":"TOXIC","score":0.95}]`),
+			passReply:    status(http.StatusOK, `[{"label":"SAFE","score":0.99}]`),
+			wantCategory: "policy.classification",
+		},
+		{
+			name:   "semantic_transformed",
+			kind:   "semantic_guard",
+			config: `{"route":"judge","semantic":{"category":"policy.semantic","similarity_threshold":0.9,"utterances":["forbidden request"]}}`,
+			configureEval: func(_ *routing.Snapshot, b *routing.Provider, r *routing.Route) {
+				b.Capabilities = append(b.Capabilities, routing.Capability{Model: modelB, Operation: "embeddings", Surface: "openai", Mode: "unary"})
+				r.Operations = []string{"embeddings"}
+			},
+			blockReply:   status(http.StatusOK, `{"object":"list","model":"`+modelB+`","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[1,0]}],"usage":{"prompt_tokens":4,"total_tokens":4}}`),
+			passReply:    status(http.StatusOK, `{"object":"list","model":"`+modelB+`","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[0,1]}],"usage":{"prompt_tokens":4,"total_tokens":4}}`),
+			wantCategory: "policy.semantic",
+			expectUsage:  true,
+		},
+		{
+			name:   "semantic_strict",
+			kind:   "semantic_guard",
+			config: `{"route":"judge","semantic":{"category":"policy.semantic","similarity_threshold":0.9,"utterances":["forbidden request"]}}`,
+			configureEval: func(_ *routing.Snapshot, b *routing.Provider, r *routing.Route) {
+				b.Kind = connectors.KindOpenAI
+				b.ProfileID, b.ProfileRevision = "openai-embeddings", connectors.ProfileRevision
+				b.Capabilities = []routing.Capability{{Model: modelB, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+				r.Operations = []string{"embeddings"}
+				r.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
+			},
+			blockReply:   status(http.StatusOK, `{"object":"list","model":"`+modelB+`","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[1,0]}],"usage":{"prompt_tokens":4,"total_tokens":4}}`),
+			passReply:    status(http.StatusOK, `{"object":"list","model":"`+modelB+`","data":[{"object":"embedding","index":0,"embedding":[1,0]},{"object":"embedding","index":1,"embedding":[0,1]}],"usage":{"prompt_tokens":4,"total_tokens":4}}`),
+			wantCategory: "policy.semantic",
+			expectUsage:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, Config{})
+			installModelGuardrailScenario(t, h, tc.kind, tc.config, tc.configureEval)
+
+			h.mock.set("b", tc.blockReply)
+			resp, _ := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"block me"}]`)
+			if resp.StatusCode != http.StatusBadRequest || h.mock.count("a") != 0 || h.mock.count("b") != 1 {
+				t.Fatalf("blocked call: status=%d main_calls=%d eval_calls=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+			}
+			envs := h.sink.await(t, 2)
+			parent := findEnvelope(t, envs, routeSlug)
+			eval := findEnvelope(t, envs, "judge")
+			if eval.Origin != usage.OriginClassifier || eval.ParentRequestID != parent.AccountingID || eval.EvaluatorGuardrailID != "model-guard" || eval.KeyID != h.keyID || eval.Outcome != "success" {
+				t.Fatalf("classifier envelope mismatch: eval=%+v parent=%+v", eval, parent)
+			}
+			if tc.expectUsage && (eval.Usage == nil || eval.Usage.TotalTokens == 0) {
+				t.Fatalf("expected evaluator usage accounting, got %+v", eval.Usage)
+			}
+			if len(parent.GuardrailDecisions) != 1 || parent.GuardrailDecisions[0].Outcome != guardrails.Blocked || len(parent.GuardrailDecisions[0].Categories) != 1 || parent.GuardrailDecisions[0].Categories[0] != tc.wantCategory {
+				t.Fatalf("parent guardrail decisions = %+v", parent.GuardrailDecisions)
+			}
+
+			h.mock.set("b", tc.passReply)
+			resp, _ = h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"allow me"}]`)
+			if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 2 {
+				t.Fatalf("passing call: status=%d main_calls=%d eval_calls=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+			}
+			allEnvs := h.sink.await(t, 4)
+			secondParent := findEnvelope(t, allEnvs[2:], routeSlug)
+			secondEval := findEnvelope(t, allEnvs[2:], "judge")
+			if secondEval.Origin != usage.OriginClassifier || secondEval.ParentRequestID != secondParent.AccountingID || secondEval.EvaluatorGuardrailID != "model-guard" {
+				t.Fatalf("passing classifier envelope mismatch: eval=%+v parent=%+v", secondEval, secondParent)
+			}
+		})
+	}
+}
+
+func TestModelGuardrailDeduplicationAuthorizationRecursionAndPlayground(t *testing.T) {
+	t.Parallel()
+	const cfg = `{"route":"judge","rule":{"pointer":"/blocked","equals":true,"category":"policy.decision"}}`
+
+	t.Run("deduplicates across candidate targets and skips recursion", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, Config{})
+		installModelGuardrailScenario(t, h, "decision_model", cfg, func(snapshot *routing.Snapshot, evalProvider *routing.Provider, evalRoute *routing.Route) {
+			mainRoute := snapshot.Routes[routeSlug]
+			mainRoute.Targets = []routing.Target{
+				mainRoute.Targets[0],
+				{ID: uuid.NewString(), RoutingID: uuid.NewString(), ProviderID: evalProvider.ID, ProviderModel: modelB, Priority: 1, Weight: 1, Timeout: 2000},
+			}
+			snapshot.Routes[routeSlug] = mainRoute
+			snapshot.Guardrails.Attachments = append(snapshot.Guardrails.Attachments, guardrails.Attachment{
+				ID: "eval-self-att", Scope: "route", ScopeID: evalRoute.ID, PolicyRevisionID: "eval-pol",
+			})
+		})
+		h.mock.set("b", completion(modelB, `{"blocked":false}`))
+		resp, _ := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"same input"}]`)
+		if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 1 {
+			t.Fatalf("deduplication/recursion failed: status=%d main=%d eval=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+		}
+	})
+
+	t.Run("refuses evaluator route forbidden to caller key", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, Config{})
+		installModelGuardrailScenario(t, h, "decision_model", cfg, func(_ *routing.Snapshot, _ *routing.Provider, _ *routing.Route) {})
+		restricted := h.rt.keys[fullKey]
+		restricted.Policy.AllowedRoutes = []string{routeSlug}
+		h.rt.keys["restricted-key"] = restricted
+		h.mock.set("b", completion(modelB, `{"blocked":false}`))
+		resp, _ := h.chat("restricted-key", nil, `,"messages":[{"role":"user","content":"hello"}]`)
+		if resp.StatusCode != http.StatusBadRequest || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+			t.Fatalf("forbidden evaluator route was not refused: status=%d main=%d eval=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+		}
+		envs := h.sink.await(t, 1)
+		if len(envs[0].GuardrailDecisions) != 1 || envs[0].GuardrailDecisions[0].Outcome != guardrails.FailedClosed {
+			t.Fatalf("expected failed_closed evidence, got %+v", envs[0].GuardrailDecisions)
+		}
+	})
+
+	t.Run("records playground origin for keyless guardrail evaluation", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, Config{})
+		installModelGuardrailScenario(t, h, "decision_model", cfg, func(_ *routing.Snapshot, _ *routing.Provider, _ *routing.Route) {})
+		h.mock.set("b", completion(modelB, `{"blocked":false}`))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://console.test/api/v1/guardrails/test", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal := authz.Principal{User: authz.User{ID: "member-1", Role: authz.RoleOwner}, AllProjects: true}
+		reg := h.rt.release.Snapshot().Clone().Guardrails
+		pinned := guardrails.Pinned{Policy: reg.Policies["eval-pol"], Definitions: reg.Definitions}
+		res, err := h.gateway.EvaluateGuardrails(req, principal, pinned, guardrails.Application{
+			PolicyRevisionID: "eval-pol", Phase: guardrails.Input, Segments: []guardrails.Segment{{ID: "s0", Text: "safe"}},
+		})
+		if err != nil || len(res.Decisions) != 1 || res.Decisions[0].Outcome != guardrails.Passed {
+			t.Fatalf("playground evaluation failed: res=%+v err=%v", res, err)
+		}
+		envs := h.sink.await(t, 2)
+		parent := findEnvelope(t, envs, "guardrails")
+		eval := findEnvelope(t, envs, "judge")
+		if eval.Origin != usage.OriginPlayground || eval.ParentRequestID != parent.AccountingID || eval.EvaluatorGuardrailID != "model-guard" || eval.UserID != "member-1" {
+			t.Fatalf("playground classifier envelope mismatch: eval=%+v parent=%+v", eval, parent)
+		}
+	})
 }

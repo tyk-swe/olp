@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/platform/panics"
@@ -13,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 )
 
@@ -72,8 +74,8 @@ func (s surface) runWebRTCControl(sess *webrtcSession) {
 			return
 		case <-reauth.C:
 			if e := s.webrtcAuthority(sess); e != nil {
-				if err := s.kernel.HangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-					s.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+				if err := s.hangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+					s.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 				}
 				s.settleWebRTC(sess, e)
 				sess.cancel()
@@ -88,8 +90,8 @@ func (s surface) runWebRTCControl(sess *webrtcSession) {
 				return
 			}
 		case <-sess.ctx.Done():
-			if err := s.kernel.HangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-				s.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+			if err := s.hangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+				s.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 			}
 			s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 			return
@@ -107,8 +109,8 @@ func (s surface) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	pending := sess.responses.Pending()
 	sess.usageMu.Unlock()
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
-		if err := s.kernel.HangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-			s.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		if err := s.hangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+			s.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 			s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 			sess.cancel()
 			return
@@ -118,14 +120,14 @@ func (s surface) finishWebRTCControl(sess *webrtcSession, readErr error) {
 		return
 	}
 	if errors.Is(sess.ctx.Err(), context.DeadlineExceeded) {
-		if err := s.kernel.HangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-			s.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		if err := s.hangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+			s.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 		}
 		s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 		return
 	}
-	if err := s.kernel.HangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-		s.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+	if err := s.hangupWebRTCCall(sess.ctx, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+		s.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 	}
 	s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 	sess.cancel()
@@ -134,7 +136,7 @@ func (s surface) finishWebRTCControl(sess *webrtcSession, readErr error) {
 func (s surface) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 	sess.settleOnce.Do(func() {
 		defer sess.admission.Release()
-		s.kernel.BeginWebRTCSettlement(sess.ctx, sess.x, sess.rejected, failure)
+		s.kernel.FinishSessionDebit(sess.ctx, sess.x, failure != nil && !sess.rejected)
 		if sess.conn != nil {
 			_ = sess.conn.CloseNow()
 		}
@@ -147,9 +149,24 @@ func (s surface) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		pending := sess.responses.Pending()
 		sess.usageMu.Unlock()
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
-		s.kernel.FinishWebRTCSettlement(settleCtx, sess.x, sess.p, observed, pending, sess.rejected, failure)
+		s.kernel.FinishObservedSession(settleCtx, sess.x, sess.p, observed, pending, sess.rejected, failure, sessionFailureClass(failure))
 		cancel()
 		s.calls.unregister(sess.id)
 		sess.cancel()
 	})
+}
+
+// sessionFailureClass classifies the session-ending failure for the attempt
+// evidence; a credential or timeout ending keeps its own class.
+func sessionFailureClass(f *fault.Error) string {
+	switch {
+	case f == nil:
+		return kernel.ClassProtocol
+	case f.Code == "key_revoked" || strings.HasPrefix(f.Code, "provider_credential_"):
+		return kernel.ClassCredential
+	case f.Code == "realtime_session_expired":
+		return kernel.ClassTimeout
+	default:
+		return kernel.ClassProtocol
+	}
 }

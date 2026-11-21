@@ -80,3 +80,65 @@ it('retires the ready plan when external credential bindings change', async () =
   );
   await vi.waitFor(() => expect(button('Apply')).toBeDefined());
 });
+
+it('ignores a deferred plan result after the artifact changed', async () => {
+  let release: (value: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => (release = resolve));
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/configuration/plan') return pending;
+      return json({});
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(ConfigurationPanel, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  const click = (name: string) => {
+    button(name)?.click();
+    flushSync();
+  };
+  const setArtifact = (id: string) => {
+    const field = target.querySelector<HTMLTextAreaElement>(
+      '#promotion-artifact'
+    );
+    if (!field) throw new Error('Missing artifact field');
+    field.value = JSON.stringify({
+      api_version: 'openllmproxy.dev/config/v2',
+      projects: [{ id }],
+      providers: [],
+      routes: [],
+      pricing: null
+    });
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+  flushSync();
+  setArtifact('first');
+  click('Plan');
+  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(true));
+  setArtifact('second');
+  release(
+    json({
+      digest: 'plan-digest',
+      actions: [],
+      blockers: [],
+      conflicts: []
+    })
+  );
+  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(false));
+  expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
+  expect(button('Apply')).toBeUndefined();
+  click('Plan');
+});
