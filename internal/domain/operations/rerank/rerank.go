@@ -3,6 +3,7 @@
 package rerank
 
 import (
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -148,11 +149,11 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		}
 	}
 	if top, present := root.Lookup(topName); present && !operations.Optional(top) {
-		value, ok := operations.Int(top)
-		if !ok || value < 1 || value > 1<<31 {
+		value, ok := operations.Position(top)
+		if !ok || value < 1 || value > math.MaxInt32 {
 			return r, operations.Invalid(topName, "Use a positive bounded native result count.")
 		}
-		r.top = int(value)
+		r.top = value
 	}
 	if value, present := root.Lookup(returnName); present {
 		if value.Kind() != oif.Boolean {
@@ -200,11 +201,11 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	}
 	seen := map[int]bool{}
 	for _, item := range items.Elements() {
-		index, ok := operations.Int(operations.Member(item, "index"))
-		if !ok || index < 0 || index >= int64(len(request.documents.Elements())) || seen[int(index)] {
+		index, ok := operations.Position(operations.Member(item, "index"))
+		if !ok || index >= len(request.documents.Elements()) || seen[index] {
 			return out, operations.Violation("/results/index", "document_identity")
 		}
-		seen[int(index)] = true
+		seen[index] = true
 		if !operations.Number(operations.Member(item, scoreName)) {
 			return out, operations.Violation("/results/score", "native_score")
 		}

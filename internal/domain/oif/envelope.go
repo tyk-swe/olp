@@ -116,47 +116,57 @@ func Apply(source Document, changes []Change) (Document, error) {
 	if len(changes) == 0 {
 		return source, nil
 	}
+	byPath, paths, err := indexChanges(source, changes)
+	if err != nil {
+		return Document{}, err
+	}
+	var out bytes.Buffer
+	renderOverlay(&out, source.Root(), "", byPath, paths)
+	return ParseJSON(out.Bytes(), source.Limits())
+}
+
+func indexChanges(source Document, changes []Change) (map[string]Change, []string, error) {
 	if len(changes) > source.Limits().MaxNodes {
-		return Document{}, errors.New("overlay exceeds node limit")
+		return nil, nil, errors.New("overlay exceeds node limit")
 	}
 	replacementBytes := 0
 	byPath := make(map[string]Change, len(changes))
 	for _, c := range changes {
 		if len(c.Value) > source.Limits().MaxBytes-replacementBytes {
-			return Document{}, errors.New("overlay exceeds byte limit")
+			return nil, nil, errors.New("overlay exceeds byte limit")
 		}
 		replacementBytes += len(c.Value)
 		if c.Origin == "" || c.Reason == "" {
-			return Document{}, errors.New("overlay requires provenance")
+			return nil, nil, errors.New("overlay requires provenance")
 		}
 		if _, ok := byPath[c.Pointer]; ok {
-			return Document{}, errors.New("duplicate overlay path")
+			return nil, nil, errors.New("duplicate overlay path")
 		}
 		if c.Pointer != "" {
 			i := strings.LastIndex(c.Pointer, "/")
 			if i < 0 {
-				return Document{}, errors.New("invalid overlay pointer")
+				return nil, nil, errors.New("invalid overlay pointer")
 			}
 			parent, ok := source.Lookup(c.Pointer[:i])
 			if !ok {
-				return Document{}, errors.New("overlay parent does not exist")
+				return nil, nil, errors.New("overlay parent does not exist")
 			}
 			_, exists := source.Lookup(c.Pointer)
 			if parent.Kind() != Object && (parent.Kind() != Array || !exists || c.Remove) {
-				return Document{}, errors.New("overlay would change array structure")
+				return nil, nil, errors.New("overlay would change array structure")
 			}
 			if c.Remove && !exists {
-				return Document{}, errors.New("overlay removal does not exist")
+				return nil, nil, errors.New("overlay removal does not exist")
 			}
 			if _, err := unescape(c.Pointer[i+1:]); err != nil {
-				return Document{}, err
+				return nil, nil, err
 			}
 		} else if c.Remove {
-			return Document{}, errors.New("cannot remove document")
+			return nil, nil, errors.New("cannot remove document")
 		}
 		if !c.Remove {
 			if _, err := ParseJSON([]byte(c.Value), source.Limits()); err != nil {
-				return Document{}, err
+				return nil, nil, err
 			}
 		}
 		byPath[c.Pointer] = c
@@ -171,75 +181,73 @@ func Apply(source Document, changes []Change) (Document, error) {
 	for _, p := range paths {
 		for i := strings.LastIndex(p, "/"); i >= 0; i = strings.LastIndex(p[:i], "/") {
 			if _, ok := byPath[p[:i]]; ok {
-				return Document{}, errors.New("overlapping overlay paths")
+				return nil, nil, errors.New("overlapping overlay paths")
 			}
 		}
 	}
-	var out bytes.Buffer
-	var render func(Value, string)
-	render = func(v Value, path string) {
-		if c, ok := byPath[path]; ok {
-			out.WriteString(c.Value)
-			return
+	return byPath, paths, nil
+}
+
+func renderOverlay(out *bytes.Buffer, v Value, path string, byPath map[string]Change, paths []string) {
+	if c, ok := byPath[path]; ok {
+		out.WriteString(c.Value)
+		return
+	}
+	changed := false
+	for _, p := range paths {
+		if strings.HasPrefix(p, path+"/") {
+			changed = true
+			break
 		}
-		changed := false
-		for _, p := range paths {
-			if strings.HasPrefix(p, path+"/") {
-				changed = true
-				break
-			}
-		}
-		if !changed {
-			out.WriteString(v.Raw())
-			return
-		}
-		if v.Kind() == Array {
-			out.WriteByte('[')
-			for i, child := range v.Elements() {
-				if i > 0 {
-					out.WriteByte(',')
-				}
-				render(child, Pointer(path, strconv.Itoa(i)))
-			}
-			out.WriteByte(']')
-			return
-		}
-		out.WriteByte('{')
-		first := true
-		seen := map[string]bool{}
-		write := func(name string, child Value) {
-			p := Pointer(path, name)
-			seen[p] = true
-			if c, ok := byPath[p]; ok && c.Remove {
-				return
-			}
-			if !first {
+	}
+	if !changed {
+		out.WriteString(v.Raw())
+		return
+	}
+	if v.Kind() == Array {
+		out.WriteByte('[')
+		for i, child := range v.Elements() {
+			if i > 0 {
 				out.WriteByte(',')
 			}
-			first = false
-			key, _ := json.Marshal(name)
-			out.Write(key)
-			out.WriteByte(':')
-			render(child, p)
+			renderOverlay(out, child, Pointer(path, strconv.Itoa(i)), byPath, paths)
 		}
-		for _, m := range v.Members() {
-			write(m.Name, m.Value)
-		}
-		for _, p := range paths {
-			if seen[p] || !strings.HasPrefix(p, path+"/") {
-				continue
-			}
-			rest := strings.TrimPrefix(p, path+"/")
-			if strings.Contains(rest, "/") {
-				continue
-			}
-			name, _ := unescape(rest)
-			write(name, Value{})
-		}
-		out.WriteByte('}')
+		out.WriteByte(']')
+		return
 	}
-	render(source.Root(), "")
-	return ParseJSON(out.Bytes(), source.Limits())
+	out.WriteByte('{')
+	first := true
+	seen := map[string]bool{}
+	write := func(name string, child Value) {
+		p := Pointer(path, name)
+		seen[p] = true
+		if c, ok := byPath[p]; ok && c.Remove {
+			return
+		}
+		if !first {
+			out.WriteByte(',')
+		}
+		first = false
+		key, _ := json.Marshal(name)
+		out.Write(key)
+		out.WriteByte(':')
+		renderOverlay(out, child, p, byPath, paths)
+	}
+	for _, m := range v.Members() {
+		write(m.Name, m.Value)
+	}
+	for _, p := range paths {
+		if seen[p] || !strings.HasPrefix(p, path+"/") {
+			continue
+		}
+		rest := strings.TrimPrefix(p, path+"/")
+		if strings.Contains(rest, "/") {
+			continue
+		}
+		name, _ := unescape(rest)
+		write(name, Value{})
+	}
+	out.WriteByte('}')
 }
 func unescape(s string) (string, error) {
 	for i := 0; i < len(s); i++ {

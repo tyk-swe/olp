@@ -186,9 +186,6 @@ type Evaluation struct {
 	Segments             []Segment `json:"segments"`
 	CompressionExemptIDs []string  `json:"-"`
 	WorkflowRecovery     bool      `json:"-"`
-	// LegacyInput is the strict native scalar view used only by migrated
-	// blocking input rules. It never changes the writable native surface.
-	LegacyInput []Segment `json:"-"`
 	// InternalModel prevents recursive evaluator invocations. It is not accepted
 	// from an HTTP caller and is set only by the gateway's evaluator runner.
 	InternalModel bool `json:"-"`

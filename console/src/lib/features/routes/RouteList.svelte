@@ -3,6 +3,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
 
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import { retiringTargets } from '#lib/features/routes/routeEditor.js';
@@ -30,7 +31,8 @@
   const access = useRole();
   const canManage = $derived(access.can('routes.manage'));
   const queryClient = useQueryClient();
-  let retiring = $state<string | null>(null);
+  const retireAction = useAction();
+  const retiring = $derived(retireAction.key || null);
   let retireError = $state<string | null>(null);
 
   const drafts = createQuery(() => {
@@ -61,19 +63,23 @@
       }))
     )
       return;
-    retiring = item.id;
     retireError = null;
-    try {
-      await retireRouteIntent.submit(
-        [item.id, item.etag] as const,
-        (input, requestId) => retireRoute(...input, requestId)
-      );
-      await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
-    } catch (error) {
-      retireError = `${item.slug}: ${errorMessage(error)}`;
-    } finally {
-      retiring = null;
-    }
+    await retireAction.run(
+      () =>
+        retireRouteIntent.submit(
+          [item.id, item.etag] as const,
+          (input, requestId) => retireRoute(...input, requestId)
+        ),
+      async (_, current) => {
+        await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
+        if (!current()) return;
+      },
+      {
+        key: item.id,
+        failure: (error) => `${item.slug}: ${errorMessage(error)}`
+      }
+    );
+    retireError = retireAction.error;
   }
 </script>
 

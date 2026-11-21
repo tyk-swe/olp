@@ -7,6 +7,7 @@
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { readResult } from '#lib/editing/result.js';
   import type { ApiKeySecret } from '#lib/features/access/api-keys/api.js';
   import { copyText } from '#lib/clipboard.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
@@ -99,16 +100,17 @@
     const route = routeSlug;
     testState = 'running';
     testMessage = '';
-    try {
-      await testSdkRequest(tested, secret.secret, route);
-      if (run !== testRun) return;
+    const result = await readResult(() =>
+      testSdkRequest(tested, secret.secret, route)
+    );
+    if (run !== testRun) return;
+    if (result.ok) {
       testState = 'passed';
       testMessage = `${sdkLabel(tested)} request succeeded through route ${route}.`;
-    } catch (error) {
-      if (run !== testRun) return;
-      testState = 'failed';
-      testMessage = errorMessage(error, 'The generated key test failed.');
+      return;
     }
+    testState = 'failed';
+    testMessage = errorMessage(result.error, 'The generated key test failed.');
   }
 </script>
 

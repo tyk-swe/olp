@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -27,9 +28,9 @@
     readiness: CreateQueryResult<Readiness>;
   } = $props();
 
-  let busyEpoch = $state('');
+  const epochAction = useAction();
+  const busyEpoch = $derived(epochAction.key);
   let epochNotice = $state('');
-  let epochError = $state('');
 
   async function acknowledgeEpoch(processEpoch: string, gateway: string) {
     if (
@@ -40,18 +41,20 @@
       }))
     )
       return;
-    busyEpoch = processEpoch;
-    epochError = '';
     epochNotice = '';
-    try {
-      await acknowledgeRequestMetadataGatewayEpoch(processEpoch);
-      epochNotice = `Epoch ${processEpoch} acknowledged. Historical completeness evidence remains retained.`;
-      await Promise.all([epochs.refetch(), readiness.refetch()]);
-    } catch (error) {
-      epochError = errorMessage(error, 'The epoch could not be acknowledged.');
-    } finally {
-      busyEpoch = '';
-    }
+    await epochAction.run(
+      () => acknowledgeRequestMetadataGatewayEpoch(processEpoch),
+      async (_, current) => {
+        epochNotice = `Epoch ${processEpoch} acknowledged. Historical completeness evidence remains retained.`;
+        await Promise.all([epochs.refetch(), readiness.refetch()]);
+        if (!current()) return;
+      },
+      {
+        key: processEpoch,
+        failure: (error) =>
+          errorMessage(error, 'The epoch could not be acknowledged.')
+      }
+    );
   }
 </script>
 
@@ -75,8 +78,8 @@
   {#if epochNotice}<Callout tone="success">
       {epochNotice}
     </Callout>{/if}
-  {#if epochError}<div class="inline-problem" role="alert">
-      {epochError}
+  {#if epochAction.error}<div class="inline-problem" role="alert">
+      {epochAction.error}
     </div>{/if}
   {#if epochs.isError}
     <div class="inline-problem" role="alert">

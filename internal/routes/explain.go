@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
-	"sync"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -15,9 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -124,19 +120,10 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
-	input := m.input
-	if key.id != "" {
-		for name := range input.Attribution {
-			if !slices.Contains(key.authority.Policy.AllowedAttributionKeys, name) && key.authority.Policy.AttributionDefaults[name] == "" && key.authority.ProjectAttributionPolicy.Defaults[name] == "" {
-				return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("attribution", "An attribution label is not allowed by the selected key.")
-			}
-		}
-	}
-	labels, err := key.authority.ResolveAttribution(input.Attribution)
+	input, err := resolveSimulationAttribution(m.input, &key)
 	if err != nil {
-		return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
+		return simulatedLeg{}, routing.Plan{}, false, err
 	}
-	key.authority.Attribution, input.Attribution = labels, labels
 	semantic, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
@@ -159,115 +146,8 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 		return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("request", "The workflow controls could not be processed.")
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
-	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
-	prepare := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
-	if unary != nil {
-		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
-	}
-	if !operationregistry.PolicyFor(input.Operation).BoundedWork {
-		prior := prepare
-		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
-		prepare = func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
-			costExempt := named.CallerCostExempt && provider.CredentialSource == "caller"
-			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug, costExempt) || routing.UnboundedWorkBudgeted(nil, nil, &named, costExempt) || routing.UnboundedWorkBudgeted(&provider, nil, &route, costExempt)
-			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
-				if eligibility != nil && slot.CredentialID != nil && eligibility(*slot.CredentialID) != routing.Eligible {
-					continue
-				}
-				budgeted = budgeted || routing.UnboundedWorkBudgeted(&provider, &slot, &route, costExempt)
-			}
-			if budgeted {
-				inspections[target.ID] = &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}
-				return nil, &inspectionDiagnostic{"unbounded_work_budget", "/limits", "bounded_provider_work", "Decisions cannot enforce token or cost budgets."}
-			}
-			if prior != nil {
-				return prior(provider, target)
-			}
-			return nil, nil
-		}
-	}
-	if mediaRequest != nil {
-		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
-	}
-	preferences := input.Preferences
-	if via != "" && preferences != nil {
-		// Like the gateway, a route the request moves to keeps the caller's
-		// narrowing but not its attempt count, which the named route spent.
-		copied := *preferences
-		copied.MaxAttempts = nil
-		preferences = &copied
-	}
-	now := m.now
-	options := routing.Options{
-		Region:  s.Region,
-		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
-		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
-		Prepare: prepare, Supply: m.supply, Unhealthy: m.unhealthy, Now: now,
-		// A simulation reports what each target could cost and applies the
-		// caller's cost ceiling to the same worst case.
-		EstimateCost: true,
-		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
-			if !operationregistry.PolicyFor(input.Operation).BoundedWork {
-				return rates.Cost{}, false
-			}
-			if provider.Commitment != nil {
-				return rates.Cost{}, true
-			}
-			if mediaRequest != nil {
-				seconds, video := mediaRequest.VideoSeconds()
-				if !video {
-					return rates.Cost{}, false
-				}
-				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
-			}
-			if input.Operation == "search" {
-				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
-			}
-			if counted.prompt != nil {
-				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
-				prepared, ok := counted.estimates[target.ID]
-				to := prepared.Estimate
-				if !ok {
-					to = from
-				}
-				if counted.output != nil {
-					from.Output, to.Output = counted.output, counted.output
-				}
-				if counted.prompt.Request().Family == wire.Completions && from.Output == nil && to.Output != nil {
-					from.Output = to.Output
-				}
-				output := max(from.Reply(), to.Reply())
-				return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
-			}
-			d := counted.fixed
-			if demand := counted.sourceDemand(); demand != nil {
-				d = demand(provider, target)
-			}
-			if d == nil {
-				return rates.Cost{}, false
-			}
-			output := int64(0)
-			if d.MaxOutputTokens != nil {
-				output = *d.MaxOutputTokens
-			} else if input.Operation == "generation" {
-				output = estimate.DefaultOutputTokens
-			}
-			return price.CostBound(d.EstimatedInputTokens, output, output > 0, now, discount)
-		},
-	}
-	if key.reason != "" {
-		options.Prepare = nil
-	}
-	if parsed != nil {
-		options.Parameters = sync.OnceValue(func() []string { return protocols.ParameterNames(parsed) })
-	}
-	if len(route.Selectors) > 0 {
-		options.Features = routing.DescribeRequest(input.Operation, parsed, counted.request())
-		options.Evaluate, options.Permitted = m.evaluate, m.permitted
-	}
-	if route.Shadowed() {
-		options.Mirror = []byte(input.Seed)
-	}
+	prepare, inspections := buildLegPrepare(m, named, route, key, eligibility, input, semantic, inspectionRequest, unary, mediaRequest, counted, workflow, workflowCapability)
+	options := s.buildLegOptions(m, route, key, eligibility, input, via, parsed, mediaRequest, counted, prepare)
 	plan, err := routing.Select(m.snapshot, slug, input.Operation, input.Surface, input.Mode, route.Affinity.Seed(input.Attribution, parsed, []byte(input.Seed)), options)
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
   import { createOwner } from '#lib/features/access/setup/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
@@ -25,8 +26,7 @@
     setupToken: ''
   });
   let errors = $state<OwnerFormErrors>({});
-  let submissionError = $state('');
-  let submitting = $state(false);
+  const action = useAction(undefined, 'authentication');
 
   const serverToFormField: Record<string, keyof OwnerFormValues> = {
     display_name: 'displayName',
@@ -45,42 +45,42 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    submissionError = '';
+    action.error = '';
     errors = validateOwner(values);
     if (Object.keys(errors).length) return;
 
     const installationName = values.installationName.trim();
-    submitting = true;
-    try {
-      await authLifecycle.authenticate((signal) =>
-        createOwner(
-          {
-            display_name: values.displayName.trim(),
-            // Omitted rather than sent blank: the API rejects an empty name and
-            // applies its own default when the field is absent.
-            ...(installationName
-              ? { installation_name: installationName }
-              : {}),
-            email: values.email.trim(),
-            password: values.password
-          },
-          values.setupToken,
-          signal
-        )
-      );
-      onComplete();
-    } catch (error) {
-      if (error instanceof ApiProblem) {
-        errors = applyServerFieldErrors(error, serverToFormField);
-        if (!Object.keys(errors).length)
-          submissionError = error.problem.detail ?? error.problem.title;
-      } else {
-        submissionError =
-          'The control API could not be reached. Check the service and try again.';
+    await action.run(
+      () =>
+        authLifecycle.authenticate((signal) =>
+          createOwner(
+            {
+              display_name: values.displayName.trim(),
+              // Omitted rather than sent blank: the API rejects an empty name and
+              // applies its own default when the field is absent.
+              ...(installationName
+                ? { installation_name: installationName }
+                : {}),
+              email: values.email.trim(),
+              password: values.password
+            },
+            values.setupToken,
+            signal
+          )
+        ),
+      () => onComplete(),
+      {
+        failure: (cause) => {
+          if (cause instanceof ApiProblem) {
+            errors = applyServerFieldErrors(cause, serverToFormField);
+            if (!Object.keys(errors).length)
+              return cause.problem.detail ?? cause.problem.title;
+            return '';
+          }
+          return 'The control API could not be reached. Check the service and try again.';
+        }
       }
-    } finally {
-      submitting = false;
-    }
+    );
   }
 
   onDestroy(() => authLifecycle.abortAuthenticationWork());
@@ -95,10 +95,10 @@
   </p>
 </div>
 
-{#if submissionError}
+{#if action.error}
   <div class="form-alert" role="alert" tabindex="-1">
     <strong>Setup could not continue</strong>
-    <span>{submissionError}</span>
+    <span>{action.error}</span>
   </div>
 {/if}
 
@@ -114,7 +114,7 @@
       bind:value={values.displayName}
       aria-invalid={errors.displayName ? 'true' : undefined}
       aria-describedby={describedBy('displayName')}
-      disabled={submitting}
+      disabled={action.busy}
     />
     {#if errors.displayName}<p class="field-error" id="displayName-error">
         {errors.displayName}
@@ -135,7 +135,7 @@
         'installationName',
         'installation-name-hint'
       )}
-      disabled={submitting}
+      disabled={action.busy}
     />
     <p class="field-hint" id="installation-name-hint">
       Names this deployment in the console. Leave blank to keep the default.
@@ -162,7 +162,7 @@
       bind:value={values.email}
       aria-invalid={errors.email ? 'true' : undefined}
       aria-describedby={describedBy('email')}
-      disabled={submitting}
+      disabled={action.busy}
     />
     {#if errors.email}<p class="field-error" id="email-error">
         {errors.email}
@@ -181,7 +181,7 @@
       bind:value={values.password}
       aria-invalid={errors.password ? 'true' : undefined}
       aria-describedby={describedBy('password', 'password-hint')}
-      disabled={submitting}
+      disabled={action.busy}
     />
     <p class="field-hint" id="password-hint">
       At least {PASSWORD_MIN_LENGTH} characters. A password manager is recommended.
@@ -201,7 +201,7 @@
       bind:value={values.confirmPassword}
       aria-invalid={errors.confirmPassword ? 'true' : undefined}
       aria-describedby={describedBy('confirmPassword')}
-      disabled={submitting}
+      disabled={action.busy}
     />
     {#if errors.confirmPassword}<p
         class="field-error"
@@ -222,7 +222,7 @@
       bind:value={values.setupToken}
       aria-invalid={errors.setupToken ? 'true' : undefined}
       aria-describedby={describedBy('setupToken', 'setup-token-hint')}
-      disabled={submitting}
+      disabled={action.busy}
     />
     <p class="field-hint" id="setup-token-hint">
       Print it on the server with <code>olp setup-token</code>. It is not saved
@@ -236,11 +236,11 @@
   <button
     class="button button-primary submit"
     type="submit"
-    disabled={submitting}
-    aria-busy={submitting}
+    disabled={action.busy}
+    aria-busy={action.busy}
   >
-    {submitting ? 'Creating owner…' : 'Create owner account'}
-    {#if !submitting}<NavIcon name="arrow" />{/if}
+    {action.busy ? 'Creating owner…' : 'Create owner account'}
+    {#if !action.busy}<NavIcon name="arrow" />{/if}
   </button>
 </form>
 

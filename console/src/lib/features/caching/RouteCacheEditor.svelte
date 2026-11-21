@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { listRoutes } from '#lib/features/routes/index.js';
   import type { RouteDraftEditorState } from '#lib/features/routes/index.js';
@@ -9,8 +11,9 @@
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const locked = $derived(!editor.canManage || Boolean(editor.busy));
   let status = $state<components['schemas']['CacheStatistics'] | null>(null);
+  const purgeAction = useAction();
+  let refreshing = $state(false);
   let problem = $state('');
-  let busy = $state(false);
 
   function setMode(mode: string) {
     editor.behavior.cache =
@@ -54,36 +57,36 @@
     editor.touch();
   }
   async function refresh() {
-    busy = true;
+    refreshing = true;
     problem = '';
-    try {
-      status = await cacheStatistics(editor.slug);
-    } catch (error) {
-      problem = errorMessage(error);
-    } finally {
-      busy = false;
-    }
+    const result = await readResult(() => cacheStatistics(editor.slug));
+    refreshing = false;
+    if (!result.ok) problem = errorMessage(result.error);
+    else status = result.value;
   }
   async function purge() {
-    busy = true;
     problem = '';
-    try {
-      const routes = await listRoutes();
-      const route = routes.find(
-        (item) =>
-          item.slug === editor.slug &&
-          (item.project_id ?? '') === editor.projectId
-      );
-      if (!route)
-        throw new Error('Publish this route before purging its cache.');
-      await purgeCache({ route_id: route.id });
-      notify('Cached responses for this route were invalidated.');
-      status = await cacheStatistics(editor.slug);
-    } catch (error) {
-      problem = errorMessage(error);
-    } finally {
-      busy = false;
-    }
+    await purgeAction.run(
+      async () => {
+        const routes = await listRoutes();
+        const route = routes.find(
+          (item) =>
+            item.slug === editor.slug &&
+            (item.project_id ?? '') === editor.projectId
+        );
+        if (!route)
+          throw new Error('Publish this route before purging its cache.');
+        await purgeCache({ route_id: route.id });
+        return cacheStatistics(editor.slug);
+      },
+      (statistics, current) => {
+        if (!current()) return;
+        notify('Cached responses for this route were invalidated.');
+        status = statistics;
+      },
+      { failure: (error) => errorMessage(error) }
+    );
+    problem = purgeAction.error;
   }
 </script>
 
@@ -287,12 +290,12 @@
     <button
       type="button"
       class="button button-secondary"
-      disabled={busy}
+      disabled={refreshing || purgeAction.busy}
       onclick={refresh}>Refresh cache statistics</button
     ><button
       type="button"
       class="button button-secondary"
-      disabled={locked || busy || editor.isNew}
+      disabled={locked || purgeAction.busy || editor.isNew}
       onclick={purge}>Purge cached responses</button
     >
   </div>

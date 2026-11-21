@@ -1,5 +1,8 @@
 <script lang="ts">
   import { notify } from '#lib/components/toasts.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
 
@@ -9,7 +12,6 @@
     listSessionPage,
     revokeSession
   } from '#lib/features/access/sessions/api.js';
-  import { errorMessage } from '#lib/management/http.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import {
     cursorPaginationProps,
@@ -19,8 +21,8 @@
   import { formatDate } from '#lib/format.js';
 
   const pagination = $state(emptyCursorHistory());
-  let revoking = $state('');
-  let error = $state('');
+  const revoke = useAction();
+  const exit = useAction(undefined, 'authentication');
 
   const sessions = createQuery(() => ({
     queryKey: profileKeys.sessions(pagination.cursor),
@@ -39,21 +41,23 @@
       }))
     )
       return;
-    revoking = id;
-    error = '';
-    try {
-      if (current) {
-        await authLifecycle.endCurrentSession((signal) => logout(signal));
-        return;
-      }
-      await revokeSession(id);
-      notify('Session revoked.');
-      await sessions.refetch();
-    } catch (cause) {
-      error = errorMessage(cause, 'The session could not be revoked.');
-    } finally {
-      revoking = '';
+    if (current) {
+      await exit.run(
+        () => authLifecycle.endCurrentSession((signal) => logout(signal)),
+        undefined,
+        { key: id }
+      );
+      return;
     }
+    await revoke.run(
+      () => revokeSession(id),
+      async (_value, active) => {
+        if (!active()) return;
+        notify('Session revoked.');
+        await sessions.refetch();
+      },
+      { key: id, fallback: 'The session could not be revoked.' }
+    );
   }
 </script>
 
@@ -72,19 +76,15 @@
     >
   </div>
 
-  {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-  {#if sessions.isPending}
-    <div class="loading-state" role="status">Loading sessions…</div>
-  {:else if sessions.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(sessions.error, 'Sessions are unavailable.')}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => sessions.refetch()}>Try again</button
-      >
-    </div>
-  {:else}
+  {#if revoke.error || exit.error}<div class="inline-problem" role="alert">
+      {revoke.error || exit.error}
+    </div>{/if}
+  <QueryView
+    query={sessions}
+    loading="Loading sessions…"
+    failure={errorMessage(sessions.error, 'Sessions are unavailable.')}
+    retryLabel="Try again"
+  >
     <div class="session-list">
       {#each sessions.data?.items ?? [] as session (session.id)}
         <article class="card session-row">
@@ -115,8 +115,8 @@
             class="button button-secondary"
             type="button"
             onclick={() => endSession(session.id, session.current)}
-            disabled={revoking === session.id}
-            >{revoking === session.id
+            disabled={revoke.key === session.id || exit.key === session.id}
+            >{revoke.key === session.id || exit.key === session.id
               ? 'Revoking…'
               : session.current
                 ? 'Sign out'
@@ -131,7 +131,7 @@
         label="Session pages"
       />
     {/if}
-  {/if}
+  </QueryView>
 </section>
 
 <style>

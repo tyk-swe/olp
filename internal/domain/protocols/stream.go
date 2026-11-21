@@ -5,15 +5,12 @@ import (
 	"errors"
 	"io"
 	"maps"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 var errStreamDone = errors.New("terminal native event")
@@ -105,6 +102,7 @@ func eventFrame(event string, v any) []byte {
 	}
 	return []byte(prefix + "data: " + string(raw(v)) + "\n\n")
 }
+
 func streamError(err error) error {
 	if errors.Is(err, sse.ErrEventTooLarge) {
 		return wire.ErrEventTooLarge
@@ -139,13 +137,186 @@ type contentBlock struct {
 	args strings.Builder
 }
 
+type anthropicStreamState struct {
+	c               *wire.Completion
+	limit           int
+	route           string
+	started         bool
+	sawMessageDelta bool
+	done            bool
+	blocks          map[int64]*contentBlock
+	next            int64
+	usage           Object
+	retained        int
+}
+
+func (st *anthropicStreamState) apply(kind string, f Object) error {
+	switch kind {
+	case "message_start":
+		return st.applyMessageStart(f)
+	case "content_block_start":
+		return st.applyBlockStart(f)
+	case "content_block_delta":
+		return st.applyBlockDelta(f)
+	case "content_block_stop":
+		index, ok := count(f["index"])
+		block := st.blocks[index]
+		if !ok || block == nil || st.sawMessageDelta {
+			return protocolError("stop outside an active content block")
+		}
+		if block.kind == "tool_use" && block.args.Len() != 0 {
+			if _, e := object([]byte(block.args.String())); e != nil {
+				return protocolError("incomplete tool arguments")
+			}
+		}
+		st.retained -= block.args.Len()
+		delete(st.blocks, index)
+	case "message_delta":
+		return st.applyMessageDelta(f)
+	case "message_stop":
+		if st.c.FinishReason == "" || len(st.blocks) > 0 {
+			return protocolError("message stopped before completion")
+		}
+		st.done = true
+		st.c.UsageComplete = st.c.Usage != nil
+	default:
+		if !st.started {
+			return protocolError("event before message start")
+		}
+	}
+	return nil
+}
+
+func (st *anthropicStreamState) applyMessageStart(f Object) error {
+	if st.started {
+		return protocolError("duplicate message start")
+	}
+	m, e := object(f["message"])
+	if e != nil || str(m["role"]) != "assistant" || str(m["type"]) != "message" {
+		return protocolError("invalid message start")
+	}
+	st.started = true
+	st.c.UpstreamID = str(m["id"])
+	st.c.ProviderModel = str(m["model"])
+	if u, e := optionalObject(m["usage"]); e != nil {
+		return e
+	} else {
+		maps.Copy(st.usage, u)
+	}
+	st.c.Usage, e = nativeUsage(st.usage, "anthropic")
+	if e != nil {
+		return e
+	}
+	m["model"] = raw(st.route)
+	f["message"] = raw(m)
+	return nil
+}
+
+func (st *anthropicStreamState) applyBlockStart(f Object) error {
+	index, ok := count(f["index"])
+	if !st.started || st.sawMessageDelta || !ok || index != st.next {
+		return protocolError("invalid content block start sequence")
+	}
+	if len(st.blocks) >= max(1, st.limit/32) {
+		return protocolError("too many active content blocks")
+	}
+	st.next++
+	block, e := object(f["content_block"])
+	if e != nil {
+		return protocolError("invalid content block")
+	}
+	kind := str(block["type"])
+	if kind == "tool_use" && (str(block["id"]) == "" || str(block["name"]) == "") {
+		return protocolError("incomplete tool start")
+	}
+	state := &contentBlock{kind: kind}
+	if kind == "tool_use" {
+		input, err := object(block["input"])
+		if err != nil {
+			return protocolError("invalid tool input")
+		}
+		if len(input) > 0 {
+			state.args.WriteString(string(block["input"]))
+			st.retained += state.args.Len()
+		}
+	} else if kind != "text" {
+		state.kind = ""
+	}
+	if st.retained > st.limit {
+		return wire.ErrEventTooLarge
+	}
+	st.blocks[index] = state
+	return nil
+}
+
+func (st *anthropicStreamState) applyBlockDelta(f Object) error {
+	index, ok := count(f["index"])
+	block := st.blocks[index]
+	if !st.started || st.sawMessageDelta || !ok || block == nil {
+		return protocolError("delta outside an active content block")
+	}
+	delta, e := object(f["delta"])
+	if e != nil {
+		return protocolError("invalid content delta")
+	}
+	switch str(delta["type"]) {
+	case "text_delta":
+		if block.kind != "text" {
+			return protocolError("text delta for non-text block")
+		}
+		var text string
+		if json.Unmarshal(delta["text"], &text) != nil {
+			return protocolError("invalid text delta")
+		}
+	case "input_json_delta":
+		if block.kind != "tool_use" {
+			return protocolError("tool delta for non-tool block")
+		}
+		var part string
+		if json.Unmarshal(delta["partial_json"], &part) != nil {
+			return protocolError("invalid tool delta")
+		}
+		if st.retained+len(part) > st.limit {
+			return wire.ErrEventTooLarge
+		}
+		st.retained += len(part)
+		block.args.WriteString(part)
+	}
+	return nil
+}
+
+func (st *anthropicStreamState) applyMessageDelta(f Object) error {
+	if !st.started || len(st.blocks) > 0 {
+		return protocolError("message delta before blocks finish")
+	}
+	delta, e := object(f["delta"])
+	if e != nil {
+		return protocolError("invalid message delta")
+	}
+	if reason := str(delta["stop_reason"]); reason != "" {
+		st.c.FinishReason = anthropicFinish(reason)
+	} else if present(delta["stop_reason"]) {
+		return protocolError("invalid stop reason")
+	}
+	u, e := optionalObject(f["usage"])
+	if e != nil {
+		return e
+	}
+	if !st.sawMessageDelta {
+		delete(st.usage, "output_tokens")
+	}
+	st.sawMessageDelta = true
+	for _, key := range [...]string{"input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "cache_creation", "server_tool_use"} {
+		if value, exists := u[key]; exists {
+			st.usage[key] = value
+		}
+	}
+	st.c.Usage, e = nativeUsage(st.usage, "anthropic")
+	return e
+}
+
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
-	c := &wire.Completion{}
-	started, sawMessageDelta, done := false, false, false
-	blocks := map[int64]*contentBlock{}
-	next := int64(0)
-	usage := Object{}
-	retained := 0
+	st := &anthropicStreamState{c: &wire.Completion{}, limit: limit, route: route, blocks: map[int64]*contentBlock{}, usage: Object{}}
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
 		event, e := openai.LiftSSE(wire.Anthropic, frame, sequence, limit)
@@ -169,165 +340,25 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 			}
 			return protocolError("invalid stream error")
 		}
-		switch kind {
-		case "ping":
+		if kind == "ping" {
 			return nil
-		case "message_start":
-			if started {
-				return protocolError("duplicate message start")
-			}
-			m, e := object(f["message"])
-			if e != nil || str(m["role"]) != "assistant" || str(m["type"]) != "message" {
-				return protocolError("invalid message start")
-			}
-			started = true
-			c.UpstreamID = str(m["id"])
-			c.ProviderModel = str(m["model"])
-			if u, e := optionalObject(m["usage"]); e != nil {
-				return e
-			} else {
-				maps.Copy(usage, u)
-			}
-			c.Usage, e = nativeUsage(usage, "anthropic")
-			if e != nil {
-				return e
-			}
-			m["model"] = raw(route)
-			f["message"] = raw(m)
-		case "content_block_start":
-			index, ok := count(f["index"])
-			if !started || sawMessageDelta || !ok || index != next {
-				return protocolError("invalid content block start sequence")
-			}
-			if len(blocks) >= max(1, limit/32) {
-				return protocolError("too many active content blocks")
-			}
-			next++
-			block, e := object(f["content_block"])
-			if e != nil {
-				return protocolError("invalid content block")
-			}
-			kind := str(block["type"])
-			if kind == "tool_use" && (str(block["id"]) == "" || str(block["name"]) == "") {
-				return protocolError("incomplete tool start")
-			}
-			state := &contentBlock{kind: kind}
-			if kind == "tool_use" {
-				input, err := object(block["input"])
-				if err != nil {
-					return protocolError("invalid tool input")
-				}
-				if len(input) > 0 {
-					state.args.WriteString(string(block["input"]))
-					retained += state.args.Len()
-				}
-			} else if kind != "text" {
-				state.kind = ""
-			}
-			if retained > limit {
-				return wire.ErrEventTooLarge
-			}
-			blocks[index] = state
-		case "content_block_delta":
-			index, ok := count(f["index"])
-			block := blocks[index]
-			if !started || sawMessageDelta || !ok || block == nil {
-				return protocolError("delta outside an active content block")
-			}
-			delta, e := object(f["delta"])
-			if e != nil {
-				return protocolError("invalid content delta")
-			}
-			switch str(delta["type"]) {
-			case "text_delta":
-				if block.kind != "text" {
-					return protocolError("text delta for non-text block")
-				}
-				var text string
-				if json.Unmarshal(delta["text"], &text) != nil {
-					return protocolError("invalid text delta")
-				}
-			case "input_json_delta":
-				if block.kind != "tool_use" {
-					return protocolError("tool delta for non-tool block")
-				}
-				var part string
-				if json.Unmarshal(delta["partial_json"], &part) != nil {
-					return protocolError("invalid tool delta")
-				}
-				if retained+len(part) > limit {
-					return wire.ErrEventTooLarge
-				}
-				retained += len(part)
-				block.args.WriteString(part)
-			}
-		case "content_block_stop":
-			index, ok := count(f["index"])
-			block := blocks[index]
-			if !ok || block == nil || sawMessageDelta {
-				return protocolError("stop outside an active content block")
-			}
-			if block.kind == "tool_use" && block.args.Len() != 0 {
-				if _, e := object([]byte(block.args.String())); e != nil {
-					return protocolError("incomplete tool arguments")
-				}
-			}
-			retained -= block.args.Len()
-			delete(blocks, index)
-		case "message_delta":
-			if !started || len(blocks) > 0 {
-				return protocolError("message delta before blocks finish")
-			}
-			delta, e := object(f["delta"])
-			if e != nil {
-				return protocolError("invalid message delta")
-			}
-			if reason := str(delta["stop_reason"]); reason != "" {
-				c.FinishReason = anthropicFinish(reason)
-			} else if present(delta["stop_reason"]) {
-				return protocolError("invalid stop reason")
-			}
-			u, e := optionalObject(f["usage"])
-			if e != nil {
-				return e
-			}
-			if !sawMessageDelta {
-				delete(usage, "output_tokens")
-			}
-			sawMessageDelta = true
-			for _, key := range [...]string{"input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "cache_creation", "server_tool_use"} {
-				if value, exists := u[key]; exists {
-					usage[key] = value
-				}
-			}
-			c.Usage, e = nativeUsage(usage, "anthropic")
-			if e != nil {
-				return e
-			}
-		case "message_stop":
-			if c.FinishReason == "" || len(blocks) > 0 {
-				return protocolError("message stopped before completion")
-			}
-			done = true
-			c.UsageComplete = c.Usage != nil
-		default:
-			if !started {
-				return protocolError("event before message start")
-			}
+		}
+		if err := st.apply(kind, f); err != nil {
+			return err
 		}
 		encoded = eventFrame(kind, f)
-		if done {
+		if st.done {
 			return errStreamDone
 		}
 		return nil
 	})
 	if err != nil && !errors.Is(err, errStreamDone) {
-		return c, streamError(err)
+		return st.c, streamError(err)
 	}
-	if !done {
-		return c, &wire.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
+	if !st.done {
+		return st.c, &wire.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
 	}
-	return c, nil
+	return st.c, nil
 }
 
 func streamGeminiEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error, expectedCandidates int64) (*wire.Completion, error) {
@@ -431,547 +462,4 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit wire.Emit, ob
 	}
 	c.UsageComplete = c.Usage != nil && usageAtFinish
 	return c, nil
-}
-
-type streamCall struct {
-	id, name  string
-	arguments strings.Builder
-}
-
-type streamTranslator struct {
-	source, target            wire.Format
-	route                     string
-	limit                     int
-	includeUsage              bool
-	emit                      wire.Emit
-	started                   bool
-	id                        string
-	text                      strings.Builder
-	calls                     map[int]*streamCall
-	responseTexts             map[int]*strings.Builder
-	responseRefusals          map[int]*strings.Builder
-	blocks                    map[int]int
-	textBlock                 *int
-	refusalBlock              *int
-	refusal                   strings.Builder
-	refused                   bool
-	sequence, nextBlock, size int
-	retained                  *int
-}
-
-func responseBuffer(buffers map[int]*strings.Builder, index int) *strings.Builder {
-	buffer := buffers[index]
-	if buffer == nil {
-		buffer = &strings.Builder{}
-		buffers[index] = buffer
-	}
-	return buffer
-}
-
-func (t *streamTranslator) send(event string, f Object) error {
-	if t.target == wire.Responses {
-		f["sequence_number"] = raw(t.sequence)
-		t.sequence++
-	}
-	return t.emit(eventFrame(event, f))
-}
-func (t *streamTranslator) start(id string) error {
-	if t.started {
-		return nil
-	}
-	t.started = true
-	t.id = id
-	if t.id == "" {
-		t.id = "olp_stream"
-	}
-	switch t.target {
-	case wire.Chat:
-		return t.chat(Object{"role": raw("assistant")}, nil, nil)
-	case wire.Anthropic:
-		return t.send("message_start", Object{"type": raw("message_start"), "message": raw(map[string]any{"id": t.id, "type": "message", "role": "assistant", "model": t.route, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": map[string]int{"input_tokens": 0, "output_tokens": 0}})})
-	case wire.Responses:
-		return t.send("response.created", Object{"type": raw("response.created"), "response": raw(map[string]any{"id": t.id, "object": "response", "created_at": 0, "status": "in_progress", "model": t.route, "output": []any{}})})
-	}
-	return nil
-}
-func (t *streamTranslator) reserve(n int) error {
-	used := &t.size
-	if t.retained != nil {
-		used = t.retained
-	}
-	*used += n
-	if *used > t.limit {
-		return wire.ErrEventTooLarge
-	}
-	return nil
-}
-func (t *streamTranslator) textDelta(text string) error {
-	if text == "" {
-		return nil
-	}
-	if e := t.start(""); e != nil {
-		return e
-	}
-	if t.source == wire.Responses && t.target != wire.Responses {
-		if err := t.reserve(len(text)); err != nil {
-			return err
-		}
-		t.text.WriteString(text)
-	}
-	switch t.target {
-	case wire.Chat:
-		return t.chat(Object{"content": raw(text)}, nil, nil)
-	case wire.Anthropic:
-		if t.textBlock == nil {
-			index := t.nextBlock
-			t.nextBlock++
-			t.textBlock = &index
-			if e := t.send("content_block_start", Object{"type": raw("content_block_start"), "index": raw(index), "content_block": raw(map[string]string{"type": "text", "text": ""})}); e != nil {
-				return e
-			}
-		}
-		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(*t.textBlock), "delta": raw(map[string]string{"type": "text_delta", "text": text})})
-	case wire.Responses:
-		if e := t.reserve(len(text)); e != nil {
-			return e
-		}
-		if t.textBlock == nil {
-			index := t.nextBlock
-			t.nextBlock++
-			t.textBlock = &index
-			if e := t.send("response.output_item.added", Object{"type": raw("response.output_item.added"), "output_index": raw(index), "item": raw(map[string]any{"id": "msg_" + t.id, "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}})}); e != nil {
-				return e
-			}
-			if e := t.send("response.content_part.added", Object{"type": raw("response.content_part.added"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "part": raw(map[string]any{"type": "output_text", "text": "", "annotations": []any{}})}); e != nil {
-				return e
-			}
-		}
-		t.text.WriteString(text)
-		return t.send("response.output_text.delta", Object{"type": raw("response.output_text.delta"), "item_id": raw("msg_" + t.id), "output_index": raw(*t.textBlock), "content_index": raw(0), "delta": raw(text)})
-	default:
-		return t.send("", Object{"responseId": raw(t.id), "modelVersion": raw(t.route), "candidates": raw([]any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": []any{map[string]string{"text": text}}}}})})
-	}
-}
-func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
-	if e := t.start(""); e != nil {
-		return e
-	}
-	call := t.calls[index]
-	fresh := call == nil
-	if fresh {
-		if e := t.reserve(64); e != nil {
-			return e
-		}
-		call = &streamCall{}
-		t.calls[index] = call
-	}
-	if id != "" {
-		call.id += id
-	}
-	if name != "" {
-		call.name += name
-	}
-	if e := t.reserve(len(args) + len(id) + len(name)); e != nil {
-		return e
-	}
-	call.arguments.WriteString(args)
-	if t.target == wire.Chat {
-		fun := Object{}
-		if name != "" {
-			fun["name"] = raw(name)
-		}
-		if args != "" {
-			fun["arguments"] = raw(args)
-		}
-		position, ok := t.blocks[index]
-		if !ok {
-			position = len(t.blocks)
-			t.blocks[index] = position
-		}
-		v := Object{"index": raw(position), "function": raw(fun)}
-		if id != "" {
-			v["id"] = raw(id)
-			v["type"] = raw("function")
-		}
-		return t.chat(Object{"tool_calls": raw([]Object{v})}, nil, nil)
-	}
-	if call.id == "" || call.name == "" || call.arguments.Len() == 0 {
-		return nil
-	}
-	block, opened := t.blocks[index]
-	partial := args
-	if !opened {
-		block = t.nextBlock
-		t.nextBlock++
-		t.blocks[index] = block
-		switch t.target {
-		case wire.Anthropic:
-			if e := t.send("content_block_start", Object{"type": raw("content_block_start"), "index": raw(block), "content_block": raw(map[string]any{"type": "tool_use", "id": call.id, "name": call.name, "input": map[string]any{}})}); e != nil {
-				return e
-			}
-		case wire.Responses:
-			if e := t.send("response.output_item.added", Object{"type": raw("response.output_item.added"), "output_index": raw(block), "item": raw(map[string]any{"type": "function_call", "id": "fc_" + call.id, "call_id": call.id, "name": call.name, "arguments": "", "status": "in_progress"})}); e != nil {
-				return e
-			}
-		}
-		partial = call.arguments.String()
-	}
-	if partial == "" {
-		return nil
-	}
-	switch t.target {
-	case wire.Anthropic:
-		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(block), "delta": raw(map[string]string{"type": "input_json_delta", "partial_json": partial})})
-	case wire.Responses:
-		return t.send("response.function_call_arguments.delta", Object{"type": raw("response.function_call_arguments.delta"), "item_id": raw("fc_" + call.id), "output_index": raw(block), "delta": raw(partial)})
-	}
-	return nil
-}
-func (t *streamTranslator) chat(delta Object, finish *string, usage *wire.Usage) error {
-	choices := []Object{}
-	if delta != nil || finish != nil {
-		choices = append(choices, Object{"index": raw(0), "delta": raw(delta), "finish_reason": raw(finish)})
-	}
-	f := Object{"id": raw(t.id), "object": raw("chat.completion.chunk"), "created": raw(0), "model": raw(t.route), "choices": raw(choices)}
-	if usage != nil {
-		f["usage"] = raw(chatUsage(usage))
-	}
-	return t.send("", f)
-}
-
-func (t *streamTranslator) responseToolSnapshot(index int, item Object) error {
-	if str(item["type"]) != "function_call" {
-		return nil
-	}
-	id, name, arguments := str(item["call_id"]), str(item["name"]), str(item["arguments"])
-	if id == "" || name == "" {
-		return protocolError("incomplete translated tool identity")
-	}
-	if _, err := object([]byte(arguments)); err != nil {
-		return protocolError("incomplete translated tool arguments")
-	}
-	call := t.calls[index]
-	if call == nil {
-		return t.toolDelta(index, id, name, arguments)
-	}
-	if call.id != id || call.name != name || !strings.HasPrefix(arguments, call.arguments.String()) {
-		return protocolError("translated tool snapshot disagrees with deltas")
-	}
-	return t.toolDelta(index, "", "", strings.TrimPrefix(arguments, call.arguments.String()))
-}
-
-func (t *streamTranslator) responseTextDelta(index int, text string) error {
-	responseBuffer(t.responseTexts, index).WriteString(text)
-	return t.textDelta(text)
-}
-
-func (t *streamTranslator) responseRefusalDelta(index int, text string) error {
-	responseBuffer(t.responseRefusals, index).WriteString(text)
-	return t.refusalDelta(text)
-}
-
-func (t *streamTranslator) responseMessageSnapshot(index int, item Object) error {
-	if str(item["type"]) != "message" {
-		return nil
-	}
-	content := func(kind, field string) string {
-		return strings.Join(slices.Collect(func(yield func(string) bool) {
-			for _, content := range arr(item["content"]) {
-				part, _ := object(content)
-				if str(part["type"]) == kind && !yield(str(part[field])) {
-					return
-				}
-			}
-		}), "")
-	}
-	text, refusal := content("output_text", "text"), content("refusal", "refusal")
-	texts, refusals := responseBuffer(t.responseTexts, index), responseBuffer(t.responseRefusals, index)
-	if !strings.HasPrefix(text, texts.String()) || !strings.HasPrefix(refusal, refusals.String()) {
-		return protocolError("Responses message snapshot disagrees with streamed deltas")
-	}
-	if err := t.responseTextDelta(index, text[texts.Len():]); err != nil {
-		return err
-	}
-	return t.responseRefusalDelta(index, refusal[refusals.Len():])
-}
-
-func (t *streamTranslator) frame(frame []byte) error {
-	return sse.Decode(strings.NewReader(string(frame)), max(t.limit, len(frame)), func(event sse.Frame) error {
-		if event.Data == "[DONE]" {
-			return nil
-		}
-		f, e := object([]byte(event.Data))
-		if e != nil {
-			return protocolError("invalid translated event")
-		}
-		switch t.source {
-		case wire.Chat:
-			if e := t.start(str(f["id"])); e != nil {
-				return e
-			}
-			for _, v := range arr(f["choices"]) {
-				choice, _ := object(v)
-				idx, _ := count(choice["index"])
-				if idx != 0 {
-					return protocolError("translation requires one candidate")
-				}
-				delta, _ := optionalObject(choice["delta"])
-				if e := t.refusalDelta(str(delta["refusal"])); e != nil {
-					return e
-				}
-				if e := t.textDelta(str(delta["content"])); e != nil {
-					return e
-				}
-				for _, v := range arr(delta["tool_calls"]) {
-					call, _ := object(v)
-					index, _ := count(call["index"])
-					fun, _ := optionalObject(call["function"])
-					if e := t.toolDelta(int(index), str(call["id"]), str(fun["name"]), str(fun["arguments"])); e != nil {
-						return e
-					}
-				}
-			}
-		case wire.Responses:
-			if response, e := optionalObject(f["response"]); e != nil {
-				return e
-			} else if response != nil {
-				if e := t.start(str(response["id"])); e != nil {
-					return e
-				}
-			}
-			switch str(f["type"]) {
-			case "response.function_call_arguments.done":
-				index, _ := count(f["output_index"])
-				call, present := t.calls[int(index)]
-				if !present {
-					return protocolError("Responses argument snapshot has no tool call")
-				}
-				return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.id), "name": raw(call.name), "arguments": f["arguments"]})
-			case "response.output_item.done":
-				item, _ := object(f["item"])
-				if t.target == wire.Anthropic || t.target == wire.Chat {
-					if err := validateResponsesItem(item); err != nil {
-						return err
-					}
-				}
-				index, _ := count(f["output_index"])
-				if err := t.responseToolSnapshot(int(index), item); err != nil {
-					return err
-				}
-				return t.responseMessageSnapshot(int(index), item)
-			case "response.completed", "response.incomplete":
-				response, _ := object(f["response"])
-				if t.target == wire.Anthropic || t.target == wire.Chat {
-					if err := validateResponsesOutput(response); err != nil {
-						return err
-					}
-				}
-				for index, value := range arr(response["output"]) {
-					item, _ := object(value)
-					if err := t.responseToolSnapshot(index, item); err != nil {
-						return err
-					}
-					if err := t.responseMessageSnapshot(index, item); err != nil {
-						return err
-					}
-				}
-				return nil
-			case "response.refusal.delta":
-				index, _ := count(f["output_index"])
-				return t.responseRefusalDelta(int(index), str(f["delta"]))
-			case "response.output_text.delta":
-				index, _ := count(f["output_index"])
-				return t.responseTextDelta(int(index), str(f["delta"]))
-			case "response.output_item.added":
-				item, _ := optionalObject(f["item"])
-				if t.target == wire.Anthropic || t.target == wire.Chat {
-					if err := validateResponsesItem(item); err != nil {
-						return err
-					}
-				}
-				if str(item["type"]) == "function_call" {
-					index, _ := count(f["output_index"])
-					return t.toolDelta(int(index), str(item["call_id"]), str(item["name"]), str(item["arguments"]))
-				}
-			case "response.function_call_arguments.delta":
-				index, _ := count(f["output_index"])
-				return t.toolDelta(int(index), "", "", str(f["delta"]))
-			}
-		case wire.Anthropic:
-			index, _ := count(f["index"])
-			switch str(f["type"]) {
-			case "message_start":
-				m, _ := object(f["message"])
-				return t.start(str(m["id"]))
-			case "content_block_start":
-				b, _ := object(f["content_block"])
-				switch str(b["type"]) {
-				case "text":
-					return t.textDelta(str(b["text"]))
-				case "tool_use":
-					input := ""
-					if value, err := object(b["input"]); err == nil && len(value) > 0 {
-						input = string(b["input"])
-					}
-					return t.toolDelta(int(index), str(b["id"]), str(b["name"]), input)
-				}
-			case "content_block_delta":
-				d, _ := object(f["delta"])
-				switch str(d["type"]) {
-				case "text_delta":
-					return t.textDelta(str(d["text"]))
-				case "input_json_delta":
-					return t.toolDelta(int(index), "", "", str(d["partial_json"]))
-				}
-			}
-		case wire.Gemini:
-			if e := t.start(str(f["responseId"])); e != nil {
-				return e
-			}
-			for _, v := range arr(f["candidates"]) {
-				candidate, _ := object(v)
-				index, _ := count(candidate["index"])
-				if index != 0 {
-					return protocolError("translation requires one candidate")
-				}
-				content, _ := optionalObject(candidate["content"])
-				for _, v := range arr(content["parts"]) {
-					part, _ := object(v)
-					var thought bool
-					_ = json.Unmarshal(part["thought"], &thought)
-					if !thought {
-						if e := t.textDelta(str(part["text"])); e != nil {
-							return e
-						}
-					}
-					if present(part["functionCall"]) {
-						call, _ := object(part["functionCall"])
-						index := len(t.calls)
-						id := str(call["id"])
-						if id == "" {
-							id = "call_" + strconv.Itoa(index)
-						}
-						if e := t.toolDelta(index, id, str(call["name"]), string(geminiArguments(call["args"]))); e != nil {
-							return e
-						}
-					}
-				}
-			}
-		case "bedrock":
-			return t.bedrockFrame(f)
-		}
-		return nil
-	})
-}
-func (t *streamTranslator) summary(c *wire.Completion) (*wire.Completion, error) {
-	summary := *c
-	summary.UpstreamID = t.id
-	summary.OutputText = t.text.String()
-	summary.Refusal = t.refusal.String()
-	if t.refused && summary.FinishReason == "stop" && t.target.Surface() != "openai" {
-		summary.FinishReason = "content_filter"
-	}
-	summary.ToolCalls = nil
-	for _, i := range slices.Sorted(maps.Keys(t.calls)) {
-		call := t.calls[i]
-		if call.id == "" || call.name == "" {
-			return nil, protocolError("incomplete translated tool call")
-		}
-		if call.arguments.Len() == 0 {
-			if err := t.toolDelta(i, "", "", "{}"); err != nil {
-				return nil, err
-			}
-		}
-		if _, e := object([]byte(call.arguments.String())); e != nil {
-			return nil, protocolError("incomplete translated tool arguments")
-		}
-		summary.ToolCalls = append(summary.ToolCalls, wire.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments.String()})
-	}
-	if len(summary.ToolCalls) > 0 && summary.FinishReason == "stop" {
-		summary.FinishReason = "tool_calls"
-	}
-	return &summary, nil
-}
-
-func (t *streamTranslator) finish(c *wire.Completion) error {
-	if e := t.start(c.UpstreamID); e != nil {
-		return e
-	}
-	summary, err := t.summary(c)
-	if err != nil {
-		return err
-	}
-	switch t.target {
-	case wire.Chat:
-		if e := t.chat(Object{}, &summary.FinishReason, nil); e != nil {
-			return e
-		}
-		if t.includeUsage && summary.Usage != nil {
-			if e := t.chat(nil, nil, summary.Usage); e != nil {
-				return e
-			}
-		}
-		return t.emit([]byte("data: [DONE]\n\n"))
-	case wire.Anthropic:
-		for i := 0; i < t.nextBlock; i++ {
-			if e := t.send("content_block_stop", Object{"type": raw("content_block_stop"), "index": raw(i)}); e != nil {
-				return e
-			}
-		}
-		reason := "end_turn"
-		switch summary.FinishReason {
-		case "tool_calls":
-			reason = "tool_use"
-		case "length":
-			reason = "max_tokens"
-		case "content_filter":
-			reason = "refusal"
-		}
-		f := Object{"type": raw("message_delta"), "delta": raw(map[string]any{"stop_reason": reason, "stop_sequence": nil})}
-		if summary.Usage != nil {
-			f["usage"] = raw(map[string]int64{"input_tokens": summary.Usage.InputTokens, "output_tokens": summary.Usage.OutputTokens})
-		}
-		if e := t.send("message_delta", f); e != nil {
-			return e
-		}
-		return t.send("message_stop", Object{"type": raw("message_stop")})
-	case wire.Responses:
-		output := make([]Object, t.nextBlock)
-		if t.textBlock != nil {
-			index := *t.textBlock
-			part := Object{"type": raw("output_text"), "text": raw(t.text.String()), "annotations": raw([]any{})}
-			if e := t.send("response.output_text.done", Object{"type": raw("response.output_text.done"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "text": raw(t.text.String())}); e != nil {
-				return e
-			}
-			if e := t.send("response.content_part.done", Object{"type": raw("response.content_part.done"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "part": raw(part)}); e != nil {
-				return e
-			}
-			output[index] = Object{"id": raw("msg_" + t.id), "type": raw("message"), "role": raw("assistant"), "status": raw("completed"), "content": raw([]Object{part})}
-		}
-		for _, i := range slices.Sorted(maps.Keys(t.calls)) {
-			call := t.calls[i]
-			index := t.blocks[i]
-			if e := t.send("response.function_call_arguments.done", Object{"type": raw("response.function_call_arguments.done"), "item_id": raw("fc_" + call.id), "output_index": raw(index), "arguments": raw(call.arguments.String())}); e != nil {
-				return e
-			}
-			output[index] = Object{"id": raw("fc_" + call.id), "type": raw("function_call"), "status": raw("completed"), "call_id": raw(call.id), "name": raw(call.name), "arguments": raw(call.arguments.String())}
-		}
-		if e := t.finishRefusal(output); e != nil {
-			return e
-		}
-		for i, item := range output {
-			if e := t.send("response.output_item.done", Object{"type": raw("response.output_item.done"), "output_index": raw(i), "item": raw(item)}); e != nil {
-				return e
-			}
-		}
-		f, _ := object(renderCompletion(summary, t.target, t.route))
-		f["output"] = raw(output)
-		kind := "response." + str(f["status"])
-		return t.send(kind, Object{"type": raw(kind), "response": raw(f)})
-	default:
-		summary.OutputText = ""
-		body := renderCompletion(summary, t.target, t.route)
-		f, _ := object(body)
-		return t.send("", f)
-	}
 }

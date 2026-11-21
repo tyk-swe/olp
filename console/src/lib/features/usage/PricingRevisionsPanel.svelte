@@ -1,19 +1,18 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { providerOptions } from '#lib/features/providers/index.js';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import PriceFields from './PriceFields.svelte';
+  import PricingRevisionForm from './PricingRevisionForm.svelte';
   import {
-    priceEntryFields,
-    type TierRow,
-    type ToolFeeRow,
-    type ContainerFeeRow,
-    type WindowPeriodRow
+    emptyPriceFields,
+    hasAnyPrice,
+    priceRevisionDraft,
+    type PricingRevisionFormValues,
+    extraComponents
   } from './priceEntry';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
@@ -30,50 +29,11 @@
     listProviderVendors,
     providerKeys
   } from '#lib/features/providers/index.js';
-  import type { ProviderKind } from '#lib/features/providers/index.js';
-  import { operationKinds } from './history/api';
-  import {
-    createPricingRevision,
-    listPricing,
-    type PriceDraft,
-    type PricingRevision
-  } from './pricing';
+
+  import { createPricingRevision, listPricing } from './pricing';
   import { pricingKeys } from './pricingKeys';
 
-  const createIntent = useMutationIntent();
-
-  // One compact line for the components beyond the per-million table columns.
-  function extraComponents(price: PricingRevision['prices'][number]): string {
-    const parts: string[] = [];
-    for (const [key, label] of [
-      ['audio_input_per_million', 'audio in'],
-      ['cached_audio_input_per_million', 'cached audio'],
-      ['audio_output_per_million', 'audio out'],
-      ['image_input_per_million', 'image in'],
-      ['cached_image_input_per_million', 'cached image'],
-      ['image_output_per_million', 'image out'],
-      ['training_per_million', 'training / million'],
-      ['storage_per_gib_day', 'storage / GiB-day'],
-      [
-        'cache_storage_per_million_token_hour',
-        'cache storage / million token-hours'
-      ],
-      ['per_request', 'per request'],
-      ['batch_multiplier', 'batch']
-    ] as const) {
-      if ((price as Record<string, unknown>)[key] != null)
-        parts.push(`${label} ${(price as Record<string, unknown>)[key]}`);
-    }
-    if (price.tool_calls && Object.keys(price.tool_calls).length)
-      parts.push(`tools ${Object.keys(price.tool_calls).join(', ')}`);
-    if (price.container_per_session)
-      for (const [tier, fee] of Object.entries(price.container_per_session))
-        parts.push(`container ${tier} / session ${fee}`);
-    if (price.tiers?.length) parts.push(`${price.tiers.length} tiers`);
-    if (price.windows?.time_zone)
-      parts.push(`windows ${price.windows.time_zone}`);
-    return parts.join(' · ');
-  }
+  const create = useMutation();
 
   let problem = $state('');
   function onFeedback(feedback: { status: string; error: string }) {
@@ -85,44 +45,22 @@
   const services = useServiceCapabilities();
   const access = useRole();
   const canEditPricing = $derived(access.can('pricing.update'));
-  let providerKind = $state<ProviderKind | null>(null);
-  let providerId = $state('');
-  let vendorId = $state('');
-  const providerVendors = createQuery(() => ({
-    queryKey: providerKeys.vendors(),
-    enabled: services.gatewayAvailable,
-    queryFn: () => listProviderVendors()
-  }));
-  let model = $state('');
-  let operation = $state<(typeof operationKinds)[number]>('generation');
-  let inputPrice = $state('');
-  let cachedInputPrice = $state('');
-  let cacheWritePrice = $state('');
-  let cacheWrite5mPrice = $state('');
-  let cacheWrite1hPrice = $state('');
-  let outputPrice = $state('');
-  let unitPrice = $state('');
-  let audioInputPrice = $state('');
-  let cachedAudioInputPrice = $state('');
-  let audioOutputPrice = $state('');
-  let imageInputPrice = $state('');
-  let cachedImageInputPrice = $state('');
-  let imageOutputPrice = $state('');
-  let perRequestPrice = $state('');
-  let trainingPrice = $state('');
-  let storagePrice = $state('');
-  let cacheStoragePrice = $state('');
-  let containerFees = $state<ContainerFeeRow[]>([]);
-  let batchMultiplier = $state('');
-  let toolFees = $state<ToolFeeRow[]>([]);
-  let tiers = $state<TierRow[]>([]);
-  let windowZone = $state('');
-  let windowPeriods = $state<WindowPeriodRow[]>([]);
-  let currency = $state('USD');
-  let effectiveAt = $state(dateTimeLocalValue(new Date()));
-  let savingPrice = $state(false);
+  const form = $state<PricingRevisionFormValues>({
+    providerKind: null,
+    vendorId: '',
+    providerId: '',
+    model: '',
+    operation: 'generation',
+    currency: 'USD',
+    effectiveAt: dateTimeLocalValue(new Date()),
+    ...emptyPriceFields()
+  });
   const pricingPagination = $state(emptyCursorHistory());
 
+  const providerVendors = createQuery(() => ({
+    queryKey: providerKeys.vendors(),
+    queryFn: () => listProviderVendors()
+  }));
   const providerKinds = createQuery(() => ({
     queryKey: providerKeys.kinds(),
     enabled: services.gatewayAvailable,
@@ -130,8 +68,8 @@
   }));
 
   $effect(() => {
-    if (!providerKind && providerKinds.data?.[0])
-      providerKind = providerKinds.data[0].kind;
+    if (!form.providerKind && providerKinds.data?.[0])
+      form.providerKind = providerKinds.data[0].kind;
   });
 
   const pricing = createQuery(() => {
@@ -146,140 +84,107 @@
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEditPricing || savingPrice) return;
+    if (!canEditPricing || create.busy) return;
     onFeedback({ status: '', error: '' });
-    if (!providerKind || !model.trim() || !operation.trim()) {
+    if (!form.providerKind || !form.model.trim() || !form.operation.trim()) {
       onFeedback({
         status: '',
         error: 'Provider kind, model, and operation are required.'
       });
       return;
     }
-    const submitted = {
-      providerKind,
-      vendorId,
-      providerId,
-      model,
-      operation,
-      inputPrice,
-      cachedInputPrice,
-      cacheWritePrice,
-      cacheWrite5mPrice,
-      cacheWrite1hPrice,
-      outputPrice,
-      unitPrice,
-      audioInputPrice,
-      cachedAudioInputPrice,
-      audioOutputPrice,
-      imageInputPrice,
-      cachedImageInputPrice,
-      imageOutputPrice,
-      perRequestPrice,
-      trainingPrice,
-      storagePrice,
-      cacheStoragePrice,
-      containerFees,
-      batchMultiplier,
-      toolFees,
-      tiers,
-      windowZone,
-      windowPeriods,
-      currency,
-      effectiveAt
-    };
-    savingPrice = true;
-    let committed = false;
-    try {
-      const price: PriceDraft = {
-        provider_kind: submitted.providerKind,
-        vendor_id: submitted.vendorId || null,
-        provider_id: submitted.providerId || null,
-        model: submitted.model.trim(),
-        operation: submitted.operation,
-        ...priceEntryFields(submitted),
-        currency: submitted.currency.trim().toUpperCase()
-      };
-      if (
-        !price.input_per_million &&
-        !price.output_per_million &&
-        !price.unit_price &&
-        !price.per_request &&
-        !price.training_per_million &&
-        !price.storage_per_gib_day &&
-        !price.cache_storage_per_million_token_hour &&
-        !price.container_per_session &&
-        !price.audio_input_per_million &&
-        !price.audio_output_per_million &&
-        !price.image_input_per_million &&
-        !price.image_output_per_million &&
-        !price.tool_calls
-      )
-        throw new Error('Enter at least one price.');
-      const submission = createIntent.prepare({
+    const submitted = { ...form };
+    const prepared = captureResult(() => {
+      const price = priceRevisionDraft(submitted);
+      if (!hasAnyPrice(price)) throw new Error('Enter at least one price.');
+      return {
         effectiveAt: new Date(submitted.effectiveAt).toISOString(),
         prices: [price]
-      });
-      await createPricingRevision(
-        submission.input.effectiveAt,
-        submission.input.prices,
-        submission.requestId
-      );
-      createIntent.reset();
-      committed = true;
+      };
+    });
+    if (!prepared.ok) {
       onFeedback({
-        status:
-          'Pricing revision created. New usage will use the effective revision.',
-        error: ''
+        status: '',
+        error: errorMessage(
+          prepared.error,
+          'The pricing revision could not be created.'
+        )
       });
-      if (model === submitted.model) model = '';
-      if (inputPrice === submitted.inputPrice) inputPrice = '';
-      if (cachedInputPrice === submitted.cachedInputPrice)
-        cachedInputPrice = '';
-      if (cacheWritePrice === submitted.cacheWritePrice) cacheWritePrice = '';
-      if (cacheWrite5mPrice === submitted.cacheWrite5mPrice)
-        cacheWrite5mPrice = '';
-      if (cacheWrite1hPrice === submitted.cacheWrite1hPrice)
-        cacheWrite1hPrice = '';
-      if (outputPrice === submitted.outputPrice) outputPrice = '';
-      if (unitPrice === submitted.unitPrice) unitPrice = '';
-      if (audioInputPrice === submitted.audioInputPrice) audioInputPrice = '';
-      if (cachedAudioInputPrice === submitted.cachedAudioInputPrice)
-        cachedAudioInputPrice = '';
-      if (audioOutputPrice === submitted.audioOutputPrice)
-        audioOutputPrice = '';
-      if (imageInputPrice === submitted.imageInputPrice) imageInputPrice = '';
-      if (cachedImageInputPrice === submitted.cachedImageInputPrice)
-        cachedImageInputPrice = '';
-      if (imageOutputPrice === submitted.imageOutputPrice)
-        imageOutputPrice = '';
-      if (perRequestPrice === submitted.perRequestPrice) perRequestPrice = '';
-      if (trainingPrice === submitted.trainingPrice) trainingPrice = '';
-      if (storagePrice === submitted.storagePrice) storagePrice = '';
-      if (cacheStoragePrice === submitted.cacheStoragePrice)
-        cacheStoragePrice = '';
-      containerFees = [];
-      if (batchMultiplier === submitted.batchMultiplier) batchMultiplier = '';
-      toolFees = [];
-      tiers = [];
-      windowZone = '';
-      windowPeriods = [];
-      if (providerId === submitted.providerId) providerId = '';
-      if (effectiveAt === submitted.effectiveAt)
-        effectiveAt = dateTimeLocalValue(new Date());
-      resetCursor(pricingPagination);
-      // The query observes the first page only once its options update, so
-      // mark every cached page stale rather than refetching the current one.
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.pages() });
-    } catch (cause) {
-      onFeedback({
-        status: committed ? 'Pricing revision created.' : '',
-        error: committed
-          ? `Pricing revision created, but refreshing failed. ${errorMessage(cause)}`
-          : errorMessage(cause, 'The pricing revision could not be created.')
-      });
-    } finally {
-      savingPrice = false;
+      return;
     }
+    await create.submit(
+      prepared.value,
+      (input, requestId) =>
+        createPricingRevision(input.effectiveAt, input.prices, requestId),
+      async () => {
+        onFeedback({
+          status:
+            'Pricing revision created. New usage will use the effective revision.',
+          error: ''
+        });
+        if (form.model === submitted.model) form.model = '';
+        if (form.inputPrice === submitted.inputPrice) form.inputPrice = '';
+        if (form.cachedInputPrice === submitted.cachedInputPrice)
+          form.cachedInputPrice = '';
+        if (form.cacheWritePrice === submitted.cacheWritePrice)
+          form.cacheWritePrice = '';
+        if (form.cacheWrite5mPrice === submitted.cacheWrite5mPrice)
+          form.cacheWrite5mPrice = '';
+        if (form.cacheWrite1hPrice === submitted.cacheWrite1hPrice)
+          form.cacheWrite1hPrice = '';
+        if (form.outputPrice === submitted.outputPrice) form.outputPrice = '';
+        if (form.unitPrice === submitted.unitPrice) form.unitPrice = '';
+        if (form.audioInputPrice === submitted.audioInputPrice)
+          form.audioInputPrice = '';
+        if (form.cachedAudioInputPrice === submitted.cachedAudioInputPrice)
+          form.cachedAudioInputPrice = '';
+        if (form.audioOutputPrice === submitted.audioOutputPrice)
+          form.audioOutputPrice = '';
+        if (form.imageInputPrice === submitted.imageInputPrice)
+          form.imageInputPrice = '';
+        if (form.cachedImageInputPrice === submitted.cachedImageInputPrice)
+          form.cachedImageInputPrice = '';
+        if (form.imageOutputPrice === submitted.imageOutputPrice)
+          form.imageOutputPrice = '';
+        if (form.perRequestPrice === submitted.perRequestPrice)
+          form.perRequestPrice = '';
+        if (form.trainingPrice === submitted.trainingPrice)
+          form.trainingPrice = '';
+        if (form.storagePrice === submitted.storagePrice)
+          form.storagePrice = '';
+        if (form.cacheStoragePrice === submitted.cacheStoragePrice)
+          form.cacheStoragePrice = '';
+        form.containerFees = [];
+        if (form.batchMultiplier === submitted.batchMultiplier)
+          form.batchMultiplier = '';
+        form.toolFees = [];
+        form.tiers = [];
+        form.windowZone = '';
+        form.windowPeriods = [];
+        if (form.providerId === submitted.providerId) form.providerId = '';
+        if (form.effectiveAt === submitted.effectiveAt)
+          form.effectiveAt = dateTimeLocalValue(new Date());
+        resetCursor(pricingPagination);
+        // The query observes the first page only once its options update, so
+        // mark every cached page stale rather than refetching the current one.
+        await queryClient.invalidateQueries({ queryKey: pricingKeys.pages() });
+      },
+      {
+        failure: (cause, stage) => {
+          onFeedback({
+            status: stage === 'accept' ? 'Pricing revision created.' : '',
+            error:
+              stage === 'accept'
+                ? `Pricing revision created, but refreshing failed. ${errorMessage(cause)}`
+                : errorMessage(
+                    cause,
+                    'The pricing revision could not be created.'
+                  )
+          });
+          return '';
+        }
+      }
+    );
   }
 </script>
 
@@ -299,124 +204,17 @@
         >Your role can view pricing revisions but not create them.</ReadOnlyNote
       >{/if}
     {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
-    <form class="card price-form" onsubmit={addPricing}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="provider-kind">Provider kind</label><select
-            id="provider-kind"
-            bind:value={providerKind}
-            onchange={() => {
-              vendorId = '';
-            }}
-            disabled={!canEditPricing ||
-              providerKinds.isPending ||
-              providerKinds.isError}
-            >{#each providerKinds.data ?? [] as option (option.kind)}<option
-                value={option.kind}>{option.label}</option
-              >{/each}</select
-          >{#if providerKinds.isPending}<small
-              >Loading provider capabilities…</small
-            >{:else if providerKinds.isError}<small class="inline-problem"
-              >Provider capabilities are unavailable; pricing changes are
-              disabled.</small
-            >{/if}
-        </div>
-        <div class="form-field">
-          <label for="price-vendor">Vendor scope</label><select
-            id="price-vendor"
-            bind:value={vendorId}
-            disabled={!canEditPricing}
-            ><option value="">All vendors using this connector</option
-            >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
-                value={vendor.id}>{vendor.name}</option
-              >{/each}</select
-          >
-        </div>
-        <div class="form-field">
-          <label for="provider-id">Only for provider</label><EntityPicker
-            id="provider-id"
-            source={providerOptions}
-            bind:value={providerId}
-            emptyLabel="Every provider of this kind"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="price-model">Upstream model</label><input
-            id="price-model"
-            bind:value={model}
-            required
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="price-operation">Operation</label><select
-            id="price-operation"
-            bind:value={operation}
-            disabled={!canEditPricing}
-            >{#each operationKinds as option (option)}<option value={option}
-                >{option}</option
-              >{/each}</select
-          >
-        </div>
-        <PriceFields
-          idPrefix="price"
-          canEdit={canEditPricing}
-          bind:inputPrice
-          bind:cachedInputPrice
-          bind:cacheWritePrice
-          bind:cacheWrite5mPrice
-          bind:cacheWrite1hPrice
-          bind:outputPrice
-          bind:unitPrice
-          bind:audioInputPrice
-          bind:cachedAudioInputPrice
-          bind:audioOutputPrice
-          bind:imageInputPrice
-          bind:cachedImageInputPrice
-          bind:imageOutputPrice
-          bind:perRequestPrice
-          bind:trainingPrice
-          bind:storagePrice
-          bind:cacheStoragePrice
-          bind:containerFees
-          bind:batchMultiplier
-          bind:toolFees
-          bind:tiers
-          bind:windowZone
-          bind:windowPeriods
-        />
-        <div class="form-field full">
-          <label for="currency">Currency</label><input
-            id="currency"
-            bind:value={currency}
-            maxlength="3"
-            required
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field full">
-          <label for="effective-at">Effective at</label><input
-            id="effective-at"
-            bind:value={effectiveAt}
-            type="datetime-local"
-            required
-            disabled={!canEditPricing}
-          />
-        </div>
-      </div>
-
-      <button
-        class="button button-primary"
-        type="submit"
-        disabled={!canEditPricing ||
-          !services.limitsEnforced ||
-          savingPrice ||
-          !providerKind ||
-          providerKinds.isError}
-        >{savingPrice ? 'Creating…' : 'Create pricing revision'}</button
-      >
-    </form>
+    <PricingRevisionForm
+      {form}
+      canEdit={canEditPricing}
+      busy={create.busy}
+      limitsEnforced={services.limitsEnforced}
+      kindsPending={providerKinds.isPending}
+      kindsError={providerKinds.isError}
+      kinds={providerKinds.data ?? []}
+      vendors={providerVendors.data ?? []}
+      onSubmit={addPricing}
+    />
 
     {#if services.pending}<div class="loading-state" role="status">
         Loading installation capabilities…
@@ -546,17 +344,6 @@
     color: var(--foreground-muted);
     line-height: 1.5;
   }
-  .price-form {
-    padding: 1.5rem;
-  }
-  .price-form .button {
-    margin-top: 1rem;
-  }
-  .form-field small {
-    display: block;
-    margin-top: 0.25rem;
-    font-size: var(--text-caption);
-  }
   summary .mono {
     font-size: var(--text-caption);
     overflow-wrap: anywhere;
@@ -594,10 +381,5 @@
   summary small,
   td small {
     color: var(--foreground-muted);
-  }
-  @media (max-width: 36rem) {
-    .price-form {
-      padding: 1rem;
-    }
   }
 </style>

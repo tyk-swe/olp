@@ -127,27 +127,9 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if ctx.ClientContract != "" && ctx.ClientContract != operations.RawVectorClient {
 		return nil, fail("state_carrier", "/client_contract", "registered_client_contract", "The requested client contract is not registered.")
 	}
-	sourceCodec, ok := operationregistry.Lookup(source.Descriptor().Dialect.ID)
-	if !ok || sourceCodec.Identity != source.Descriptor().Dialect || source.Descriptor().Operation != t.codec.Operation {
-		return nil, fail("target_capability", "/operation", "matching_operation", "Source and target operation contracts differ.")
-	}
-	if len(source.Provenance()) != 0 {
-		return nil, fail("policy_conflict", "/request", "source_identity", "Strict operations require the original caller source.")
-	}
-	if sourceCodec.ValidateRoute != nil {
-		if err := sourceCodec.ValidateRoute(source, ctx.Route); err != nil {
-			return nil, err
-		}
-	}
-	sourceView, err := sourceCodec.Request(source)
+	sourceCodec, sourceView, err := t.validateSource(source, ctx)
 	if err != nil {
 		return nil, err
-	}
-	if model := operations.Member(source.Document().Root(), "model"); model.Kind() != oif.Absent {
-		text, ok := model.Text()
-		if !ok || strings.TrimPrefix(text, "models/") != strings.TrimPrefix(ctx.Route, "models/") {
-			return nil, fail("resource_affinity", "/model", "route_identity", "The native model must agree with the selected route.")
-		}
 	}
 	config, semantic, err := t.bindSemantic(ctx, sourceCodec.Identity == t.codec.Identity)
 	if err != nil {
@@ -172,46 +154,9 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	descriptor := source.Descriptor()
 	descriptor.Dialect = t.codec.Identity
 	descriptor.Profile = oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision}
-	effective, _ := oif.NewRequest(descriptor, document)
-	changes := []oif.Change{}
-	dispositions := []oif.Disposition{{Field: "/request", Disposition: "preserved", Rule: "native_source_identity", Evidence: t.codec.Evidence}}
-	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
-		if _, present := document.Root().Lookup(name); present {
-			continue
-		}
-		origin := oif.ProviderDefault
-		rule := "provider_default"
-		for _, p := range t.origins {
-			if p.Pointer == operations.Pointer("", name) {
-				rule = p.Source
-				if strings.HasPrefix(rule, "binding_default") {
-					origin = oif.ModelDefault
-				}
-				break
-			}
-		}
-		changes = append(changes, oif.Change{Pointer: operations.Pointer("", name), Value: string(t.defaults[name]), Origin: origin, Reason: "declared absent-only operation default"})
-		dispositions = append(dispositions, oif.Disposition{Field: operations.Pointer("", name), Disposition: "introduced", Rule: rule, Evidence: t.codec.Evidence})
-	}
-	effective, err = effective.WithChanges(changes...)
+	effective, dispositions, err := t.effectiveRequest(descriptor, document)
 	if err != nil {
 		return nil, err
-	}
-	// Model hooks return only identity changes. The codec owns nested model paths.
-	if t.codec.BindModel != nil {
-		bound, err := t.codec.BindModel(effective.Document(), t.serving.Model)
-		if err != nil {
-			return nil, err
-		}
-		for _, change := range bound {
-			if change.Origin != oif.IdentityBinding || change.Remove {
-				return nil, fail("target_capability", "/model", "identity_binding", "The registered model overlay is invalid.")
-			}
-		}
-		effective, err = effective.WithChanges(bound...)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if mapping != nil && mapping.ValidateEffective != nil {
 		if err := mapping.ValidateEffective(source, effective); err != nil {
@@ -230,29 +175,9 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if t.codec.FetchedDocument != nil && t.codec.FetchedDocument(effective) && !t.config.AllowProviderFetchedDocuments {
 		return nil, fail("content_egress", "/document", "provider_fetched_documents", "This route does not allow the provider to fetch document URLs. Enable provider-fetched documents on the route or send the document inline.")
 	}
-	var query url.Values
-	var wireBody []byte
-	switch t.codec.Transport.Normalized() {
-	case operations.TransportGetQuery:
-		query, err = t.codec.Query(effective)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateQuery(query); err != nil {
-			return nil, err
-		}
-	case operations.TransportPoll202:
-		wire, wireErr := t.codec.Wire(view)
-		if wireErr != nil {
-			return nil, wireErr
-		}
-		if err := validateWireQuery(wire.Query); err != nil {
-			return nil, err
-		}
-		if len(wire.Body) == 0 {
-			return nil, fail("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
-		}
-		query, wireBody = wire.Query, wire.Body
+	query, wireBody, err := t.operationWire(effective, view)
+	if err != nil {
+		return nil, err
 	}
 	for _, pair := range []struct {
 		codec operations.Dialect
@@ -291,6 +216,103 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	return &Plan{template: t, config: config, source: source, effective: effective, view: view, prepared: prepared, receipt: receipt, mapping: mapping, route: ctx.Route, estimate: estimate, query: query, wireBody: wireBody}, nil
 }
 
+func (t *Template) validateSource(source oif.Request, ctx Context) (operations.Dialect, oif.View, error) {
+	sourceCodec, ok := operationregistry.Lookup(source.Descriptor().Dialect.ID)
+	if !ok || sourceCodec.Identity != source.Descriptor().Dialect || source.Descriptor().Operation != t.codec.Operation {
+		return operations.Dialect{}, nil, fail("target_capability", "/operation", "matching_operation", "Source and target operation contracts differ.")
+	}
+	if len(source.Provenance()) != 0 {
+		return operations.Dialect{}, nil, fail("policy_conflict", "/request", "source_identity", "Strict operations require the original caller source.")
+	}
+	if sourceCodec.ValidateRoute != nil {
+		if err := sourceCodec.ValidateRoute(source, ctx.Route); err != nil {
+			return operations.Dialect{}, nil, err
+		}
+	}
+	sourceView, err := sourceCodec.Request(source)
+	if err != nil {
+		return operations.Dialect{}, nil, err
+	}
+	if model := operations.Member(source.Document().Root(), "model"); model.Kind() != oif.Absent {
+		text, ok := model.Text()
+		if !ok || strings.TrimPrefix(text, "models/") != strings.TrimPrefix(ctx.Route, "models/") {
+			return operations.Dialect{}, nil, fail("resource_affinity", "/model", "route_identity", "The native model must agree with the selected route.")
+		}
+	}
+	return sourceCodec, sourceView, nil
+}
+func (t *Template) effectiveRequest(descriptor oif.Descriptor, document oif.Document) (oif.Request, []oif.Disposition, error) {
+	effective, _ := oif.NewRequest(descriptor, document)
+	changes := []oif.Change{}
+	dispositions := []oif.Disposition{{Field: "/request", Disposition: "preserved", Rule: "native_source_identity", Evidence: t.codec.Evidence}}
+	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
+		if _, present := document.Root().Lookup(name); present {
+			continue
+		}
+		origin := oif.ProviderDefault
+		rule := "provider_default"
+		for _, p := range t.origins {
+			if p.Pointer == operations.Pointer("", name) {
+				rule = p.Source
+				if strings.HasPrefix(rule, "binding_default") {
+					origin = oif.ModelDefault
+				}
+				break
+			}
+		}
+		changes = append(changes, oif.Change{Pointer: operations.Pointer("", name), Value: string(t.defaults[name]), Origin: origin, Reason: "declared absent-only operation default"})
+		dispositions = append(dispositions, oif.Disposition{Field: operations.Pointer("", name), Disposition: "introduced", Rule: rule, Evidence: t.codec.Evidence})
+	}
+	effective, err := effective.WithChanges(changes...)
+	if err != nil {
+		return oif.Request{}, nil, err
+	}
+	// Model hooks return only identity changes. The codec owns nested model paths.
+	if t.codec.BindModel != nil {
+		bound, err := t.codec.BindModel(effective.Document(), t.serving.Model)
+		if err != nil {
+			return oif.Request{}, nil, err
+		}
+		for _, change := range bound {
+			if change.Origin != oif.IdentityBinding || change.Remove {
+				return oif.Request{}, nil, fail("target_capability", "/model", "identity_binding", "The registered model overlay is invalid.")
+			}
+		}
+		effective, err = effective.WithChanges(bound...)
+		if err != nil {
+			return oif.Request{}, nil, err
+		}
+	}
+	return effective, dispositions, nil
+}
+func (t *Template) operationWire(effective oif.Request, view oif.View) (url.Values, []byte, error) {
+	var query url.Values
+	var wireBody []byte
+	var err error
+	switch t.codec.Transport.Normalized() {
+	case operations.TransportGetQuery:
+		query, err = t.codec.Query(effective)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := validateQuery(query); err != nil {
+			return nil, nil, err
+		}
+	case operations.TransportPoll202:
+		wire, wireErr := t.codec.Wire(view)
+		if wireErr != nil {
+			return nil, nil, wireErr
+		}
+		if err := validateWireQuery(wire.Query); err != nil {
+			return nil, nil, err
+		}
+		if len(wire.Body) == 0 {
+			return nil, nil, fail("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
+		}
+		query, wireBody = wire.Query, wire.Body
+	}
+	return query, wireBody, nil
+}
 func validateQuery(values url.Values) error {
 	if len(values) == 0 || len(values) > 32 {
 		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")

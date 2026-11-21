@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import Callout from '#lib/components/Callout.svelte';
   import { onDestroy } from 'svelte';
   import {
@@ -65,10 +67,11 @@
   );
   const access = useRole();
   const principal = access.user?.id;
+  const importAction = useAction();
   let error = $state('');
   let notice = $state('');
   let importInput = $state('');
-  let importing = $state(false);
+
   let importActive = true;
   onDestroy(() => {
     importActive = false;
@@ -100,7 +103,9 @@
     }
   });
   const enrollmentAllowed = $derived(allowed && access.user?.id === principal);
-  $effect(() => onBusyChange(!!grant.busy || !!grant.enrollment || importing));
+  $effect(() =>
+    onBusyChange(!!grant.busy || !!grant.enrollment || importAction.busy)
+  );
   $effect(() => {
     if (!enrollmentAllowed) importInput = '';
   });
@@ -109,7 +114,7 @@
     const selectedImport = importProfile;
     if (
       !enrollmentAllowed ||
-      importing ||
+      importAction.busy ||
       grant.busy ||
       !provider.data ||
       !selectedImport
@@ -119,35 +124,42 @@
     importInput = '';
     error = '';
     notice = '';
-    try {
+    const parsed = captureResult(() => {
       JSON.parse(credentials);
-    } catch {
+    });
+    if (!parsed.ok) {
       error = `Paste valid ${selectedImport.file} JSON.`;
       return;
     }
-    importing = true;
-    try {
-      const completion = await importSubscriptionCredentials(
-        provider.data,
-        credentials,
-        selectedImport.id
-      );
-      if (!importActive || !enrollmentAllowed) return;
-      onComplete(completion.credential_id);
-      notice =
-        'Credentials imported. OLP owns refresh. Stop using the original local credentials. Inference has not been tested.';
-      await Promise.all([
-        client.invalidateQueries({
-          queryKey: providerKeys.credentials(providerId)
-        }),
-        client.invalidateQueries({ queryKey: providerKeys.detail(providerId) })
-      ]);
-    } catch {
-      if (importActive && enrollmentAllowed)
-        error = `Could not import ${selectedImport.name} credentials. Check the supported format and account, then sign in again before retrying.`;
-    } finally {
-      importing = false;
-    }
+    await importAction.run(
+      () =>
+        importSubscriptionCredentials(
+          provider.data,
+          credentials,
+          selectedImport.id
+        ),
+      async (completion, current) => {
+        if (!importActive || !enrollmentAllowed || !current()) return;
+        onComplete(completion.credential_id);
+        notice =
+          'Credentials imported. OLP owns refresh. Stop using the original local credentials. Inference has not been tested.';
+        await Promise.all([
+          client.invalidateQueries({
+            queryKey: providerKeys.credentials(providerId)
+          }),
+          client.invalidateQueries({
+            queryKey: providerKeys.detail(providerId)
+          })
+        ]);
+      },
+      {
+        failure: () =>
+          importActive && enrollmentAllowed
+            ? `Could not import ${selectedImport.name} credentials. Check the supported format and account, then sign in again before retrying.`
+            : ''
+      }
+    );
+    error = importAction.error;
   }
 </script>
 
@@ -193,7 +205,10 @@
     <button
       class="button button-secondary"
       type="button"
-      disabled={!enrollmentAllowed || !supported || !!grant.busy || importing}
+      disabled={!enrollmentAllowed ||
+        !supported ||
+        !!grant.busy ||
+        importAction.busy}
       onclick={() => {
         if (provider.data) {
           notice = '';
@@ -225,18 +240,20 @@
         autocomplete="off"
         spellcheck="false"
         bind:value={importInput}
-        disabled={!enrollmentAllowed || !!grant.busy || importing}
+        disabled={!enrollmentAllowed || !!grant.busy || importAction.busy}
       />
       <button
         class="button button-secondary"
         type="button"
         disabled={!enrollmentAllowed ||
           !!grant.busy ||
-          importing ||
+          importAction.busy ||
           !importInput.trim()}
         onclick={() => void importCredentials()}
       >
-        {importing ? 'Importing…' : `Import ${importProfile.name} credentials`}
+        {importAction.busy
+          ? 'Importing…'
+          : `Import ${importProfile.name} credentials`}
       </button>
     {/if}
     {#if provider.data && !supported && !kinds.isPending}<p>

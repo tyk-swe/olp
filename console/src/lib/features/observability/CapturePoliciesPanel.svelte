@@ -1,20 +1,17 @@
 <script lang="ts">
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
-  import Dialog from '#lib/components/Dialog.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { formatUTCDate } from '#lib/format.js';
-  import { ProjectScopeField } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
-  import CaptureExpiryField from './CaptureExpiryField.svelte';
+  import CapturePolicyDialog from './CapturePolicyDialog.svelte';
+  import CapturePolicyList from './CapturePolicyList.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import {
     createCapturePolicy,
     deleteCapturePolicy,
@@ -30,6 +27,9 @@
   let creating = $state(false);
   let error = $state('');
   const policyIntent = useMutationIntent();
+  const saveAction = useAction();
+  const rowAction = useAction();
+  const masterAction = useAction();
   let {
     canManageInstallation,
     canManageProjects,
@@ -83,42 +83,14 @@
   let policyRedactors = $state<string[]>([]);
   let redactorName = $state('');
   let refreshRedactors = $state(false);
-  function addRedactor() {
-    const name = redactorName.trim();
-    if (
-      name &&
-      !policyRedactors.some(
-        (value) => value.toLowerCase() === name.toLowerCase()
-      ) &&
-      policyRedactors.length < 128
-    ) {
-      policyRedactors = [...policyRedactors, name];
-      redactorName = '';
-    }
-  }
-  function moveRedactor(index: number, direction: number) {
-    const next = [...policyRedactors];
-    [next[index], next[index + direction]] = [
-      next[index + direction],
-      next[index]
-    ];
-    policyRedactors = next;
-  }
   let policyKeyIds = $state('');
   let policyEndUsers = $state('');
   let policyMaxBytes = $state('65536');
   let policyEnabled = $state(true);
   let policyExpiry = $state<string | null | undefined>();
-  let policyBusy = $state(false);
-
-  function toggleInclude(part: string) {
-    policyInclude = policyInclude.includes(part)
-      ? policyInclude.filter((value) => value !== part)
-      : [...policyInclude, part];
-  }
 
   function startPolicyEdit(policy: CapturePolicy) {
-    if (policyBusy) return;
+    if (saveAction.busy) return;
     policyIntent.reset();
     editingPolicy = policy;
     creating = true;
@@ -153,31 +125,32 @@
 
   function cancelPolicyEdit() {
     creating = false;
-    if (!policyBusy) resetPolicyForm();
+    if (!saveAction.busy) resetPolicyForm();
   }
 
-  const captureOwner = usePrincipalLifetime(() => {
+  usePrincipalLifetime(() => {
     resetPolicyForm();
-    policyBusy = false;
     error = '';
   });
 
   async function toggleMaster() {
     if (!ownerOnly || !captureConfig.data) return;
-    const isCurrent = captureOwner();
     error = '';
-    try {
-      await updateCaptureConfiguration(captureConfig.data, {
-        enabled: !captureConfig.data.enabled
-      });
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({
-        queryKey: observabilityKeys.capture()
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = errorMessage(cause, 'Capture could not be changed.');
-    }
+    const config = captureConfig.data;
+    await masterAction.run(
+      () => updateCaptureConfiguration(config, { enabled: !config.enabled }),
+      async (_, current) => {
+        await queryClient.invalidateQueries({
+          queryKey: observabilityKeys.capture()
+        });
+        if (!current()) return;
+      },
+      {
+        key: 'master',
+        failure: (cause) => errorMessage(cause, 'Capture could not be changed.')
+      }
+    );
+    error = masterAction.error;
   }
 
   async function submitPolicy(event: SubmitEvent) {
@@ -188,7 +161,7 @@
     );
     if (
       !allowed ||
-      policyBusy ||
+      saveAction.busy ||
       !policySinkId ||
       !policyRatio.trim() ||
       !policyInclude.length
@@ -199,10 +172,7 @@
       error = 'Max bytes must be a positive integer.';
       return;
     }
-    const isCurrent = captureOwner();
-    policyBusy = true;
     error = '';
-    let committed = false;
     const fields = {
       ...(!editing ||
       refreshRedactors ||
@@ -224,64 +194,64 @@
       enabled: policyEnabled,
       ...(policyExpiry !== undefined ? { expires_at: policyExpiry } : {})
     };
-    try {
-      if (editing) {
-        await updateCapturePolicy(editing, fields);
-        committed = true;
-        if (!isCurrent()) return;
+    await saveAction.run(
+      () =>
+        editing
+          ? updateCapturePolicy(editing, fields)
+          : policyIntent.submit(
+              {
+                project_id: policyProjectId || null,
+                route_slug: policyRoute.trim() || null,
+                ...fields
+              } satisfies Parameters<typeof createCapturePolicy>[0],
+              (input, requestId) => createCapturePolicy(input, requestId)
+            ),
+      async (_, current) => {
         creating = false;
-        notify('Capture policy updated');
-      } else {
-        const submission = policyIntent.prepare<
-          Parameters<typeof createCapturePolicy>[0]
-        >({
-          project_id: policyProjectId || null,
-          route_slug: policyRoute.trim() || null,
-          ...fields
-        });
-        await createCapturePolicy(submission.input, submission.requestId);
-        committed = true;
-        if (!isCurrent()) return;
-        policyIntent.reset();
-        creating = false;
-        notify('Capture policy created');
+        notify(editing ? 'Capture policy updated' : 'Capture policy created');
+        resetPolicyForm();
+        await queryClient.invalidateQueries(
+          {
+            queryKey: observabilityKeys.capturePolicies()
+          },
+          { throwOnError: true }
+        );
+        if (!current()) return;
+      },
+      {
+        key: 'save',
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
+            : errorMessage(
+                cause,
+                editing
+                  ? 'The capture policy could not be updated.'
+                  : 'The capture policy could not be created.'
+              )
       }
-      resetPolicyForm();
-      await queryClient.invalidateQueries(
-        {
-          queryKey: observabilityKeys.capturePolicies()
-        },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = committed
-        ? `Saved, but the list could not be refreshed. ${errorMessage(cause)}`
-        : errorMessage(
-            cause,
-            editing
-              ? 'The capture policy could not be updated.'
-              : 'The capture policy could not be created.'
-          );
-    } finally {
-      if (isCurrent()) policyBusy = false;
-    }
+    );
+    error = saveAction.error;
   }
 
   async function togglePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
-    const isCurrent = captureOwner();
     error = '';
-    try {
-      await updateCapturePolicy(policy, { enabled: !policy.enabled });
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({
-        queryKey: observabilityKeys.capturePolicies()
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = errorMessage(cause, 'The capture policy could not be updated.');
-    }
+    await rowAction.run(
+      () => updateCapturePolicy(policy, { enabled: !policy.enabled }),
+      async (_, current) => {
+        await queryClient.invalidateQueries({
+          queryKey: observabilityKeys.capturePolicies()
+        });
+        if (!current()) return;
+      },
+      {
+        key: policy.id,
+        failure: (cause) =>
+          errorMessage(cause, 'The capture policy could not be updated.')
+      }
+    );
+    error = rowAction.error;
   }
 
   async function removePolicy(policy: CapturePolicy) {
@@ -295,19 +265,23 @@
       }))
     )
       return;
-    const isCurrent = captureOwner();
     error = '';
-    try {
-      await deleteCapturePolicy(policy);
-      if (!isCurrent()) return;
-      notify('Capture policy deleted.');
-      await queryClient.invalidateQueries({
-        queryKey: observabilityKeys.capturePolicies()
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = errorMessage(cause, 'The capture policy could not be deleted.');
-    }
+    await rowAction.run(
+      () => deleteCapturePolicy(policy),
+      async (_, current) => {
+        notify('Capture policy deleted.');
+        await queryClient.invalidateQueries({
+          queryKey: observabilityKeys.capturePolicies()
+        });
+        if (!current()) return;
+      },
+      {
+        key: policy.id,
+        failure: (cause) =>
+          errorMessage(cause, 'The capture policy could not be deleted.')
+      }
+    );
+    error = rowAction.error;
   }
 
   function sinkOptionLabel(id: string) {
@@ -353,295 +327,50 @@
   </p>
 {/if}
 
-{#if canManageProjects || canManageInstallation}<div class="toolbar">
-    <p class="section-help">
-      Choose which prompts and responses are kept, for which projects, and where
-      they go.
-    </p>
-    <div class="page-actions">
-      <button
-        class="button button-primary"
-        type="button"
-        onclick={() => {
-          error = '';
-          creating = true;
-        }}>New policy</button
-      >
-    </div>
-  </div>{/if}
 {#if creating}
-  <Dialog
-    title={editingPolicy ? 'Edit capture policy' : 'New capture policy'}
-    description="Choose which prompts and responses are captured and how they are redacted."
-    placement="side"
+  <CapturePolicyDialog
+    {editingPolicy}
+    busy={saveAction.busy}
+    {error}
+    {canManageInstallation}
+    sinkOptions={sinkOptions.data ?? []}
+    {eligibleRedactors}
+    bind:policyProjectId
+    bind:policyRoute
+    bind:policySinkId
+    bind:policyRatio
+    bind:policyInclude
+    bind:policyRedactors
+    bind:redactorName
+    bind:policyKeyIds
+    bind:policyEndUsers
+    bind:policyMaxBytes
+    bind:policyEnabled
+    bind:policyExpiry
+    bind:refreshRedactors
     onClose={() => {
       creating = false;
       cancelPolicyEdit();
     }}
-  >
-    {#if error}<Callout tone="danger">{error}</Callout>{/if}
-    <form class="create-form" onsubmit={submitPolicy}>
-      <fieldset class="submission-fields" disabled={policyBusy}>
-        <div class="form-grid">
-          <ProjectScopeField
-            id="policy-project"
-            bind:value={policyProjectId}
-            unassigned={canManageInstallation}
-            disabled={!!editingPolicy}
-          />
-          <div class="form-field">
-            <label for="policy-route">Route</label><input
-              id="policy-route"
-              bind:value={policyRoute}
-              placeholder="Optional route slug"
-              disabled={!!editingPolicy}
-            />
-          </div>
-          <div class="form-field">
-            <label for="policy-sink">Sink</label><select
-              id="policy-sink"
-              bind:value={policySinkId}
-              required
-              ><option value="" disabled>Choose an installation sink</option
-              >{#each sinkOptions.data ?? [] as option (option.export_sink_id)}<option
-                  value={option.export_sink_id}
-                  >{option.name} ({option.type})</option
-                >{/each}</select
-            >
-          </div>
-          <div class="form-field">
-            <label for="policy-ratio">Sample ratio</label><input
-              id="policy-ratio"
-              bind:value={policyRatio}
-              required
-              placeholder="0.25"
-            />
-          </div>
-          <fieldset class="form-field">
-            <legend>Include</legend>
-            {#each ['input', 'output', 'tool_calls'] as part (part)}
-              <label class="inline-check"
-                ><input
-                  type="checkbox"
-                  checked={policyInclude.includes(part)}
-                  onchange={() => toggleInclude(part)}
-                />{part}</label
-              >
-            {/each}
-          </fieldset>
-          <fieldset class="form-field">
-            <legend>Redactors in order</legend>
-            <label for="policy-redactor">Local detector name</label>
-            <input
-              id="policy-redactor"
-              list="capture-redactor-options"
-              bind:value={redactorName}
-              placeholder="Choose or enter a detector name"
-            />
-            <datalist id="capture-redactor-options">
-              {#each eligibleRedactors as detector (detector.id)}
-                <option value={detector.name}
-                  >{detector.type} · {detector.project_id}</option
-                >
-              {/each}
-            </datalist>
-            <button
-              type="button"
-              class="text-button"
-              onclick={addRedactor}
-              disabled={!redactorName.trim() || policyRedactors.length >= 128}
-              >Add redactor</button
-            >
-            <ol>
-              {#each policyRedactors as name, index (name)}
-                <li>
-                  {name}
-                  <button
-                    type="button"
-                    aria-label={`Move ${name} up`}
-                    disabled={index === 0}
-                    onclick={() => moveRedactor(index, -1)}>↑</button
-                  >
-                  <button
-                    type="button"
-                    aria-label={`Move ${name} down`}
-                    disabled={index === policyRedactors.length - 1}
-                    onclick={() => moveRedactor(index, 1)}>↓</button
-                  >
-                  <button
-                    type="button"
-                    aria-label={`Remove ${name}`}
-                    onclick={() =>
-                      (policyRedactors = policyRedactors.filter(
-                        (_, i) => i !== index
-                      ))}>Remove</button
-                  >
-                </li>
-              {/each}
-            </ol>
-            <p class="section-help">
-              Names resolve in the policy project, or the route's project when
-              no project is selected. Empty means unredacted capture.
-            </p>
-            {#if editingPolicy}
-              <p class="section-help">
-                Other edits preserve pinned revisions. Changing this list adopts
-                active revisions for every selected detector.
-              </p>
-              <button
-                type="button"
-                class="text-button"
-                onclick={() => (refreshRedactors = true)}
-                disabled={refreshRedactors || !policyRedactors.length}
-                >Refresh pinned revisions on save</button
-              >
-              {#if refreshRedactors}<p role="status">
-                  Saving will adopt the active detector revisions.
-                </p>{/if}
-              <ul aria-label="Pinned redactor revisions">
-                {#each editingPolicy.redactor_revisions ?? [] as pin (pin.revision_id)}
-                  <li>
-                    {pin.name} · revision {pin.revision}
-                    <span class="mono">{pin.revision_id}</span>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </fieldset>
-          <div class="form-field">
-            <label for="policy-keys">Key IDs</label><input
-              id="policy-keys"
-              bind:value={policyKeyIds}
-              placeholder="Optional comma-separated UUIDs"
-            />
-          </div>
-          <div class="form-field">
-            <label for="policy-users">End-user digests</label><input
-              id="policy-users"
-              bind:value={policyEndUsers}
-              placeholder="Optional comma-separated digests"
-            />
-          </div>
-          <div class="form-field">
-            <label for="policy-max">Max bytes</label><input
-              id="policy-max"
-              inputmode="numeric"
-              bind:value={policyMaxBytes}
-              required
-            />
-          </div>
-          <CaptureExpiryField
-            current={editingPolicy?.expires_at}
-            onChange={(expiry) => (policyExpiry = expiry)}
-          />
-          <div class="form-field">
-            <label class="inline-check"
-              ><input
-                type="checkbox"
-                bind:checked={policyEnabled}
-              />Enabled</label
-            >
-          </div>
-        </div>
-        <div class="form-actions">
-          {#if editingPolicy}<button
-              class="button button-secondary"
-              type="button"
-              onclick={cancelPolicyEdit}>Cancel</button
-            >{/if}
-          <button
-            class="button button-primary"
-            type="submit"
-            disabled={policyBusy ||
-              !policySinkId ||
-              !policyRatio.trim() ||
-              !policyInclude.length}
-            >{policyBusy
-              ? 'Saving…'
-              : editingPolicy
-                ? 'Save capture policy'
-                : 'Create capture policy'}</button
-          >
-        </div>
-      </fieldset>
-    </form>
-  </Dialog>
+    onSubmit={submitPolicy}
+    onCancel={cancelPolicyEdit}
+  />
 {/if}
 
-{#if policies.isPending}<span class="inline-status" role="status"
-    >Loading capture policies…</span
-  >
-{:else if policies.isError}<span class="inline-problem" role="alert"
-    >Capture policies are unavailable.
-    <button class="text-button" type="button" onclick={() => policies.refetch()}
-      >Retry</button
-    ></span
-  >
-{:else if !(policies.data ?? []).length}<EmptyState
-    title="No capture policies yet"
-    >Prompts and responses are not stored unless a policy turns capture on.</EmptyState
-  >
-{:else}
-  <ScrollTable label="Capture policies">
-    <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Scope</th><th scope="col">Sink</th><th scope="col"
-            >Ratio</th
-          ><th scope="col">Includes</th><th scope="col">Redactors</th><th
-            scope="col">Enabled</th
-          ><th scope="col">Expires</th><th scope="col"
-            ><span class="sr-only">Actions</span></th
-          ></tr
-        ></thead
-      >
-      <tbody>
-        {#each policies.data ?? [] as policy (policy.id)}
-          <tr
-            ><td
-              >{policy.project_id
-                ? 'Project'
-                : 'Installation'}{policy.route_slug
-                ? ` · ${policy.route_slug}`
-                : ''}</td
-            ><td>{sinkOptionLabel(policy.sink)}</td><td
-              ><span class="mono">{policy.sample_ratio}</span></td
-            ><td>{policy.include.join(', ')}</td><td>
-              {#if policy.redact.length}
-                <ol>
-                  {#each policy.redactor_revisions ?? [] as pin (pin.revision_id)}<li
-                    >
-                      {pin.name} · revision {pin.revision}
-                      <span class="mono">{pin.revision_id}</span>
-                    </li>{/each}
-                </ol>
-              {:else}Unredacted{/if}
-            </td><td>{policy.enabled ? 'Yes' : 'No'}</td><td>
-              {#if policy.expires_at}
-                <time datetime={policy.expires_at}
-                  >{formatUTCDate(policy.expires_at)}</time
-                >
-              {:else}Never{/if}
-            </td><td
-              >{#if canMutate(policy.project_id)}<button
-                  class="text-button"
-                  type="button"
-                  disabled={policyBusy}
-                  onclick={() => startPolicyEdit(policy)}>Edit</button
-                ><button
-                  class="text-button"
-                  type="button"
-                  onclick={() => togglePolicy(policy)}
-                  >{policy.enabled ? 'Disable' : 'Enable'}</button
-                ><button
-                  class="text-button"
-                  type="button"
-                  onclick={() => removePolicy(policy)}>Delete</button
-                >{/if}</td
-            ></tr
-          >
-        {/each}
-      </tbody>
-    </table>
-  </ScrollTable>
-{/if}
+<CapturePolicyList
+  canCreate={canManageProjects || canManageInstallation}
+  onCreate={() => {
+    error = '';
+    creating = true;
+  }}
+  pending={policies.isPending}
+  failed={policies.isError}
+  items={policies.data ?? []}
+  onRetry={() => policies.refetch()}
+  {canMutate}
+  busy={saveAction.busy}
+  onEdit={startPolicyEdit}
+  onToggle={togglePolicy}
+  onRemove={removePolicy}
+  {sinkOptionLabel}
+/>
