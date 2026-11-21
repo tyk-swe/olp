@@ -19,6 +19,11 @@ const dayFormat = new Intl.DateTimeFormat(LOCALE, {
   dateStyle: 'medium',
   timeZone: 'UTC'
 });
+const utcDateTimeFormat = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: 'medium',
+  timeStyle: 'medium',
+  timeZone: 'UTC'
+});
 const timeFormat = new Intl.DateTimeFormat(LOCALE, { timeStyle: 'medium' });
 const compactFormat = new Intl.NumberFormat(LOCALE, {
   notation: 'compact',
@@ -46,6 +51,12 @@ export function formatDate(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return '—';
   return dateTimeFormat.format(date);
+}
+
+export function formatUTCDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return '—';
+  return `${utcDateTimeFormat.format(date)} UTC`;
 }
 
 export function formatDay(value?: string | null): string {

@@ -7,8 +7,10 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { formatUTCDate } from '#lib/format.js';
   import { ProjectScopeField } from '#lib/features/access/index.js';
   import { observabilityKeys } from './observabilityKeys';
+  import CaptureExpiryField from './CaptureExpiryField.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -106,6 +108,7 @@
   let policyEndUsers = $state('');
   let policyMaxBytes = $state('65536');
   let policyEnabled = $state(true);
+  let policyExpiry = $state<string | null | undefined>();
   let policyBusy = $state(false);
 
   function toggleInclude(part: string) {
@@ -131,6 +134,7 @@
     policyEndUsers = policy.end_user_digests.join(', ');
     policyMaxBytes = String(policy.max_bytes);
     policyEnabled = policy.enabled;
+    policyExpiry = undefined;
     error = '';
   }
 
@@ -144,6 +148,7 @@
     policySinkId = '';
     policyRatio = '1';
     policyEnabled = true;
+    policyExpiry = undefined;
   }
 
   function cancelPolicyEdit() {
@@ -216,7 +221,8 @@
         .map((v) => v.trim())
         .filter(Boolean),
       max_bytes: maxBytes,
-      enabled: policyEnabled
+      enabled: policyEnabled,
+      ...(policyExpiry !== undefined ? { expires_at: policyExpiry } : {})
     };
     try {
       if (editing) {
@@ -524,6 +530,10 @@
               required
             />
           </div>
+          <CaptureExpiryField
+            current={editingPolicy?.expires_at}
+            onChange={(expiry) => (policyExpiry = expiry)}
+          />
           <div class="form-field">
             <label class="inline-check"
               ><input
@@ -580,7 +590,9 @@
             >Ratio</th
           ><th scope="col">Includes</th><th scope="col">Redactors</th><th
             scope="col">Enabled</th
-          ><th scope="col"><span class="sr-only">Actions</span></th></tr
+          ><th scope="col">Expires</th><th scope="col"
+            ><span class="sr-only">Actions</span></th
+          ></tr
         ></thead
       >
       <tbody>
@@ -604,7 +616,13 @@
                     </li>{/each}
                 </ol>
               {:else}Unredacted{/if}
-            </td><td>{policy.enabled ? 'Yes' : 'No'}</td><td
+            </td><td>{policy.enabled ? 'Yes' : 'No'}</td><td>
+              {#if policy.expires_at}
+                <time datetime={policy.expires_at}
+                  >{formatUTCDate(policy.expires_at)}</time
+                >
+              {:else}Never{/if}
+            </td><td
               >{#if canMutate(policy.project_id)}<button
                   class="text-button"
                   type="button"

@@ -7550,6 +7550,14 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "expires_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "RFC 3339 capture deadline, returned in UTC. Omit or send null for no expiry."
             }
           },
           "required": [
@@ -44460,6 +44468,14 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "expires_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "RFC 3339 capture deadline, returned in UTC. Omit to keep the current deadline or send null to remove it."
             }
           }
         }

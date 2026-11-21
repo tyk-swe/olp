@@ -94,7 +94,10 @@ func (m *Manager) Resolve(project, route, key, endUser, requestID string) *Colle
 	if cached == nil || time.Since(cached.at) > cacheTTL {
 		return nil
 	}
-	i := slices.IndexFunc(cached.policies, func(p active) bool { return p.matches(project, route, key, endUser) })
+	now := time.Now()
+	i := slices.IndexFunc(cached.policies, func(p active) bool {
+		return beforeExpiry(p.ExpiresAt, now) && p.matches(project, route, key, endUser)
+	})
 	if i < 0 || !sampled(cached.policies[i].ratio, cached.policies[i].ID, requestID) {
 		return nil
 	}
@@ -109,7 +112,7 @@ func (m *Manager) Resolve(project, route, key, endUser, requestID string) *Colle
 		m.dropped.Add(1)
 		return nil
 	}
-	return &Collector{manager: m, policyID: policy.ID, etag: policy.ETag, requestID: requestID, maxBytes: policy.MaxBytes, include: policy.Include, redactor: engine}
+	return &Collector{manager: m, policyID: policy.ID, etag: policy.ETag, requestID: requestID, maxBytes: policy.MaxBytes, include: policy.Include, redactor: engine, expiresAt: policy.ExpiresAt}
 }
 
 func (m *Manager) drop(redactionFailed bool) {
@@ -205,8 +208,11 @@ type queued struct {
 	record         []byte
 }
 
-func (m *Manager) enqueue(item queued) bool {
+func (m *Manager) enqueue(item queued, expiresAt *time.Time) bool {
 	if len(item.record) > maxRecord || !m.budget.admit(item.projectID, len(item.record), item.at, func() bool {
+		if !beforeExpiry(expiresAt, time.Now()) {
+			return false
+		}
 		select {
 		case m.queue <- item:
 			return true
@@ -214,7 +220,9 @@ func (m *Manager) enqueue(item queued) bool {
 			return false
 		}
 	}) {
-		m.dropped.Add(1)
+		if beforeExpiry(expiresAt, time.Now()) {
+			m.dropped.Add(1)
+		}
 		return false
 	}
 	m.queued.Add(1)

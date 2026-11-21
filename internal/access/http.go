@@ -307,10 +307,10 @@ func auditSource(r *http.Request) any {
 // Audit records a metadata-only audit event inside the mutation's
 // transaction, attributed to actor.
 func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string) error {
-	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
+	return AuditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
 }
 
-func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
+func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor authz.Actor, action, resource, id, outcome string, projectID *string) error {
 	source := auditSource(r)
 	family := "other"
 	agent := r.UserAgent()

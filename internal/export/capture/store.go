@@ -4,7 +4,7 @@ const capturableSink = `s.enabled AND s.project_id IS NULL AND s.format IN ('jso
 
 const policyJSON = `jsonb_build_object('id',p.id,'project_id',p.project_id,'route_slug',p.route_slug,'sink',p.sink_id,
  'sample_ratio',p.sample_ratio,'include',p.include,'redact',p.redact,'key_ids',p.key_ids,'end_user_digests',p.end_user_digests,
- 'max_bytes',p.max_bytes,'enabled',p.enabled,'etag',p.etag,
+ 'max_bytes',p.max_bytes,'enabled',p.enabled,'etag',p.etag,'expires_at',p.expires_at,
  'redactor_revisions',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',b.name,'guardrail_id',v.guardrail_id,'revision_id',v.id,'revision',v.revision,'type',g.type) ORDER BY b.position)
  FROM olp.capture_redactors b JOIN olp.guardrail_revisions v ON v.id=b.revision_id JOIN olp.guardrails g ON g.id=v.guardrail_id WHERE b.policy_id=p.id),'[]'::jsonb))`
 
@@ -17,9 +17,9 @@ const (
  WHERE p.id<$1::uuid AND ($2 OR p.project_id=ANY($3::uuid[])) ORDER BY p.id DESC LIMIT $4`
 	getPolicySQL    = `SELECT ` + policyJSON + ` FROM olp.capture_policies p WHERE p.id=$1`
 	lockPolicySQL   = getPolicySQL + ` FOR UPDATE`
-	createPolicySQL = `INSERT INTO olp.capture_policies(id,project_id,route_slug,sink_id,sample_ratio,include,redact,max_bytes,enabled,etag,created_by,key_ids,end_user_digests)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
-	updatePolicySQL  = `UPDATE olp.capture_policies SET sink_id=$2,sample_ratio=$3,include=$4,redact=$5,max_bytes=$6,enabled=$7,etag=$8,key_ids=$9,end_user_digests=$10,updated_at=now() WHERE id=$1`
+	createPolicySQL = `INSERT INTO olp.capture_policies(id,project_id,route_slug,sink_id,sample_ratio,include,redact,max_bytes,enabled,etag,created_by,key_ids,end_user_digests,expires_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`
+	updatePolicySQL  = `UPDATE olp.capture_policies SET sink_id=$2,sample_ratio=$3,include=$4,redact=$5,max_bytes=$6,enabled=$7,etag=$8,key_ids=$9,end_user_digests=$10,expires_at=$11,updated_at=now() WHERE id=$1`
 	deletePolicySQL  = `DELETE FROM olp.capture_policies WHERE id=$1`
 	countPoliciesSQL = `SELECT count(*) FROM olp.capture_policies`
 	sinkScopeSQL     = `SELECT s.project_id IS NULL AND s.enabled,` + capturableSink + ` FROM olp.export_sinks s WHERE s.id=$1 FOR SHARE`

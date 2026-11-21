@@ -229,6 +229,7 @@ it('creates, updates and deletes a capture policy using its revision', async () 
     key_ids: [],
     end_user_digests: [],
     enabled: true,
+    expires_at: null,
     etag: 'revision-1'
   };
   const fetch = vi.fn(async (request: Request) => {

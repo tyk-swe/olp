@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -47,16 +48,17 @@ type Redactor struct {
 }
 
 type Settings struct {
-	ProjectID   *string   `json:"project_id"`
-	Route       *string   `json:"route_slug"`
-	SinkID      string    `json:"sink"`
-	SampleRatio string    `json:"sample_ratio"`
-	Include     []Include `json:"include"`
-	Redact      []string  `json:"redact"`
-	KeyIDs      []string  `json:"key_ids"`
-	EndUsers    []string  `json:"end_user_digests"`
-	MaxBytes    int       `json:"max_bytes"`
-	Enabled     bool      `json:"enabled"`
+	ProjectID   *string    `json:"project_id"`
+	Route       *string    `json:"route_slug"`
+	SinkID      string     `json:"sink"`
+	SampleRatio string     `json:"sample_ratio"`
+	Include     []Include  `json:"include"`
+	Redact      []string   `json:"redact"`
+	KeyIDs      []string   `json:"key_ids"`
+	EndUsers    []string   `json:"end_user_digests"`
+	MaxBytes    int        `json:"max_bytes"`
+	Enabled     bool       `json:"enabled"`
+	ExpiresAt   *time.Time `json:"expires_at"`
 }
 
 type Policy struct {
@@ -130,6 +132,10 @@ func (p Settings) matches(project, route, key, endUser string) bool {
 	return (p.ProjectID == nil || *p.ProjectID == project) && (p.Route == nil || *p.Route == route) &&
 		(len(p.KeyIDs) == 0 || slices.Contains(p.KeyIDs, key)) &&
 		(len(p.EndUsers) == 0 || slices.Contains(p.EndUsers, endUser))
+}
+
+func beforeExpiry(expiresAt *time.Time, now time.Time) bool {
+	return expiresAt == nil || now.Before(*expiresAt)
 }
 
 func sampled(ratio *big.Rat, policyID, requestID string) bool {
