@@ -175,7 +175,7 @@ func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
 		}
 	}
 	ctx := s.shadows.ctx
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 	if e := s.reserveSystemBudgets(ctx, x); e != nil {
 		s.Finish(x, &Outcome{Err: e}, e.Status)
 		return

@@ -196,7 +196,7 @@ func (s *Server) SettleRetained(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
-	s.settleAdmission(ctx, x)
+	s.SettleAdmission(ctx, x)
 }
 
 func observeRetainedUsage(exchange *PinnedExchange, source oif.Document, generation bool) error {

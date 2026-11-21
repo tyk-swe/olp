@@ -250,7 +250,6 @@ func (s *Server) RegisterKernel(mux *http.ServeMux, actions GeminiActions, retri
 	if s.code != nil {
 		s.code.Register(mux)
 	}
-	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
 	mux.Handle("POST /v1/delegations", delegation.New(delegation.Dependencies{Gate: s.Gate, Keys: s.Deps.Runtime, Begin: func(w http.ResponseWriter, r *http.Request) { s.begin(w, r) }}))
 	mux.Handle("POST /v1/traces", traceingest.New(s.Deps.Runtime, s.Config.TrustedProxies, s.Deps.Traces))
 	catalog := models.New(models.Dependencies{

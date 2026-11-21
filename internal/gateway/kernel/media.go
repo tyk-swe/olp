@@ -136,7 +136,7 @@ func (s *Server) ServeMedia(ctx context.Context, w http.ResponseWriter, x *Call,
 		s.Refuse(x, w, e)
 		return
 	}
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 
 	out := s.executeMedia(ctx, w, x)
 	if out.err != nil {

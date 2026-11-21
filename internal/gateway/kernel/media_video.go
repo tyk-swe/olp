@@ -57,7 +57,7 @@ func (s *Server) CreateVideoJob(w http.ResponseWriter, r *http.Request, x *Call,
 		s.Refuse(x, w, e)
 		return
 	}
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, target.attempt, target.provider, target.slots, deadline)

@@ -35,7 +35,7 @@ func (s *Server) ProbeGeneration(ctx context.Context, release *release.Release, 
 		generation:         generationCall{parsed: parsed},
 	}
 	x.bind(canonicalPlanner, nil, true)
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 	if e := s.planCanonical(ctx, x); e != nil {
 		return ProbeAttempt{Unplanned: e}
 	}

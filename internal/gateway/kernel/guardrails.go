@@ -382,42 +382,34 @@ func nilIfParallel(p *parallelGuardrail) error {
 	return p.err
 }
 
-func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
+func (s *Server) EnterGuardrails(w http.ResponseWriter, r *http.Request) (*Call, bool) {
 	req := s.begin(w, r)
 	s.cors(w, r)
 	if !s.Gate.Admit(r.Context()) {
 		fault.WriteError(w, fault.Overloaded)
-		return
+		return nil, false
 	}
-	defer s.Gate.Release(r.Context())
 	authority, e := s.Gate.Authenticate(r, "guardrails")
 	if e != nil {
 		fault.WriteError(w, e)
-		return
+		s.Gate.Release(r.Context())
+		return nil, false
 	}
-	var in guardrails.Application
-	if err := httpkit.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
-		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
-		return
-	}
-	x := &Call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}
-	result, err := s.evaluateGuardrails(r.Context(), x, in, func(view *routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
+	return &Call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}, true
+}
+
+func (s *Server) ApplyGuardrails(ctx context.Context, h http.Header, x *Call, in guardrails.Application) (guardrails.AppliedResult, *fault.Error) {
+	result, err := s.evaluateGuardrails(ctx, x, in, func(view *routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
 		return view.CompileGuardrailPolicy(in.PolicyRevisionID)
 	})
-	status := 200
-	out := &Outcome{}
 	if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
-		out.Err = guardrailError(err)
-		status = out.Err.Status
-		fault.WriteError(w, out.Err)
-	} else {
-		x.guard.metadata = req.guardrailMetadata
-		x.guardrailHeaders(w.Header(), false, false)
-		fault.WriteJSON(w, guardrails.Applied(result, err))
+		return guardrails.AppliedResult{}, guardrailError(err)
 	}
-	s.settleAdmission(context.WithoutCancel(r.Context()), x)
-	s.Finish(x, out, status)
+	x.guard.metadata = x.request.guardrailMetadata
+	x.guardrailHeaders(h, false, false)
+	return guardrails.Applied(result, err), nil
 }
+
 func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID string, phase guardrails.Phase, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
 	if s == nil || release == nil || release.Snapshot() == nil {
 		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
@@ -457,7 +449,7 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p authz.Principal, pinned g
 	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
 		return pinned.Compile()
 	})
-	s.settleAdmission(context.WithoutCancel(r.Context()), x)
+	s.SettleAdmission(context.WithoutCancel(r.Context()), x)
 	if err == nil || errors.Is(err, guardrails.ErrBlocked) {
 		s.Finish(x, &Outcome{}, 200)
 		return result, err
@@ -577,7 +569,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 	if parent.keyID == "" {
 		x.origin = usage.OriginPlayground
 	}
-	defer s.settleAdmission(context.WithoutCancel(ctx), x)
+	defer s.SettleAdmission(context.WithoutCancel(ctx), x)
 	var raw []byte
 	var out *Outcome
 	if semantic {

@@ -72,7 +72,7 @@ func (g *MemberGeneration) Run(ctx context.Context, parsed ParsedRequest, emit f
 		return g.refuse(fault.Overloaded)
 	}
 	defer s.Gate.Release(ctx)
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 	if e := s.reserveSystemBudgets(ctx, x); e != nil {
 		return g.refuse(e)
 	}

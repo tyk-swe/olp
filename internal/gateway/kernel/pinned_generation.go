@@ -66,7 +66,7 @@ func (s *Server) SettleGeneration(ctx context.Context, x *Call, p *Pin) {
 	if p != nil {
 		s.settlePinnedHold(ctx, p.Hold)
 	}
-	s.settleAdmission(ctx, x)
+	s.SettleAdmission(ctx, x)
 }
 
 func (s *Server) SessionCall(w http.ResponseWriter, r *http.Request, family wire.Format, mode string) *Call {

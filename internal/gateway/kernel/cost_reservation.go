@@ -389,12 +389,12 @@ func (x *Call) responseCost() (rates.Cost, bool) {
 	return total, billable
 }
 
-// settleAdmission finishes the reservations a request holds once it has ended,
+// SettleAdmission finishes the reservations a request holds once it has ended,
 // whether it succeeded, failed or its client went away. A request that was handed
 // to a provider replaces the cost it reserved with the cost it incurred; one that
 // never was gives everything back. Either way this runs before the usage event
 // is consumed or after, and the reservation script makes the order immaterial.
-func (s *Server) settleAdmission(ctx context.Context, x *Call) {
+func (s *Server) SettleAdmission(ctx context.Context, x *Call) {
 	s.SettleCaps(ctx, x)
 	if x.cacheRateLease != nil {
 		zero := int64(0)
