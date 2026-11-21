@@ -60,6 +60,9 @@ func addReportedTokens(total, turn *int64) (*int64, bool) {
 }
 
 func ProjectChatWorkflowUsage(body []byte, usage *wire.Usage, maxBytes int) ([]byte, error) {
+	if usage == nil {
+		return body, nil
+	}
 	fields, err := object(body)
 	if err != nil {
 		return nil, err
@@ -67,11 +70,14 @@ func ProjectChatWorkflowUsage(body []byte, usage *wire.Usage, maxBytes int) ([]b
 	if !present(fields["usage"]) {
 		return body, nil
 	}
-	return replaceChatWorkflowUsage(fields, chatWorkflowUsageFields(usage), maxBytes)
+	return replaceChatWorkflowUsage(fields, chatUsage(usage), maxBytes)
 }
 
 func ProjectChatWorkflowStreamUsage(frames []byte, usage *wire.Usage, maxEvent, maxBytes int) ([]byte, error) {
-	replacement := chatWorkflowUsageFields(usage)
+	if usage == nil {
+		return frames, nil
+	}
+	replacement := chatUsage(usage)
 	decoder := sse.NewRawDecoder(bytes.NewReader(frames), maxEvent)
 	var out bytes.Buffer
 	for {
@@ -104,9 +110,6 @@ func projectChatWorkflowFrame(frame sse.RawFrame, usage Object, maxEvent int) ([
 	if !present(fields["usage"]) {
 		return frame.Bytes, nil
 	}
-	if usage == nil && len(arr(fields["choices"])) == 0 {
-		return nil, nil
-	}
 	body, err := replaceChatWorkflowUsage(fields, usage, maxEvent)
 	if err != nil {
 		return nil, err
@@ -131,9 +134,6 @@ func replaceChatWorkflowUsage(fields, usage Object, maxBytes int) ([]byte, error
 }
 
 func mergeChatWorkflowUsage(final json.RawMessage, usage Object) (Object, error) {
-	if usage == nil {
-		return nil, nil
-	}
 	fields, err := object(final)
 	if err != nil {
 		return nil, err
@@ -169,13 +169,6 @@ func overlayChatWorkflowFields(base, updates Object) Object {
 		}
 		maps.All(updates)(yield)
 	})
-}
-
-func chatWorkflowUsageFields(usage *wire.Usage) Object {
-	if usage == nil {
-		return nil
-	}
-	return chatUsage(usage)
 }
 
 func WorkflowSingleCandidate(body []byte) bool {

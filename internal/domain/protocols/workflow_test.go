@@ -3,6 +3,7 @@ package protocols
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,36 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
+
+func TestChatWorkflowPreservesFinalUsageWhenTotalIsUnavailable(t *testing.T) {
+	const finalUsage = `"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}`
+	const finalBody = `{"id":"chatcmpl-final","choices":[{"index":0,"message":{"role":"assistant","content":"Done."},"finish_reason":"stop"}],` + finalUsage + `}`
+	const finalStream = "data: " + `{"id":"chatcmpl-final","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: " + `{"id":"chatcmpl-final","choices":[],` + finalUsage + "}\n\ndata: [DONE]\n\n"
+	for _, tc := range []struct {
+		name         string
+		intermediate *wire.Usage
+	}{
+		{name: "missing intermediate usage"},
+		{name: "unrepresentable total", intermediate: &wire.Usage{InputTokens: math.MaxInt64 - 8, TotalTokens: math.MaxInt64 - 8}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			earlier := AddChatWorkflowUsage(new(wire.Usage), &wire.Usage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8})
+			intermediate := AddChatWorkflowUsage(earlier, tc.intermediate)
+			total := AddChatWorkflowUsage(intermediate, &wire.Usage{InputTokens: 9, OutputTokens: 4, TotalTokens: 13})
+
+			const limit = 4096
+			body, err := ProjectChatWorkflowUsage([]byte(finalBody), total, limit)
+			if err != nil || string(body) != finalBody {
+				t.Errorf("JSON reply = %s, error = %v; want unchanged final turn with usage", body, err)
+			}
+			stream, err := ProjectChatWorkflowStreamUsage([]byte(finalStream), total, limit, limit)
+			if err != nil || string(stream) != finalStream {
+				t.Errorf("SSE reply = %q, error = %v; want unchanged final turn with usage", stream, err)
+			}
+		})
+	}
+}
 
 func TestAnthropicWorkflowPreservesStreamedToolAndSignedThinking(t *testing.T) {
 	// Anthropic streaming format: https://platform.claude.com/docs/en/build-with-claude/streaming (2026-10-29).

@@ -90,9 +90,10 @@ the route's toolsets with `olp_toolsets` and tighten its bounds with
 `olp_run_limits`. Read-only tools can execute without approval; other tools
 require approval.
 
-A Chat Completions reply reports token usage summed across the model turns in
-that HTTP request when every turn reports usage. Streaming clients receive
-this total only when they set `stream_options.include_usage`.
+A Chat Completions reply sums token usage across the model turns in that HTTP
+request when all turns report usage and the sum fits. Otherwise, it leaves
+the final turn's usage unchanged. Streaming clients receive usage only when
+they set `stream_options.include_usage`.
 
 Default bounds are eight model iterations, 32 tool calls and 120 seconds per
 run, with hard ceilings of 32 iterations, 128 tool calls and 600 seconds. The
