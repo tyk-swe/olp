@@ -3613,6 +3613,99 @@ func (e GuardrailPolicyEntryPhase) Valid() bool {
 	}
 }
 
+// Defines values for GuardrailPreviewEntryMode.
+const (
+	Enforce GuardrailPreviewEntryMode = "enforce"
+	Monitor GuardrailPreviewEntryMode = "monitor"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPreviewEntryMode enum.
+func (e GuardrailPreviewEntryMode) Valid() bool {
+	switch e {
+	case Enforce:
+		return true
+	case Monitor:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailPreviewEntryNotes.
+const (
+	RetainedOutputUninspected GuardrailPreviewEntryNotes = "retained_output_uninspected"
+	RewriteUnavailable        GuardrailPreviewEntryNotes = "rewrite_unavailable"
+	StreamingUnavailable      GuardrailPreviewEntryNotes = "streaming_unavailable"
+	SurfaceUninspected        GuardrailPreviewEntryNotes = "surface_uninspected"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPreviewEntryNotes enum.
+func (e GuardrailPreviewEntryNotes) Valid() bool {
+	switch e {
+	case RetainedOutputUninspected:
+		return true
+	case RewriteUnavailable:
+		return true
+	case StreamingUnavailable:
+		return true
+	case SurfaceUninspected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailPreviewEntryPhase.
+const (
+	GuardrailPreviewEntryPhaseInput         GuardrailPreviewEntryPhase = "input"
+	GuardrailPreviewEntryPhaseInputParallel GuardrailPreviewEntryPhase = "input_parallel"
+	GuardrailPreviewEntryPhaseOutput        GuardrailPreviewEntryPhase = "output"
+	GuardrailPreviewEntryPhaseOutputStream  GuardrailPreviewEntryPhase = "output_stream"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPreviewEntryPhase enum.
+func (e GuardrailPreviewEntryPhase) Valid() bool {
+	switch e {
+	case GuardrailPreviewEntryPhaseInput:
+		return true
+	case GuardrailPreviewEntryPhaseInputParallel:
+		return true
+	case GuardrailPreviewEntryPhaseOutput:
+		return true
+	case GuardrailPreviewEntryPhaseOutputStream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailPreviewEntryScope.
+const (
+	GuardrailPreviewEntryScopeApiKey       GuardrailPreviewEntryScope = "api-key"
+	GuardrailPreviewEntryScopeInstallation GuardrailPreviewEntryScope = "installation"
+	GuardrailPreviewEntryScopeOrganization GuardrailPreviewEntryScope = "organization"
+	GuardrailPreviewEntryScopeProject      GuardrailPreviewEntryScope = "project"
+	GuardrailPreviewEntryScopeRoute        GuardrailPreviewEntryScope = "route"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPreviewEntryScope enum.
+func (e GuardrailPreviewEntryScope) Valid() bool {
+	switch e {
+	case GuardrailPreviewEntryScopeApiKey:
+		return true
+	case GuardrailPreviewEntryScopeInstallation:
+		return true
+	case GuardrailPreviewEntryScopeOrganization:
+		return true
+	case GuardrailPreviewEntryScopeProject:
+		return true
+	case GuardrailPreviewEntryScopeRoute:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GuardrailResponseOnError.
 const (
 	GuardrailResponseOnErrorFailClosed GuardrailResponseOnError = "fail_closed"
@@ -4924,6 +5017,30 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventSpendSpike:
 		return true
 	case NotificationEventWorkerStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationTestStatus.
+const (
+	NotificationTestStatusDelivered   NotificationTestStatus = "delivered"
+	NotificationTestStatusFailed      NotificationTestStatus = "failed"
+	NotificationTestStatusPending     NotificationTestStatus = "pending"
+	NotificationTestStatusUnconfirmed NotificationTestStatus = "unconfirmed"
+)
+
+// Valid indicates whether the value is a known member of the NotificationTestStatus enum.
+func (e NotificationTestStatus) Valid() bool {
+	switch e {
+	case NotificationTestStatusDelivered:
+		return true
+	case NotificationTestStatusFailed:
+		return true
+	case NotificationTestStatusPending:
+		return true
+	case NotificationTestStatusUnconfirmed:
 		return true
 	default:
 		return false
@@ -7465,6 +7582,24 @@ func (e GetCodeClientConfigurationParamsClient) Valid() bool {
 	case GetCodeClientConfigurationParamsClientCodex:
 		return true
 	case GetCodeClientConfigurationParamsClientOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PreviewGuardrailsParamsMode.
+const (
+	PreviewGuardrailsParamsModeStreaming PreviewGuardrailsParamsMode = "streaming"
+	PreviewGuardrailsParamsModeUnary     PreviewGuardrailsParamsMode = "unary"
+)
+
+// Valid indicates whether the value is a known member of the PreviewGuardrailsParamsMode enum.
+func (e PreviewGuardrailsParamsMode) Valid() bool {
+	switch e {
+	case PreviewGuardrailsParamsModeStreaming:
+		return true
+	case PreviewGuardrailsParamsModeUnary:
 		return true
 	default:
 		return false
@@ -11785,6 +11920,47 @@ type GuardrailPolicyInput struct {
 	ProjectId *openapi_types.UUID    `json:"project_id,omitempty"`
 }
 
+// GuardrailPreviewEntry defines model for GuardrailPreviewEntry.
+type GuardrailPreviewEntry struct {
+	GuardrailId      string                       `json:"guardrail_id"`
+	Mode             GuardrailPreviewEntryMode    `json:"mode"`
+	Notes            []GuardrailPreviewEntryNotes `json:"notes"`
+	Phase            GuardrailPreviewEntryPhase   `json:"phase"`
+	PolicyId         string                       `json:"policy_id"`
+	PolicyRevisionId string                       `json:"policy_revision_id"`
+	RevisionId       string                       `json:"revision_id"`
+	Scope            GuardrailPreviewEntryScope   `json:"scope"`
+}
+
+// GuardrailPreviewEntryMode defines model for GuardrailPreviewEntry.Mode.
+type GuardrailPreviewEntryMode string
+
+// GuardrailPreviewEntryNotes defines model for GuardrailPreviewEntry.Notes.
+type GuardrailPreviewEntryNotes string
+
+// GuardrailPreviewEntryPhase defines model for GuardrailPreviewEntry.Phase.
+type GuardrailPreviewEntryPhase string
+
+// GuardrailPreviewEntryScope defines model for GuardrailPreviewEntry.Scope.
+type GuardrailPreviewEntryScope string
+
+// GuardrailPreviewResponse defines model for GuardrailPreviewResponse.
+type GuardrailPreviewResponse struct {
+	// Entries Visible entries in relative serving order.
+	Entries []GuardrailPreviewEntry `json:"entries"`
+
+	// PartialVisibility True for any caller without installation-wide read access, regardless of which entries apply.
+	PartialVisibility bool               `json:"partial_visibility"`
+	ReleaseId         openapi_types.UUID `json:"release_id"`
+	ReleaseSequence   int64              `json:"release_sequence"`
+
+	// Stale True when a newer published release exists than the one inspected.
+	Stale bool `json:"stale"`
+
+	// StaticCompatible Whether the entire chain passed the selected static guardrail checks. Omitted for scoped callers.
+	StaticCompatible *bool `json:"static_compatible,omitempty"`
+}
+
 // GuardrailResponse defines model for GuardrailResponse.
 type GuardrailResponse struct {
 	ActiveRevisionId nullable.Nullable[openapi_types.UUID] `json:"active_revision_id,omitempty"`
@@ -12920,6 +13096,16 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// NotificationDestinationTest Result of a single test attempt, separate from incident delivery history.
+type NotificationDestinationTest struct {
+	// Failure Sanitized failure code when available.
+	Failure *string            `json:"failure,omitempty"`
+	Id      openapi_types.UUID `json:"id"`
+
+	// Status Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.
+	Status NotificationTestStatus `json:"status"`
+}
+
 // NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 type NotificationEvent string
 
@@ -12971,6 +13157,9 @@ type NotificationSilence struct {
 	EndsAt   time.Time `json:"ends_at"`
 	StartsAt time.Time `json:"starts_at"`
 }
+
+// NotificationTestStatus Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.
+type NotificationTestStatus string
 
 // ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
 type ObservabilityRunEvidence struct {
@@ -18495,6 +18684,30 @@ type ListGuardrailsParams struct {
 type CreateGuardrailParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
+
+// PreviewGuardrailsParams defines parameters for PreviewGuardrails.
+type PreviewGuardrailsParams struct {
+	// RouteId ID of a route in the serving release.
+	RouteId openapi_types.UUID `form:"route_id" json:"route_id"`
+
+	// ApiKeyId ID of an API key in the same project as the route.
+	ApiKeyId openapi_types.UUID `form:"api_key_id" json:"api_key_id"`
+
+	// Operation A serving operation on the route, such as generation.
+	Operation string `form:"operation" json:"operation"`
+
+	// Surface A request surface or dialect for the operation, such as openai-chat.
+	Surface string `form:"surface" json:"surface"`
+
+	// Mode Delivery mode.
+	Mode PreviewGuardrailsParamsMode `form:"mode" json:"mode"`
+
+	// RetainsOutput Check provider-retained output compatibility for OpenAI Responses.
+	RetainsOutput *bool `form:"retains_output,omitempty" json:"retains_output,omitempty"`
+}
+
+// PreviewGuardrailsParamsMode defines parameters for PreviewGuardrails.
+type PreviewGuardrailsParamsMode string
 
 // DeleteGuardrailParams defines parameters for DeleteGuardrail.
 type DeleteGuardrailParams struct {

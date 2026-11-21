@@ -2,6 +2,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
+  import NotificationDestinationTest from './NotificationDestinationTest.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -316,6 +317,9 @@
                       onclick={() => toggleDestination(destination)}
                       >{destination.enabled ? 'Disable' : 'Enable'}</button
                     >
+                    {#if destination.enabled && (destination.type == null || destination.type === 'webhook' || destination.type === 'email')}
+                      <NotificationDestinationTest {destination} />
+                    {/if}
                     {#if canDelete}<ConfirmAction
                         danger
                         label="Delete destination"

@@ -28,6 +28,10 @@ const (
 	OpVideoDelete     Operation = "video_delete"
 )
 
+func (op Operation) SupportsStreaming() bool {
+	return op == OpImageGeneration || op == OpImageEdit || op == OpSpeech || op == OpTranscription
+}
+
 type Params interface {
 	Operation() Operation
 	uploads() []staging.Part
@@ -64,7 +68,7 @@ func (r *Request) Mode() string {
 	switch {
 	case r.Op() == OpVideoCreate:
 		return "async"
-	case r.Stream():
+	case r.Op().SupportsStreaming() && r.Stream():
 		return "streaming"
 	}
 	return "unary"

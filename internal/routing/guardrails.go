@@ -8,6 +8,10 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
+func (r Route) UsesPreparedBedrockConverse() bool {
+	return r.Fidelity.Strict() || r.Cache != nil || r.PromptCache != nil
+}
+
 func (s *Snapshot) compileGuardrails() error {
 	if s.Guardrails == nil {
 		return nil

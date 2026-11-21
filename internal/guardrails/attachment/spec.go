@@ -57,6 +57,10 @@ var changeOperation = map[guardrails.Scope]authz.Operation{
 	guardrails.KeyScope:          authz.Keys,
 }
 
+func CanView(p authz.Principal, scope guardrails.Scope, id string, owner *string) bool {
+	return authorize(p, target{Attachment: guardrails.Attachment{Scope: scope, ScopeID: id}, owner: owner, found: true}, authz.View) == nil
+}
+
 func authorize(p authz.Principal, t target, need authz.Need) error {
 	if need == authz.Change {
 		if err := p.Authorize(cmp.Or(changeOperation[t.Scope], authz.Configure)); err != nil {

@@ -5402,6 +5402,37 @@
         ],
         "type": "object"
       },
+      "NotificationDestinationTest": {
+        "description": "Result of a single test attempt, separate from incident delivery history.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationTestStatus"
+          },
+          "failure": {
+            "description": "Sanitized failure code when available.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "NotificationTestStatus": {
+        "description": "Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.",
+        "enum": [
+          "pending",
+          "delivered",
+          "failed",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
       "NotificationDelivery": {
         "description": "Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.",
         "properties": {
@@ -27984,6 +28015,112 @@
           "latency_ms"
         ]
       },
+      "GuardrailPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "release_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "release_sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "True when a newer published release exists than the one inspected."
+          },
+          "partial_visibility": {
+            "type": "boolean",
+            "description": "True for any caller without installation-wide read access, regardless of which entries apply."
+          },
+          "static_compatible": {
+            "type": "boolean",
+            "description": "Whether the entire chain passed the selected static guardrail checks. Omitted for scoped callers."
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailPreviewEntry"
+            },
+            "description": "Visible entries in relative serving order."
+          }
+        },
+        "required": [
+          "release_id",
+          "release_sequence",
+          "stale",
+          "partial_visibility",
+          "entries"
+        ]
+      },
+      "GuardrailPreviewEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy_id": {
+            "type": "string"
+          },
+          "policy_revision_id": {
+            "type": "string"
+          },
+          "guardrail_id": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "organization",
+              "project",
+              "route",
+              "api-key"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "enforce",
+              "monitor"
+            ]
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "rewrite_unavailable",
+                "retained_output_uninspected",
+                "streaming_unavailable",
+                "surface_uninspected"
+              ]
+            }
+          }
+        },
+        "required": [
+          "policy_id",
+          "policy_revision_id",
+          "guardrail_id",
+          "revision_id",
+          "scope",
+          "phase",
+          "mode",
+          "notes"
+        ]
+      },
       "GuardrailApplyInput": {
         "type": "object",
         "additionalProperties": false,
@@ -36211,6 +36348,227 @@
               }
             },
             "description": "Egress policy or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}": {
+      "get": {
+        "operationId": "get_notification_destination_test",
+        "description": "Read the current test result without sending.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "post": {
+        "operationId": "send_notification_destination_test",
+        "description": "Send one test from a saved, enabled webhook or email destination. Reusing an action ID returns the existing result without sending or consuming the rate limit.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Disabled destination or unsupported destination type"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many new tests for this destination",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -68152,6 +68510,117 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails/preview": {
+      "get": {
+        "operationId": "preview_guardrails",
+        "summary": "Preview the guardrails attached to a route and API key",
+        "description": "Inspect the installed serving release without evaluating content or dispatching. Compatibility only covers the selected static surface and mode. Request-dependent features, provider eligibility and fallback routes are not checked.",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "route_id",
+            "required": true,
+            "description": "ID of a route in the serving release.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": true,
+            "description": "ID of an API key in the same project as the route.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": true,
+            "description": "A serving operation on the route, such as generation.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "surface",
+            "required": true,
+            "description": "A request surface or dialect for the operation, such as openai-chat.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": true,
+            "description": "Delivery mode.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unary",
+                "streaming"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "retains_output",
+            "required": false,
+            "description": "Check provider-retained output compatibility for OpenAI Responses.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Route or key not found or not visible"
+          },
+          "422": {
+            "description": "Invalid preview selection"
+          },
+          "503": {
+            "description": "Serving release unavailable"
           }
         }
       }

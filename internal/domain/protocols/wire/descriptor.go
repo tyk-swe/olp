@@ -9,7 +9,7 @@ import "github.com/tyk-swe/olp/internal/domain/oif"
 var wireDialects = map[Format]string{
 	Completions: "openai-completions", Chat: "openai-chat", Responses: "openai-responses", InputTokens: "openai-input-tokens",
 	Anthropic: "anthropic-messages", AnthropicCount: "anthropic-count-tokens",
-	Gemini: "gemini-generate-content", GeminiStream: "gemini-generate-content", GeminiCount: "gemini-count-tokens",
+	Gemini: "gemini-generate-content", GeminiStream: "gemini-generate-content", GeminiCount: "gemini-count-tokens", GeminiInteractions: "gemini-interactions",
 	GeminiDecisions: "gemini-decisions",
 	Embeddings:      "openai-embeddings", Moderation: "openai-moderation", Rerank: "rerank", BedrockRerank: "bedrock-rerank",
 	GeminiEmbeddings: "gemini-embeddings", GeminiEmbeddingsBatch: "gemini-embeddings-batch",

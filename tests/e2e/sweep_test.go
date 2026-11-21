@@ -72,6 +72,14 @@ func sweepPath(pattern string, known map[string]string) string {
 		return resolved + "?" + url.Values{"gateway_url": {"https://gateway.example.com"}}.Encode()
 	case path == "/api/v1/delegation-options":
 		return resolved + "?" + url.Values{"api_key_id": {known["api_key_id"]}}.Encode()
+	case path == "/api/v1/guardrails/preview":
+		return resolved + "?" + url.Values{
+			"route_id":   {known["route_id"]},
+			"api_key_id": {known["api_key_id"]},
+			"operation":  {"generation"},
+			"surface":    {"openai-chat"},
+			"mode":       {"unary"},
+		}.Encode()
 	default:
 		return resolved
 	}

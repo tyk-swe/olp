@@ -87,10 +87,8 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 	// Unary operation codecs expose inspection text but cannot apply rewritten
 	// segments to their typed request and result documents.
 	if x.unary != nil {
-		for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.Output, guardrails.OutputStream} {
-			if x.guard.engine.HasAction(phase, guardrails.Redact) || x.guard.engine.HasAction(phase, guardrails.Mask) {
-				return guardrailError(guardrails.ErrSurface)
-			}
+		if err := x.guard.engine.ValidateRewrites(); err != nil {
+			return guardrailError(err)
 		}
 	}
 	x.guard.ctx = ctx
@@ -125,8 +123,10 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 			}
 		}
 	}
-	if retainsOutput && (x.guard.engine.HasPhase(guardrails.Output) || x.guard.engine.HasPhase(guardrails.OutputStream) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask)) {
-		return guardrailError(guardrails.ErrSurface)
+	if retainsOutput {
+		if err := x.guard.engine.ValidateRetainedOutput(); err != nil {
+			return guardrailError(err)
+		}
 	}
 	if x.generation.parsed != nil && x.generation.parsed.Stream {
 		if err := x.guardrailStreamSurface(x.generation.parsed.OIF().Document()); err != nil {

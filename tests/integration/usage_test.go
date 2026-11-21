@@ -2784,8 +2784,13 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 
 func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
+	return notificationManagementWithPolicy(t, pool, userID, egress.Policy{})
+}
+
+func notificationManagementWithPolicy(t *testing.T, pool *pgxpool.Pool, userID string, policy egress.Policy) notificationCaller {
+	t.Helper()
 	return managementHTTPAs(t, pool, userID, func(mux *http.ServeMux, server *access.Server) {
-		notifications.NewManagement(server, egress.Policy{}).Register(mux)
+		notifications.NewManagement(server, policy).Register(mux)
 	})
 }
 

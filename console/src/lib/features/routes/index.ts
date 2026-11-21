@@ -6,6 +6,7 @@ export {
   type RouteDraftValidation,
   activateRoute,
   createRouteDraft,
+  listOperationDialects,
   listRoutes,
   selectActiveRoutes,
   simulateRouting

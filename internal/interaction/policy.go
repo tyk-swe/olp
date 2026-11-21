@@ -30,8 +30,9 @@ func inputFields(encodedWire wire.Format) []string {
 }
 
 func checkInputCoverage(encodedWire wire.Format, document oif.Document) error {
+	fields := inputFields(encodedWire)
 	for _, field := range document.Root().Members() {
-		if !slices.Contains(inputFields(encodedWire), field.Name) {
+		if !slices.Contains(fields, field.Name) {
 			return incompatible("policy_conflict", safeField(field.Name), "input_policy_coverage", "The input policy cannot inspect an unknown or opaque native control.")
 		}
 	}
@@ -235,4 +236,8 @@ func inspectableFormat(value oif.Value, responses bool) bool {
 // CheckGuardrailCoverage applies the native inspection contract to platform guardrails.
 func CheckGuardrailCoverage(format wire.Format, document oif.Document) error {
 	return checkInputCoverage(format, document)
+}
+
+func HasGuardrailInputCoverage(format wire.Format) bool {
+	return len(inputFields(format)) != 0
 }
