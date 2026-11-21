@@ -41,6 +41,9 @@ var dimensionExpressions = map[Dimension]string{
 }
 
 func parseDimension(raw string, f Filters) (Dimension, error) {
+	if raw == "" {
+		return DimensionRoute, nil
+	}
 	dimension := Dimension(raw)
 	if _, known := dimensionExpressions[dimension]; !known {
 		return "", fail(FailureInvalidDimension,

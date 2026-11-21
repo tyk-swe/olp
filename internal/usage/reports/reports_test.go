@@ -50,6 +50,13 @@ func TestUsageReportsRejectUnknownGroupings(t *testing.T) {
 	}
 }
 
+func TestUsageBreakdownDefaultsToRoute(t *testing.T) {
+	dimension, err := parseDimension("", Filters{})
+	if err != nil || dimension != DimensionRoute {
+		t.Fatalf("omitted dimension = %q, %v; want route", dimension, err)
+	}
+}
+
 func TestOversizedExportIsUnprocessable(t *testing.T) {
 	_, err := RequestCSV(make([]RequestSummary, 10001))
 	got := usageProblem(t, err)

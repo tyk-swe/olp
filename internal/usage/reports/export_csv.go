@@ -46,11 +46,7 @@ func (s *API) exportUsageCSV(w http.ResponseWriter, r *http.Request, p authz.Pri
 	if err != nil {
 		return err
 	}
-	raw := strings.TrimSpace(r.URL.Query().Get("dimension"))
-	if raw == "" {
-		raw = string(DimensionRoute)
-	}
-	dimension, err := parseDimension(raw, filters)
+	dimension, err := parseDimension(strings.TrimSpace(r.URL.Query().Get("dimension")), filters)
 	if err != nil {
 		return err
 	}
