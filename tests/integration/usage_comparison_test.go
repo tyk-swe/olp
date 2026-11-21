@@ -113,18 +113,24 @@ func TestUsageComparisonWithholdsChangesWhenSubtotalsAreNotComparable(t *testing
 		t.Fatalf("unpriced usage was treated as complete: %+v", unpriced)
 	}
 	expectComparisonSubtotal(t, unpriced.Current, "USD", usdCost)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.attempt_usage_hourly SET currency='USD'
+		WHERE route_slug='shared' AND bucket=$1`, start); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_ingestion_gaps
 		(id,gateway_instance,event_count,reason,first_observed_at,last_observed_at,certainty)
-		VALUES($1,'fixture',0,'fixture',$2,$2,'lower_bound')`, uuid.NewString(), previous.Add(time.Hour)); err != nil {
+		VALUES($1,'fixture',2,'fixture',$3,$3,'exact'), ($2,'fixture',0,'fixture',$3,$3,'lower_bound')`,
+		uuid.NewString(), uuid.NewString(), previous.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	gap := call(url.Values{"route": {"shared"}})
 	if gap.Status != "incomplete" || len(gap.Items) != 0 ||
+		gap.Previous.Completeness.RequestMetadataGapEvents != 2 ||
 		gap.Previous.Completeness.UncertainRequestMetadataGapCount != 1 || !gap.Current.Completeness.Complete {
 		t.Fatalf("uncertain prior coverage was treated as complete: %+v", gap)
 	}
 	expectComparisonSubtotal(t, gap.Previous, "USD", usdCost)
-	expectComparisonSubtotal(t, gap.Current, "EUR", eurCost)
+	expectComparisonSubtotal(t, gap.Current, "USD", eurCost)
 }
 
 func seedComparisonHour(t *testing.T, f usageFixture, at time.Time, route, model, currency string, cost *string, unpriced int) {
@@ -143,22 +149,20 @@ func seedComparisonHour(t *testing.T, f usageFixture, at time.Time, route, model
 
 func seedComparisonBoundary(t *testing.T, fixture usageFixture, at time.Time, route string) {
 	t.Helper()
-	if _, err := fixture.pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, at.Add(-time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	f := fixture
-	f.observedAt = at
 	input, output := int64(12_000_000), int64(0)
-	attempt := f.attempt(1)
+	attempt := fixture.attempt(1)
 	attempt.Usage.InputTokens, attempt.Usage.OutputTokens = &input, &output
-	event := f.event(attempt)
+	event := fixture.event(attempt)
 	event.RouteSlug = route
 	accepted, err := usage.NewAccountingEvent(event)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result, err := ingest.PersistEvent(t.Context(), f.pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+	if result, err := ingest.PersistEvent(t.Context(), fixture.pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
 		t.Fatalf("persist shared-boundary usage: %+v %v", result, err)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE olp.attempt_usage_facts SET observed_at=$1 WHERE event_id=$2`, at, event.EventID); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -180,21 +184,32 @@ func usageComparisonClient(t *testing.T, f usageFixture, start, end time.Time) f
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	api := reports.API{Access: access.New(access.Config{Pool: f.pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)})}
+	api := reports.API{Access: access.New(access.Config{Pool: f.pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.NewTextHandler(t.Output(), nil))})}
 	api.Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
 	return func(extra url.Values) contract.UsageComparisonResponse {
 		t.Helper()
 		query := url.Values{"start": {start.Format(time.RFC3339)}, "end": {end.Format(time.RFC3339)}, "project_id": {f.projectID}}
 		for key, values := range extra {
 			query[key] = values
 		}
-		request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/usage/comparison?"+query.Encode(), nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/usage/comparison?"+query.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		request.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, request)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("usage comparison: HTTP %d", response.StatusCode)
+		}
 		var report contract.UsageComparisonResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &report); rec.Code != http.StatusOK || err != nil {
-			t.Fatalf("usage comparison: HTTP %d %s (%v)", rec.Code, rec.Body, err)
+		if err := json.NewDecoder(response.Body).Decode(&report); err != nil {
+			t.Fatal(err)
 		}
 		return report
 	}
