@@ -30,19 +30,27 @@ import (
 
 type notificationCaller func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult
 
-func TestSavedWebhookTestIsSentOnceAcrossReplicas(t *testing.T) {
+func TestSavedDestinationTestAcrossReplicas(t *testing.T) {
 	t.Parallel()
+	pool, fixture, first, second := testNotificationReplicas(t)
 	for _, ending := range []string{"acknowledged", "timeout", "interrupted"} {
-		t.Run(ending, func(t *testing.T) {
+		t.Run("webhook_"+ending, func(t *testing.T) {
 			t.Parallel()
-			exerciseWebhookTest(t, ending)
+			exerciseWebhookTest(t, pool, fixture, first, second, ending)
 		})
 	}
+	t.Run("email", func(t *testing.T) {
+		t.Parallel()
+		exerciseEmailTest(t, first, second)
+	})
+	t.Run("permissions", func(t *testing.T) {
+		t.Parallel()
+		checkDestinationTestPermissions(t, pool, fixture, first)
+	})
 }
 
-func exerciseWebhookTest(t *testing.T, ending string) {
+func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture, first, second notificationCaller, ending string) {
 	t.Helper()
-	pool, fixture, first, second := testNotificationReplicas(t)
 	type received struct{ body, signature string }
 	messages := make(chan received, 8)
 	ack := make(chan struct{})
@@ -61,7 +69,7 @@ func exerciseWebhookTest(t *testing.T, ending string) {
 	}))
 	t.Cleanup(receiver.Close)
 	const signingKey = "fixture-signing-key"
-	destination := saveTestDestination(t, first, fmt.Sprintf(`{"name":"test webhook","url":%q,"project_id":%q,"secret":%q}`, receiver.URL, fixture.projectID, signingKey))
+	destination := saveTestDestination(t, first, fmt.Sprintf(`{"name":%q,"url":%q,"project_id":%q,"secret":%q}`, "test webhook "+ending, receiver.URL, fixture.projectID, signingKey))
 	rule := seedTestIncident(t, pool, fixture, destination)
 	before := testIncidentState(t, pool, rule)
 	path := newNotificationTestPath(destination)
@@ -126,9 +134,8 @@ func exerciseWebhookTest(t *testing.T, ending string) {
 	}
 }
 
-func TestSavedEmailTestIsSentOnceAcrossReplicas(t *testing.T) {
-	t.Parallel()
-	_, _, first, second := testNotificationReplicas(t)
+func exerciseEmailTest(t *testing.T, first, second notificationCaller) {
+	t.Helper()
 	url, certificate, messages, ack := openTestSMTPSink(t)
 	destination := saveTestDestination(t, first, fmt.Sprintf(`{"name":"test email","url":%q,"type":"email","configuration":{"from":"alerts@example.invalid","to":["ops@example.invalid"],"ca_certificate":%q}}`, url, certificate))
 	path := newNotificationTestPath(destination)
@@ -164,9 +171,8 @@ func testNotificationReplicas(t *testing.T) (*pgxpool.Pool, usageFixture, notifi
 	return pool, fixture, notificationManagementWithPolicy(t, pool, fixture.ownerID, policy), notificationManagementWithPolicy(t, pool, fixture.ownerID, policy)
 }
 
-func TestSavedDestinationTestRequiresWriteScopeAndEnabledDestination(t *testing.T) {
-	t.Parallel()
-	pool, f, owner, _ := testNotificationReplicas(t)
+func checkDestinationTestPermissions(t *testing.T, pool *pgxpool.Pool, f usageFixture, owner notificationCaller) {
+	t.Helper()
 	id := saveTestDestination(t, owner, fmt.Sprintf(`{"name":"disabled webhook","url":"https://example.test","project_id":%q,"enabled":false}`, f.projectID))
 	user := uuid.NewString()
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users(id,email,display_name,role,etag,access_scope)
