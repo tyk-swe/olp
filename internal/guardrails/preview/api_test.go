@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -210,5 +211,52 @@ func assertPreviewOrder(t *testing.T, result response, want ...string) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("preview order = %v, want %v", got, want)
+	}
+}
+
+func TestPreviewExplainsStaticSurfaceLimits(t *testing.T) {
+	d := guardrails.Revision{ID: "revision", GuardrailID: "check", ProjectID: "project", Type: "builtin.keywords",
+		Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+	engine, err := guardrails.Compile([]guardrails.Entry{
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.OutputStream, Action: guardrails.Redact},
+	}, map[string]guardrails.Revision{d.ID: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		operation, surface, mode string
+		input, output            guardrails.CompatibilityNote
+	}{
+		{"generation", "openai-chat", "streaming", "", ""},
+		{"generation", "cohere-chat-v2", "unary", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"generation", "mistral-fim", "unary", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"generation", "bedrock-converse", "streaming", "", guardrails.RewriteUnavailable},
+		{"generation", "gemini-interactions", "unary", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"generation", "gemini-interactions", "streaming", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"image_generation", "openai", "streaming", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"image_edit", "openai", "streaming", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"speech", "openai", "streaming", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+		{"transcription", "openai", "streaming", guardrails.SurfaceUninspected, guardrails.SurfaceUninspected},
+	} {
+		t.Run(tt.operation+"/"+tt.surface+"/"+tt.mode, func(t *testing.T) {
+			route := routing.Route{
+				Operations: []string{tt.operation}, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+				Behavior: routing.Behavior{Cache: &cache.Policy{}, ToolExecution: "gateway"},
+			}
+			profile, err := compatibility(route, selection{operation: tt.operation, surface: tt.surface, mode: tt.mode}, 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := engine.Preview(profile, func(guardrails.Placement) bool { return true })
+			for i, want := range []guardrails.CompatibilityNote{tt.input, tt.output} {
+				if want == "" && len(entries[i].Notes) == 0 {
+					continue
+				}
+				if !slices.Equal(entries[i].Notes, []guardrails.CompatibilityNote{want}) {
+					t.Errorf("%s notes = %v, want %v", entries[i].Phase, entries[i].Notes, want)
+				}
+			}
+		})
 	}
 }

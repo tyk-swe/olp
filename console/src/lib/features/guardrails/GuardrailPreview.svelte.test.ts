@@ -101,11 +101,28 @@ it('shows the full serving order and compatibility only to an installation-wide 
   ).toEqual(['installation-policy', 'project-policy', 'key-policy']);
 });
 
-async function mountPreview(payload: {
-  partial_visibility: boolean;
-  static_compatible?: boolean;
-  entries: PreviewEntry[];
-}) {
+it.each([
+  { operation: 'generation', surface: 'gemini-interactions' },
+  { operation: 'speech', surface: 'openai' }
+])(
+  'requests the streaming preview for $operation on $surface',
+  async (selection) => {
+    const view = await mountPreview(
+      { partial_visibility: false, static_compatible: false, entries: [] },
+      selection
+    );
+    await view.inspect('zero-hidden');
+  }
+);
+
+async function mountPreview(
+  payload: {
+    partial_visibility: boolean;
+    static_compatible?: boolean;
+    entries: PreviewEntry[];
+  },
+  selection = { operation: 'generation', surface: 'openai-chat' }
+) {
   const fixtures = ['zero-hidden', 'one-hidden', 'several-hidden'];
   const requested = vi.fn<(route: string) => void>();
   serve(
@@ -120,7 +137,7 @@ async function mountPreview(payload: {
               project_id: 'project',
               state: 'active',
               latest_revision: {
-                operations: ['generation'],
+                operations: [selection.operation],
                 fidelity: { mode: 'transformed' }
               }
             }))
@@ -144,8 +161,7 @@ async function mountPreview(payload: {
           expect(Object.fromEntries(url.searchParams)).toEqual({
             route_id: expect.stringMatching(/hidden$/),
             api_key_id: 'key',
-            operation: 'generation',
-            surface: 'openai-chat',
+            ...selection,
             mode: 'streaming',
             retains_output: 'false'
           });
@@ -195,8 +211,8 @@ async function mountPreview(payload: {
       select(0, route);
       expect(target.querySelector('option[value="other-key"]')).toBeNull();
       select(1, 'key');
-      select(2, 'generation');
-      select(3, 'openai-chat');
+      select(2, selection.operation);
+      select(3, selection.surface);
       select(4, 'streaming');
       const button = target.querySelector('button');
       expect(button?.disabled).toBe(false);

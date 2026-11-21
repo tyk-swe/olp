@@ -14,6 +14,7 @@ type resolvedEntry struct {
 
 type Compatibility struct {
 	TypedUnary, RetainsOutput, Uninspected, StreamTextRewriteUnavailable bool
+	TypeSafeInput                                                        bool
 	StreamWindow                                                         int
 }
 
@@ -41,13 +42,28 @@ func (e *Engine) Preview(c Compatibility, visible func(Placement) bool) []Previe
 	if e == nil {
 		return []PreviewEntry{}
 	}
-	return slices.AppendSeq([]PreviewEntry{}, func(yield func(PreviewEntry) bool) {
+	entries := slices.Collect(func(yield func(compiledEntry) bool) {
 		for _, r := range e.entries {
-			if visible(r.placement) && !yield(r.preview(c)) {
+			if visible(r.placement) && !yield(r) {
 				return
 			}
 		}
 	})
+	profile := c.forEntries(entries)
+	return slices.AppendSeq([]PreviewEntry{}, func(yield func(PreviewEntry) bool) {
+		for _, r := range entries {
+			if !yield(r.preview(profile)) {
+				return
+			}
+		}
+	})
+}
+
+func (c Compatibility) forEntries(entries []compiledEntry) Compatibility {
+	if c.TypeSafeInput && onlyTypeSafe(entries) {
+		return Compatibility{}
+	}
+	return c
 }
 
 func (r compiledEntry) preview(c Compatibility) PreviewEntry {
@@ -92,7 +108,8 @@ func (r compiledEntry) rewriteConflict() bool {
 }
 
 func (r compiledEntry) streamTextRewriteConflict() bool {
-	return !r.entry.Monitor && r.entry.Phase == OutputStream && r.entry.Action == Redact && r.definition.Type != "builtin.tools"
+	return !r.entry.Monitor && (r.entry.Phase == Input && r.entry.Action == Mask ||
+		r.entry.Phase == OutputStream && r.entry.Action == Redact && r.definition.Type != "builtin.tools")
 }
 
 func (r compiledEntry) retainedOutputConflict() bool {

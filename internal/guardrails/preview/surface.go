@@ -22,9 +22,11 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 		return guardrails.Compatibility{}, httpkit.Invalid("retains_output", "Retained output is only available for OpenAI Responses.")
 	}
 	if family, ok := generationFamily(in.surface); in.operation == wire.OperationGeneration && ok {
-		if family == wire.GeminiInteractions || (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) ||
-			(!interaction.HasGuardrailInputCoverage(family) && route.ToolExecution != "gateway") {
+		if family == wire.GeminiInteractions || (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) {
 			return guardrails.Compatibility{Uninspected: true}, nil
+		}
+		if !interaction.HasGuardrailInputCoverage(family) {
+			return guardrails.Compatibility{Uninspected: true, TypeSafeInput: route.ToolExecution == "gateway"}, nil
 		}
 		if in.mode == "streaming" {
 			return guardrails.Compatibility{
