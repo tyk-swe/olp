@@ -1440,6 +1440,73 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	strict.call(t, "strict-owner", "GET", "/v1/responses/"+bound.ID, "", "", 404)
 }
 
+func TestMissingStoredResponseReconcilesBackgroundUsage(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug = "missing-responses"
+	var providerStatus atomic.Int32
+	upstream := &retainedUpstream{
+		status: func(request string) int {
+			if request == "POST /responses" {
+				return http.StatusOK
+			}
+			return int(providerStatus.Load())
+		},
+		replies: func(request string, nth int) map[string]string {
+			if request == "POST /responses" {
+				return map[string]string{request: fmt.Sprintf(`{"id":"resp_%s-%d","object":"response","background":true,"status":"queued","model":"provider-model","output":[]}`, providerOwned, nth)}
+			}
+			return map[string]string{request: `{"error":{"type":"server_error","message":"provider error"}}`}
+		},
+	}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: "responses-model", kind: "azure_openai", operations: []string{"generation"}, upstream: upstream,
+	})
+	keyID := g.key(t, "owner")
+	headers := map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}
+	for i, op := range []struct{ name, method, suffix string }{
+		{"read", http.MethodGet, ""},
+		{"cancel", http.MethodPost, "/cancel"},
+		{"input items", http.MethodGet, "/input_items"},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			header, raw := g.send(t, http.MethodPost, "/v1/responses", headers, `{"model":"`+slug+`","input":"hi","background":true,"store":true}`, http.StatusOK)
+			var created retainedObject
+			if err := json.Unmarshal(raw, &created); err != nil || created.ID == "" || created.Status != "queued" {
+				t.Fatalf("background response creation: %s, %v", raw, err)
+			}
+			assertUsage := func(want int) {
+				t.Helper()
+				var count, uncertain int
+				err := pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE charge_status = 'billing_uncertain' AND NOT usage_observed AND NOT usage_complete)
+					FROM olp.attempt_usage_facts WHERE request_id=$1 AND api_key_id=$2`, header.Get("X-Request-Id"), keyID).Scan(&count, &uncertain)
+				if err != nil || count != want || uncertain != want {
+					t.Fatalf("creation usage: %d facts, %d unobserved and uncertain, want %d of each (error: %v)", count, uncertain, want, err)
+				}
+			}
+
+			path := "/v1/responses/" + created.ID + op.suffix
+			native := fmt.Sprintf("%s /responses/resp_%s-%d%s", op.method, providerOwned, i+1, op.suffix)
+			providerStatus.Store(http.StatusInternalServerError)
+			g.send(t, op.method, path, headers, "", http.StatusInternalServerError)
+			assertUsage(0)
+
+			providerStatus.Store(http.StatusNotFound)
+			for range 2 {
+				_, raw := g.send(t, op.method, path, headers, "", http.StatusNotFound)
+				var missing struct{ Error struct{ Code string } }
+				if err := json.Unmarshal(raw, &missing); err != nil || missing.Error.Code != "not_found" {
+					t.Fatalf("missing response: %s, %v", raw, err)
+				}
+				if got := len(upstream.sent(native)); got != 2 {
+					t.Errorf("provider calls after missing response: got %d, want 2", got)
+				}
+				assertUsage(1)
+			}
+		})
+	}
+}
+
 type storedResponse struct {
 	kind, state, model string
 	expires            time.Time

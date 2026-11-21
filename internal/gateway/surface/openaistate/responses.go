@@ -63,10 +63,7 @@ func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *reso
 	}
 	resp, failure := s.kernel.PinnedDo(ctx, x, p, method, endpoint, body, "application/json")
 	if failure != nil {
-		if failure.Status == http.StatusNotFound {
-			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-		}
-		return kernel.UpstreamError(failure)
+		return s.kernel.StoredResponseUpstreamError(ctx, res.ID, failure)
 	}
 	defer resp.Body.Close()
 
@@ -230,10 +227,7 @@ func (s surface) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
-			if failure.Status == http.StatusNotFound {
-				return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
-			}
-			return kernel.UpstreamError(failure)
+			return s.kernel.StoredResponseUpstreamError(ctx, res.ID, failure)
 		}
 		defer resp.Body.Close()
 
