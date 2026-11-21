@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"github.com/tyk-swe/olp/management"
@@ -176,6 +178,11 @@ func (runner Runner) generatedOutput(result management.Response, format, path st
 	data, err := formatResponse(result.Body, format)
 	if err != nil {
 		return commandFailure(management.InvalidResponse, err)
+	}
+	if jsonErrors && path == "" {
+		brokenPipe := make(chan os.Signal, 1)
+		signal.Notify(brokenPipe, syscall.SIGPIPE)
+		defer signal.Stop(brokenPipe)
 	}
 	if err := runner.output(path, data); err != nil {
 		return commandFailure(management.Local, err)

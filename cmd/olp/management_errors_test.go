@@ -22,10 +22,16 @@ func TestManagementCLIProcess(t *testing.T) {
 	}
 }
 
-func runManagementCLI(t *testing.T, origin, tokenFile, format string, args ...string) (stdout, stderr string, status int) {
+func managementCLICommand(t *testing.T, origin, tokenFile, format string, args ...string) *exec.Cmd {
 	t.Helper()
 	command := exec.CommandContext(t.Context(), os.Args[0], append([]string{"-test.run=^TestManagementCLIProcess$", "--"}, args...)...)
 	command.Env = []string{"OLP_MANAGEMENT_URL=" + origin, "OLP_MANAGEMENT_TOKEN_FILE=" + tokenFile, "OLP_CLI_ERROR_FORMAT=" + format}
+	return command
+}
+
+func runManagementCLI(t *testing.T, origin, tokenFile, format string, args ...string) (stdout, stderr string, status int) {
+	t.Helper()
+	command := managementCLICommand(t, origin, tokenFile, format, args...)
 	var out, errOut strings.Builder
 	command.Stdout, command.Stderr = &out, &errOut
 	if err := command.Run(); err != nil {
@@ -194,4 +200,30 @@ func TestManagementCLIErrorFormatScope(t *testing.T) {
 	server.Close()
 	requireCLIFailure(t, server.URL, token, "json", `{"kind":"transport"}`, "keys", "list")
 	requireCLIFailure(t, "private-invalid-origin", token, "json", `{"kind":"local"}`, "keys", "list")
+}
+
+func TestManagementCLIStructuredErrorOnClosedStdout(t *testing.T) {
+	t.Parallel()
+	token := cliInputFile(t, "olp_test_only_management_token\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("ETag", `"fixture"`)
+		io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.Close()
+	defer writer.Close()
+
+	command := managementCLICommand(t, server.URL, token, "json", "keys", "list")
+	command.Stdout = writer
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	err = command.Run()
+	exit, ok := errors.AsType[*exec.ExitError](err)
+	if !ok || exit.ExitCode() != 1 || stderr.String() != "{\"kind\":\"local\"}\n" {
+		t.Fatalf("execution error=%v, stderr=%q; want exit=1 and one local error", err, stderr.String())
+	}
 }
