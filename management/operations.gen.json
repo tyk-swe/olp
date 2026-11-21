@@ -32231,6 +32231,107 @@
     }
   },
   {
+    "name": "preview_guardrails",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrails/preview",
+    "description": "Preview the guardrails attached to a route and API key",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "route_id",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "operation",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "surface",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "mode",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "retains_output",
+        "in": "query",
+        "required": false,
+        "type": "boolean"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "unary",
+                "streaming"
+              ]
+            },
+            "retains_output": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "route_id",
+            "api_key_id",
+            "operation",
+            "surface",
+            "mode"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "pricing_quote",
     "group": "usage",
     "method": "POST",

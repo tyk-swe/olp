@@ -174,6 +174,11 @@ export const NAVIGATION_SECTIONS: readonly NavigationSection[] = [
             route: 'GET /api/v1/guardrail-credentials'
           },
           {
+            label: 'Preview',
+            href: resolve('guardrails/preview'),
+            route: 'GET /api/v1/guardrails/preview'
+          },
+          {
             label: 'Try it',
             href: resolve('guardrails/try'),
             route: 'POST /api/v1/guardrails/evaluate'

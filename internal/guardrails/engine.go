@@ -31,6 +31,7 @@ type detector interface {
 	width() int
 }
 type compiledEntry struct {
+	placement  Placement
 	entry      Entry
 	definition Revision
 	kind       kind
@@ -53,7 +54,7 @@ func (r compiledEntry) bound(external Evaluator) compiledEntry {
 	if !ok {
 		return r
 	}
-	return compiledEntry{r.entry, r.definition, r.kind, externalDetector{definition: d.definition, spec: d.spec, evaluator: external}}
+	return compiledEntry{r.placement, r.entry, r.definition, r.kind, externalDetector{definition: d.definition, spec: d.spec, evaluator: external}}
 }
 
 func (e *Engine) entriesWhere(match func(compiledEntry) bool) bool {
@@ -106,6 +107,16 @@ func (e *Engine) WithoutModelGuardrails() *Engine {
 // Compile copies configuration before compiling it. No live management object
 // or PostgreSQL handle is reachable from a compiled engine.
 func Compile(entries []Entry, definitions map[string]Revision) (*Engine, error) {
+	return compile(slices.Collect(func(yield func(resolvedEntry) bool) {
+		for _, entry := range entries {
+			if !yield(resolvedEntry{entry: entry}) {
+				return
+			}
+		}
+	}), definitions)
+}
+
+func compile(entries []resolvedEntry, definitions map[string]Revision) (*Engine, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -113,7 +124,8 @@ func Compile(entries []Entry, definitions map[string]Revision) (*Engine, error) 
 		return nil, errors.New("too many effective guardrails")
 	}
 	e := &Engine{}
-	for _, entry := range entries {
+	for _, item := range entries {
+		entry := item.entry
 		d, ok := definitions[entry.RevisionID]
 		if !ok || d.ID != entry.RevisionID || d.GuardrailID != entry.GuardrailID || !entry.Phase.Valid() || !entry.Action.Valid() {
 			return nil, errors.New("invalid guardrail revision or policy entry")
@@ -135,7 +147,7 @@ func Compile(entries []Entry, definitions map[string]Revision) (*Engine, error) 
 		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !k.transforms {
 			return nil, errors.New("this detector does not supply transformation spans")
 		}
-		e.entries = append(e.entries, compiledEntry{entry, d, k, detectorOf(d, spec)})
+		e.entries = append(e.entries, compiledEntry{item.placement, entry, d, k, detectorOf(d, spec)})
 	}
 	return e, nil
 }
@@ -161,7 +173,7 @@ func (e *Engine) Unavailable(phases ...Phase) (Result, error) {
 				continue
 			}
 			outcome := FailedOpen
-			if !r.entry.Monitor && r.entry.Action != Annotate {
+			if r.enforcesUnavailable() {
 				outcome = FailedClosed
 				err = ErrSurface
 			}
@@ -194,20 +206,24 @@ func (e *Engine) ValidateStream(window int) error {
 	if window < 1 || window > MaxWindowBytes {
 		return ErrSurface
 	}
-	for _, r := range e.entries {
-		if r.entry.Monitor || r.entry.Action == Annotate {
-			continue
-		}
-		// Tool schemas inspect completed argument values buffered by the native
-		// stream adapter, within the same configured byte limit.
-		if r.entry.Phase == OutputStream && r.definition.Type == "builtin.tools" {
-			continue
-		}
-		if r.entry.Phase == Output || (r.entry.Phase == OutputStream && (r.detector.width() == 0 || r.detector.width()+utf8.UTFMax > window)) {
-			return ErrSurface
-		}
+	if e.entriesWhere(func(r compiledEntry) bool { return r.streamConflict(window) }) {
+		return ErrSurface
 	}
 	return nil
+}
+
+func (r compiledEntry) streamConflict(window int) bool {
+	if !r.enforcesUnavailable() || r.entry.Phase == OutputStream && r.definition.Type == "builtin.tools" {
+		return false
+	}
+	if r.entry.Phase == Output {
+		return true
+	}
+	if r.entry.Phase != OutputStream {
+		return false
+	}
+	width := r.detector.width()
+	return width == 0 || width+utf8.UTFMax > window
 }
 
 // Masking belongs to a single caller request, including retries. It must never

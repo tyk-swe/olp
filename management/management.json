@@ -27984,6 +27984,112 @@
           "latency_ms"
         ]
       },
+      "GuardrailPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "release_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "release_sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "True when a newer published release exists than the one inspected."
+          },
+          "partial_visibility": {
+            "type": "boolean",
+            "description": "True for any caller without installation-wide read access, regardless of which entries apply."
+          },
+          "static_compatible": {
+            "type": "boolean",
+            "description": "Whether the entire chain passed the selected static guardrail checks. Omitted for scoped callers."
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailPreviewEntry"
+            },
+            "description": "Visible entries in relative serving order."
+          }
+        },
+        "required": [
+          "release_id",
+          "release_sequence",
+          "stale",
+          "partial_visibility",
+          "entries"
+        ]
+      },
+      "GuardrailPreviewEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy_id": {
+            "type": "string"
+          },
+          "policy_revision_id": {
+            "type": "string"
+          },
+          "guardrail_id": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "organization",
+              "project",
+              "route",
+              "api-key"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "enforce",
+              "monitor"
+            ]
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "rewrite_unavailable",
+                "retained_output_uninspected",
+                "streaming_unavailable",
+                "surface_uninspected"
+              ]
+            }
+          }
+        },
+        "required": [
+          "policy_id",
+          "policy_revision_id",
+          "guardrail_id",
+          "revision_id",
+          "scope",
+          "phase",
+          "mode",
+          "notes"
+        ]
+      },
       "GuardrailApplyInput": {
         "type": "object",
         "additionalProperties": false,
@@ -68152,6 +68258,117 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails/preview": {
+      "get": {
+        "operationId": "preview_guardrails",
+        "summary": "Preview the guardrails attached to a route and API key",
+        "description": "Inspect the installed serving release without evaluating content or dispatching. Compatibility only covers the selected static surface and mode. Request-dependent features, provider eligibility and fallback routes are not checked.",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "route_id",
+            "required": true,
+            "description": "ID of a route in the serving release.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": true,
+            "description": "ID of an API key in the same project as the route.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": true,
+            "description": "A serving operation on the route, such as generation.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "surface",
+            "required": true,
+            "description": "A request surface or dialect for the operation, such as openai-chat.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": true,
+            "description": "Delivery mode.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unary",
+                "streaming"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "retains_output",
+            "required": false,
+            "description": "Check provider-retained output compatibility for OpenAI Responses.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Route or key not found or not visible"
+          },
+          "422": {
+            "description": "Invalid preview selection"
+          },
+          "503": {
+            "description": "Serving release unavailable"
           }
         }
       }
