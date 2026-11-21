@@ -114,7 +114,14 @@
         ]
   );
   const canStream = $derived(
-    operation === 'generation' || operation === 'bedrock_invoke'
+    [
+      'generation',
+      'bedrock_invoke',
+      'image_generation',
+      'image_edit',
+      'speech',
+      'transcription'
+    ].includes(operation)
   );
   const preview = createQuery(() => ({
     queryKey: [...guardrailKeys.root, 'preview', submitted] as const,

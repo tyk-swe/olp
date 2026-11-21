@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -72,11 +73,13 @@ func uninspectedSurface(in selection) bool {
 	if in.operation == "bedrock_invoke" && in.surface == "bedrock-invoke" {
 		return true
 	}
+	if in.surface == "openai" && slices.Contains(vendors.MediaOperations(), in.operation) {
+		return in.mode == "unary" || media.Operation(in.operation).SupportsStreaming()
+	}
 	if in.mode != "unary" {
 		return false
 	}
-	return in.surface == "openai" && slices.Contains(vendors.MediaOperations(), in.operation) ||
-		in.operation == "realtime" && slices.Contains([]string{"openai-realtime", "gemini-live", "native-duplex"}, in.surface) ||
+	return in.operation == "realtime" && slices.Contains([]string{"openai-realtime", "gemini-live", "native-duplex"}, in.surface) ||
 		in.operation == "batch" && slices.Contains([]string{"openai-batch", "anthropic-batch", "gemini-batch", "cloud-batch"}, in.surface) ||
 		in.operation == "passthrough" && in.surface == "native"
 }
