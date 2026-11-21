@@ -30,7 +30,7 @@ func (s *Server) record(r *http.Request, tx pgx.Tx, p authz.Principal, e Event) 
 	if e.Failed {
 		outcome = "failure"
 	}
-	return auditForProject(r.Context(), tx, r, p.Actor(), e.Action, e.Resource, e.ID, outcome, e.Project)
+	return AuditForProject(r.Context(), tx, r, p.Actor(), e.Action, e.Resource, e.ID, outcome, e.Project)
 }
 
 // Unlocked is the lock step of a change that loads and authorizes nothing

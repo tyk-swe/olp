@@ -291,7 +291,7 @@ func auditExpiry(r *http.Request, tx pgx.Tx, p authz.Principal, before, after Po
 	if sameDeadline(before.ExpiresAt, after.ExpiresAt) {
 		return nil
 	}
-	return access.Audit(r.Context(), tx, r, p.Actor(), "capture_policy.expiry.update", "capture_policy", after.ID, "success")
+	return access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.expiry.update", "capture_policy", after.ID, "success", after.ProjectID)
 }
 
 func sameDeadline(a, b *time.Time) bool {
