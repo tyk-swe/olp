@@ -60,9 +60,7 @@ func comparisonBaseline(f Filters, now time.Time) (Filters, error) {
 		f.End.After(now.Truncate(comparisonDay)) {
 		return Filters{}, fail(FailureInvalidRange, "Choose 1 to 31 closed UTC days with midnight boundaries.")
 	}
-	previous := f
-	previous.Start, previous.End = f.Start.Add(-duration), f.Start
-	return previous, nil
+	return f.withRange(f.Start.Add(-duration), f.Start), nil
 }
 
 func (s *API) usageComparison(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -157,8 +155,7 @@ func readComparisonPeriod(ctx context.Context, q database.Queryer, f Filters, no
 const completenessCountsWithAliases = "SUM(request_count) AS request_count, SUM(unpriced_count) AS unpriced_count, SUM(incomplete_count) AS incomplete_count"
 
 func readRouteSpendChanges(ctx context.Context, q database.Queryer, previous, current Filters) ([]routeSpendChange, error) {
-	combined := current
-	combined.Start = previous.Start
+	combined := current.withRange(previous.Start, current.End)
 	var query filterQuery
 	combined.completenessRows(&query)
 	boundary := query.bind(current.Start)
