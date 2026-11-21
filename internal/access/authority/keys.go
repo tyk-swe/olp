@@ -114,7 +114,7 @@ type Authority struct {
 	BudgetGroupMonthlyCostLimit                            *string
 	BudgetGroupWeeklyCostLimit                             *string
 	Policy                                                 KeyPolicy
-	ExpiresAt, RevokedAt                                   *time.Time
+	ExpiresAt, RevokedAt, PausedAt                         *time.Time
 }
 
 type SecretOverlap struct {
@@ -171,6 +171,7 @@ func (a Authority) TaskAuthority(identity Authority, snapshot, workloadRevision 
 		Policy:                      a.Policy,
 		ExpiresAt:                   expiry,
 		RevokedAt:                   identity.RevokedAt,
+		PausedAt:                    identity.PausedAt,
 	}
 }
 
@@ -257,7 +258,7 @@ func (a Authority) Delegated(scopes, routes, toolsets, agents []string, agent Au
 			EndUserPolicy:           a.Policy.EndUserPolicy,
 			Priority:                a.Policy.Priority, MaxPriority: a.Policy.MaxPriority,
 		},
-		ExpiresAt: &expiresAt, RevokedAt: a.RevokedAt,
+		ExpiresAt: &expiresAt, RevokedAt: a.RevokedAt, PausedAt: a.PausedAt,
 	}
 }
 
@@ -268,7 +269,7 @@ func (a Authority) Allows(scope, route string, projectID *string, now time.Time)
 	if scope != "inference" && scope != "models_read" && scope != "guardrails" {
 		return false
 	}
-	if a.RevokedAt != nil || (a.ExpiresAt != nil && !a.ExpiresAt.After(now)) {
+	if a.RevokedAt != nil || a.PausedAt != nil || (a.ExpiresAt != nil && !a.ExpiresAt.After(now)) {
 		return false
 	}
 	return slices.Contains(a.Policy.Scopes, scope) &&

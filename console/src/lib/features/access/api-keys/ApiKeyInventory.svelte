@@ -25,12 +25,17 @@
   } from '#lib/listing/pagination.js';
 
   import {
+    getApiKeyPauseRollout,
     listApiKeyPage,
+    pauseApiKey,
+    resumeApiKey,
     revokeApiKey,
     rotateApiKey,
     type ApiKey,
+    type ApiKeyPauseRollout,
     type ApiKeySecret
   } from '#lib/features/access/api-keys/api.js';
+  import { pauseNotice } from './pauseNotice';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import NavIcon from '#lib/shell/NavIcon.svelte';
@@ -44,6 +49,8 @@
   import { isApiKeyExpired, isApiKeyUsable } from './apiKeyLifecycle';
 
   const revokeApiKeyIntent = useMutationIntent();
+  const pauseApiKeyIntent = useMutationIntent();
+  const resumeApiKeyIntent = useMutationIntent();
 
   let {
     listState = $bindable(),
@@ -65,11 +72,38 @@
   let rotationId = $state('');
   let rotationAttempted = $state(false);
   let mutationError = $state('');
+  let pauseSavedFor = $state('');
+  let pauseRolloutState = $state<ApiKeyPauseRollout | null>(null);
+  const pauseNoticeText = $derived(
+    pauseSavedFor ? pauseNotice(true, pauseRolloutState) : null
+  );
   const captureOwner = usePrincipalLifetime(() => {
     rotating = null;
     overlapSeconds = '0';
     rotationAttempted = false;
+    pauseSavedFor = '';
+    pauseRolloutState = null;
     rotationId = rotationError = mutationError = busy = '';
+  });
+  $effect(() => {
+    if (!pauseSavedFor) return;
+    const id = pauseSavedFor;
+    let stopped = false;
+    const check = () => {
+      getApiKeyPauseRollout(id)
+        .then((rollout) => {
+          if (!stopped) pauseRolloutState = rollout;
+        })
+        .catch(() => {
+          if (!stopped) pauseRolloutState = null;
+        });
+    };
+    check();
+    const timer = setInterval(check, 5000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
   });
   const createdBy = $derived(
     page.url.searchParams.get('created_by')?.trim().toLowerCase() || undefined
@@ -136,6 +170,56 @@
     }
   }
 
+  async function pause(key: ApiKey) {
+    if (
+      !(await confirmAction({
+        title: `Pause ${key.name}?`,
+        body: 'New requests using this key are refused once serving replicas pick up the change. Already admitted work is not canceled. Rotate or revoke a key you suspect is compromised instead.',
+        confirmLabel: 'Pause key'
+      }))
+    )
+      return;
+    const isCurrent = captureOwner();
+    busy = `pause-${key.id}`;
+    mutationError = '';
+    try {
+      await pauseApiKeyIntent.submit(
+        { id: key.id, etag: key.etag },
+        (input, requestId) => pauseApiKey(input, requestId)
+      );
+      if (!isCurrent()) return;
+      pauseRolloutState = null;
+      pauseSavedFor = key.id;
+      await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
+    } catch (error) {
+      if (isCurrent()) mutationError = errorMessage(error);
+    } finally {
+      if (isCurrent()) busy = '';
+    }
+  }
+
+  async function resume(key: ApiKey) {
+    const isCurrent = captureOwner();
+    busy = `resume-${key.id}`;
+    mutationError = '';
+    try {
+      await resumeApiKeyIntent.submit(
+        { id: key.id, etag: key.etag },
+        (input, requestId) => resumeApiKey(input, requestId)
+      );
+      if (!isCurrent()) return;
+      if (pauseSavedFor === key.id) {
+        pauseSavedFor = '';
+        pauseRolloutState = null;
+      }
+      await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
+    } catch (error) {
+      if (isCurrent()) mutationError = errorMessage(error);
+    } finally {
+      if (isCurrent()) busy = '';
+    }
+  }
+
   async function revoke(key: ApiKey) {
     if (
       !(await confirmAction({
@@ -187,6 +271,9 @@
 {#if submitError || mutationError}<div class="inline-problem" role="alert">
     {submitError || mutationError}
   </div>{/if}
+{#if pauseNoticeText}<p class="muted" role="status">
+    {pauseNoticeText}
+  </p>{/if}
 
 <div class="toolbar issuer-filter">
   <label for="key-issuer"
@@ -265,14 +352,16 @@
             <td
               ><span
                 class:danger={Boolean(key.revoked_at)}
-                class:warning={expired}
-                class:success={usable}
+                class:warning={expired || Boolean(key.paused_at)}
+                class:success={usable && !key.paused_at}
                 class="badge"
                 >{key.revoked_at
                   ? 'revoked'
                   : expired
                     ? 'expired'
-                    : 'active'}</span
+                    : key.paused_at
+                      ? 'paused'
+                      : 'active'}</span
               ><br /><small
                 >{key.expires_at
                   ? `Expires ${formatDate(key.expires_at)}`
@@ -370,7 +459,23 @@
                   >{canManage && usable && !key.workload_issuer_id
                     ? 'Edit'
                     : 'View'}</a
-                >{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
+                >{#if canManage && !key.revoked_at}{#if key.paused_at && !expired}<button
+                      class="button button-secondary"
+                      type="button"
+                      onclick={() => resume(key)}
+                      disabled={Boolean(busy)}
+                      >{busy === `resume-${key.id}`
+                        ? 'Resuming…'
+                        : 'Resume'}</button
+                    >{:else if usable}<button
+                      class="button button-secondary"
+                      type="button"
+                      onclick={() => pause(key)}
+                      disabled={Boolean(busy)}
+                      >{busy === `pause-${key.id}`
+                        ? 'Pausing…'
+                        : 'Pause'}</button
+                    >{/if}{#if usable && !key.workload_issuer_id}<button
                       class="button button-secondary"
                       type="button"
                       onclick={() => {

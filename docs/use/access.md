@@ -121,6 +121,28 @@ be withdrawn. See [notifications](../operate/observability.md#notifications).
 Old secrets persist only as purpose-separated HMACs and public lookup/deadline
 metadata; replay replies are sealed for 24 hours. Keys and reminders stay local.
 
+## Pausing an API key
+
+`POST /api/v1/api-keys/{id}/pause` and `POST /api/v1/api-keys/{id}/resume` take
+the same key-edit authority, `If-Match` and `Idempotency-Key` as rotation, and
+both are audited. The pause sits on the logical key, so every current and
+overlap secret stops admitting new work as soon as a replica installs the
+authority generation the pause response returns. A replica still on an older
+proven-fresh generation may admit until its next poll, and the 60-second
+authority freshness deadline then fails closed. A saved pause therefore does
+not by itself prove fleet-wide enforcement. `GET
+/api/v1/api-keys/{id}/pause-rollout` reports the generation each recently
+reporting serving replica has installed, and the console only calls the pause
+enforced when every reported replica is at or past the pause generation while
+the key is still paused. Already admitted work is not canceled.
+
+Rotation while paused follows the normal overlap rules and keeps the key
+paused, with overlap deadlines still running. Resume clears only the pause
+and admits secrets that are still valid under the usual expiry and revocation
+checks. Resuming an expired or revoked key is refused, and revocation wins
+over pause and resume. Pause is for stopping an integration temporarily, so
+rotate or revoke a key whose secret may be compromised instead.
+
 ## End-user identity
 
 Keys select `end_user_source: "header"`, `"native"` or null. Header mode requires

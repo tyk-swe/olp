@@ -479,6 +479,13 @@
                 "type": "null"
               }
             ]
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -535,6 +542,88 @@
         "required": [
           "etag",
           "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime_generation": {
+            "$ref": "#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "etag",
+          "paused",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseReplica": {
+        "properties": {
+          "authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "gateway_instance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_instance",
+          "authority_sequence"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseRolloutResponse": {
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "replicas": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyPauseReplica"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enforced",
+          "paused",
+          "replicas"
         ],
         "type": "object"
       },
@@ -33956,6 +34045,265 @@
           {
             "managementToken": [
               "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause": {
+      "post": {
+        "operationId": "pause_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique pause key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key paused and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/resume": {
+      "post": {
+        "operationId": "resume_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique resume key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key resumed and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause-rollout": {
+      "get": {
+        "operationId": "get_api_key_pause_rollout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseRolloutResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
             ]
           }
         ],
