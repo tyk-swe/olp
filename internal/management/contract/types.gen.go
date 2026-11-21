@@ -5980,6 +5980,30 @@ func (e RequestDetailResponseBudgetBoundary) Valid() bool {
 	}
 }
 
+// Defines values for RequestDetailResponseCacheLookupReason.
+const (
+	BackendUnavailable RequestDetailResponseCacheLookupReason = "backend_unavailable"
+	MultipleChoices    RequestDetailResponseCacheLookupReason = "multiple_choices"
+	NoStore            RequestDetailResponseCacheLookupReason = "no_store"
+	Refresh            RequestDetailResponseCacheLookupReason = "refresh"
+)
+
+// Valid indicates whether the value is a known member of the RequestDetailResponseCacheLookupReason enum.
+func (e RequestDetailResponseCacheLookupReason) Valid() bool {
+	switch e {
+	case BackendUnavailable:
+		return true
+	case MultipleChoices:
+		return true
+	case NoStore:
+		return true
+	case Refresh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestDetailResponseCacheResult.
 const (
 	RequestDetailResponseCacheResultBypass      RequestDetailResponseCacheResult = "bypass"
@@ -15167,8 +15191,11 @@ type RequestDetailResponse struct {
 	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
-	BudgetBoundary *RequestDetailResponseBudgetBoundary                `json:"budget_boundary,omitempty"`
-	CacheResult    nullable.Nullable[RequestDetailResponseCacheResult] `json:"cache_result,omitempty"`
+	BudgetBoundary *RequestDetailResponseBudgetBoundary `json:"budget_boundary,omitempty"`
+
+	// CacheLookupReason Reason observed when deciding whether to look up an exact response cache entry. Absent for ordinary misses, hits, and bypasses without a recorded reason.
+	CacheLookupReason *RequestDetailResponseCacheLookupReason             `json:"cache_lookup_reason,omitempty"`
+	CacheResult       nullable.Nullable[RequestDetailResponseCacheResult] `json:"cache_result,omitempty"`
 
 	// CacheTokenSeconds Exact cached token-seconds.
 	CacheTokenSeconds       nullable.Nullable[string] `json:"cache_token_seconds,omitempty"`
@@ -15224,6 +15251,9 @@ type RequestDetailResponse struct {
 
 // RequestDetailResponseBudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
 type RequestDetailResponseBudgetBoundary string
+
+// RequestDetailResponseCacheLookupReason Reason observed when deciding whether to look up an exact response cache entry. Absent for ordinary misses, hits, and bypasses without a recorded reason.
+type RequestDetailResponseCacheLookupReason string
 
 // RequestDetailResponseCacheResult defines model for RequestDetailResponse.CacheResult.
 type RequestDetailResponseCacheResult string

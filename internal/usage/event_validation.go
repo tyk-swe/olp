@@ -42,6 +42,9 @@ type ValidatedAttempt struct {
 }
 
 func Validate(e *Event) (*Validated, error) {
+	if !validCacheLookupReason(e.CacheLookupReason, e.CacheResult) {
+		return nil, fmt.Errorf("%w: invalid cache lookup reason for result", ErrInvalidEvent)
+	}
 	if !validBudgetBoundary(e.BudgetBoundary, e.ErrorClass) {
 		return nil, fmt.Errorf("%w: invalid budget boundary", ErrInvalidEvent)
 	}
@@ -126,6 +129,19 @@ func Validate(e *Event) (*Validated, error) {
 		validated.Attempts = append(validated.Attempts, *attempt)
 	}
 	return validated, nil
+}
+
+func validCacheLookupReason(reason CacheLookupReason, result string) bool {
+	switch reason {
+	case "":
+		return true
+	case CacheLookupRefresh:
+		return result == "miss"
+	case CacheLookupNoStore, CacheLookupMultipleChoices, CacheLookupUnavailable:
+		return result == "bypass"
+	default:
+		return false
+	}
 }
 
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {

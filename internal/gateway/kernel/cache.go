@@ -31,7 +31,8 @@ type responseCacheCall struct {
 	admitted                 bool // Set only after the replay passes admission.
 	embeddingDispatched      bool // An embedding consumed the parent's shared request reservation.
 	result                   string
-	reason                   string
+	lookupReason             usage.CacheLookupReason
+	backendIssue             bool
 	age                      int64
 	similarity               *float64
 	vector                   []float32
@@ -64,6 +65,12 @@ func (x *Call) cacheHeaders(h http.Header) {
 	}
 }
 
+func (x *Call) noteCacheLookupReason(reason usage.CacheLookupReason) {
+	if x.family == wire.Chat && x.mode == "unary" && x.cache.policy.Mode == "exact" {
+		x.cache.lookupReason = reason
+	}
+}
+
 func (s *Server) initializeCache(x *Call) *fault.Error {
 	if x.workflow != nil {
 		return nil
@@ -80,12 +87,20 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 		return fault.InvalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.Route.Cache == nil || s.Deps.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
+	if x.Route.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
 	p := x.Route.Cache.Effective()
 	x.cache.policy = p
-	if c.NoStore || !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
+	if !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
+		return nil
+	}
+	if c.NoStore {
+		x.noteCacheLookupReason(usage.CacheLookupNoStore)
+		return nil
+	}
+	if s.Deps.Cache == nil {
+		x.noteCacheLookupReason(usage.CacheLookupUnavailable)
 		return nil
 	}
 	if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
@@ -100,7 +115,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 			return nil
 		}
 	}
-	if cacheRetentionRequested(doc) || cacheNonSingleCandidateRequested(doc) {
+	if cacheRetentionRequested(doc) || x.bypassNonSingleCacheCandidate(doc) {
 		return nil
 	}
 	// Retained Responses defaults to store=true. Require explicit stateless
@@ -127,9 +142,12 @@ func cacheRetentionRequested(doc oif.Document) bool {
 	return false
 }
 
-func cacheNonSingleCandidateRequested(doc oif.Document) bool {
+func (x *Call) bypassNonSingleCacheCandidate(doc oif.Document) bool {
 	for _, field := range []string{"/n", "/candidate_count", "/candidateCount", "/generationConfig/candidateCount"} {
 		if v, ok := doc.Lookup(field); ok && v.Raw() != "1" {
+			if count, err := strconv.Atoi(v.Raw()); err == nil && count > 1 {
+				x.noteCacheLookupReason(usage.CacheLookupMultipleChoices)
+			}
 			return true
 		}
 	}
@@ -348,7 +366,7 @@ func (s *Server) storeCache(x *Call, out *Outcome, status int) {
 	defer cancel()
 	if err := s.Deps.Cache.Put(ctx, c.ticket, cache.Entry{Body: c.body, Frames: c.frames, Metadata: metadata}, c.policy, c.controls, c.vector); err != nil {
 		if !errors.Is(err, cache.ErrNotStored) {
-			c.reason = "unavailable"
+			c.backendIssue = true
 		}
 	} else {
 		c.storedBytes = len(c.body) + c.size

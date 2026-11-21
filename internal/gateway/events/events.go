@@ -16,9 +16,10 @@ import (
 // Envelope is the single terminal, metadata-only record of one inference
 // request. It never carries prompts, outputs, tool data, headers, or secrets.
 type Envelope struct {
-	CacheResult string
-	ClientIP    string
-	RequestID   string
+	CacheLookupReason usage.CacheLookupReason
+	CacheResult       string
+	ClientIP          string
+	RequestID         string
 	// AccountingID is the durable identity of this request. It is the request
 	// id whenever the gateway minted it, and a fresh identifier when the
 	// caller named its own: a client-supplied request id is echoed back for

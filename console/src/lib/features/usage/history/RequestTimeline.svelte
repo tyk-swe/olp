@@ -18,6 +18,13 @@
   } from '#lib/features/usage/history/api.js';
   let { detail }: { detail: CreateQueryResult<RequestDetail> } = $props();
 
+  const cacheReasonLabels = new Map([
+    ['no_store', 'Caller opted out (no-store)'],
+    ['refresh', 'Caller requested a refresh (no-cache)'],
+    ['multiple_choices', 'More than one response choice'],
+    ['backend_unavailable', 'Cache backend unavailable']
+  ]);
+
   function chargeLabel(status: RequestAttempt['charge_status']) {
     switch (status) {
       case 'billable':
@@ -53,9 +60,16 @@
     >
   </div>
 {:else if detail.data}
-  {#if detail.data.cache_result}<p class="muted">
+  {#if detail.data.cache_result}
+    {@const cacheReason =
+      cacheReasonLabels.get(detail.data.cache_lookup_reason ?? '') ??
+      (detail.data.cache_result === 'bypass' ? 'Reason not recorded' : null)}
+    <p class="muted">
       Response cache: {detail.data.cache_result}
-    </p>{/if}
+      {#if cacheReason}
+        · {cacheReason}{/if}
+    </p>
+  {/if}
   {#if detail.data.budget_boundary}
     <p class="inline-problem" role="status">
       Cost budget exhausted: {detail.data.budget_boundary.replaceAll('_', ' ')}.

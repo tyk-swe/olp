@@ -20,6 +20,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
@@ -52,10 +53,11 @@ func streamedEvents(text string) []string {
 const benchChat = `{"id":"chatcmpl-bench","object":"chat.completion","created":1800000000,"model":"gpt-bench","choices":[{"index":0,"message":{"role":"assistant","content":"The capital of France is Paris, a city on the Seine known for its museums, its cafes and the tower that carries the name of its engineer."},"finish_reason":"stop"}],"usage":{"prompt_tokens":24,"completion_tokens":31,"total_tokens":55}}`
 
 type cacheMemory struct {
-	mu       sync.Mutex
-	values   map[string]string
-	fail     bool
-	commands int
+	mu        sync.Mutex
+	values    map[string]string
+	fail      bool
+	failWrite bool
+	commands  int
 }
 
 func (*cacheMemory) Search(context.Context, ...string) ([]coordination.SearchDocument, error) {
@@ -66,7 +68,7 @@ func (m *cacheMemory) Do(_ context.Context, a ...string) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.commands++
-	if m.fail {
+	if m.fail || m.failWrite && a[0] == "EVAL" && a[2] == "1" {
 		return nil, errors.New("offline")
 	}
 	switch a[0] {
@@ -166,43 +168,76 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 	key.Policy.ResponseMetadata = true
 	h.rt.keys[fullKey] = key
 	h.rt.mu.Unlock()
+	var first string
+	for i, tc := range []struct {
+		name, prompt, control, result string
+		reason                        usage.CacheLookupReason
+		calls                         int
+		failRead, failWrite           bool
+	}{
+		{"healthy empty cache", "hello", "", "miss", "", 1, false, false},
+		{"replay", "hello", "", "hit", "", 0, false, false},
+		{"refresh", "hello", "no-cache", "miss", usage.CacheLookupRefresh, 1, false, false},
+		{"opt out takes precedence over refresh", "hello", "no-store,no-cache", "bypass", usage.CacheLookupNoStore, 1, false, false},
+		{"lookup failure", "hello", "", "bypass", usage.CacheLookupUnavailable, 1, true, false},
+		{"begin refresh failure", "hello", "no-cache", "bypass", usage.CacheLookupUnavailable, 1, true, false},
+		{"write failure still reports an ordinary miss", "another prompt", "", "miss", "", 1, false, true},
+		{"write failure preserves the refresh reason", "hello", "no-cache", "miss", usage.CacheLookupRefresh, 1, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m.mu.Lock()
+			m.fail, m.failWrite = tc.failRead, tc.failWrite
+			m.mu.Unlock()
+			body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}]}`, routeSlug, tc.prompt))
+			before := h.mock.count("a") + h.mock.count("b")
+			r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, map[string]string{"X-OLP-Cache": tc.control})
+			defer r.Body.Close()
+			b, err := io.ReadAll(r.Body)
+			if err != nil || r.StatusCode != http.StatusOK || r.Header.Get("X-OLP-Cache") != tc.result {
+				t.Fatalf("status=%d cache=%q body=%s read error=%v", r.StatusCode, r.Header.Get("X-OLP-Cache"), b, err)
+			}
+			ev := h.sink.await(t, i+1)[i]
+			accounting, err := events.UsageEvent(ev)
+			if err != nil || accounting == nil || accounting.CacheResult != tc.result || accounting.CacheLookupReason != tc.reason {
+				t.Fatalf("unexpected cache accounting result=%q reason=%q, error=%v", ev.CacheResult, ev.CacheLookupReason, err)
+			}
+			if calls := h.mock.count("a") + h.mock.count("b") - before; calls != tc.calls {
+				t.Fatalf("provider dispatches=%d want=%d", calls, tc.calls)
+			}
+			if i == 0 {
+				first = string(b)
+			}
+			if tc.result == "hit" {
+				if string(b) != first || r.Header.Get("X-OLP-Cost") != "0" || r.Header.Get("X-OLP-Attempts") != "0" {
+					t.Fatalf("incorrect replay: headers=%v body=%s", r.Header, b)
+				}
+				if len(ev.Attempts) != 1 || ev.Attempts[0].Class != "cache_hit" || ev.Attempts[0].Cache == nil {
+					t.Fatalf("cache accounting %#v", ev.Attempts)
+				}
+			}
+		})
+	}
+}
+
+func TestCallerOptOutWinsWhenNoCacheBackendIsConfigured(t *testing.T) {
+	h, _ := cacheHarness(t)
+	h.gateway.Deps.Cache = nil
 	body := []byte(`{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]}`)
-	request := func(headers map[string]string) (string, string) {
-		r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, headers)
-		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
-		if r.StatusCode != 200 {
-			t.Fatalf("%d %s", r.StatusCode, b)
+	for i, tc := range []struct {
+		control string
+		reason  usage.CacheLookupReason
+	}{
+		{"no-store", usage.CacheLookupNoStore},
+		{"", usage.CacheLookupUnavailable},
+	} {
+		r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, map[string]string{"X-OLP-Cache": tc.control})
+		r.Body.Close()
+		if got := r.Header.Get("X-OLP-Cache"); r.StatusCode != http.StatusOK || got != "bypass" {
+			t.Fatalf("control=%q status=%d cache=%q", tc.control, r.StatusCode, got)
 		}
-		if r.Header.Get("X-OLP-Cache") == "hit" && (r.Header.Get("X-OLP-Cost") != "0" || r.Header.Get("X-OLP-Attempts") != "0") {
-			t.Fatalf("incorrect cache metadata: %v", r.Header)
+		if got := h.sink.await(t, i+1)[i].CacheLookupReason; got != tc.reason {
+			t.Fatalf("control=%q reason=%q, want %q", tc.control, got, tc.reason)
 		}
-		return r.Header.Get("X-OLP-Cache"), string(b)
-	}
-	result, first := request(nil)
-	if result != "miss" {
-		t.Fatal(result)
-	}
-	count := h.mock.count("a") + h.mock.count("b")
-	result, second := request(nil)
-	if result != "hit" || first != second || h.mock.count("a")+h.mock.count("b") != count {
-		t.Fatalf("replay result=%s first=%s second=%s", result, first, second)
-	}
-	ev := h.sink.last(t)
-	if len(ev.Attempts) != 1 || ev.Attempts[0].Class != "cache_hit" || ev.Attempts[0].Cache == nil {
-		t.Fatalf("cache accounting %#v", ev.Attempts)
-	}
-	if r, _ := request(map[string]string{"X-OLP-Cache": "no-cache"}); r != "miss" {
-		t.Fatal(r)
-	}
-	if r, _ := request(map[string]string{"X-OLP-Cache": "no-store"}); r != "bypass" {
-		t.Fatal(r)
-	}
-	m.mu.Lock()
-	m.fail = true
-	m.mu.Unlock()
-	if r, _ := request(nil); r != "bypass" {
-		t.Fatal(r)
 	}
 }
 
@@ -211,10 +246,12 @@ func TestExactCacheUsesEffectiveChatChoiceCount(t *testing.T) {
 		name, defaultN, callerFields string
 		choices, calls               int
 		results                      [2]string
+		reason                       usage.CacheLookupReason
 	}{
-		{"multiple choices", "2", "", 2, 2, [2]string{"bypass", "bypass"}},
-		{"one choice", "1", "", 1, 1, [2]string{"miss", "hit"}},
-		{"caller overrides default", "2", `,"n":1`, 1, 1, [2]string{"miss", "hit"}},
+		{"effective multiple choices", "2", "", 2, 2, [2]string{"bypass", "bypass"}, usage.CacheLookupMultipleChoices},
+		{"requested multiple choices", "1", `,"n":2`, 2, 2, [2]string{"bypass", "bypass"}, usage.CacheLookupMultipleChoices},
+		{"one choice", "1", "", 1, 1, [2]string{"miss", "hit"}, ""},
+		{"caller overrides default", "2", `,"n":1`, 1, 1, [2]string{"miss", "hit"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -250,7 +287,9 @@ func TestExactCacheUsesEffectiveChatChoiceCount(t *testing.T) {
 				if got := response.Header.Get("X-OLP-Cache"); response.StatusCode != http.StatusOK || got != want || err != nil || len(reply.Choices) != tc.choices {
 					t.Errorf("request %d: status=%d cache=%q choices=%d decode error=%v, want status=200 cache=%q choices=%d", i+1, response.StatusCode, got, len(reply.Choices), err, want, tc.choices)
 				}
-				h.sink.await(t, i+1)
+				if ev := h.sink.await(t, i+1)[i]; ev.CacheResult != want || ev.CacheLookupReason != tc.reason {
+					t.Errorf("request %d: accounting cache=%q reason=%q, want %q / %q", i+1, ev.CacheResult, ev.CacheLookupReason, want, tc.reason)
+				}
 			}
 			if got := h.mock.count("a"); got != tc.calls {
 				t.Errorf("provider calls = %d, want %d", got, tc.calls)
