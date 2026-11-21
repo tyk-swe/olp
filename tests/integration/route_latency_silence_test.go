@@ -152,8 +152,8 @@ func addLatencyRule(t *testing.T, f usageFixture, name string, project *string, 
 func latencyManager(t *testing.T, f usageFixture, project string) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
 	id := uuid.NewString()
-	execLatencyFixture(t, f.pool, `INSERT INTO olp.users(id,email,display_name,role,etag)
-	 VALUES($1::uuid,$1::text||'@example.test','Project manager','developer',$1::uuid)`, id)
+	execLatencyFixture(t, f.pool, `INSERT INTO olp.users(id,email,display_name,role,access_scope,etag)
+	 VALUES($1::uuid,$1::text||'@example.test','Project manager','developer','assigned',$1::uuid)`, id)
 	execLatencyFixture(t, f.pool, `INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,'manager',$3)`, project, id, f.ownerID)
 	return notificationManagementAs(t, f.pool, id)
 }
