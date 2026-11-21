@@ -25,6 +25,7 @@
     ['openai-completions', 'OpenAI Completions'],
     ['anthropic-messages', 'Anthropic Messages'],
     ['gemini-generate-content', 'Gemini Generate Content'],
+    ['gemini-interactions', 'Gemini Interactions'],
     ['bedrock-converse', 'Bedrock Converse'],
     ['mistral-fim', 'Mistral Fill-in-the-Middle'],
     ['cohere-chat-v2', 'Cohere Chat']

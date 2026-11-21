@@ -22,7 +22,7 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 		return guardrails.Compatibility{}, httpkit.Invalid("retains_output", "Retained output is only available for OpenAI Responses.")
 	}
 	if family, ok := generationFamily(in.surface); in.operation == wire.OperationGeneration && ok {
-		if (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) ||
+		if family == wire.GeminiInteractions || (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) ||
 			(!interaction.HasGuardrailInputCoverage(family) && route.ToolExecution != "gateway") {
 			return guardrails.Compatibility{Uninspected: true}, nil
 		}
@@ -52,7 +52,7 @@ func generationFamily(surface string) (wire.Format, bool) {
 	if family, native := protocols.NativeGenerationFamily(surface); native {
 		return family, true
 	}
-	for _, family := range [...]wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock} {
+	for _, family := range [...]wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiInteractions, wire.Bedrock} {
 		if wire.Dialect(family) == surface {
 			return family, true
 		}
