@@ -1750,3 +1750,158 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	credential, account := uuid.NewString(), uuid.NewString()
+	key, otherKey, poolID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	routeID, revisionID := uuid.NewString(), uuid.NewString()
+	otherRouteID, otherRevisionID := uuid.NewString(), uuid.NewString()
+	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "thread-status", PoolID: poolID, Models: []string{"model"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	otherRoute := codemode.Route{ID: otherRouteID, ProjectID: project, Slug: "thread-status-other", PoolID: poolID, Models: []string{"model"}, Enabled: true, RevisionID: otherRevisionID, Revision: 1, ETag: uuid.NewString()}
+	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}}`
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'thread-status@example.invalid', 'Status', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'thread-status', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'thread-status', 'plugin', 'active', '{}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'status-principal', repeat('0',64), '{}')`, []any{credential, provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'status-principal', 'status', '["model"]', $5, $6)`, []any{account, project, provider, credential, uuid.NewString(), user}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'thread-status-lookup', '\x00', 'status', $2, '{"scopes":["inference"]}', $3, $4)`, []any{key, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'thread-status-other-lookup', '\x00', 'status-other', $2, '{"scopes":["inference"]}', $3, $4)`, []any{otherKey, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.code_pools(id, project_id, name, kind, etag, created_by) VALUES($1, $2, 'thread-status', 'shared', $3, $4)`, []any{poolID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, account}},
+		{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{poolID, key}},
+		{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{poolID, otherKey}},
+		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, 'thread-status', '{}', $3, $4)`, []any{routeID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, 'thread-status-other', '{}', $3, $4)`, []any{otherRouteID, project, uuid.NewString(), user}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, published := range []struct {
+		routeID, revisionID string
+		document            codemode.Route
+	}{{routeID, revisionID, route}, {otherRouteID, otherRevisionID, otherRoute}} {
+		document, err := json.Marshal(published.document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by) VALUES($1, $2, 1, $3, $4, $5)`, published.revisionID, published.routeID, document, connections, user); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, published.routeID, published.revisionID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := codesessions.New(pool)
+	identity := codemode.Identity{Conversation: "status-thread"}
+	admit := func(id codemode.Identity) codesessions.Permit {
+		t.Helper()
+		permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: id}, Providers: []string{provider}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return permit
+	}
+	permit := admit(identity)
+	child := admit(codemode.Identity{Conversation: "status-child", Parent: "status-thread"})
+	var attempts int
+	attemptCount := func() int {
+		t.Helper()
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts`).Scan(&attempts); err != nil {
+			t.Fatal(err)
+		}
+		return attempts
+	}
+	baseline := attemptCount()
+	base := time.Now().UTC().Truncate(time.Second)
+	retry := base.Add(5 * time.Minute)
+	status := func(at time.Time, onRoute codemode.Route, withKey string, id codemode.Identity) (codemode.ThreadStatus, error) {
+		t.Helper()
+		return store.ThreadStatus(t.Context(), onRoute, withKey, id, at)
+	}
+	fresh, err := status(base, route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Status != codemode.ThreadUnknown || fresh.RetryAt != nil || fresh.LastObservedAt != nil {
+		t.Fatalf("fresh thread status = %+v, want unknown without evidence", fresh)
+	}
+	if err := store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeCredential, RetryAt: retry}, base); err != nil {
+		t.Fatal(err)
+	}
+	cooling, err := status(base.Add(2*time.Minute), route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cooling.Status != codemode.ThreadUnavailable || cooling.RetryAt == nil || !cooling.RetryAt.Equal(retry) ||
+		cooling.LastObservedAt == nil || !cooling.LastObservedAt.Equal(base) || !cooling.CheckedAt.Equal(base.Add(2*time.Minute)) {
+		t.Fatalf("cooling status = %+v, want unavailable with retry %v observed %v", cooling, retry, base)
+	}
+	childStatus, err := status(base.Add(2*time.Minute), route, key, codemode.Identity{Conversation: child.Binding.Conversation, Parent: "status-thread"})
+	if err != nil || childStatus.Status != codemode.ThreadUnavailable {
+		t.Fatalf("child status = %+v, %v, want unavailable on the tree account", childStatus, err)
+	}
+	expired, err := status(base.Add(6*time.Minute), route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Status != codemode.ThreadUnknown || expired.RetryAt != nil ||
+		expired.LastObservedAt == nil || !expired.LastObservedAt.Equal(base) || !expired.CheckedAt.Equal(base.Add(6*time.Minute)) {
+		t.Fatalf("expired status = %+v, want unknown without a retry time", expired)
+	}
+	notFound := func(err error) *codemode.Refusal {
+		t.Helper()
+		refusal, ok := errors.AsType[*codemode.Refusal](err)
+		if !ok || refusal.Status != 404 || refusal.Code != "code_thread_not_found" {
+			t.Fatalf("status error = %v, want the missing-thread refusal", err)
+		}
+		return refusal
+	}
+	_, wrongKeyErr := status(base, route, otherKey, identity)
+	_, wrongRouteErr := status(base, otherRoute, key, identity)
+	_, wrongParentErr := status(base, route, key, codemode.Identity{Conversation: "status-child", Parent: "someone-else"})
+	_, missingErr := status(base, route, key, codemode.Identity{Conversation: "never-bound"})
+	if *notFound(wrongKeyErr) != *notFound(missingErr) || *notFound(wrongRouteErr) != *notFound(missingErr) || *notFound(wrongParentErr) != *notFound(missingErr) {
+		t.Fatal("wrong key, route or lineage must look the same as a missing thread")
+	}
+	var bound int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_bindings WHERE conversation='never-bound'`).Scan(&bound); err != nil {
+		t.Fatal(err)
+	}
+	if bound != 0 || attemptCount() != baseline {
+		t.Fatalf("polling bound %d conversations and left %d attempts, want no writes over %d", bound, attempts, baseline)
+	}
+	recovered := base.Add(7 * time.Minute)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET health='healthy', health_observed_at=$2, unavailable_until=NULL WHERE id=$1`, account, recovered); err != nil {
+		t.Fatal(err)
+	}
+	available, err := status(base.Add(8*time.Minute), route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available.Status != codemode.ThreadAvailable || available.RetryAt != nil {
+		t.Fatalf("recovered status = %+v, want available", available)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_bindings SET retired_at=now() WHERE id=$1`, permit.Binding.RootID); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := status(base.Add(9*time.Minute), route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.Status != codemode.ThreadUnavailable || retired.RetryAt != nil {
+		t.Fatalf("retired status = %+v, want unavailable without a retry time", retired)
+	}
+	if attemptCount() != baseline {
+		t.Fatalf("status checks left %d attempts, want %d", attempts, baseline)
+	}
+}

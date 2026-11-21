@@ -65,6 +65,8 @@ func codeRefusalMessage(code string) string {
 		return "Set X-OLP-Code-Model to a route model before connecting. If Retry-After is present, at least one model-hinted connection may be available after that delay"
 	case "code_response_account_conflict":
 		return "Continue on the account that produced the response, or start a new conversation with full context and no response reference"
+	case "code_thread_not_found":
+		return "No thread with that identity exists for this key on this route"
 	case "code_translation_unsupported_semantics":
 		return "This route supports text, tools and explicit reasoning effort. Use a native Messages account for required semantics this route cannot represent."
 	}

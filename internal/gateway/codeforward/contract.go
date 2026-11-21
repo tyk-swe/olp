@@ -19,6 +19,7 @@ import (
 // coding generation, including each generation on an upgraded connection.
 type Ledger interface {
 	Models(context.Context, codemode.Route, string) (codeclient.Offers, error)
+	ThreadStatus(context.Context, codemode.Route, string, codemode.Identity, time.Time) (codemode.ThreadStatus, error)
 	Admit(context.Context, codesessions.Admission) (codesessions.Permit, error)
 	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error)
 	MarkDispatched(context.Context, string) error

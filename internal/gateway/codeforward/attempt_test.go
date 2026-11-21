@@ -457,6 +457,11 @@ type fakeCodeLedger struct {
 	settlements      []codemode.Usage
 	confirmations    int
 	cooldownErr      error
+	threadStatus     codemode.ThreadStatus
+	threadErr        error
+	threadIdentity   codemode.Identity
+	threadKey        string
+	threadCalls      int
 }
 
 func TestCodeAttemptChatTracksEveryChoice(t *testing.T) {
@@ -555,6 +560,12 @@ func TestCodeAttemptChatTracksEveryChoice(t *testing.T) {
 
 func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
 	return codeclient.Offers{}, nil
+}
+func (f *fakeCodeLedger) ThreadStatus(_ context.Context, _ codemode.Route, key string, identity codemode.Identity, _ time.Time) (codemode.ThreadStatus, error) {
+	f.threadCalls++
+	f.threadKey = key
+	f.threadIdentity = identity
+	return f.threadStatus, f.threadErr
 }
 func (f *fakeCodeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
 	return codesessions.Permit{}, nil
@@ -1147,6 +1158,9 @@ func (l *chargeLedger) AdmitPaid(context.Context, codesessions.PaidAdmission) (c
 
 func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
 	return nil, nil
+}
+func (l *chargeLedger) ThreadStatus(context.Context, codemode.Route, string, codemode.Identity, time.Time) (codemode.ThreadStatus, error) {
+	return codemode.ThreadStatus{}, nil
 }
 func (l *chargeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
 	return codesessions.Permit{}, nil
