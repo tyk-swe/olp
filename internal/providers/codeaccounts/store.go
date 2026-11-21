@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -102,7 +103,35 @@ func ReadGranted(ctx context.Context, q database.Queryer, providerName, projectI
 	return granted, err == nil, err
 }
 
+const remainingPins = `SELECT count(*) FROM olp.code_pins pin
+	JOIN olp.code_bindings b ON b.id=pin.root_id
+	JOIN olp.api_keys k ON k.id=b.api_key_id
+	JOIN olp.users u ON u.id=k.created_by
+	LEFT JOIN olp.workload_issuers wi ON wi.id=k.workload_issuer_id
+	JOIN olp.code_routes r ON r.id=b.route_id AND r.project_id=k.project_id
+	JOIN olp.projects project ON project.id=r.project_id
+	JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
+	JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid AND pa.account_id=pin.account_id
+	JOIN olp.code_pool_keys pk ON pk.pool_id=pa.pool_id AND pk.api_key_id=k.id
+	WHERE pin.account_id=x.id AND pin.principal=x.principal AND b.retired_at IS NULL
+	AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
+	AND ` + codesessions.LiveKeyIssuerCondition + `
+	AND k.policy->'scopes' ? 'inference'
+	AND ((coalesce(nullif(k.policy->'allowed_routes','null'::jsonb),'[]'::jsonb)='[]'::jsonb
+		AND coalesce(nullif(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb)='[]'::jsonb)
+		OR k.policy->'allowed_routes' ? r.slug
+		OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(nullif(k.policy->'allowed_route_groups','null'::jsonb)) g(name)
+			WHERE project.route_groups->g.name ? r.slug))
+	AND v.document->>'enabled'='true' AND v.connections ? x.provider_id::text
+	AND (v.document->'models' ? pin.model OR (v.document->>'model_rewriting'='true'
+		AND v.document->'models' ? (v.document->'aliases'->>pin.model)))
+	AND v.document->'models' ? coalesce(pin.target_model,pin.model)
+	AND x.models ? coalesce(pin.target_model,pin.model)`
+
 var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'extra_usage_enabled',x.extra_usage_enabled,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,'cycle_anchor',x.cycle_anchor,
+	'draining',x.draining,
+	'remaining_pins',CASE WHEN x.enabled AND p.state<>'disabled' AND c.revoked_at IS NULL AND ` + grants.LiveCondition + ` THEN (` + remainingPins + `) ELSE 0 END,
+	'last_activity_at',(SELECT d.created_at FROM olp.code_decisions d WHERE d.chosen_account_id=x.id ORDER BY d.created_at DESC LIMIT 1),
 	'max_concurrency',x.max_concurrency,
 	'cooldowns',coalesce((SELECT jsonb_agg(jsonb_build_object('class',cd.class,'model',cd.model,'retry_at',cd.retry_at) ORDER BY cd.retry_at,cd.class,cd.model) FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now()),'[]'::jsonb),
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
@@ -113,7 +142,7 @@ var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id
 		AND c.provider_id=x.provider_id AND c.principal=x.principal AND c.profile_id='` + codeplans.ZAIProfile + `'
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND g.expires_at IS NULL AND g.refresh_token_id IS NULL
 		AND p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=c.profile_id,false),
-	'allowance',x.allowance,'allowance_read_requested_at',x.allowance_read_requested_at,'allowance_read_at',x.allowance_read_at,'eligible',coalesce(x.enabled AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND ` + grants.LiveCondition + `
+	'allowance',x.allowance,'allowance_read_requested_at',x.allowance_read_requested_at,'allowance_read_at',x.allowance_read_at,'eligible',coalesce(x.enabled AND NOT x.draining AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND ` + grants.LiveCondition + `
 		AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(x.models) m(model) WHERE NOT EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=m.model))),false),
 	'grant_state',CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' WHEN g.lapsed_at IS NOT NULL THEN 'lapsed' WHEN g.expires_at<=now() THEN 'expired' ELSE 'current' END)
 	FROM olp.code_accounts x JOIN olp.providers p ON p.id=x.provider_id JOIN olp.provider_credentials c ON c.id=x.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id`

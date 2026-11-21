@@ -25,6 +25,7 @@ func (a API) Register(mux *http.ServeMux) {
 	a.access.Route(mux, "GET /api/v1/code/accounts", a.list)
 	a.access.Route(mux, "POST /api/v1/code/accounts", a.write)
 	a.access.Route(mux, "PUT /api/v1/code/accounts/{id}", a.write)
+	a.access.Route(mux, "PUT /api/v1/code/accounts/{id}/drain", a.setDrain)
 	a.access.Route(mux, "POST /api/v1/code/accounts/{id}/allowance-reads", a.requestAllowanceRead)
 }
 
@@ -44,6 +45,50 @@ func (a API) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return codeadmin.Write(a.access, r, codeadmin.Accounts, in.ProjectID, in, func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error) {
 		return save(r.Context(), tx, p, id, etag, in, existing)
 	})
+}
+
+func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "id")
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	var input struct {
+		Draining *bool `json:"draining"`
+	}
+	if err := httpkit.Decode(r, &input); err != nil {
+		return httpkit.Reply{}, err
+	}
+	if input.Draining == nil {
+		return httpkit.Reply{}, httpkit.Invalid("draining", "Set draining to true or false.")
+	}
+	ctx := r.Context()
+	return access.Transact(a.access, r, func(tx pgx.Tx, p authz.Principal) (string, error) {
+		var project, oldETag string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text,etag::text FROM olp.code_accounts WHERE id=$1`, id).Scan(&project, &oldETag); err != nil {
+			return "", err
+		}
+		if err := p.Project(&project, authz.Change); err != nil {
+			return "", err
+		}
+		return project, httpkit.Match(r, oldETag)
+	}, func(tx pgx.Tx, _ authz.Principal, project string) (httpkit.Reply, access.Event, error) {
+		etag := httpkit.NewID()
+		if _, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET draining=$2,etag=$3 WHERE id=$1`, id, *input.Draining, etag); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		var body json.RawMessage
+		if err := tx.QueryRow(ctx, accountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(body, etag), access.Event{Action: drainAction(*input.Draining), Resource: "code_account", ID: id, Project: &project}, nil
+	})
+}
+
+func drainAction(draining bool) string {
+	if draining {
+		return "code_account.drain"
+	}
+	return "code_account.resume"
 }
 
 type connectionProfile struct {

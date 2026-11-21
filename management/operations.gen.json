@@ -41920,6 +41920,83 @@
     }
   },
   {
+    "name": "set_code_account_drain",
+    "group": "code-mode",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/code/accounts/{id}/drain",
+    "description": "Start or stop draining a Code Mode subscription account",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "body": {
+          "$ref": "#/$defs/CodeAccountDrainWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "CodeAccountDrainWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "draining"
+          ],
+          "properties": {
+            "draining": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "set_prompt_label",
     "group": "agents",
     "method": "PUT",

@@ -40,6 +40,8 @@
     listCredentialSlots
   } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
+  import AccountDrainControl from './AccountDrainControl.svelte';
+  import AccountStatus from './AccountStatus.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
   import { managementSections, type CodeManagementKind } from './sections';
@@ -265,7 +267,10 @@
                 onclick={() =>
                   (editing = { kind: 'accounts', current: account })}
                 >Edit account</button
-              >{/if}
+              ><AccountDrainControl
+                {account}
+                disabled={!!editing || busy}
+              />{/if}
           </div>
           <dl>
             <dt>Subscription</dt>
@@ -283,12 +288,7 @@
             <dd>{account.id} / {account.principal}</dd>
             <dt>Maximum simultaneous generations</dt>
             <dd>{account.max_concurrency ?? 'Not set'}</dd>
-            <dt>Eligibility</dt>
-            <dd>
-              {account.eligible ? 'Eligible' : 'Ineligible'} · {account.enabled
-                ? 'enabled'
-                : 'disabled'}
-            </dd>
+            <AccountStatus {account} />
             <dt>Grant state</dt>
             <dd>
               {account.grant_state === 'lapsed'

@@ -904,6 +904,33 @@ account the tree would take for a new model refuses that model too. A credential
 refresh may change authentication for the same principal; it must not change
 the principal stored in the binding.
 
+### Drain a subscription account
+
+In **Code mode → Accounts**, select the project and choose **Start drain** on
+the account you want to rotate or remove. New conversation roots, new model
+pins, and automatic recovery skip that account. A new conversation can use
+another eligible account or receive a typed refusal if none can take it.
+Draining applies immediately across replicas and does not require a route
+republish.
+
+Existing model pins keep the same account, including on reconnect and in child
+conversations using the same pin. Normal access, health, quota, and concurrency
+checks still apply. Disabling the account or revoking its grant still stops
+admissions on those pins.
+
+**Remaining eligible pins** counts nonretired model pins with a current grant
+and a live key, model, route, and pool assignment. The key's owner must still
+have project access. Temporary cooldowns and
+capacity limits do not subtract pins. **Last activity** shows the latest
+recorded routing decision. These are not counts of open requests. Use
+**Conversation trees** to inspect or retire pins when their conversations no
+longer need them.
+
+Choose **Resume routing** to allow new assignments again. API clients can send
+`PUT /api/v1/code/accounts/{id}/drain` with the current `If-Match` ETag and
+`{"draining": true}` or `{"draining": false}`. Both actions are audited. The
+drain is local to the installation and is not exported as configuration.
+
 ## Limits and accounting
 
 Request rate, token rate and concurrency reuse shared admission. Those estimates
