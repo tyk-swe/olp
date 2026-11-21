@@ -187,7 +187,7 @@ func (c *Collector) Finish(ctx context.Context, identity Identity, at time.Time)
 		c.manager.drop(c.redactor != nil)
 		return false
 	}
-	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record})
+	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record}, c.expiresAt)
 }
 
 func (c *Collector) record(ctx context.Context, identity Identity, at time.Time) ([]byte, error) {

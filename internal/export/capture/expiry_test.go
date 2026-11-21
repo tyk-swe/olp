@@ -40,6 +40,21 @@ func TestCachedCapturePoliciesExpireWithoutRefresh(t *testing.T) {
 	})
 }
 
+func TestEnqueueDoesNotRecordExpiredPayload(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		deadline := started.Add(time.Second)
+		manager := NewManager(nil, nil, "", nil, nil)
+		time.Sleep(time.Until(deadline))
+		if manager.enqueue(queued{at: started, record: []byte(`{"input":"sample"}`)}, &deadline) || len(manager.queue) != 0 {
+			t.Fatal("expired payload was queued")
+		}
+		if dropped := manager.dropped.Load(); dropped != 0 {
+			t.Fatalf("planned expiry counted %d dropped captures", dropped)
+		}
+	})
+}
+
 func assertCapture(t *testing.T, manager *Manager, project, route, wantPolicy string) {
 	t.Helper()
 	collector := manager.Resolve(project, route, "", "", "request")

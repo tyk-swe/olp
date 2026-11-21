@@ -208,8 +208,11 @@ type queued struct {
 	record         []byte
 }
 
-func (m *Manager) enqueue(item queued) bool {
+func (m *Manager) enqueue(item queued, expiresAt *time.Time) bool {
 	if len(item.record) > maxRecord || !m.budget.admit(item.projectID, len(item.record), item.at, func() bool {
+		if !beforeExpiry(expiresAt, time.Now()) {
+			return false
+		}
 		select {
 		case m.queue <- item:
 			return true
@@ -217,7 +220,9 @@ func (m *Manager) enqueue(item queued) bool {
 			return false
 		}
 	}) {
-		m.dropped.Add(1)
+		if beforeExpiry(expiresAt, time.Now()) {
+			m.dropped.Add(1)
+		}
 		return false
 	}
 	m.queued.Add(1)
