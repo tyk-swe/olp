@@ -12,11 +12,7 @@ export function emptyCursorHistory(): CursorHistory {
   return { cursor: undefined, history: [] };
 }
 
-export function pushCursor(
-  state: CursorHistory,
-  next: string | null | undefined
-) {
-  if (!next) return;
+function pushCursor(state: CursorHistory, next: string) {
   state.history = [...state.history, state.cursor];
   state.cursor = next;
 }
