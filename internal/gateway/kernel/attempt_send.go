@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -85,7 +86,7 @@ func (run attemptRun) send(plan attemptPlan, fact events.AttemptFact) (attemptSe
 	if err != nil {
 		return announced, ended(run.state.classify(err, false), nil)
 	}
-	return run.accept(attemptSent{plan: plan, config: config, fact: fact, parallel: parallel, response: resp}, endpoint)
+	return run.accept(attemptSent{plan: plan, config: config, fact: fact, parallel: parallel, response: resp}, req.URL)
 }
 
 func (run attemptRun) sendingConfig(plan attemptPlan, header http.Header) connectors.Config {
@@ -128,7 +129,7 @@ func (run attemptRun) announce(plan attemptPlan) (*parallelGuardrail, *attemptEn
 	return parallel, nil
 }
 
-func (run attemptRun) accept(sent attemptSent, endpoint string) (attemptSent, *attemptEnd) {
+func (run attemptRun) accept(sent attemptSent, endpoint *url.URL) (attemptSent, *attemptEnd) {
 	s, resp := run.server, sent.response
 	received := s.Now().Sub(sent.fact.StartedAt)
 	fact := sent.fact
@@ -150,9 +151,15 @@ func (run attemptRun) accept(sent attemptSent, endpoint string) (attemptSent, *a
 	return answered, ended(class, f)
 }
 
-func (run attemptRun) providerRequestID(sent attemptSent, endpoint string) string {
-	if sent.config.Kind != connectors.KindAnthropic || sent.plan.format != wire.Anthropic ||
-		endpoint != connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")+"/messages" {
+func (run attemptRun) providerRequestID(sent attemptSent, endpoint *url.URL) string {
+	if sent.config.Kind != connectors.KindAnthropic || sent.plan.format != wire.Anthropic {
+		return ""
+	}
+	target := *endpoint
+	if target.Scheme == "https" && target.Port() == "443" {
+		target.Host = target.Hostname()
+	}
+	if target.String() != connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")+"/messages" {
 		return ""
 	}
 	ids := sent.response.Header.Values("Request-Id")

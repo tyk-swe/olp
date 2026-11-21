@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -2110,6 +2111,15 @@ func TestNativeMessagesProviderRequestIDsStayWithTheirAttempts(t *testing.T) {
 		gatewayID = "gateway-messages-1"
 	)
 	official := connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")
+	officialURL, err := url.Parse(official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPort := func(port string) string {
+		endpoint := *officialURL
+		endpoint.Host = net.JoinHostPort(endpoint.Hostname(), port)
+		return endpoint.String()
+	}
 	for _, tc := range []struct {
 		name, endpoint string
 		firstHeader    []string
@@ -2118,6 +2128,8 @@ func TestNativeMessagesProviderRequestIDsStayWithTheirAttempts(t *testing.T) {
 		wantSecond     string
 	}{
 		{name: "official fallback", endpoint: official, firstHeader: []string{failedID}, wantFirst: failedID, wantSecond: successID},
+		{name: "explicit HTTPS port", endpoint: withPort("443"), firstHeader: []string{failedID}, wantFirst: failedID, wantSecond: successID},
+		{name: "nondefault port", endpoint: withPort("8443"), firstHeader: []string{failedID}},
 		{name: "custom host", endpoint: "https://custom.example/v1", firstHeader: []string{failedID}},
 		{name: "duplicate header", endpoint: official, firstHeader: []string{failedID, failedID}, wantSecond: successID},
 		{name: "combined header", endpoint: official, firstHeader: []string{failedID + ", " + successID}, wantSecond: successID},
