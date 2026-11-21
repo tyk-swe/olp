@@ -751,6 +751,7 @@ func normalizedDependencies(deps Dependencies) Dependencies {
 		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
 		Runtime: deps.Runtime, Digester: deps.Digester, BudgetAuthority: deps.BudgetAuthority, TaskAttemptAdmitter: deps.TaskAttemptAdmitter,
 		TaskCapabilityAuthenticator: deps.TaskCapabilityAuthenticator, DelegationReauthenticator: deps.DelegationReauthenticator,
+		ObserveOverlap: deps.ObserveOverlap,
 		Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
 		Traces: deps.Traces, Media: deps.Media, Staging: deps.Staging, Uploads: deps.Uploads, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
 	}
