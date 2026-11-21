@@ -31,7 +31,7 @@ func TestOverlapRecordingFailureDoesNotInterruptAdmittedInference(t *testing.T) 
 	rotate := func(prev map[string]any, seconds int) map[string]any {
 		return s.Want(owner, "POST", path+"/rotate", map[string]int{"overlap_seconds": seconds}, harness.Idempotent(harness.ETag(prev)), http.StatusOK)
 	}
-	middle := rotate(old, 180)
+	middle := rotate(s.Want(owner, "GET", path, nil, nil, http.StatusOK), 180)
 	current := rotate(middle, 180)
 
 	overlaps := func() []any {

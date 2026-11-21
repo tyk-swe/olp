@@ -266,7 +266,7 @@ func TestOverlapObservationCountsAdmittedCacheHits(t *testing.T) {
 	}
 	observedAt := before.Add(time.Second)
 	clock.Store(observedAt.UnixNano())
-	resp, _ := h.chat(oldKey, map[string]string{"X-OLP-Cache": "only-if-cached"})
+	resp, _ := h.chat(oldKey, nil)
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-OLP-Cache") != "hit" {
 		t.Fatalf("overlap request did not serve from cache: %d %q", resp.StatusCode, resp.Header.Get("X-OLP-Cache"))
 	}
