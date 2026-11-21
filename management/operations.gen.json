@@ -6153,6 +6153,53 @@
     }
   },
   {
+    "name": "compare_provider_listing",
+    "group": "providers",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/providers/{provider_id}/listing-comparison",
+    "description": "Reads every page of the upstream model listing with the published credential version of the active revision and compares it with the published inventory. The comparison changes no draft, revision or certification state. Only the native anthropic adapter with one enabled, stored API-key credential slot is supported.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "continue_grant_enrollment",
     "group": "providers",
     "method": "POST",

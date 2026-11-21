@@ -3,6 +3,7 @@ import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import type { Provider } from './providers';
 import {
   certifyProviderModel,
+  compareProviderListing,
   declareProviderModels,
   discoverProviderModels,
   getProviderCapabilityOptions,
@@ -84,6 +85,32 @@ describe('provider model API', () => {
       return Response.json(provider);
     });
     expect(await discoverProviderModels(provider)).toEqual(provider);
+  });
+
+  it('compares the upstream listing without a draft precondition', async () => {
+    const comparison = {
+      provider_id: provider.id,
+      revision_id: 'revision-fixture',
+      revision: 2,
+      status: 'incomplete',
+      detail: 'The final page was unavailable.',
+      checked_at: new Date(0).toISOString(),
+      api_version: '2023-06-01',
+      credential_version: 3,
+      new_models: [],
+      changed_display_names: [],
+      not_listed: [],
+      unverified: []
+    };
+    respond(async (request) => {
+      expect(new URL(request.url).pathname).toBe(
+        `/api/v1/providers/${provider.id}/listing-comparison`
+      );
+      expect(request.method).toBe('POST');
+      expect(request.headers.get('If-Match')).toBeNull();
+      return Response.json(comparison);
+    });
+    expect(await compareProviderListing(provider.id)).toEqual(comparison);
   });
 
   it('surfaces rejected model declarations', async () => {

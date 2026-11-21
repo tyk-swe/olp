@@ -143,8 +143,12 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode}, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
 		}
 		encoded, _ := json.Marshal(capabilities)
-		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)
-			ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,enabled=true,capabilities=excluded.capabilities`, m.ID, current.ID, m.UpstreamModel, m.DisplayName, encoded); err != nil {
+		endpoint, apiVersion, credentialID, credentialVersion, listedAt := listingValues(m.Listing)
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_listing_endpoint,discovered_listing_api_version,discovered_listing_credential_id,discovered_listing_credential_version,discovered_listing_at) VALUES($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10)
+			ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,enabled=true,capabilities=excluded.capabilities,
+			discovered_listing_endpoint=excluded.discovered_listing_endpoint,discovered_listing_api_version=excluded.discovered_listing_api_version,
+			discovered_listing_credential_id=excluded.discovered_listing_credential_id,discovered_listing_credential_version=excluded.discovered_listing_credential_version,
+			discovered_listing_at=excluded.discovered_listing_at`, m.ID, current.ID, m.UpstreamModel, m.DisplayName, encoded, endpoint, apiVersion, credentialID, credentialVersion, listedAt); err != nil {
 			return err
 		}
 	}

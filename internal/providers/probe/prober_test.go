@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -169,6 +170,94 @@ func TestModelDiscoveryFollowsPagesToTheEnd(t *testing.T) {
 			}
 			if got := listedModels(models); !slices.Equal(got, c.want) {
 				t.Fatalf("listed %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCompleteModelDiscoveryUsesOneCredentialAcrossPages(t *testing.T) {
+	t.Parallel()
+	var keys, versions, afterIDs []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("X-Api-Key"))
+		versions = append(versions, r.Header.Get("Anthropic-Version"))
+		afterID := r.URL.Query().Get("after_id")
+		afterIDs = append(afterIDs, afterID)
+		switch afterID {
+		case "":
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-kept","display_name":"Claude Kept"}],"has_more":true,"last_id":"claude-kept"}`))
+		case "claude-kept":
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-new","display_name":"Claude New"}],"has_more":false,"last_id":"claude-new"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	connection := upstreamConnection(t, connectors.KindAnthropic, upstream.URL)
+	listing, err := prober(loopback).ListCompleteModelFacts(t.Context(), connection)
+	if err != nil {
+		t.Fatal(Classify(err))
+	}
+	if !listing.Complete {
+		t.Fatalf("listing incomplete: %s", listing.Detail)
+	}
+	want := []listedModel{{Name: "claude-kept", Display: "Claude Kept"}, {Name: "claude-new", Display: "Claude New"}}
+	if got := listedModels(listing.Models); !slices.Equal(got, want) {
+		t.Fatalf("listed %+v, want %+v", got, want)
+	}
+	if len(keys) != 2 || keys[0] != "sk-test" || keys[1] != keys[0] {
+		t.Fatalf("page credentials %v, want the same published credential on both pages", keys)
+	}
+	if len(versions) != 2 || versions[0] != versions[1] {
+		t.Fatalf("page API versions %v, want one listing configuration on both pages", versions)
+	}
+	if !slices.Equal(afterIDs, []string{"", "claude-kept"}) {
+		t.Fatalf("after_id values %v, want the first page cursor followed", afterIDs)
+	}
+}
+
+func TestCompleteModelDiscoveryNeverClaimsCompletenessWithoutProof(t *testing.T) {
+	t.Parallel()
+	truncated := func() string {
+		items := make([]string, 2001)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"id":"model-%04d"}`, i)
+		}
+		return `{"data":[` + strings.Join(items, ",") + `],"has_more":false,"last_id":"model-2000"}`
+	}()
+	cases := map[string]struct {
+		handler http.HandlerFunc
+		wantErr bool
+	}{
+		"missing has_more":          {answer(http.StatusOK, `{"data":[{"id":"claude-a"}]}`), false},
+		"malformed has_more":        {answer(http.StatusOK, `{"data":[{"id":"claude-a"}],"has_more":"false"}`), false},
+		"has_more without a cursor": {answer(http.StatusOK, `{"data":[{"id":"claude-a"}],"has_more":true}`), true},
+		"repeated cursor":           {answer(http.StatusOK, `{"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}`), true},
+		"model without an id":       {answer(http.StatusOK, `{"data":[{"display_name":"No ID"}],"has_more":false}`), true},
+		"truncated at the bound":    {answer(http.StatusOK, truncated), false},
+		"withheld final page": {func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("after_id") == "" {
+				_, _ = w.Write([]byte(`{"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}`))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}, true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			upstream := httptest.NewServer(c.handler)
+			t.Cleanup(upstream.Close)
+			connection := upstreamConnection(t, connectors.KindAnthropic, upstream.URL)
+			listing, err := prober(loopback).ListCompleteModelFacts(t.Context(), connection)
+			if listing.Complete {
+				t.Fatalf("listing claimed completeness from %s", name)
+			}
+			if c.wantErr && err == nil {
+				t.Fatalf("listing from %s succeeded, want a failure", name)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("listing from %s failed with %v, want an incomplete result", name, Classify(err))
 			}
 		})
 	}

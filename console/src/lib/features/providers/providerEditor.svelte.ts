@@ -55,6 +55,7 @@ import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import {
   certifyProviderModel,
+  compareProviderListing,
   declareProviderModels,
   discoverProviderModels,
   setProviderModel,
@@ -506,6 +507,13 @@ export class ProviderEditor {
       );
       return true;
     });
+  };
+  readonly compareListing = async () => {
+    const current = this.current;
+    if (!current || !this.canManage || this.pending) return;
+    return this.run('listing-comparison', () =>
+      compareProviderListing(current.id)
+    );
   };
   readonly compareRevisions = async (from: string, to: string) => {
     const current = this.current;

@@ -20,6 +20,7 @@
   import { cursorPaginationProps } from '#lib/listing/pagination.js';
   import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
   import CatalogSuggestions from '#lib/features/providers/CatalogSuggestions.svelte';
+  import ProviderListingComparison from '#lib/features/providers/ProviderListingComparison.svelte';
   import {
     activationReady,
     DISABLED_EDIT_NOTE,
@@ -154,6 +155,7 @@
     </button>
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
+  <ProviderListingComparison {current} {editor} />
   <CatalogSuggestions {current} {editor} locked={editingLocked} />
   {#if canManage && !editingLocked && (declared || current.configuration.kind === 'openai_compatible')}<details
       class="manual-fallback"
