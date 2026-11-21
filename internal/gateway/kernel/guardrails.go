@@ -429,13 +429,45 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthor
 }
 
 func (s *Server) EvaluateGuardrails(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+	release, err := s.admitGuardrailEvaluation(r)
+	if err != nil {
+		return guardrails.Result{}, err
+	}
+	defer release()
+	return s.evaluatePinnedGuardrails(r, p, pinned, in)
+}
+
+func (s *Server) EvaluateGuardrailsBatch(r *http.Request, p authz.Principal, pinneds []guardrails.Pinned, ins []guardrails.Application) ([]guardrails.Result, error) {
+	if len(pinneds) != len(ins) {
+		return nil, guardrails.ErrSurface
+	}
+	release, err := s.admitGuardrailEvaluation(r)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	results := make([]guardrails.Result, 0, len(ins))
+	for i, in := range ins {
+		result, err := s.evaluatePinnedGuardrails(r, p, pinneds[i], in)
+		if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (s *Server) admitGuardrailEvaluation(r *http.Request) (func(), error) {
 	if s == nil || s.Deps.Runtime == nil {
-		return guardrails.Result{}, httpkit.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
+		return nil, httpkit.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
 	if !s.Gate.Admit(r.Context()) {
-		return guardrails.Result{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
+		return nil, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.Gate.Release(r.Context())
+	return func() { s.Gate.Release(r.Context()) }, nil
+}
+
+func (s *Server) evaluatePinnedGuardrails(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = func(route *routing.Route) *fault.Error {
 		if err := p.Authorize(authz.Playground); err != nil {
