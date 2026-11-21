@@ -117,7 +117,7 @@ func (f *surfaceRuntime) NetworkSecret(ctx context.Context, rel *release.Release
 	return secret, err
 }
 
-func (*surfaceRuntime) GrantGeneration(string) int64  { return 0 }
+func (*surfaceRuntime) GrantGeneration(string) int64    { return 0 }
 func (*surfaceRuntime) CredentialRefused(string, int64) {}
 
 type surfaceEnvelopes struct {

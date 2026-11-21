@@ -177,7 +177,8 @@
         class="button button-secondary"
         disabled={working ||
           !$pageState.server.oauth ||
-          Boolean($pageState.server.oauth.entra_obo)}>Start key enrollment</button
+          Boolean($pageState.server.oauth.entra_obo)}
+        >Start key enrollment</button
       >
     </form>
   {/if}

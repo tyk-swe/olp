@@ -52,7 +52,8 @@
       required
     /></label
   >
-  <button class="button button-secondary" disabled={working || !$pageState.agentID}
-    >Start agent key enrollment</button
+  <button
+    class="button button-secondary"
+    disabled={working || !$pageState.agentID}>Start agent key enrollment</button
   >
 </form>

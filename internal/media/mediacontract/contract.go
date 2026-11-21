@@ -339,7 +339,6 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	return bound, nil
 }
 
-
 func (t *Template) multipartDefaults(in Input) ([]Part, error) {
 	if len(in.CallerParts) == 0 || len(in.Parts) < len(in.CallerParts) {
 		return nil, reject("target_capability", "/request", "multipart_source", "The ordered caller multipart source is missing.")
