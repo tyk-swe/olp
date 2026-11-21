@@ -69,7 +69,7 @@ func summarizeFixturePlan(plan explanation, snapshot *routing.Snapshot) fixtureP
 	winner := fixtureWinner(plan, snapshot)
 	return fixturePlan{
 		Winner: winner, Reason: noWinnerReason(winner), Fallbacks: plan.Fallbacks,
-		Targets: slices.Collect(func(yield func(fixtureDecision) bool) {
+		Targets: slices.AppendSeq([]fixtureDecision{}, func(yield func(fixtureDecision) bool) {
 			for _, leg := range plan.Legs {
 				for _, decision := range leg.Decisions {
 					if !yield(fixtureDecision{
@@ -83,7 +83,7 @@ func summarizeFixturePlan(plan explanation, snapshot *routing.Snapshot) fixtureP
 				}
 			}
 		}),
-		Selectors: slices.Collect(func(yield func(fixtureSelector) bool) {
+		Selectors: slices.AppendSeq([]fixtureSelector{}, func(yield func(fixtureSelector) bool) {
 			for _, leg := range plan.Legs {
 				for _, selector := range leg.Selectors {
 					if !yield(fixtureSelector{leg.Route, selector.ID, selector.Matched, selector.Outcome}) {

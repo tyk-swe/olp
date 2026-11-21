@@ -69,6 +69,10 @@ func TestRouteFixtureComparisonKeepsPlainTextAndFlagsStructuredOutput(t *testing
 	}
 	results := result["results"].([]any)
 	structured, plain := results[0].(map[string]any), results[1].(map[string]any)
+	baseline := plain["published"].(map[string]any)
+	if selectors, ok := baseline["selectors"].([]any); !ok || len(selectors) != 0 {
+		t.Fatalf("published route without selectors should report an empty list, got %#v", baseline["selectors"])
+	}
 	if structured["passed"] != false || structured["published"].(map[string]any)["winner"] == nil || structured["draft"].(map[string]any)["winner"] != nil {
 		t.Fatalf("structured fixture did not catch the regression: %v", structured)
 	}
