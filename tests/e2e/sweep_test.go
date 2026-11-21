@@ -46,6 +46,13 @@ func sweepPath(pattern string, known map[string]string) string {
 	})
 	now := time.Now().UTC()
 	switch {
+	case path == "/api/v1/usage/comparison":
+		end := now.Truncate(24 * time.Hour)
+		return resolved + "?" + url.Values{
+			"start":      {end.AddDate(0, 0, -1).Format(time.RFC3339)},
+			"end":        {end.Format(time.RFC3339)},
+			"project_id": {known["project_id"]},
+		}.Encode()
 	case path == "/api/v1/usage/reconciliation", strings.HasSuffix(path, "/invoiced-costs"):
 		return resolved + "?" + url.Values{
 			"start": {now.Add(-24 * time.Hour).Format(time.DateOnly)},

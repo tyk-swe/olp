@@ -1,5 +1,4 @@
 <script lang="ts">
-  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
@@ -148,8 +147,6 @@
     }
   }
 </script>
-
-<PageTitle title="Usage" />
 
 <div class="toolbar">
   <SavedFilters

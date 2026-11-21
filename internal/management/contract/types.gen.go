@@ -7273,6 +7273,30 @@ func (e UpdateUserRoleRequestAccessScope) Valid() bool {
 	}
 }
 
+// Defines values for UsageComparisonResponseStatus.
+const (
+	UsageComparisonResponseStatusAvailable            UsageComparisonResponseStatus = "available"
+	UsageComparisonResponseStatusIncompatibleCurrency UsageComparisonResponseStatus = "incompatible_currency"
+	UsageComparisonResponseStatusIncomplete           UsageComparisonResponseStatus = "incomplete"
+	UsageComparisonResponseStatusNoPricedUsage        UsageComparisonResponseStatus = "no_priced_usage"
+)
+
+// Valid indicates whether the value is a known member of the UsageComparisonResponseStatus enum.
+func (e UsageComparisonResponseStatus) Valid() bool {
+	switch e {
+	case UsageComparisonResponseStatusAvailable:
+		return true
+	case UsageComparisonResponseStatusIncompatibleCurrency:
+		return true
+	case UsageComparisonResponseStatusIncomplete:
+		return true
+	case UsageComparisonResponseStatusNoPricedUsage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UserDetailResponseAccessScope.
 const (
 	UserDetailResponseAccessScopeAssigned UserDetailResponseAccessScope = "assigned"
@@ -17591,6 +17615,28 @@ type UsageBreakdownResponse struct {
 	Items    []UsageBreakdownItem       `json:"items"`
 }
 
+// UsageComparisonPeriod defines model for UsageComparisonPeriod.
+type UsageComparisonPeriod struct {
+	Completeness UsageCompletenessResponse `json:"completeness"`
+	End          time.Time                 `json:"end"`
+	Start        time.Time                 `json:"start"`
+
+	// Subtotals Observed estimated cost by recorded currency. Missing costs are not represented by zero.
+	Subtotals []UsageCostSubtotal `json:"subtotals"`
+}
+
+// UsageComparisonResponse defines model for UsageComparisonResponse.
+type UsageComparisonResponse struct {
+	Currency nullable.Nullable[string]     `json:"currency"`
+	Current  UsageComparisonPeriod         `json:"current"`
+	Items    []UsageRouteSpendChange       `json:"items"`
+	Previous UsageComparisonPeriod         `json:"previous"`
+	Status   UsageComparisonResponseStatus `json:"status"`
+}
+
+// UsageComparisonResponseStatus defines model for UsageComparisonResponse.Status.
+type UsageComparisonResponseStatus string
+
 // UsageCompletenessResponse defines model for UsageCompletenessResponse.
 type UsageCompletenessResponse struct {
 	Complete                         bool                                  `json:"complete"`
@@ -17604,6 +17650,12 @@ type UsageCompletenessResponse struct {
 	RequestMetadataGapEvents         int64                                 `json:"request_metadata_gap_events"`
 	UncertainRequestMetadataGapCount int64                                 `json:"uncertain_request_metadata_gap_count"`
 	UnpricedCount                    int64                                 `json:"unpriced_count"`
+}
+
+// UsageCostSubtotal defines model for UsageCostSubtotal.
+type UsageCostSubtotal struct {
+	Currency      nullable.Nullable[string] `json:"currency"`
+	EstimatedCost string                    `json:"estimated_cost"`
 }
 
 // UsagePointResponse defines model for UsagePointResponse.
@@ -17663,6 +17715,17 @@ type UsageRangeCoverageResponse struct {
 	Approximate                        bool  `json:"approximate"`
 	ExcludedPartialAggregateBoundaries int32 `json:"excluded_partial_aggregate_boundaries"`
 	RangeComplete                      bool  `json:"range_complete"`
+}
+
+// UsageRouteSpendChange defines model for UsageRouteSpendChange.
+type UsageRouteSpendChange struct {
+	Change      string `json:"change"`
+	CurrentCost string `json:"current_cost"`
+
+	// PercentChange Percent change, rounded to six decimal places, or null when the previous amount is zero.
+	PercentChange nullable.Nullable[string] `json:"percent_change"`
+	PreviousCost  string                    `json:"previous_cost"`
+	Route         string                    `json:"route"`
 }
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
@@ -19741,6 +19804,29 @@ type UsageBreakdownParams struct {
 
 // UsageBreakdownParamsDimension defines parameters for UsageBreakdown.
 type UsageBreakdownParamsDimension string
+
+// UsageComparisonParams defines parameters for UsageComparison.
+type UsageComparisonParams struct {
+	Start      time.Time           `form:"start" json:"start"`
+	End        time.Time           `form:"end" json:"end"`
+	Route      *string             `form:"route,omitempty" json:"route,omitempty"`
+	ProviderId *openapi_types.UUID `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
+	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId openapi_types.UUID `form:"project_id" json:"project_id"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// AttributionKey Restrict to records carrying this attribution key.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Restrict to records whose attribution key carries this exact value; requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+}
 
 // UsageCompletenessParams defines parameters for UsageCompleteness.
 type UsageCompletenessParams struct {

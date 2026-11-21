@@ -208,6 +208,8 @@ Guardrails includes credential creation and metadata listing. To replace a crede
 
 The Templates tab under Routes manages route templates, including explicit Apply and recorded placement outcomes. New templates leave automatic publishing disabled. Route operation and simulation choices include registered unary dialects alongside existing generation, streaming and resource operations.
 
+In Usage, choose **Compare with previous period**, select one project, and choose 1 to 31 closed UTC days. The end date is excluded. The report compares the selected range with the immediately preceding range of the same length and carries any applied Usage filters into both periods. When both periods have complete accounting and one comparable currency, the report ranks up to 25 routes by the size of their estimated cost change, including decreases. Otherwise it shows the observed subtotals by currency without changes. The comparison uses recorded estimated cost, not customer charges or invoices.
+
 The Routing savings tab under Usage reports selector savings and shadow comparisons. These reports filter by time range, route and project and distinguish unavailable measurements from zero values. Session and attribution filters are unavailable because the report queries do not apply them. The Signed usage records tab under Exports manages the scoped HTTPS export system, including credentials and delivery counters. Telemetry sinks on the Telemetry tab are a separate export system.
 
 Provider drafts, credential slots, projects, budget groups and notification resources expose cleanup actions where authorized. Dependency and history checks can reject cleanup, in which case the resource remains available.

@@ -49191,6 +49191,149 @@
     }
   },
   {
+    "name": "usage_comparison",
+    "group": "usage",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/usage/comparison",
+    "description": "Compare recorded estimated costs by route against the immediately preceding period of equal length. Both range bounds are UTC midnights. The start is inclusive, the end exclusive, and the range must cover 1 to 31 closed days. Route changes are returned only for complete periods with compatible currency.",
+    "scopes": [
+      [
+        "usage"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "start",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "end",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "route",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "provider_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "model",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "operation",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "attribution_value",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "route": {
+              "type": "string"
+            },
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "attribution_key": {
+              "type": "string"
+            },
+            "attribution_value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end",
+            "project_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "usage_completeness",
     "group": "usage",
     "method": "GET",

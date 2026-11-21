@@ -224,6 +224,7 @@
     "GET /api/v1/toolsets/{publication_id}/revisions/{revision_id}": "YYYYYYYYYYYY",
     "GET /api/v1/unconfined-plugins": "Y-----------",
     "GET /api/v1/usage/breakdown": "YYYYYYYYYYY-",
+    "GET /api/v1/usage/comparison": "YYYYYYYYYYY-",
     "GET /api/v1/usage/completeness": "YYYYYYYYYYY-",
     "GET /api/v1/usage/export.csv": "YYYYYYYYYYY-",
     "GET /api/v1/usage/reconciliation": "YYYYYYYYYYY-",
