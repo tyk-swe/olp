@@ -66,7 +66,7 @@ func (s surface) preparedConverse(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	route, ok := release.Snapshot().FindRoute(r.PathValue("model"))
-	if !ok || !route.Fidelity.Strict() && route.Cache == nil && route.PromptCache == nil {
+	if !ok || !route.UsesPreparedBedrockConverse() {
 		return false
 	}
 	r = r.Clone(r.Context())

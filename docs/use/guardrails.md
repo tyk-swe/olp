@@ -15,6 +15,20 @@ attachments. Its playground runs the same evaluation engine without storing the
 entered content, subject to playground access and project visibility. An external
 evaluator still receives the content required by its configured service.
 
+## Preview before dispatch
+
+In **Guardrails → Preview**, select an active route, an API key in the same
+project, and the operation and request surface. The preview shows the serving
+release, flags it if a newer one is published, and lists visible checks in
+serving order. It checks static constraints such as streaming and
+provider-retained output. It does not accept sample content, run checks, reserve
+quota, or dispatch a request.
+
+Installation-wide readers see the full chain. Scoped readers see the same
+partial-visibility notice even when their list is empty. The preview does not
+report compatibility for policies they cannot read. The management API is
+`GET /api/v1/guardrails/preview`.
+
 ## Definitions and policies
 
 Create a definition with `POST /api/v1/guardrails`:

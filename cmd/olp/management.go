@@ -32,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/reports"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
+	"github.com/tyk-swe/olp/internal/guardrails/preview"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
@@ -120,6 +121,7 @@ func (m Management) registerGuardrails(mux *http.ServeMux) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publish).Register(mux)
+	preview.Register(m.Access, mux, m.Runtime.Release)
 }
 
 // Register mounts the whole management API: the published contract, every

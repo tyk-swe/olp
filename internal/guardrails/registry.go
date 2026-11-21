@@ -115,6 +115,20 @@ func (b Boundary) matches(a Attachment, organization string) bool {
 // Entries only adds policies. There is deliberately no overriding or exclusion
 // operator with which a narrower scope could remove inherited safeguards.
 func (r *Registry) Entries(b Boundary) ([]Entry, error) {
+	resolved, err := r.resolve(b)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Collect(func(yield func(Entry) bool) {
+		for _, item := range resolved {
+			if !yield(item.entry) {
+				return
+			}
+		}
+	}), nil
+}
+
+func (r *Registry) resolve(b Boundary) ([]resolvedEntry, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -128,7 +142,7 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	attachments := slices.SortedStableFunc(slices.Values(slices.DeleteFunc(slices.Clone(r.Attachments), func(a Attachment) bool { return !b.matches(a, organization) })), func(x, y Attachment) int {
 		return cmp.Or(cmp.Compare(scopeRanks[x.Scope], scopeRanks[y.Scope]), cmp.Compare(legacyFirst(x), legacyFirst(y)), cmp.Compare(x.Order, y.Order), strings.Compare(x.ID, y.ID))
 	})
-	var entries []Entry
+	var entries []resolvedEntry
 	for _, a := range attachments {
 		p, ok := r.Policies[a.PolicyRevisionID]
 		if !ok {
@@ -139,7 +153,10 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 		if a.Scope != InstallationScope && a.Scope != OrganizationScope && p.ProjectID != b.ProjectID {
 			return nil, errors.New("guardrail attachment crosses request project")
 		}
-		entries = append(entries, p.Entries...)
+		origin := Placement{a.Scope, a.ScopeID, p.ProjectID, p.PolicyID, p.ID}
+		for _, entry := range p.Entries {
+			entries = append(entries, resolvedEntry{entry: entry, placement: origin})
+		}
 		if len(entries) > MaxEntries {
 			return nil, errors.New("effective guardrails exceed entry bound")
 		}
@@ -163,11 +180,11 @@ func (r *Registry) Engines(b Boundary) (map[string]*Engine, error) {
 	})
 	engines := make(map[string]*Engine, len(keys))
 	for _, key := range keys {
-		entries, err := r.Entries(Boundary{ProjectID: b.ProjectID, RouteID: b.RouteID, ToolsetID: b.ToolsetID, KeyID: key})
+		entries, err := r.resolve(Boundary{ProjectID: b.ProjectID, RouteID: b.RouteID, ToolsetID: b.ToolsetID, KeyID: key})
 		if err != nil {
 			return nil, err
 		}
-		engine, err := Compile(entries, r.Definitions)
+		engine, err := compile(entries, r.Definitions)
 		if err != nil {
 			return nil, err
 		}

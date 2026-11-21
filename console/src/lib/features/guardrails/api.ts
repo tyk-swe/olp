@@ -1,5 +1,5 @@
 import { apiClient } from '#lib/management/client.js';
-import type { components } from '#lib/management/schema.js';
+import type { components, operations } from '#lib/management/schema.js';
 import {
   createHeaders,
   ensureOk,
@@ -13,6 +13,19 @@ export type Definition = components['schemas']['GuardrailResponse'];
 export type Policy = components['schemas']['GuardrailPolicy'];
 export type Entry = components['schemas']['GuardrailPolicyEntry'];
 export type Result = components['schemas']['GuardrailApplyResult'];
+export type PreviewSelection =
+  operations['preview_guardrails']['parameters']['query'];
+export type PreviewEntry = components['schemas']['GuardrailPreviewEntry'];
+export const getGuardrailPreview = async (
+  query: PreviewSelection,
+  signal?: AbortSignal
+) =>
+  unwrap(
+    await apiClient.GET('/api/v1/guardrails/preview', {
+      params: { query },
+      signal
+    })
+  );
 export const listDefinitions = async () => ({
   items: await collectCursorPages(async (cursor) =>
     unwrapPage(

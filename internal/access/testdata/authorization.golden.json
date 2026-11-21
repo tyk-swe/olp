@@ -95,6 +95,7 @@
     "GET /api/v1/guardrail-policies/{policy_id}": "YYYYYYYYYYYY",
     "GET /api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}": "YYYYYYYYYYYY",
     "GET /api/v1/guardrails": "YYYYYYYYYYYY",
+    "GET /api/v1/guardrails/preview": "YYYYYYYYYYYY",
     "GET /api/v1/guardrails/{guardrail_id}": "YYYYYYYYYYYY",
     "GET /api/v1/guardrails/{guardrail_id}/revisions/{revision_id}": "YYYYYYYYYYYY",
     "GET /api/v1/health/ready": "YYYYYYYYYYYY",

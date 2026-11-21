@@ -85,7 +85,7 @@ func documentFields(family wire.Format, doc oif.Document) ([]field, error) {
 }
 
 func rewriteFrame(family wire.Format, frame []byte, texts map[string]string) ([]byte, error) {
-	if family == wire.Bedrock {
+	if !family.CanRewriteGuardrailStreamText() {
 		return nil, guardrails.ErrSurface
 	}
 	doc, lines, indices, err := frameDocument(frame)
