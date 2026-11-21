@@ -123,6 +123,21 @@ func TestReadFileEnforcesModeAndContent(t *testing.T) {
 	}
 }
 
+func TestReadBootstrapTokenRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "token")
+	if err := os.WriteFile(target, []byte(strings.Repeat("a", 64)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "token-link")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if token, ok := ReadBootstrapToken(path); ok || token != "" {
+		t.Fatal("read a bootstrap token through a final-component symlink")
+	}
+}
+
 func TestParseRingRejectsInvalidDocuments(t *testing.T) {
 	documents := map[string][]byte{
 		"not json":          []byte(`{`),

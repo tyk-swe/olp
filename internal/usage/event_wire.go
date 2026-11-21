@@ -40,6 +40,7 @@ type wireEvent struct {
 	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
 	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
 
+	CacheLookupReason       CacheLookupReason     `json:"cache_lookup_reason,omitempty"`
 	CacheResult             string                `json:"cache_result,omitempty"`
 	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id"`
 	HTTPOutcomePending      bool                  `json:"http_outcome_pending,omitempty"`

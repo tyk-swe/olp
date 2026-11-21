@@ -205,24 +205,31 @@ func ReadSummary(ctx context.Context, q database.Queryer, f Filters, now time.Ti
 	return summary, nil
 }
 
-func ReadCompleteness(ctx context.Context, q database.Queryer, f Filters, now time.Time) (Completeness, error) {
+func (f Filters) completenessRows(query *filterQuery) {
 	scope := scopeFor(f)
-	var query filterQuery
-	query.push("WITH completeness_rows AS (SELECT" +
+	query.push("WITH completeness_rows AS (SELECT observed_at, route_slug," +
 		" CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
 		" estimated_cost, currency::text AS currency FROM olp.attempt_usage_facts WHERE true")
 	query.pushBind(" AND observed_at >= ", f.Start)
 	query.pushBind(" AND observed_at < ", f.End)
-	f.dimensions(&query)
-	query.push(" UNION ALL SELECT " + scope.hourlyCount + ", " + scope.hourlyUnpriced + ", " +
+	f.dimensions(query)
+	query.push(" UNION ALL SELECT bucket, route_slug, " + scope.hourlyCount + ", " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", estimated_cost, currency::text FROM olp.attempt_usage_hourly WHERE true")
 	query.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	query.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
-	f.dimensions(&query)
-	query.push(") SELECT COALESCE(SUM(request_count), 0)::bigint," +
-		" COALESCE(SUM(unpriced_count), 0)::bigint, COALESCE(SUM(incomplete_count), 0)::bigint," +
+	f.dimensions(query)
+	query.push(")")
+}
+
+const completenessCounts = "COALESCE(SUM(request_count), 0)::bigint," +
+	" COALESCE(SUM(unpriced_count), 0)::bigint, COALESCE(SUM(incomplete_count), 0)::bigint"
+
+func ReadCompleteness(ctx context.Context, q database.Queryer, f Filters, now time.Time) (Completeness, error) {
+	var query filterQuery
+	f.completenessRows(&query)
+	query.push(" SELECT " + completenessCounts + "," +
 		" SUM(estimated_cost)::text, COALESCE(MAX(btrim(currency))," +
 		" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton)) FROM completeness_rows")
 	var report Completeness
@@ -230,6 +237,10 @@ func ReadCompleteness(ctx context.Context, q database.Queryer, f Filters, now ti
 		&report.IncompleteCount, &report.EstimatedCost, &report.Currency); err != nil {
 		return Completeness{}, fmt.Errorf("read usage completeness: %w", err)
 	}
+	return withCompletenessEvidence(ctx, q, f, now, report)
+}
+
+func withCompletenessEvidence(ctx context.Context, q database.Queryer, f Filters, now time.Time, report Completeness) (Completeness, error) {
 	if report.RequestCount < 0 || report.UnpricedCount < 0 || report.IncompleteCount < 0 || report.UnpricedCount > report.RequestCount {
 		return Completeness{}, errInvalidUsageCount
 	}

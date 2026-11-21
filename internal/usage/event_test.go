@@ -173,6 +173,12 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			e.RequestCompletedAt = e.RequestStartedAt.Add(-time.Nanosecond)
 		}},
 		{"blank route", func(e *Event) { e.RouteSlug = "  " }},
+		{"arbitrary cache lookup reason", func(e *Event) {
+			e.CacheResult, e.CacheLookupReason = "bypass", "connection failed on cache host"
+		}},
+		{"refresh reason with a hit", func(e *Event) {
+			e.CacheResult, e.CacheLookupReason = "hit", CacheLookupRefresh
+		}},
 		{"request status outside HTTP range", func(e *Event) {
 			status := 99
 			e.StatusCode = &status

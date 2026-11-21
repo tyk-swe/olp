@@ -85,6 +85,7 @@ func (x *Call) scopeEnvelope(env *events.Envelope) {
 	}
 	if x.cache != nil {
 		env.CacheResult = x.cache.result
+		env.CacheLookupReason = x.cache.lookupReason
 	}
 }
 
@@ -206,7 +207,7 @@ func (s *Server) recordBusiness(env events.Envelope, x *Call) {
 		project = *x.Route.ProjectID
 	}
 	if x.cache != nil {
-		s.Deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
+		s.Deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.backendIssue)
 	}
 	for _, decision := range env.GuardrailDecisions {
 		s.Deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, string(decision.Phase), string(decision.Action), string(decision.Outcome), decision.LatencyMS)

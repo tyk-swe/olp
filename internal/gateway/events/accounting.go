@@ -60,6 +60,7 @@ func UsageEvent(e Envelope) (*usage.Event, error) {
 		return nil, fmt.Errorf("generate usage event ID: %w", err)
 	}
 	event := &usage.Event{
+		CacheLookupReason:    e.CacheLookupReason,
 		CacheResult:          e.CacheResult,
 		EvaluatorGuardrailID: OptionalText(e.EvaluatorGuardrailID),
 		Version:              usage.WireVersion,

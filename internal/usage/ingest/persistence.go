@@ -97,9 +97,9 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id,cache_result)
+         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id,cache_result,cache_lookup_reason)
     VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($8, now()),
-            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid,NULLIF($24,''))
+            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid,NULLIF($24,''),NULLIF($25,''))
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
@@ -351,7 +351,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *usage.Event, validate
 		validated.StatusCode, ev.ErrorClass, latency, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(attribution.JSON(ev.Attribution)),
 		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, usage.OriginCaller),
-		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID, ev.CacheResult); err != nil {
+		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID, ev.CacheResult, ev.CacheLookupReason); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {

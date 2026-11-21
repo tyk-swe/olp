@@ -62,11 +62,46 @@ idempotency key, supply `--idempotency-key` before the first write; omission
 fails before dispatch. Retain that key and the exact payload after an uncertain
 response, and reuse both for the same logical write. A deliberate new write
 requires a new identity.
-The CLI implements no application-level mutation retry loop. The standard HTTP transport may replay the original request and idempotency key on a recoverable reused-connection failure.
+Each generated command makes one call on a fresh client. The CLI has no
+mutation retry loop.
 
 Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
 Error messages exclude server-controlled request details.
+
+### Structured errors
+
+Set `OLP_CLI_ERROR_FORMAT=json` for generated management commands to write
+one JSON object followed by a newline to stderr on failure. The exit status
+is still 1. For example, a stale ETag produces:
+
+```json
+{"kind":"api","status":412,"code":"etag_mismatch"}
+```
+
+| Kind | Meaning |
+| --- | --- |
+| `invalid_input` | The command, arguments or request body failed local validation. |
+| `local` | The CLI could not use its configuration, token, input file or output destination. |
+| `transport` | The CLI did not receive an HTTP response. |
+| `api` | The API returned a non-success HTTP status. |
+| `invalid_response` | A successful HTTP response could not be read or decoded. |
+
+Only `api` errors include `status`. They include `code` only when the problem
+type is a recognized `https://openllmproxy.dev/problems/` URI. The supported
+codes are `already_exists`, `authentication_required`, `etag_mismatch`,
+`idempotency_conflict`, `idempotency_key_required`, `invalid_identifier`,
+`invalid_json`, `not_found`, `permission_denied`, `precondition_required`,
+`service_unavailable`, `unsupported_media_type` and `validation_failed`.
+The JSON never includes server descriptions, credentials, or request values.
+
+A `transport` error does not say whether a write committed. The CLI does not
+resend a write after losing its response. If your script explicitly retries the
+same write, reuse the original idempotency key and payload.
+
+This setting does not change help, successful stdout or success ETags. It
+does not apply to server commands, `olp config` promotion workflows, or
+`olp code-setup`.
 
 ### Published route lifecycle
 

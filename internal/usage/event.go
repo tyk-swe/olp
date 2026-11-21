@@ -71,6 +71,15 @@ func validateDelegation(event *Event) error {
 	return nil
 }
 
+type CacheLookupReason string
+
+const (
+	CacheLookupNoStore         CacheLookupReason = "no_store"
+	CacheLookupRefresh         CacheLookupReason = "refresh"
+	CacheLookupMultipleChoices CacheLookupReason = "multiple_choices"
+	CacheLookupUnavailable     CacheLookupReason = "backend_unavailable"
+)
+
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
@@ -79,13 +88,14 @@ type Event struct {
 	CacheTokenSeconds  *string          `json:"cache_token_seconds,omitempty"`
 	ContainerSessions  map[string]int64 `json:"container_sessions,omitempty"`
 
-	CacheResult          string  `json:"cache_result,omitempty"`
-	EvaluatorGuardrailID *string `json:"evaluator_guardrail_id,omitempty"`
-	BudgetBoundary       string  `json:"budget_boundary,omitempty"`
-	Version              int     `json:"version"`
-	EventID              string  `json:"event_id"`
-	RequestID            string  `json:"request_id"`
-	RuntimeGenerationID  string  `json:"runtime_generation_id"`
+	CacheLookupReason    CacheLookupReason `json:"cache_lookup_reason,omitempty"`
+	CacheResult          string            `json:"cache_result,omitempty"`
+	EvaluatorGuardrailID *string           `json:"evaluator_guardrail_id,omitempty"`
+	BudgetBoundary       string            `json:"budget_boundary,omitempty"`
+	Version              int               `json:"version"`
+	EventID              string            `json:"event_id"`
+	RequestID            string            `json:"request_id"`
+	RuntimeGenerationID  string            `json:"runtime_generation_id"`
 	// EndUserDigest contains a project-scoped digest, never a caller identifier.
 	EndUserDigest string `json:"end_user_digest,omitempty"`
 	// APIKeyID is empty exactly when the origin is keyless.

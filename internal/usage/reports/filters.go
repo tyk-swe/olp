@@ -24,6 +24,16 @@ type Filters struct {
 	providerIDs      []string
 }
 
+func (f Filters) withRange(start, end time.Time) Filters {
+	return Filters{
+		Start: start, End: end,
+		Route: f.Route, ProviderID: f.ProviderID, Model: f.Model,
+		APIKey: f.APIKey, Operation: f.Operation, Projects: f.Projects,
+		AttributionKey: f.AttributionKey, AttributionValue: f.AttributionValue,
+		providerIDs: f.providerIDs,
+	}
+}
+
 // filterQuery assembles one parameterised statement. Filters are optional and
 // vary per request, so the text is built alongside its arguments and every
 // value is bound; nothing a caller supplies is ever concatenated into SQL.

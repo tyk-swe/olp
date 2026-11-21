@@ -585,6 +585,124 @@ func (f usageFixture) event(attempts ...usage.Attempt) *usage.Event {
 	}
 }
 
+func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	event := fixture.event(fixture.attempt(1))
+	event.CacheResult, event.CacheLookupReason = "bypass", usage.CacheLookupUnavailable
+	record, err := usage.NewAccountingEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []ingest.PersistOutcome{ingest.PersistOutcomePersisted, ingest.PersistOutcomeDuplicate} {
+		if result, err := ingest.PersistEvent(ctx, pool, record); err != nil || result.Outcome != want {
+			t.Fatalf("delivery outcome=%v error=%v, want %v", result.Outcome, err, want)
+		}
+	}
+	altered := *event
+	altered.CacheLookupReason = usage.CacheLookupNoStore
+	conflict, err := usage.NewAccountingEvent(&altered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.PersistEvent(ctx, pool, conflict); !errors.Is(err, usage.ErrInvalidEvent) {
+		t.Fatalf("persisting an altered replay: %v", err)
+	}
+	legacy := fixture.event(fixture.attempt(1))
+	legacy.CacheResult = "bypass"
+	old, err := usage.NewAccountingEvent(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.PersistEvent(ctx, pool, old); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM olp.requests WHERE id=$1", event.RequestID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("requests after replay=%d, error=%v", count, err)
+	}
+	requestDetail := cacheLookupReports(t, fixture)
+	for _, tc := range []struct {
+		token, id string
+		status    int
+		reason    usage.CacheLookupReason
+	}{
+		{"owner-session", event.RequestID, http.StatusOK, usage.CacheLookupUnavailable},
+		{"owner-session", legacy.RequestID, http.StatusOK, ""},
+		{"other-project-session", event.RequestID, http.StatusNotFound, ""},
+	} {
+		status, body := requestDetail(tc.token, tc.id)
+		if status != tc.status {
+			t.Fatalf("request detail status=%d, want %d: %s", status, tc.status, body)
+		}
+		if tc.status == http.StatusOK {
+			var detail struct {
+				Result string                  `json:"cache_result"`
+				Reason usage.CacheLookupReason `json:"cache_lookup_reason"`
+			}
+			if err := json.Unmarshal(body, &detail); err != nil || detail.Result != "bypass" || detail.Reason != tc.reason {
+				t.Fatalf("unexpected cache detail: %s (decode error: %v)", body, err)
+			}
+		} else if bytes.Contains(body, []byte(usage.CacheLookupUnavailable)) {
+			t.Fatalf("another project saw the reason: %s", body)
+		}
+	}
+}
+
+func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string) (int, []byte) {
+	t.Helper()
+	ctx, pool := t.Context(), fixture.pool
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	otherUser, otherProject := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.users (id,email,display_name,role,etag,access_scope)
+		VALUES ($1::uuid,'other@example.com','Other project','operator',$1::uuid,'assigned')`, otherUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.projects (id,name,etag,created_by)
+		VALUES ($1::uuid,'other',$1::uuid,$2)`, otherProject, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.project_members (project_id,user_id,role,added_by)
+		VALUES ($1,$2,'manager',$3)`, otherProject, otherUser, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	for token, user := range map[string]string{"owner-session": fixture.ownerID, "other-project-session": otherUser} {
+		if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint)
+			VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), user, auth.Digest(secrets.SessionDigest, token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := http.NewServeMux()
+	api := reports.API{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.NewTextHandler(t.Output(), nil))})}
+	api.Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return func(token, requestID string) (int, []byte) {
+		t.Helper()
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/requests/"+requestID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.AddCookie(&http.Cookie{Name: access.SessionCookie, Value: token})
+		res, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode, body
+	}
+}
+
 func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)

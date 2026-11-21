@@ -82,7 +82,6 @@
     "internal/domain/operations/embeddings/embeddings.go liftResult",
     "internal/domain/operations/search/search.go parseRequest",
     "internal/domain/operations/tokenization/counts.go countRequest",
-    "internal/operatorcli/cli.go Runner.Run",
     "internal/operatorcli/client_env.go Runner.clientEnv",
     "internal/operatorcli/configuration.go Runner.configuration",
     "internal/domain/protocols/bedrock.go encodeBedrock",

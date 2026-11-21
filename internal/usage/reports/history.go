@@ -142,13 +142,16 @@ type AttemptDetail struct {
 // RequestDetail is one request with its attempt timeline.
 type RequestDetail struct {
 	RequestSummary
-	Attempts []AttemptDetail `json:"attempts"`
+	CacheLookupReason *usage.CacheLookupReason `json:"cache_lookup_reason,omitempty"`
+	Attempts          []AttemptDetail          `json:"attempts"`
 }
 
 // requestColumns projects a request with the usage its facts add up to. The
 // lateral join is filtered by HAVING so a request with no facts yet reports
 // null totals rather than zeros it never earned.
-const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_key_id::text,
+const requestColumns = "SELECT " + requestProjection
+
+const requestProjection = `r.id::text, r.runtime_generation_id::text, r.api_key_id::text,
         r.route_slug, r.operation, r.surface, r.started_at, r.completed_at,
         r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
@@ -342,8 +345,8 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
 // a 404.
 func GetRequest(ctx context.Context, q database.Queryer, id string) (RequestDetail, error) {
 	var detail RequestDetail
-	err := q.QueryRow(ctx, requestColumns+" WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1", id).
-		Scan(detail.RequestSummary.scanTargets()...)
+	err := q.QueryRow(ctx, "SELECT r.cache_lookup_reason, "+requestProjection+" WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1", id).
+		Scan(append([]any{&detail.CacheLookupReason}, detail.RequestSummary.scanTargets()...)...)
 	if err != nil {
 		return RequestDetail{}, err
 	}
