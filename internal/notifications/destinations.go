@@ -162,7 +162,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ authz.Principa
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return s.update(r, destinations, func(tx pgx.Tx, row document, etag string) error {
+	return s.update(r, destinations, nil, func(tx pgx.Tx, row document, etag string) error {
 		var current storedDestination
 		if err := json.Unmarshal(row.body, &current); err != nil {
 			return err

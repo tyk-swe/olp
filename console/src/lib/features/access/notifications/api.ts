@@ -105,14 +105,17 @@ export async function createNotificationRule(
 
 export async function updateNotificationRule(
   rule: NotificationRule,
-  input: UpdateNotificationRuleInput
+  input: UpdateNotificationRuleInput,
+  requestId?: string
 ): Promise<NotificationRule> {
   const response = await apiClient.PATCH(
     '/api/v1/notifications/rules/{notification_rule_id}',
     {
       params: {
         path: { notification_rule_id: rule.id },
-        header: ifMatch(rule.etag)
+        header: requestId
+          ? mutationHeaders(rule.etag, requestId)
+          : ifMatch(rule.etag)
       },
       body: input
     }

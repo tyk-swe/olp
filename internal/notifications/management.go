@@ -119,16 +119,15 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (htt
 	})
 }
 
-func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, current document, etag string) error) (httpkit.Reply, error) {
+func (s *Server) update(r *http.Request, res resource, replayPatch map[string]json.RawMessage, apply func(tx pgx.Tx, current document, etag string) error) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, res.parameter)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		locked, err := res.lockForChange(r.Context(), tx, p, id)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
+	lock := func(tx pgx.Tx, p authz.Principal) (revision, error) {
+		return res.lockForChange(r.Context(), tx, p, id)
+	}
+	change := func(tx pgx.Tx, _ authz.Principal, locked revision) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, locked.etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -143,8 +142,12 @@ func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, cur
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Detail(updated.body, updated.etag), access.Event{Action: res.kind + ".update", Resource: res.kind, ID: id}, nil
-	})
+		return httpkit.Detail(updated.body, updated.etag), access.Event{Action: res.kind + ".update", Resource: res.kind, ID: id, Project: locked.projectID}, nil
+	}
+	if replayPatch != nil {
+		return access.Mutate(s.access, r, replayPatch, lock, change)
+	}
+	return access.Transact(s.access, r, lock, change)
 }
 
 func (s *Server) delete(res resource) access.Handler {

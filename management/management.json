@@ -5793,6 +5793,12 @@
               "null"
             ]
           },
+          "silence": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/NotificationSilence" },
+              { "type": "null" }
+            ]
+          },
           "threshold_percent": {
             "description": "Set for budget.threshold rules only; null for other events.",
             "format": "int32",
@@ -5833,6 +5839,7 @@
           "name",
           "project_id",
           "project_name",
+          "silence",
           "subject_id",
           "subject_kind",
           "subject_name",
@@ -5861,6 +5868,16 @@
           "items"
         ],
         "type": "object"
+      },
+      "NotificationSilence": {
+        "description": "One time window on a project-scoped route.latency webhook rule. The start is inclusive and the end is exclusive.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["starts_at", "ends_at"],
+        "properties": {
+          "starts_at": { "type": "string", "format": "date-time" },
+          "ends_at": { "type": "string", "format": "date-time" }
+        }
       },
       "OidcAuthorizationResponse": {
         "properties": {
@@ -14479,6 +14496,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "silence": {
+            "description": "Set or replace a project-scoped route.latency webhook rule's silence. The end must be in the future. Send null to cancel or omit to leave unchanged unless switching to a non-webhook destination. Including this field requires Idempotency-Key.",
+            "oneOf": [
+              { "$ref": "#/components/schemas/NotificationSilence" },
+              { "type": "null" }
+            ]
           },
           "subject_id": {
             "format": "uuid",
@@ -36729,6 +36753,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Required when setting or canceling a silence",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": { "type": "string" }
           }
         ],
         "requestBody": {
@@ -36751,6 +36782,14 @@
               }
             },
             "description": "Notification rule updated"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+              }
+            },
+            "description": "Invalid request or missing Idempotency-Key for a silence change"
           },
           "403": {
             "content": {
@@ -36780,7 +36819,7 @@
                 }
               }
             },
-            "description": "An identical rule already exists"
+            "description": "An identical rule already exists or the Idempotency-Key belongs to another request"
           },
           "412": {
             "content": {

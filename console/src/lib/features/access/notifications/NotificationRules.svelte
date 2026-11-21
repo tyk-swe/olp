@@ -10,6 +10,7 @@
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { notificationKeys } from './notificationKeys';
   import { canChangeNotification } from './presentation';
+  import RuleSilenceEditor from './RuleSilenceEditor.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -558,6 +559,22 @@
                 ></td
               ></tr
             >
+            {#if editingRule?.event === 'route.latency' && editingRule.project_id && (destinations.data ?? []).some((destination) => destination.id === editingRule?.destination_id && destination.type === 'webhook')}
+              <tr>
+                <td colspan="8">
+                  <RuleSilenceEditor
+                    rule={editingRule}
+                    disabled={editRuleBusy}
+                    saved={async (value) => {
+                      if (editRuleId === value.id) editingRule = value;
+                      await queryClient.invalidateQueries({
+                        queryKey: notificationKeys.rules()
+                      });
+                    }}
+                  />
+                </td>
+              </tr>
+            {/if}
           {:else}
             <tr
               ><td

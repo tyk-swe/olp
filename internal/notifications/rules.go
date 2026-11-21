@@ -38,6 +38,7 @@ var rulePatchFields = map[string]string{
 	"destination_id":    "Use a valid destination identifier.",
 	"enabled":           "Use true or false.",
 	"configuration":     "Use a configuration object.",
+	"silence":           "Send UTC start and end timestamps or null to cancel.",
 }
 
 type subjectShape int
@@ -262,7 +263,7 @@ func (s *Server) updateNotificationRule(r *http.Request, _ authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return s.update(r, rules, func(tx pgx.Tx, row document, etag string) error {
+	return s.update(r, rules, replayableRulePatch(patch), func(tx pgx.Tx, row document, etag string) error {
 		input, err := patchRule(row.body, patch)
 		if err != nil {
 			return err
@@ -274,13 +275,23 @@ func (s *Server) updateNotificationRule(r *http.Request, _ authz.Principal) (htt
 		if err := checkReferences(r.Context(), tx, target); err != nil {
 			return err
 		}
-		c := target.subject.columns()
-		if _, err := tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
-			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration); err != nil {
+		silence, err := parseSilence(r.Context(), tx, target, patch["silence"])
+		if err != nil {
 			return err
 		}
-		return nil
+		c := target.subject.columns()
+		_, err = tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
+			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration,
+			patch["silence"] != nil, silence.startsAt, silence.endsAt)
+		return err
 	})
+}
+
+func replayableRulePatch(patch map[string]json.RawMessage) map[string]json.RawMessage {
+	if _, present := patch["silence"]; present {
+		return patch
+	}
+	return nil
 }
 
 func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleInput, error) {
@@ -332,6 +343,9 @@ const ruleDocumentsSQL = `SELECT r.id,r.project_id,r.etag,jsonb_build_object(
 	'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'event',r.event,'configuration',r.configuration,
 	'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),
 	'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,
+	'silence',CASE WHEN r.silence_starts_at IS NOT NULL THEN jsonb_build_object(
+	 'starts_at',to_char(r.silence_starts_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+	 'ends_at',to_char(r.silence_ends_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) END,
 	'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at) AS document
  FROM olp.notification_rules r
  JOIN olp.users u ON u.id=r.created_by
@@ -345,7 +359,11 @@ const lockRuleSQL = `SELECT etag::text,project_id::text FROM olp.notification_ru
 const createChannelRuleSQL = `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,enabled,etag,created_by,configuration)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 
-const updateChannelRuleSQL = `UPDATE olp.notification_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,threshold_percent=$6,destination_id=$7,enabled=$8,etag=$9,configuration=$10,updated_at=now() WHERE id=$1`
+const updateChannelRuleSQL = `UPDATE olp.notification_rules r SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,threshold_percent=$6,
+ destination_id=$7,enabled=$8,etag=$9,configuration=$10,updated_at=now(),
+ silence_starts_at=CASE WHEN $11 THEN $12::timestamptz WHEN d.type='webhook' THEN r.silence_starts_at END,
+ silence_ends_at=CASE WHEN $11 THEN $13::timestamptz WHEN d.type='webhook' THEN r.silence_ends_at END
+ FROM olp.notification_destinations d WHERE r.id=$1 AND d.id=$7`
 
 const evaluatedRuleCountSQL = `SELECT count(*) FROM olp.notification_rules WHERE event=ANY($1)`
 

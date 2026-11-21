@@ -12911,8 +12911,9 @@ type NotificationRule struct {
 	Name  string             `json:"name"`
 
 	// ProjectId Owning project; null for an installation-wide rule, as every provider event rule is.
-	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	ProjectId   nullable.Nullable[openapi_types.UUID]  `json:"project_id"`
+	ProjectName nullable.Nullable[string]              `json:"project_name"`
+	Silence     nullable.Nullable[NotificationSilence] `json:"silence"`
 
 	// SubjectId Set for budget.threshold rules only; null for other events.
 	SubjectId nullable.Nullable[openapi_types.UUID] `json:"subject_id"`
@@ -12933,6 +12934,12 @@ type NotificationRule struct {
 type NotificationRuleListResponse struct {
 	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// NotificationSilence One time window on a project-scoped route.latency webhook rule. The start is inclusive and the end is exclusive.
+type NotificationSilence struct {
+	EndsAt   time.Time `json:"ends_at"`
+	StartsAt time.Time `json:"starts_at"`
 }
 
 // ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
@@ -17467,7 +17474,10 @@ type UpdateNotificationRuleRequest struct {
 	DestinationId *openapi_types.UUID                       `json:"destination_id,omitempty"`
 	Enabled       *bool                                     `json:"enabled,omitempty"`
 	Name          *string                                   `json:"name,omitempty"`
-	SubjectId     *openapi_types.UUID                       `json:"subject_id,omitempty"`
+
+	// Silence Set or replace a project-scoped route.latency webhook rule's silence. The end must be in the future. Send null to cancel or omit to leave unchanged unless switching to a non-webhook destination. Including this field requires Idempotency-Key.
+	Silence   nullable.Nullable[NotificationSilence] `json:"silence,omitempty"`
+	SubjectId *openapi_types.UUID                    `json:"subject_id,omitempty"`
 
 	// SubjectKind Whose spend a budget.threshold rule watches.
 	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
@@ -18708,6 +18718,9 @@ type DeleteNotificationRuleParams struct {
 type UpdateNotificationRuleParams struct {
 	// IfMatch Concurrency token returned with the resource
 	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Required when setting or canceling a silence
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
 // UpdateCaptureConfigurationParams defines parameters for UpdateCaptureConfiguration.

@@ -103,3 +103,29 @@ func TestRecoveryOnlySignalsAnnounceEveryRecovery(t *testing.T) {
 		state = next.state
 	}
 }
+
+func TestSilencedLatencyRepeatsDoNotAdvanceCooldown(t *testing.T) {
+	t.Parallel()
+	before := time.Date(2026, 3, 1, 11, 45, 0, 0, time.UTC)
+	start, end := before.Add(15*time.Minute), before.Add(time.Hour)
+	rule := signalRule{
+		event:   contract.NotificationEventRouteLatency,
+		silence: silenceWindow{startsAt: &start, endsAt: &end},
+	}
+	trigger, err := rule.transition(signalState{}, observed{active: true}, triggersAndRecoveries{},
+		signalEnv{now: before, silenceNow: before}, time.Hour)
+	if err != nil || trigger.change != triggered {
+		t.Fatalf("trigger before window: %+v (%v)", trigger, err)
+	}
+	lastMutedEvaluation := end.Add(-time.Second)
+	muted, err := rule.transition(trigger.state, observed{active: true}, triggersAndRecoveries{},
+		signalEnv{now: lastMutedEvaluation, silenceNow: lastMutedEvaluation}, 15*time.Minute)
+	if err != nil || muted.change != quiet {
+		t.Fatalf("repeat inside window: %+v (%v)", muted, err)
+	}
+	repeat, err := rule.transition(muted.state, observed{active: true}, triggersAndRecoveries{},
+		signalEnv{now: end, silenceNow: end}, 15*time.Minute)
+	if err != nil || repeat.change != triggered || repeat.state.incident != trigger.state.incident {
+		t.Fatalf("repeat at exclusive end moved or lost the original incident: %+v (%v)", repeat, err)
+	}
+}

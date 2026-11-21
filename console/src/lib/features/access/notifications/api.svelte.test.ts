@@ -58,6 +58,7 @@ const rule: NotificationRule = {
   etag: '018f1234-5678-7abc-8def-0123456789ac',
   project_id: null,
   project_name: null,
+  silence: null,
   subject_id: null,
   subject_kind: null,
   subject_name: null,
