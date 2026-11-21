@@ -10,5 +10,7 @@ export const observabilityKeys = {
   redactorOptions: () => ['capture-redactor-options'] as const,
   gaps: (sink: string) => [...sinks(), 'gaps', sink] as const,
   focusDatasets: (sink: string, cursor?: string) =>
-    [...sinks(), sink, 'focus-datasets', cursor] as const
+    [...sinks(), sink, 'focus-datasets', cursor] as const,
+  meteringDelivery: (sink: string, attempt: string) =>
+    [...sinks(), sink, 'metering-delivery', attempt] as const
 };

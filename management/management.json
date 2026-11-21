@@ -26333,6 +26333,100 @@
           "next_cursor"
         ]
       },
+      "MeteringDeliveryLookup": {
+        "description": "What OLP can prove about one priced attempt's delivery to one CloudEvents metering sink. Accepted means the sink answered 2xx and OLP recorded it. Delivery unconfirmed means retries ended after a send may have occurred without a recorded acknowledgement. No payload or destination is included.",
+        "properties": {
+          "attempt_id": {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempts": {
+            "description": "Delivery claims made for this attempt on this sink, or null when no evidence remains",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "event_id": {
+            "description": "Durable export record id sent as X-OLP-Event-ID, or null when no evidence remains",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "export_sink_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "description": "When the most recent delivery claim was made, or null",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_code": {
+            "description": "Safe category of the most recent delivery failure, or null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "description": "When the priced attempt was observed, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "description": "pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope",
+            "enum": [
+              "pending",
+              "retrying",
+              "accepted",
+              "delivery_unconfirmed",
+              "expired_before_delivery",
+              "no_retained_evidence"
+            ],
+            "type": "string"
+          },
+          "queued_at": {
+            "description": "When the export record was queued, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settled_at": {
+            "description": "When delivery was recorded as accepted or the receipt reached its terminal state, or null while queued",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "attempt_id",
+          "attempts",
+          "event_id",
+          "export_sink_id",
+          "last_attempt_at",
+          "last_error_code",
+          "occurred_at",
+          "outcome",
+          "queued_at",
+          "settled_at"
+        ],
+        "type": "object"
+      },
       "CaptureSinkOption": {
         "type": "object",
         "required": [
@@ -65917,6 +66011,80 @@
               }
             },
             "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}": {
+      "get": {
+        "operationId": "get_export_sink_metering_delivery",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeteringDeliveryLookup"
+                }
+              }
+            },
+            "description": "Delivery state of one metering attempt on the sink, or no retained evidence when nothing attempt-specific remains in the caller's scope"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found, outside the caller's scope, or not a CloudEvents metering sink"
           }
         },
         "security": [

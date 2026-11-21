@@ -106,10 +106,14 @@ const (
 )
 
 type claim struct {
-	target   destination.Target
-	loadErr  error
-	record   destination.Record
-	attempts int
+	target    destination.Target
+	loadErr   error
+	record    destination.Record
+	attempts  int
+	sourceID  *string
+	projectID *string
+	queuedAt  time.Time
+	receipt   bool
 }
 
 func (w *Worker) deliverOne(ctx context.Context, p pair) (bool, error) {
@@ -157,16 +161,15 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 		return idle, claim{}, err
 	}
 	var c claim
-	var sourceID, projectID *string
 	var deliverySettings json.RawMessage
-	err = tx.QueryRow(claimCtx, nextRecordSQL, p.sink, p.stream, settings).Scan(&c.record.ID, &c.record.At, &c.record.Data, &c.attempts, &sourceID, &projectID, &deliverySettings)
+	err = tx.QueryRow(claimCtx, nextRecordSQL, p.sink, p.stream, settings).Scan(&c.record.ID, &c.record.At, &c.record.Data, &c.attempts, &c.sourceID, &c.projectID, &deliverySettings, &c.queuedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return idle, claim{}, nil
 	}
 	if err != nil {
 		return idle, claim{}, err
 	}
-	admitted, err := evidence.Admit(claimCtx, tx, p.stream, sourceID, projectID, creatorID)
+	admitted, err := evidence.Admit(claimCtx, tx, p.stream, c.sourceID, c.projectID, creatorID)
 	if err != nil {
 		return idle, claim{}, err
 	}
@@ -194,7 +197,8 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 		freezeSettings = deliverySettings
 	}
 	resetUnmapped := destination.DeliveryErrorCode(recordErr) == "unmapped"
-	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts, freezeSettings, resetUnmapped)
+	c.receipt = format == "cloudevents" && p.stream == "metering" && c.sourceID != nil
+	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts, freezeSettings, resetUnmapped, c.loadErr == nil)
 	if err != nil || tag.RowsAffected() != 1 {
 		return idle, claim{}, err
 	}
@@ -224,7 +228,18 @@ func (w *Worker) finish(ctx context.Context, p pair, c claim, sendErr error) err
 		return err
 	}
 	if tag.RowsAffected() != 1 {
+		if success && c.receipt {
+			if err := recordAccepted(finish, tx, p, c); err != nil {
+				return err
+			}
+			return tx.Commit(finish)
+		}
 		return errors.New("export pending row already resolved")
+	}
+	if success && c.receipt {
+		if err := recordAccepted(finish, tx, p, c); err != nil {
+			return err
+		}
 	}
 	cursor, delivered, failed := any(nil), 0, 1
 	if success {
@@ -234,6 +249,11 @@ func (w *Worker) finish(ctx context.Context, p pair, c claim, sendErr error) err
 		return err
 	}
 	return tx.Commit(finish)
+}
+
+func recordAccepted(ctx context.Context, tx pgx.Tx, p pair, c claim) error {
+	_, err := tx.Exec(ctx, acceptedReceiptSQL, p.sink, *c.sourceID, c.record.ID, c.projectID, c.attempts+1, c.record.At, c.queuedAt)
+	return err
 }
 
 func backoffSeconds(attempts int) int {
