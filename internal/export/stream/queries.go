@@ -9,14 +9,20 @@ const (
  FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
 	nextRecordSQL = `SELECT r.id::text,r.occurred_at,
  jsonb_build_object('version',1,'event_id',r.id,'stream',r.stream,'source_id',r.source_id,'project_id',r.project_id,
- 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts,r.source_id::text,r.project_id::text,COALESCE(p.delivery_settings,$3::jsonb)
+ 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts,r.source_id::text,r.project_id::text,COALESCE(p.delivery_settings,$3::jsonb),r.queued_at
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id
  WHERE p.sink_id=$1 AND r.stream=$2 AND p.delivered_at IS NULL AND p.rejected_at IS NULL AND p.next_attempt_at<=now()
  ORDER BY r.queued_at,r.id LIMIT 1`
 	claimRecordSQL = `UPDATE olp.export_pending SET attempts=LEAST(attempts+1,2147483647),
  last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes',
+ send_may_have_occurred=send_may_have_occurred OR $6,
  delivery_settings=CASE WHEN $5 THEN NULL ELSE COALESCE(delivery_settings,$4::jsonb) END
  WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL AND attempts=$3`
+	acceptedReceiptSQL = `INSERT INTO olp.metering_delivery_receipts(sink_id,attempt_id,record_id,project_id,outcome,last_error_code,attempts,occurred_at,queued_at,last_attempt_at,settled_at)
+ VALUES($1,$2,$3,$4,'accepted',NULL,$5,$6,$7,now(),now())
+ ON CONFLICT(sink_id,attempt_id) DO UPDATE SET record_id=EXCLUDED.record_id,project_id=EXCLUDED.project_id,
+ outcome='accepted',last_error_code=NULL,attempts=EXCLUDED.attempts,occurred_at=EXCLUDED.occurred_at,
+ queued_at=EXCLUDED.queued_at,last_attempt_at=EXCLUDED.last_attempt_at,settled_at=EXCLUDED.settled_at`
 	rejectEvidenceSQL = `UPDATE olp.export_pending SET rejected_at=now(),last_error_code='evidence_unavailable' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 	finishRecordSQL   = `UPDATE olp.export_pending SET delivered_at=CASE WHEN $3 THEN now() ELSE NULL END,
  rejected_at=CASE WHEN $6 THEN now() ELSE NULL END,

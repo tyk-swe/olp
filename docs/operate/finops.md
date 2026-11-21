@@ -68,6 +68,35 @@ configuration. After an upgrade, the first claim of a legacy pending event
 freezes the current settings. It cannot reconstruct settings used by earlier
 attempts. Older workers continue to read live settings until upgraded.
 
+#### Delivery lookup
+
+Exports can answer what OLP knows about one priced attempt on one CloudEvents
+sink. Open the sink's delivery lookup in the console, or call
+`GET /api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}`
+with the attempt ID, which is also the CloudEvents event `id`. The caller needs
+current access to the sink and to the consumer project, and an attempt outside
+that scope answers exactly like one with no evidence. The reply carries the
+durable record ID sent as `X-OLP-Event-ID`, the claim count, the safe error
+category of the last failure and the relevant timestamps. It never carries a
+payload or the destination URL, and there is no replay or backfill.
+
+The worker durably records that a send may have occurred in the claim commit
+before the outbound call, and that marker is never cleared, so a later local
+failure or rejection cannot erase an earlier possible send. Queue cleanup
+settles each removed CloudEvents metering record into a compact per-sink
+receipt under the same pending row lock the claim takes, so expiry cannot race
+that transition. Receipts are kept for `retention.requests_days` (default 30
+days) after they settle and are then purged by the same maintenance pass.
+
+| Outcome | Meaning |
+| --- | --- |
+| Pending | Queued and never claimed. |
+| Retrying | Queued after at least one claim. |
+| Accepted by sink | The sink answered 2xx and OLP recorded it. This says nothing about downstream ledger posting. |
+| Delivery unconfirmed | Retries ended after a send may have occurred and no 2xx was recorded, for example when the receiver stored the event but its response was lost. |
+| Expired before delivery | Durable evidence rules out every send, for example a record that expired before any worker claimed it. |
+| No retained evidence | Nothing attempt-specific remains in scope, because the attempt never queued for this sink, its receipt aged out, or it is outside the caller's scope. An aggregate gap alone proves nothing about one attempt. |
+
 ### Stripe meter sinks
 
 A `stripe_meter` sink with format `stripe` carries `metering` only and posts

@@ -3,6 +3,7 @@ import type { ExportSink, FocusDataset } from './api';
 import {
   focusDatasetStatus,
   lagSeconds,
+  meteringDeliveryLabel,
   sinkSettingsSummary,
   streamState,
   streamStatuses
@@ -98,6 +99,21 @@ describe('export sink presentation', () => {
       sinkSettingsSummary({ ...sink, format: 'stripe', settings: {} })
     ).toBe('Meter:  () · 0 customers');
   });
+});
+
+it('labels every metering delivery outcome honestly', () => {
+  expect(meteringDeliveryLabel('pending')).toBe('Pending');
+  expect(meteringDeliveryLabel('retrying')).toBe('Retrying');
+  expect(meteringDeliveryLabel('accepted')).toBe('Accepted by sink');
+  expect(meteringDeliveryLabel('delivery_unconfirmed')).toBe(
+    'Delivery unconfirmed'
+  );
+  expect(meteringDeliveryLabel('expired_before_delivery')).toBe(
+    'Expired before delivery'
+  );
+  expect(meteringDeliveryLabel('no_retained_evidence')).toBe(
+    'No retained evidence'
+  );
 });
 
 it('presents current and pending datasets while prioritizing delivery errors', () => {

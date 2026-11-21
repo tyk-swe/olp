@@ -126,6 +126,7 @@
     "GET /api/v1/observability/sinks/{export_sink_id}": "YYYYYYYYYYYY",
     "GET /api/v1/observability/sinks/{export_sink_id}/focus-datasets": "YYYYYYYYYYYY",
     "GET /api/v1/observability/sinks/{export_sink_id}/gaps": "YYYYYYYYYYYY",
+    "GET /api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}": "YYYYYYYYYYYY",
     "GET /api/v1/oidc/callback": "YYYYYYYYYYYY",
     "GET /api/v1/oidc/configuration": "Y-Y-----Y-Y-",
     "GET /api/v1/oidc/identities": "YYYYYYYY----",

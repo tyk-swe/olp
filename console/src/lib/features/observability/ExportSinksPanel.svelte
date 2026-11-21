@@ -18,6 +18,7 @@
   } from '#lib/editing/mutationIntent.svelte.js';
   import { formatDate } from '#lib/format.js';
   import ExportSinkHistory from './ExportSinkHistory.svelte';
+  import MeteringDeliveryLookup from './MeteringDeliveryLookup.svelte';
   import {
     createExportSink,
     deleteExportSink,
@@ -310,6 +311,11 @@
   function toggleDatasets(sink: ExportSink) {
     datasetSinkId =
       datasetSinkId === sink.export_sink_id ? '' : sink.export_sink_id;
+  }
+  let deliverySinkId = $state('');
+  function toggleDelivery(sink: ExportSink) {
+    deliverySinkId =
+      deliverySinkId === sink.export_sink_id ? '' : sink.export_sink_id;
   }
 
   const captureOwner = usePrincipalLifetime(() => {
@@ -662,7 +668,11 @@
                 class="text-button"
                 type="button"
                 onclick={() => toggleGaps(sink)}>Gaps</button
-              >{#if sink.format === 'csv_gzip'}<button
+              >{#if sink.format === 'cloudevents'}<button
+                  class="text-button"
+                  type="button"
+                  onclick={() => toggleDelivery(sink)}>Delivery lookup</button
+                >{/if}{#if sink.format === 'csv_gzip'}<button
                   class="text-button"
                   type="button"
                   onclick={() => toggleDatasets(sink)}>Datasets</button
@@ -690,6 +700,13 @@
                   sinkId={sink.export_sink_id}
                   kind="gaps"
                 /></td
+              ></tr
+            >
+          {/if}
+          {#if deliverySinkId === sink.export_sink_id}
+            <tr class="gap-row"
+              ><td colspan="7"
+                ><MeteringDeliveryLookup sinkId={sink.export_sink_id} /></td
               ></tr
             >
           {/if}
