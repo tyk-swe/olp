@@ -25,11 +25,7 @@ func (r signalRule) transition(current signalState, reading reading, policy anno
 		return transitionSignal(current, reading, policy, env.now, cooldown)
 	}
 	muted := r.silence.active(env.silenceNow)
-	rateLimit := cooldown
-	if muted || current.triggerPending {
-		rateLimit = 0
-	}
-	next, err := transitionSignal(current, reading, policy, env.now, rateLimit)
+	next, err := transitionSignal(current, reading, policy, env.now, latencyCooldown(current, muted, cooldown))
 	if err != nil {
 		return signalTransition{}, err
 	}
@@ -44,6 +40,13 @@ func (r signalRule) transition(current signalState, reading reading, policy anno
 	default:
 		return next, nil
 	}
+}
+
+func latencyCooldown(current signalState, muted bool, cooldown time.Duration) time.Duration {
+	if muted || current.triggerPending {
+		return 0
+	}
+	return cooldown
 }
 
 func parseSilence(ctx context.Context, tx pgx.Tx, target ruleTarget, raw json.RawMessage) (silenceWindow, error) {
