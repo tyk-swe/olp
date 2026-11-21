@@ -5770,6 +5770,24 @@ func (e ProviderKind) Valid() bool {
 	}
 }
 
+// Defines values for ProviderListingComparisonResponseStatus.
+const (
+	ProviderListingComparisonResponseStatusComplete   ProviderListingComparisonResponseStatus = "complete"
+	ProviderListingComparisonResponseStatusIncomplete ProviderListingComparisonResponseStatus = "incomplete"
+)
+
+// Valid indicates whether the value is a known member of the ProviderListingComparisonResponseStatus enum.
+func (e ProviderListingComparisonResponseStatus) Valid() bool {
+	switch e {
+	case ProviderListingComparisonResponseStatusComplete:
+		return true
+	case ProviderListingComparisonResponseStatusIncomplete:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderProbeResultStatus.
 const (
 	ProviderProbeResultStatusHealthy   ProviderProbeResultStatus = "healthy"
@@ -14649,6 +14667,51 @@ type ProviderKindCapabilityResponse struct {
 type ProviderListResponse struct {
 	Items      []ProviderSummaryResponse `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ProviderListingComparisonResponse A comparison of one complete upstream model listing with the published inventory of one active provider revision. An incomplete comparison carries no new, changed or missing-model verdicts. Not listed does not mean retired.
+type ProviderListingComparisonResponse struct {
+	ApiVersion          string                                     `json:"api_version"`
+	ChangedDisplayNames []ProviderListingDisplayNameChangeResponse `json:"changed_display_names"`
+	CheckedAt           time.Time                                  `json:"checked_at"`
+	CredentialVersion   int32                                      `json:"credential_version"`
+	Detail              string                                     `json:"detail"`
+	NewModels           []ProviderListingNewModelResponse          `json:"new_models"`
+	NotListed           []ProviderListingOmissionResponse          `json:"not_listed"`
+	ProviderId          openapi_types.UUID                         `json:"provider_id"`
+	Revision            int32                                      `json:"revision"`
+	RevisionId          openapi_types.UUID                         `json:"revision_id"`
+	Status              ProviderListingComparisonResponseStatus    `json:"status"`
+	Unverified          []ProviderListingOmissionResponse          `json:"unverified"`
+}
+
+// ProviderListingComparisonResponseStatus defines model for ProviderListingComparisonResponse.Status.
+type ProviderListingComparisonResponseStatus string
+
+// ProviderListingDisplayNameChangeResponse defines model for ProviderListingDisplayNameChangeResponse.
+type ProviderListingDisplayNameChangeResponse struct {
+	ListedDisplayName    string `json:"listed_display_name"`
+	PublishedDisplayName string `json:"published_display_name"`
+	UpstreamModel        string `json:"upstream_model"`
+}
+
+// ProviderListingNewModelResponse defines model for ProviderListingNewModelResponse.
+type ProviderListingNewModelResponse struct {
+	DisplayName   string `json:"display_name"`
+	UpstreamModel string `json:"upstream_model"`
+}
+
+// ProviderListingOmissionResponse defines model for ProviderListingOmissionResponse.
+type ProviderListingOmissionResponse struct {
+	DisplayName   string                         `json:"display_name"`
+	Routes        []ProviderListingRouteResponse `json:"routes"`
+	UpstreamModel string                         `json:"upstream_model"`
+}
+
+// ProviderListingRouteResponse defines model for ProviderListingRouteResponse.
+type ProviderListingRouteResponse struct {
+	Id   openapi_types.UUID `json:"id"`
+	Slug string             `json:"slug"`
 }
 
 // ProviderModelInventoryListResponse defines model for ProviderModelInventoryListResponse.

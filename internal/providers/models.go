@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -38,15 +39,22 @@ type storedModel struct {
 	Enabled       bool               `json:"enabled"`
 	Capabilities  []storedCapability `json:"capabilities"`
 	DiscoveredAt  *time.Time         `json:"discovered_at"`
+	Listing       *routing.RevisionListing
 }
 
-const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at"
+const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at,discovered_listing_endpoint,discovered_listing_api_version,discovered_listing_credential_id::text,discovered_listing_credential_version,discovered_listing_at"
 
 func scanModel(row pgx.Row) (storedModel, error) {
 	var m storedModel
 	var capabilities []byte
-	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
+	var listingEndpoint, listingAPIVersion, listingCredentialID *string
+	var listingCredentialVersion *int
+	var listingAt *time.Time
+	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &listingEndpoint, &listingAPIVersion, &listingCredentialID, &listingCredentialVersion, &listingAt); err != nil {
 		return storedModel{}, err
+	}
+	if listingEndpoint != nil && listingAPIVersion != nil && listingCredentialID != nil && listingCredentialVersion != nil && listingAt != nil {
+		m.Listing = &routing.RevisionListing{Endpoint: *listingEndpoint, APIVersion: *listingAPIVersion, CredentialID: *listingCredentialID, CredentialVersion: *listingCredentialVersion, ListedAt: listingAt.UTC()}
 	}
 	if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
 		return storedModel{}, err
@@ -118,29 +126,29 @@ func modelID(m modelReply) string { return m.ID }
 
 // The project scope is decided first, so a provider outside it answers 404
 // before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, error) {
+func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, *slotRow, error) {
 	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := readProbeProvider(r, p, tx, id)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
-	credential, err := s.credentialFor(r.Context(), tx, current)
+	credential, slot, err := s.credentialSlotFor(r.Context(), tx, current)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	models, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
-	return current, current.target(credential, models...), nil
+	return current, current.target(credential, models...), slot, nil
 }
 
 func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, id string) (*record, error) {
@@ -159,7 +167,7 @@ func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	current, target, err := s.prepare(r, p, id)
+	current, target, _, err := s.prepare(r, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -235,14 +243,26 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 			models = append(models, probe.DiscoveredModel{Name: m.UpstreamModel, Display: m.DisplayName})
 		}
 	}
-	current, target, err := s.prepare(r, p, id)
+	current, target, slot, err := s.prepare(r, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	upstream := len(models) == 0
 	at := time.Now().UTC()
+	var listing *routing.RevisionListing
 	if upstream {
-		listed, err := s.prober.ListModelFacts(r.Context(), target)
+		cfg := current.Connection.Document()
+		var listed []probe.DiscoveredModel
+		if cfg.Kind == connectors.KindAnthropic {
+			var complete probe.Listing
+			complete, err = s.prober.ListCompleteModelFacts(r.Context(), target)
+			listed = complete.Models
+			if err == nil && complete.Complete {
+				listing = completeListingProvenance(cfg, slot, at)
+			}
+		} else {
+			listed, err = s.prober.ListModelFacts(r.Context(), target)
+		}
 		if err != nil {
 			pe := probe.Classify(err)
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
@@ -253,7 +273,7 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		models = append(models, listed...)
 	}
 	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
-		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
+		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at, listing); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		reply, err := s.detailReply(r.Context(), tx, id)
@@ -436,7 +456,7 @@ func (s *Server) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, 
 	return nil
 }
 
-func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time) error {
+func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time, listing *routing.RevisionListing) error {
 	document := current.Connection.Document()
 	metadata := maps.Clone(document.Options.Models)
 	for _, m := range models {
@@ -447,7 +467,14 @@ func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *
 		if merged {
 			metadata[m.Name] = facts
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", httpkit.NewID(), current.ID, m.Name, m.Display, at); err != nil {
+		endpoint, apiVersion, credentialID, credentialVersion, listedAt := listingValues(listing)
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at,discovered_listing_endpoint,discovered_listing_api_version,discovered_listing_credential_id,discovered_listing_credential_version,discovered_listing_at) VALUES($1,$2,$3,$4,false,'[]',$5,$6,$7,$8,$9,$10)
+			ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at,
+			discovered_listing_endpoint=coalesce(excluded.discovered_listing_endpoint,olp.provider_models.discovered_listing_endpoint),
+			discovered_listing_api_version=coalesce(excluded.discovered_listing_api_version,olp.provider_models.discovered_listing_api_version),
+			discovered_listing_credential_id=coalesce(excluded.discovered_listing_credential_id,olp.provider_models.discovered_listing_credential_id),
+			discovered_listing_credential_version=coalesce(excluded.discovered_listing_credential_version,olp.provider_models.discovered_listing_credential_version),
+			discovered_listing_at=coalesce(excluded.discovered_listing_at,olp.provider_models.discovered_listing_at)`, httpkit.NewID(), current.ID, m.Name, m.Display, at, endpoint, apiVersion, credentialID, credentialVersion, listedAt); err != nil {
 			return err
 		}
 	}
@@ -537,16 +564,22 @@ func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeed
 }
 
 func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, error) {
+	credential, _, err := s.credentialSlotFor(ctx, tx, p)
+	return credential, err
+}
+
+func (s *Server) credentialSlotFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *slotRow, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg := p.Connection.Document()
 	slot := selectProbeSlot(slots, cfg, nil)
 	if slot == nil {
-		return nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+		return nil, nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
-	return s.probeCredential(ctx, tx, cfg, *slot)
+	credential, err := s.probeCredential(ctx, tx, cfg, *slot)
+	return credential, slot, err
 }
 
 func (s *Server) probeCredential(ctx context.Context, q database.Queryer, cfg connection.Configuration, slot slotRow) ([]byte, error) {

@@ -140,7 +140,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 		if len(m.Capabilities) == 0 {
 			return activatedProvider{}, httpkit.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
 		}
-		rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName}
+		rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName, Listing: m.Listing}
 		for _, c := range m.Capabilities {
 			if c.Source != "certified" {
 				return activatedProvider{}, httpkit.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")

@@ -83,6 +83,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	certifyTimeout := time.Duration(len(connection.Vocabulary())+1) * probe.Timeout
 	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
 	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/listing-comparison", s.compareListing, access.Deadline(certifyTimeout))
 	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)
 	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/catalog-suggestions/accept", s.acceptCatalogSuggestions, access.MaxBody(1<<20))
 	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)

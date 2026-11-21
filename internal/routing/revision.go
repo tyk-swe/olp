@@ -17,6 +17,17 @@ type RevisionModel struct {
 	UpstreamModel string               `json:"upstream_model"`
 	DisplayName   string               `json:"display_name"`
 	Capabilities  []RevisionCapability `json:"capabilities"`
+	Listing       *RevisionListing     `json:"listing,omitempty"`
+}
+
+// RevisionListing records that a complete upstream model listing named the
+// model under one endpoint, API version and immutable credential version.
+type RevisionListing struct {
+	Endpoint          string    `json:"endpoint"`
+	APIVersion        string    `json:"api_version"`
+	CredentialID      string    `json:"credential_id"`
+	CredentialVersion int       `json:"credential_version"`
+	ListedAt          time.Time `json:"listed_at"`
 }
 
 // RevisionCapability records whether a tuple was certified when activated.
