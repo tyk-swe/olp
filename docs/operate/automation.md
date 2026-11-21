@@ -62,12 +62,30 @@ idempotency key, supply `--idempotency-key` before the first write; omission
 fails before dispatch. Retain that key and the exact payload after an uncertain
 response, and reuse both for the same logical write. A deliberate new write
 requires a new identity.
-Each generated command makes one call on a fresh client. The CLI has no
-mutation retry loop.
+By default, each generated command makes one call on a fresh client. The CLI
+has no mutation retry loop.
 
 Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
 Error messages exclude server-controlled request details.
+
+### Follow list pages
+
+```sh
+olp providers list --query search=staging --query limit=25 --all-pages=true
+olp keys list --all-pages=true --output keys.json
+```
+
+Only `list_providers` and `list_api_keys` accept `--all-pages=true`. The CLI
+keeps the filters and page size on every request. Use `--query cursor=CURSOR`
+to start from a specific page. The result is one JSON envelope with all
+`items` in API order and no `next_cursor`. This is a live walk, not a
+snapshot. Without the option, the command returns one page as usual.
+
+The walk is limited to 100 pages and 16 MiB of JSON response bodies in
+total. If a page fails, a cursor repeats, or fetching the full result would
+exceed either limit, the command exits nonzero without writing to stdout or
+replacing an existing output file.
 
 ### Structured errors
 
@@ -85,7 +103,7 @@ is still 1. For example, a stale ETag produces:
 | `local` | The CLI could not use its configuration, token, input file or output destination. |
 | `transport` | The CLI did not receive an HTTP response. |
 | `api` | The API returned a non-success HTTP status. |
-| `invalid_response` | A successful HTTP response could not be read or decoded. |
+| `invalid_response` | A successful HTTP response could not be read or decoded, or the pagination walk hit a repeated cursor or a limit. |
 
 Only `api` errors include `status`. They include `code` only when the problem
 type is a recognized `https://openllmproxy.dev/problems/` URI. The supported
