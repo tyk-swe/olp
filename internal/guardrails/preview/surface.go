@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -19,8 +20,9 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 	if in.retainsOutput && (in.operation != wire.OperationGeneration || in.surface != wire.Dialect(wire.Responses)) {
 		return guardrails.Compatibility{}, httpkit.Invalid("retains_output", "Retained output is only available for OpenAI Responses.")
 	}
-	if in.operation == wire.OperationGeneration && generationSurface(in.surface) {
-		if in.surface == wire.Dialect(wire.Bedrock) && !route.UsesPreparedBedrockConverse() {
+	if family, ok := generationFamily(in.surface); in.operation == wire.OperationGeneration && ok {
+		if (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) ||
+			(!interaction.HasGuardrailInputCoverage(family) && route.ToolExecution != "gateway") {
 			return guardrails.Compatibility{Uninspected: true}, nil
 		}
 		if in.mode == "streaming" {
@@ -42,16 +44,16 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 	return guardrails.Compatibility{}, httpkit.Invalid("surface", "Choose a supported surface for this operation, fidelity and mode.")
 }
 
-func generationSurface(surface string) bool {
-	if _, native := protocols.NativeGenerationFamily(surface); native {
-		return true
+func generationFamily(surface string) (wire.Format, bool) {
+	if family, native := protocols.NativeGenerationFamily(surface); native {
+		return family, true
 	}
 	for _, family := range [...]wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock} {
 		if wire.Dialect(family) == surface {
-			return true
+			return family, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func transformedSurface(surface string) bool {
