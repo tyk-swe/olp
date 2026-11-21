@@ -27,7 +27,7 @@ Report suspected vulnerabilities privately through the
 | --- | --- | --- | --- |
 | Member | The `__Host-olp_session` cookie, with a CSRF proof on unsafe methods and an allowed `Origin` | `access.Server.Authenticate` | The management operations of its role, within its [access scope](#project-boundaries) |
 | Management token | `Authorization: Bearer olpm_…` | `access.Server.Authenticate` | Its delegated operations that its creator can still perform |
-| API key | The location its SDK uses; see [gateway keys](#gateway-keys) | `gateway/credentials.go` | Inference and model reads on its permitted routes within one project boundary |
+| API key | The location its SDK uses; see [gateway keys](#gateway-keys) | `gateway/ingress/credentials.go` | Inference and model reads on its permitted routes within one project boundary |
 | Bootstrap token | `X-OLP-Setup-Token` | `access` setup | Creating the first owner, once |
 
 ## Management authorization
@@ -112,12 +112,11 @@ revoked keys, and realtime sessions reauthorize every five seconds.
 | Gemini Live | Exactly one of those locations |
 | Bedrock | `X-OLP-API-Key`, otherwise a non-SigV4 bearer token; OLP never verifies AWS signatures |
 
-`gateway/credentials.go` owns these locations, and a characterization table
-pins every location, precedence, and refusal.
+`gateway/ingress/credentials.go` owns these locations and their precedence.
 
 A retained resource, such as a stored response, file, batch, continuation, or
 video job, is usable only by the key that created it, through a route that key
-may still use. `gateway/retained.go` answers any other key with 404, and
+may still use. `gateway/kernel/retained.go` answers any other key with 404, and
 answers 409 when the provider revision, slot, or credential that serves the
 resource is gone.
 
