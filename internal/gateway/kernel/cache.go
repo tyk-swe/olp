@@ -95,12 +95,12 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 	if !slices.Contains(p.Operations, x.operationName()) || x.mode == "streaming" && p.Streaming != "replay" || len(x.attempts) == 0 {
 		return nil
 	}
-	if s.Deps.Cache == nil {
-		x.noteCacheLookupReason(usage.CacheLookupUnavailable)
-		return nil
-	}
 	if c.NoStore {
 		x.noteCacheLookupReason(usage.CacheLookupNoStore)
+		return nil
+	}
+	if s.Deps.Cache == nil {
+		x.noteCacheLookupReason(usage.CacheLookupUnavailable)
 		return nil
 	}
 	if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {

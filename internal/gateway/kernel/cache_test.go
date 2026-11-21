@@ -219,6 +219,28 @@ func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 	}
 }
 
+func TestCallerOptOutWinsWhenNoCacheBackendIsConfigured(t *testing.T) {
+	h, _ := cacheHarness(t)
+	h.gateway.Deps.Cache = nil
+	body := []byte(`{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]}`)
+	for i, tc := range []struct {
+		control string
+		reason  usage.CacheLookupReason
+	}{
+		{"no-store", usage.CacheLookupNoStore},
+		{"", usage.CacheLookupUnavailable},
+	} {
+		r := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, body, map[string]string{"X-OLP-Cache": tc.control})
+		r.Body.Close()
+		if got := r.Header.Get("X-OLP-Cache"); r.StatusCode != http.StatusOK || got != "bypass" {
+			t.Fatalf("control=%q status=%d cache=%q", tc.control, r.StatusCode, got)
+		}
+		if got := h.sink.await(t, i+1)[i].CacheLookupReason; got != tc.reason {
+			t.Fatalf("control=%q reason=%q, want %q", tc.control, got, tc.reason)
+		}
+	}
+}
+
 func TestExactCacheUsesEffectiveChatChoiceCount(t *testing.T) {
 	for _, tc := range []struct {
 		name, defaultN, callerFields string
