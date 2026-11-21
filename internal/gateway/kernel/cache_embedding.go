@@ -38,7 +38,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 			status = out.Err.Status
 		}
 		s.Finish(x, out, status)
-		s.settleAdmission(context.WithoutCancel(ctx), x)
+		s.SettleAdmission(context.WithoutCancel(ctx), x)
 	}()
 	body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": text, "encoding_format": "float"})
 	x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}

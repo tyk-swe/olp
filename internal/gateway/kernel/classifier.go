@@ -152,7 +152,7 @@ func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.Cl
 
 			Route: &route},
 	}
-	defer s.settleAdmission(ctx, x)
+	defer s.SettleAdmission(ctx, x)
 	var answer classification
 	var out *Outcome
 	if slices.Contains(route.Operations, "classification") {

@@ -66,7 +66,6 @@
     "internal/gateway/codeforward/websocket.go Forwarder.codeWebSocket",
     "internal/gateway/kernel/gemini_managed.go Server.translateGeminiManagedContent",
     "internal/gateway/kernel/guardrails.go Server.modelGuardrail",
-    "internal/gateway/kernel/passthrough.go Server.servePassthrough",
     "internal/gateway/kernel/workflow_approval.go workflowPauseFrames",
     "internal/gateway/kernel/workflow_pruning.go Server.typeSafeRelevance",
     "internal/guardrails/engine.go Engine.Evaluate",

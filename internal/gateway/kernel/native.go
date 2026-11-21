@@ -8,7 +8,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/models"
-	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler, actions GeminiActions) {
@@ -21,9 +20,6 @@ func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler, act
 		}
 		s.inferenceOperation("", r.PathValue("dialect"))(w, r)
 	})
-	for _, method := range routing.PassthroughMethods() {
-		mux.HandleFunc(method+" /native/{dialect}/routes/{route}/{path...}", s.passthrough)
-	}
 	mux.HandleFunc("OPTIONS /native/", s.Preflight)
 	mux.HandleFunc("POST /v1/completions", s.inference(wire.Completions))
 	mux.HandleFunc("POST /v1/decisions", s.inference(wire.Decisions))

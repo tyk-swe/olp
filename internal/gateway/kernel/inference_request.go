@@ -80,7 +80,7 @@ func (q inferenceRequest) finish() {
 	// The budgets this request reserved are settled even when the
 	// client is gone: a concurrency slot nobody releases is a slot
 	// every replica keeps counting.
-	q.server.settleAdmission(q.r.Context(), q.x)
+	q.server.SettleAdmission(q.r.Context(), q.x)
 	// Mirrors start once the caller's response is complete, so they
 	// never add to its latency.
 	if q.end.out != nil {
