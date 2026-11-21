@@ -35,7 +35,11 @@ func ReadFile(path string) ([]byte, error) {
 }
 
 func ReadRawFile(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	return readRawFile(path, 0)
+}
+
+func readRawFile(path string, flags int) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK|flags, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("cannot read secret file: %w", os.ErrNotExist)
@@ -55,11 +59,12 @@ func ReadRawFile(path string) ([]byte, error) {
 }
 
 func ReadBootstrapToken(path string) (string, bool) {
-	data, err := ReadFile(path)
-	if err != nil || len(data) < 32 || len(data) > 256 {
+	data, err := readRawFile(path, unix.O_NOFOLLOW)
+	trimmed := bytes.TrimSpace(data)
+	if err != nil || len(trimmed) < 32 || len(trimmed) > 256 {
 		return "", false
 	}
-	return string(data), true
+	return string(trimmed), true
 }
 
 func DecodeKey(raw string) ([]byte, error) {
