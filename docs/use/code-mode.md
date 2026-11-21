@@ -904,6 +904,96 @@ account the tree would take for a new model refuses that model too. A credential
 refresh may change authentication for the same principal; it must not change
 the principal stored in the binding.
 
+### Thread status from the coding client
+
+A developer can check whether their own thread can continue without sending a
+generation. Send `GET /code/{slug}/status`, or `GET /code/{slug}/v1/status`,
+with the same OLP inference key and the same conversation identity headers
+the client already sends, as listed under
+[Recognized client lineage](#recognized-client-lineage). A generic client
+sends its `X-OLP-Code-Affinity` value instead. For a Codex thread that looks
+like this.
+
+```sh
+curl --fail-with-body https://olp.example/code/team-coding/status \
+  -H "Authorization: Bearer ${OLP_API_KEY}" \
+  -H "Thread-Id: ${THREAD_ID}"
+```
+
+Polling never binds a conversation, never contacts an upstream and never
+dispatches or reserves capacity, so a client can poll on a timer. The answer
+is advisory. It reads only the local evidence admission already keeps, which
+is the live key, pool and grant checks for the accounts the conversation
+tree is pinned to, plus their stored health, allowance and cooldown
+observations. It reports no quotas, balances, account names, models or
+sibling threads.
+
+A successful reply carries four fields. `status` is `available`,
+`unavailable` or `unknown`. `checked_at` is when this check ran.
+`last_observed_at` is when the newest stored observation was taken, or
+`null` when nothing has been observed yet. `retry_at` is set only when a
+current blocker has a known future deadline, and the `Retry-After` header
+then carries the same delay in seconds.
+
+| Status | Meaning |
+| --- | --- |
+| `available` | Current local evidence supports another attempt on every account the tree uses. The newest evidence for each account is a healthy observation taken after its last blocker and after that blocker's deadline. Capacity is still not reserved, so the next generation can still meet a limit. |
+| `unavailable` | A current blocker is known, such as an active cooldown, an exhausted allowance, a revoked grant or a retired tree. `retry_at` names when the thread is expected to clear, when every blocker has a known deadline. |
+| `unknown` | Current evidence is insufficient. Nothing is known to block the thread, but no healthy observation newer than the last blocker establishes that another attempt will be admitted. |
+
+The two times stay separate because an old observation cannot set a current
+retry time. A cooldown observed at 10:00 with a retry deadline of 10:05
+answers `unavailable` with `retry_at` 10:05, `last_observed_at` 10:00 and
+`checked_at` 10:02 when polled at 10:02. Polled again at 10:06 with no newer
+evidence, the same thread answers `unknown` with no `retry_at`, because the
+deadline passing alone does not prove the account healthy. A later
+successful generation records the healthy observation that moves the thread
+to `available`.
+
+An unknown conversation, a thread belonging to another key or another
+route, and a conversation whose named parent does not match its stored
+lineage all answer the same `404` with code `code_thread_not_found`, so
+polling cannot confirm another caller's thread. A retired tree answers
+`unavailable` with no retry time. A thread served only by paid API targets
+has no subscription evidence to report and answers `unknown` while its tree
+is live.
+
+Claude Code can show the status in its status line. Save this script, point
+`OLP_CODE_STATUS_URL` at the route's status endpoint, and register the
+script as the `statusLine` command in Claude Code settings. The command
+receives the session JSON, including `session_id`, on standard input, as
+described in the [Claude Code status line documentation](https://code.claude.com/docs/en/statusline),
+checked on 2026-11-21.
+
+```sh
+#!/bin/sh
+input=$(cat)
+session=$(printf '%s' "$input" | jq -r '.session_id // empty')
+if [ -z "$session" ] || [ -z "${OLP_API_KEY:-}" ] || [ -z "${OLP_CODE_STATUS_URL:-}" ]; then
+  printf 'OLP unknown'
+  exit 0
+fi
+curl -fsS --max-time 2 "$OLP_CODE_STATUS_URL" \
+  -H "Authorization: Bearer $OLP_API_KEY" \
+  -H "X-Claude-Code-Session-Id: $session" \
+  | jq -r '"OLP \(.status)" + (if .retry_at then " retry \(.retry_at)" else "" end)' \
+  || printf 'OLP unknown'
+```
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/olp-statusline.sh"
+  }
+}
+```
+
+The same `curl` call works from any terminal prompt or editor status bar.
+Send the identity header of the client that owns the thread, keep the key in
+the environment, and treat a failed or slow check as `unknown` rather than
+blocking the client on it.
+
 ### Drain a subscription account
 
 In **Code mode → Accounts**, select the project and choose **Start drain** on
