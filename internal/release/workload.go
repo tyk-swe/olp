@@ -173,6 +173,7 @@ func (m *Manager) authenticateWorkload(raw string) (*keyauthority.Authority, err
 	base.LookupID = principal.LookupID
 	base.LimitLookupID = principal.LimitLookupID
 	base.RevokedAt = principal.RevokedAt
+	base.PausedAt = principal.PausedAt
 	base.WorkloadIssuerID = principal.WorkloadIssuerID
 	base.WorkloadDigest = digest
 	base.WorkloadMapping = identity.Mapping.Name
