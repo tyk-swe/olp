@@ -10,7 +10,6 @@
     "internal/gateway/kernel/guardrails.go",
     "internal/gateway/quota/limits.go",
     "internal/gateway/kernel/resources.go",
-    "internal/gateway/kernel/retained_codec.go",
     "internal/gateway/kernel/server.go",
     "internal/guardrails/detectors.go",
     "internal/mcp/streamable.go",

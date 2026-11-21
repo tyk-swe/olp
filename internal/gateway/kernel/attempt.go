@@ -212,7 +212,7 @@ func (run attemptRun) succeed(reply attemptReply) (events.AttemptFact, *wire.Com
 	done.Duration = run.server.Now().Sub(done.StartedAt)
 	// Moderation intentionally has no usage counters. Other successful work
 	// without usage may have been billed with nothing this gateway can meter.
-	done.RecordEvidence(run.x.operationName() != "moderation")
+	done.RecordEvidence(run.x.OperationName() != "moderation")
 	run.finishTrace(done)
 	return done, reply.completion, nil
 }

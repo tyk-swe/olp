@@ -26,7 +26,7 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *Call, fact e
 		Actor: x.actor, KeyID: x.keyID, EndUserDigest: x.endUserDigest, BudgetGroupID: x.budgetGroupID,
 		AgentPrincipalID: x.authority.DelegationAgentID, MemberPrincipalID: x.authority.DelegationMemberID, DelegationPairDigest: x.authority.DelegationPairDigest,
 		Attribution: x.attribution, UserID: x.userID, Family: string(x.family), Mode: x.mode,
-		Operation: x.operationName(), Surface: x.surfaceName(), Route: x.named().Slug,
+		Operation: x.OperationName(), Surface: x.surfaceName(), Route: x.named().Slug,
 		RouteRevisionID: x.named().RevisionID, Status: fact.Status, StartedAt: x.request.startedAt,
 		CompletedAt: completedAt, Duration: completedAt.Sub(x.request.startedAt), Attempts: x.facts,
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID, ReleaseSequence: x.request.release.Sequence,

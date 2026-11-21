@@ -84,7 +84,7 @@ func (s *Server) lookupCache(ctx context.Context, x *Call) *fault.Error {
 	if found.entry == nil {
 		return nil
 	}
-	metadata, replayable := subject.replays(found.entry, x.operationName())
+	metadata, replayable := subject.replays(found.entry, x.OperationName())
 	c.metadata = metadata
 	if !replayable {
 		c.result = "bypass"
@@ -252,7 +252,7 @@ func (subject cacheSubject) replays(entry *cache.Entry, operation string) (cache
 func (s *Server) cacheHitSpend(x *Call, subject cacheSubject, metadata cacheMetadata) (string, string) {
 	attempt, provider := subject.attempt, subject.provider
 	fact := events.AttemptFact{Class: ClassSuccess, Status: 200, Usage: metadata.Usage, UsageObserved: metadata.Usage != nil, UsageComplete: metadata.UsageComplete}
-	used := events.AttemptUsage(&fact, x.operationName())
+	used := events.AttemptUsage(&fact, x.OperationName())
 	at := s.Now()
 	cost, priced := cacheHitCost(x, attempt, used, at)
 	spend := "0"
@@ -264,7 +264,7 @@ func (s *Server) cacheHitSpend(x *Call, subject cacheSubject, metadata cacheMeta
 	if revision == nil {
 		return spend, spend
 	}
-	charge, ok := revision.Charge(used, at, true, costed, string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
+	charge, ok := revision.Charge(used, at, true, costed, string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.OperationName())
 	if !ok {
 		return spend, spend
 	}

@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -34,9 +34,9 @@ func (k retainedWork) codec() retainedapi.Endpoint {
 }
 
 type retainedWorkRequest struct {
-	server    *Server
+	server    surface
 	r         *http.Request
-	x         *Call
+	x         *kernel.Call
 	authority keyauthority.Authority
 	reply     retainedReply
 	work      retainedWork
@@ -45,13 +45,13 @@ type retainedWorkRequest struct {
 }
 
 type retainedWorkTarget struct {
-	pin      *Pin
+	pin      *kernel.Pin
 	route    *routing.Route
 	resource *resources.Resource
 	path     string
 }
 
-func (s *Server) retainedSearch(w http.ResponseWriter, r *http.Request) {
+func (s surface) retainedSearch(w http.ResponseWriter, r *http.Request) {
 	if id, err := uuid.Parse(r.PathValue("id")); err == nil && s.retrievalQuery != nil {
 		r.SetPathValue("binding_id", id.String())
 		s.retrievalQuery(w, r)
@@ -60,28 +60,25 @@ func (s *Server) retainedSearch(w http.ResponseWriter, r *http.Request) {
 	s.retainedProxy(w, r, retainedWork{operation: "retrieval", path: "vector_stores/{id}/search", storeKind: "vector_store"})
 }
 
-func (s *Server) retainedCompact(w http.ResponseWriter, r *http.Request) {
+func (s surface) retainedCompact(w http.ResponseWriter, r *http.Request) {
 	s.retainedProxy(w, r, retainedWork{operation: "generation", path: "responses/compact"})
 }
 
-func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, work retainedWork) {
-	x, authority, done := s.StateBegin(w, r, wire.File)
+func (s surface) retainedProxy(w http.ResponseWriter, r *http.Request, work retainedWork) {
+	x, authority, done := s.kernel.StateBegin(w, r, wire.File)
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
-	x.operationOverride = work.operation
-	x.mode = "unary"
-	x.actor = "api_key_resource"
-	x.retained = retainedOperation{use: RetainedNewWork, billing: retainedMeteredWork}
+	defer s.kernel.Gate.Release(r.Context())
+	x.BeginRetainedWork(work.operation)
 	end := &retainedEnd{status: http.StatusInternalServerError}
 	defer func() {
-		s.Finish(x, nil, end.status)
-		s.SettleRetained(r.Context(), x, end.pin)
+		s.kernel.Finish(x, nil, end.status)
+		s.kernel.SettleRetained(r.Context(), x, end.pin)
 	}()
 	reply := retainedReply{w: w, x: x, surface: "openai", end: end}
 	if !authority.Policy.AllowProviderState {
-		reply.fail(ProviderStateForbidden())
+		reply.fail(kernel.ProviderStateForbidden())
 		return
 	}
 	q, err := s.readRetainedWork(r, x, authority, work, reply)
@@ -104,10 +101,10 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, work reta
 		reply.fail(err)
 		return
 	}
-	x.estimate = int64(len(body))
-	ctx, cancel := s.StateDeadline(r.Context(), target.route)
+	x.EstimateRetainedBody(len(body))
+	ctx, cancel := s.kernel.StateDeadline(r.Context(), target.route)
 	defer cancel()
-	if err := s.AdmitRetainedRequest(ctx, x, authority, target.pin, target.route, false); err != nil {
+	if err := s.kernel.AdmitRetainedRequest(ctx, x, authority, target.pin, target.route, false); err != nil {
 		reply.fail(err)
 		return
 	}
@@ -116,12 +113,12 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, work reta
 	}
 }
 
-func (s *Server) readRetainedWork(r *http.Request, x *Call, authority keyauthority.Authority, work retainedWork, reply retainedReply) (retainedWorkRequest, *fault.Error) {
-	body, err := s.Gate.ReadBody(r)
+func (s surface) readRetainedWork(r *http.Request, x *kernel.Call, authority keyauthority.Authority, work retainedWork, reply retainedReply) (retainedWorkRequest, *fault.Error) {
+	body, err := s.kernel.Gate.ReadBody(r)
 	if err != nil {
 		return retainedWorkRequest{}, err
 	}
-	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxBodyBytes)})
+	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.kernel.Config.MaxBodyBytes)})
 	if parseErr != nil || source.Root().Kind() != oif.Object {
 		return retainedWorkRequest{}, fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
 	}
@@ -142,11 +139,11 @@ func (q retainedWorkRequest) target() (retainedWorkTarget, *fault.Error) {
 // current new-work restrictions rather than the historical retrieval contract
 // that created the binding.
 func (q retainedWorkRequest) storeTarget() (retainedWorkTarget, *fault.Error) {
-	resource, getErr := q.server.Deps.Resources.Get(q.r.Context(), q.work.storeKind, q.x.keyID, q.r.PathValue("id"))
+	resource, getErr := q.server.kernel.Deps.Resources.Get(q.r.Context(), q.work.storeKind, q.x.KeyID(), q.r.PathValue("id"))
 	if getErr != nil {
 		return retainedWorkTarget{}, retainedMissing()
 	}
-	pin, route, err := q.server.ResolveResource(q.r.Context(), q.x, q.authority, resource, q.work.operation, RetainedNewWork)
+	pin, route, err := q.server.kernel.ResolveResource(q.r.Context(), q.x, q.authority, resource, q.work.operation, kernel.RetainedNewWork)
 	q.reply.end.pin = pin
 	if err != nil {
 		return retainedWorkTarget{}, err
@@ -164,13 +161,13 @@ func (q retainedWorkRequest) routeTarget() (retainedWorkTarget, *fault.Error) {
 	if err != nil {
 		return retainedWorkTarget{}, err
 	}
-	q.x.estimate = int64(len(q.body))
+	q.x.EstimateRetainedBody(len(q.body))
 	bound, err := q.boundReference()
 	if err != nil {
 		return retainedWorkTarget{}, err
 	}
 	operation := q.work.operation
-	pin, err := q.server.selectBoundPinSurface(q.r.Context(), q.x, route, operation, "openai", "unary", resourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
+	pin, err := q.server.kernel.SelectBoundPinSurface(q.r.Context(), q.x, route, operation, "openai", "unary", kernel.ResourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.Connector().Supports(operation, "openai", "unary")
 	})
 	q.reply.end.pin = pin
@@ -181,7 +178,7 @@ func (q retainedWorkRequest) routeTarget() (retainedWorkTarget, *fault.Error) {
 }
 
 func (q retainedWorkRequest) route() (*routing.Route, *fault.Error) {
-	slug := strings.TrimSpace(q.r.Header.Get(StateRouteHeader))
+	slug := strings.TrimSpace(q.r.Header.Get(kernel.StateRouteHeader))
 	if slug == "" {
 		return nil, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil)
 	}
@@ -191,11 +188,11 @@ func (q retainedWorkRequest) route() (*routing.Route, *fault.Error) {
 	}
 	route := &candidate
 	q.x.Route = route
-	if !q.authority.Allows("inference", route.Slug, route.ProjectID, q.server.Now()) {
+	if !q.authority.Allows("inference", route.Slug, route.ProjectID, q.server.kernel.Now()) {
 		return nil, fault.PermissionError("route_forbidden", "The API key cannot use this route.")
 	}
 	if !slices.Contains(route.Operations, q.work.operation) {
-		return nil, PolicyUnavailable("operation_unavailable", "The route does not allow this operation.")
+		return nil, kernel.PolicyUnavailable("operation_unavailable", "The route does not allow this operation.")
 	}
 	if err := q.x.GuardrailSurfaceGate(route); err != nil {
 		return nil, err
@@ -210,7 +207,7 @@ func (q retainedWorkRequest) boundReference() (*resources.Resource, *fault.Error
 	}
 	bound := referenced[0]
 	for _, candidate := range referenced[1:] {
-		if !samePin(candidate, bound) {
+		if !kernel.SamePin(candidate, bound) {
 			return nil, retainedReferenceUnavailable()
 		}
 	}
@@ -225,7 +222,7 @@ func (q retainedWorkRequest) referenced() ([]*resources.Resource, *fault.Error) 
 	fileIDs := retainedFileIDs(q.source.Root())
 	files := make([]*resources.Resource, 0, len(fileIDs))
 	for _, fileID := range fileIDs {
-		resolved, _, readErr := q.server.ReadDurable(q.r.Context(), DurableKind(resources.KindFile, fileID), q.x.keyID, fileID)
+		resolved, _, readErr := q.server.kernel.ReadDurable(q.r.Context(), kernel.DurableKind(resources.KindFile, fileID), q.x.KeyID(), fileID)
 		if readErr != nil {
 			return nil, retainedReferenceUnavailable()
 		}
@@ -243,7 +240,7 @@ func (q retainedWorkRequest) previousResponse() ([]*resources.Resource, *fault.E
 	if !isText || id == "" {
 		return nil, nil
 	}
-	resolved, _, readErr := q.server.ReadResponseResource(q.r.Context(), q.x.keyID, id)
+	resolved, _, readErr := q.server.kernel.ReadResponseResource(q.r.Context(), q.x.KeyID(), id)
 	if readErr != nil {
 		return nil, retainedReferenceUnavailable()
 	}
@@ -263,44 +260,44 @@ func (q retainedWorkRequest) perform(ctx context.Context, target retainedWorkTar
 	if urlErr != nil {
 		return fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable.")
 	}
-	native, failure := q.server.PinnedDo(ctx, q.x, target.pin, http.MethodPost, endpoint, body, "application/json")
+	native, failure := q.server.kernel.PinnedDo(ctx, q.x, target.pin, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
-		return RetainedPublicError(UpstreamError(failure), failure.Status)
+		return kernel.RetainedPublicError(kernel.UpstreamError(failure), failure.Status)
 	}
 	defer native.Body.Close()
 	projected, err := q.accept(ctx, target, native)
 	if err != nil {
 		return err
 	}
-	native.Exchange.Complete(ClassSuccess)
+	native.Exchange.Complete(kernel.ClassSuccess)
 	q.reply.end.status = native.StatusCode
-	q.server.WriteStateJSONStatus(q.reply.w, q.x, projected, native.StatusCode, native.Exchange)
+	q.server.kernel.WriteStateJSONStatus(q.reply.w, q.x, projected, native.StatusCode, native.Exchange)
 	return nil
 }
 
-func (q retainedWorkRequest) accept(ctx context.Context, target retainedWorkTarget, native *PinnedResponse) ([]byte, *fault.Error) {
-	response, readErr := native.ReadBody(q.server.RetainedResponseLimit())
+func (q retainedWorkRequest) accept(ctx context.Context, target retainedWorkTarget, native *kernel.PinnedResponse) ([]byte, *fault.Error) {
+	response, readErr := native.ReadBody(q.server.kernel.RetainedResponseLimit())
 	if readErr != nil || native.StatusCode < 200 || native.StatusCode >= 300 {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response.")
 	}
-	source, parseErr := oif.ParseJSON(response, oif.Limits{MaxBytes: retainedBodyLimit})
+	source, parseErr := oif.ParseJSON(response, oif.Limits{MaxBytes: kernel.RetainedBodyLimit})
 	if parseErr != nil || source.Root().Kind() != oif.Object {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid response.")
 	}
-	if q.work.generates() && observeRetainedUsage(native.Exchange, source, true) != nil {
+	if q.work.generates() && kernel.ObserveRetainedUsage(native.Exchange, source, true) != nil {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider returned invalid usage.")
 	}
 	codec := q.work.codec()
-	rewrite, referenceErr := retainedapi.PrepareRewrite(source, retainedResponseRefs(codec, source))
+	rewrite, referenceErr := retainedapi.PrepareRewrite(source, kernel.RetainedResponseRefs(codec, source))
 	if referenceErr != nil {
 		return nil, fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource reference.")
 	}
-	projected, projectErr := q.server.projectRetainedGeneric(ctx, target.owner(q.x.keyID), codec, source, rewrite)
+	projected, projectErr := q.server.kernel.ProjectRetainedGeneric(ctx, target.owner(q.x.KeyID()), codec, source, rewrite)
 	if projectErr != nil {
-		return nil, retainedProjectionError(native.Exchange, projectErr)
+		return nil, kernel.RetainedProjectionError(native.Exchange, projectErr)
 	}
 	if !q.work.generates() {
-		_ = observeRetainedUsage(native.Exchange, source, false)
+		_ = kernel.ObserveRetainedUsage(native.Exchange, source, false)
 	}
 	return projected, nil
 }

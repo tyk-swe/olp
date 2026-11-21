@@ -212,7 +212,7 @@ func (run unaryRun) succeed(fact events.AttemptFact, result operationplan.Result
 	}
 	// Moderation and search have no usage counters; a validated result
 	// completes their evidence.
-	operation := run.x.operationName()
+	operation := run.x.OperationName()
 	done.RecordEvidence(operation != "moderation" && operation != "search")
 	run.finishTrace(done)
 	return done, result, nil

@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -15,13 +16,13 @@ import (
 // retainedEnd is the only state a request writes as it proceeds. The deferred
 // settlement reads it, so a step that panics still settles the pin it held.
 type retainedEnd struct {
-	pin    *Pin
+	pin    *kernel.Pin
 	status int
 }
 
 type retainedReply struct {
 	w       http.ResponseWriter
-	x       *Call
+	x       *kernel.Call
 	action  string
 	surface string
 	end     *retainedEnd
@@ -46,9 +47,9 @@ type retainedInput struct {
 }
 
 type retainedRequest struct {
-	server    *Server
+	server    surface
 	r         *http.Request
-	x         *Call
+	x         *kernel.Call
 	authority keyauthority.Authority
 	reply     retainedReply
 	endpoint  retainedapi.Endpoint
@@ -57,24 +58,21 @@ type retainedRequest struct {
 	ancestors map[string]string
 }
 
-func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retainedapi.Endpoint) {
-	x, authority, done := s.StateBegin(w, r, retainedSurfaceFormat(e.Surface))
+func (s surface) retainedGeneric(w http.ResponseWriter, r *http.Request, e retainedapi.Endpoint) {
+	x, authority, done := s.kernel.StateBegin(w, r, retainedSurfaceFormat(e.Surface))
 	if done {
 		return
 	}
-	defer s.Gate.Release(r.Context())
-	x.operationOverride = e.Operation
-	x.mode = "unary"
-	x.actor = "api_key_resource"
-	x.retained = retainedOperationForAction(e.Action)
+	defer s.kernel.Gate.Release(r.Context())
+	x.BeginRetainedAction(e.Operation, e.Action)
 	end := &retainedEnd{status: http.StatusInternalServerError}
 	defer func() {
-		s.Finish(x, nil, end.status)
-		s.SettleRetained(r.Context(), x, end.pin)
+		s.kernel.Finish(x, nil, end.status)
+		s.kernel.SettleRetained(r.Context(), x, end.pin)
 	}()
 	reply := retainedReply{w: w, x: x, action: e.Action, surface: e.Surface, end: end}
 	if !authority.Policy.AllowProviderState {
-		reply.fail(ProviderStateForbidden())
+		reply.fail(kernel.ProviderStateForbidden())
 		return
 	}
 	if e.Action == "list" && len(e.Ancestors) == 0 {
@@ -101,14 +99,14 @@ func retainedReferenceUnavailable() *fault.Error {
 	return fault.InvalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil)
 }
 
-func (s *Server) readRetainedRequest(r *http.Request, x *Call, authority keyauthority.Authority, declared retainedapi.Endpoint, reply retainedReply) (retainedRequest, *fault.Error) {
+func (s surface) readRetainedRequest(r *http.Request, x *kernel.Call, authority keyauthority.Authority, declared retainedapi.Endpoint, reply retainedReply) (retainedRequest, *fault.Error) {
 	body, source, contentType, err := s.readRetainedBody(r, declared)
 	if err != nil {
 		return retainedRequest{}, err
 	}
 	displayOnly := changesOnlyDisplayFields(declared, source)
 	if displayOnly {
-		x.retained = retainedOperation{use: RetainedHousekeeping}
+		x.MarkRetainedDisplayChange()
 	}
 	e := meteredUnless(declared, displayOnly)
 	parent, ancestors, err := s.retainedAncestry(r, x, authority, e)
@@ -142,20 +140,20 @@ func meteredUnless(e retainedapi.Endpoint, free bool) retainedapi.Endpoint {
 	return unmetered
 }
 
-func (s *Server) retainedAncestry(r *http.Request, x *Call, authority keyauthority.Authority, e retainedapi.Endpoint) (*resources.Resource, map[string]string, *fault.Error) {
+func (s surface) retainedAncestry(r *http.Request, x *kernel.Call, authority keyauthority.Authority, e retainedapi.Endpoint) (*resources.Resource, map[string]string, *fault.Error) {
 	ctx := r.Context()
 	var parent *resources.Resource
 	ids := map[string]string{}
 	for i, kind := range e.Ancestors {
 		name := "parent" + strconv.Itoa(i)
-		got, err := s.Deps.Resources.Get(ctx, kind, x.keyID, r.PathValue(name))
+		got, err := s.kernel.Deps.Resources.Get(ctx, kind, x.KeyID(), r.PathValue(name))
 		if err != nil {
 			return nil, nil, retainedMissing()
 		}
 		if parent != nil && (got.ParentID == nil || *got.ParentID != parent.UUID) {
 			return nil, nil, retainedMissing()
 		}
-		if _, _, err := s.ResolveResource(ctx, x, authority, got, e.Operation, RetainedHousekeeping); err != nil {
+		if _, _, err := s.kernel.ResolveResource(ctx, x, authority, got, e.Operation, kernel.RetainedHousekeeping); err != nil {
 			return nil, nil, err
 		}
 		parent = got
@@ -164,7 +162,7 @@ func (s *Server) retainedAncestry(r *http.Request, x *Call, authority keyauthori
 	if !addressesBatchFile(e) {
 		return parent, ids, nil
 	}
-	store, err := s.Deps.Resources.GetByUUID(ctx, *parent.ParentID, x.keyID)
+	store, err := s.kernel.Deps.Resources.GetByUUID(ctx, *parent.ParentID, x.KeyID())
 	if err != nil || store.Kind != "vector_store" {
 		return nil, nil, retainedMissing()
 	}
@@ -180,7 +178,7 @@ func (q retainedRequest) metersWork() bool {
 	return e.Metered && (e.Action == "create" || e.Action == "update" || e.Action == "patch")
 }
 
-func (q retainedRequest) upstreamURL(ctx context.Context, pin *Pin, ids map[string]string) (string, *fault.Error) {
+func (q retainedRequest) upstreamURL(ctx context.Context, pin *kernel.Pin, ids map[string]string) (string, *fault.Error) {
 	query, err := q.server.retainedQuery(ctx, q.x, q.endpoint, q.parent, q.r.URL.Query())
 	if err != nil {
 		return "", err

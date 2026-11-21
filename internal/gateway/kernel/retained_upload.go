@@ -84,7 +84,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		return
 	}
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
-	digest, digestErr := s.retainedBodyDigest(e, route.Slug, body, contentType)
+	digest, digestErr := s.RetainedBodyDigest(e, route.Slug, body, contentType)
 	if digestErr != nil {
 		fail(digestErr)
 		return
@@ -142,8 +142,8 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be fenced."))
 		return
 	}
-	defer s.settleFence(r.Context(), lifecycle.Close)
-	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, nil, endpoint, body, contentType, lifecycle, fail)
+	defer s.SettleFence(r.Context(), lifecycle.Close)
+	status = s.RetainedDispatch(w, r.WithContext(ctx), x, p, e, resource, nil, endpoint, body, contentType, lifecycle, fail)
 }
 
 func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {

@@ -27,7 +27,7 @@ type generationResources struct {
 }
 
 func sameGenerationAffinity(a, b *resources.Resource) bool {
-	return a != nil && b != nil && a.APIKeyID == b.APIKeyID && a.RouteSlug == b.RouteSlug && a.RouteRevisionID == b.RouteRevisionID && samePin(a, b) && strings.TrimPrefix(ResourceModel(a), "models/") == strings.TrimPrefix(ResourceModel(b), "models/")
+	return a != nil && b != nil && a.APIKeyID == b.APIKeyID && a.RouteSlug == b.RouteSlug && a.RouteRevisionID == b.RouteRevisionID && SamePin(a, b) && strings.TrimPrefix(ResourceModel(a), "models/") == strings.TrimPrefix(ResourceModel(b), "models/")
 }
 
 func (s *Server) bindGenerationReferences(ctx context.Context, x *Call) *fault.Error {

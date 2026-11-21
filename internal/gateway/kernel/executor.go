@@ -162,6 +162,23 @@ type AttemptFailure struct {
 	aggregateTooLarge bool
 }
 
+func (f *AttemptFailure) rejectedWithoutWork() bool {
+	if f == nil {
+		return false
+	}
+	if f.Acceptance == upstream.NotSent {
+		return true
+	}
+	if f.Acceptance != upstream.Terminal || f.accepted {
+		return false
+	}
+	switch f.Status {
+	case 400, 401, 403, 404, 405, 413, 415, 422, 429:
+		return true
+	}
+	return false
+}
+
 // billingUncertain reports whether the upstream may have served and billed
 // work this attempt cannot account for. Anything already delivered to the
 // client was served, and work the upstream may hold is what its acceptance
@@ -364,7 +381,7 @@ func (s *Server) slots(x *Call, attempt routing.Attempt, provider *routing.Provi
 		}
 		return []routing.Slot{*x.pinnedSlot}
 	}
-	ordered := routing.SelectSlots(*provider, attempt.UpstreamModel, *x.Route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
+	ordered := routing.SelectSlots(*provider, attempt.UpstreamModel, *x.Route, x.keyID, x.OperationName(), x.surfaceName(), x.mode, x.affinity)
 	if attempt.Slots != nil {
 		ordered = routing.ArrangeSlots(ordered, attempt.Slots)
 	}

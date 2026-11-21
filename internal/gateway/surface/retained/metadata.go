@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"encoding/json"
@@ -7,13 +7,14 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type retainedControls struct {
-	pin      *Pin
+	pin      *kernel.Pin
 	route    *routing.Route
 	owner    string
 	endpoint retainedapi.Endpoint
@@ -24,7 +25,7 @@ type retainedControls struct {
 // retainedInputMetadata validates controls which can spend under the pinned
 // credential. Only the resulting model identities and billing dimensions are
 // retained; native source content and grader definitions remain provider-side.
-func retainedInputMetadata(p *Pin, route *routing.Route, owner string, e retainedapi.Endpoint, source oif.Document, parent *resources.Resource) (map[string]any, error) {
+func retainedInputMetadata(p *kernel.Pin, route *routing.Route, owner string, e retainedapi.Endpoint, source oif.Document, parent *resources.Resource) (map[string]any, error) {
 	c := retainedControls{pin: p, route: route, owner: owner, endpoint: e, root: source.Root(), parent: parent}
 	meta := map[string]any{"upstream_model": p.Model, "contract_revision": retainedapi.Revision}
 	for _, facts := range []func() (map[string]any, error){

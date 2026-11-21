@@ -186,7 +186,7 @@ func (e *PinnedExchange) Delivery(state usage.ClientState) {
 	fact.Interaction.ClientState = state
 }
 
-func (s *Server) settlePinnedHold(ctx context.Context, hold *dispatchHold) {
+func (s *Server) SettlePinnedHold(ctx context.Context, hold *dispatchHold) {
 	if hold == nil || hold.settled {
 		return
 	}
@@ -237,7 +237,7 @@ func DeliveryState[T ~int | ~int64](written T) usage.ClientState {
 }
 
 func (r *PinnedResponse) ReadBody(limit int64) ([]byte, error) {
-	body, err := readBounded(r.Body, limit)
+	body, err := ReadBounded(r.Body, limit)
 	if err != nil {
 		r.Exchange.readFailure()
 	}

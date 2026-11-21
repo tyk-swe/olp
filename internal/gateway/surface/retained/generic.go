@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"net/http"
@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // Generic retained families share the managed-agent lifecycle contracts:
@@ -25,7 +24,7 @@ func retainedSurfaceFormat(surface string) wire.Format {
 	return wire.File
 }
 
-func (s *Server) registerRetainedGeneric(mux *http.ServeMux) {
+func (s surface) registerRetainedGeneric(mux *http.ServeMux) {
 	for _, endpoint := range retainedapi.Endpoints() {
 		if endpoint.Operation == "agent_resource" {
 			continue
@@ -37,7 +36,7 @@ func (s *Server) registerRetainedGeneric(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/responses/compact", s.retainedCompact)
 }
 
-// upstreamPath maps a gateway pattern to the provider-relative path by
+// retainedUpstreamPath maps a gateway pattern to the provider-relative path by
 // substituting upstream IDs and stripping the gateway surface prefix.
 func retainedUpstreamPath(e retainedapi.Endpoint, ids map[string]string) string {
 	path := e.Pattern
@@ -67,21 +66,4 @@ func retainedUpstreamPath(e retainedapi.Endpoint, ids map[string]string) string 
 		path = strings.TrimPrefix(path, "/v1/")
 	}
 	return path
-}
-
-func retainedRejectedWithoutWork(failure *AttemptFailure) bool {
-	if failure == nil {
-		return false
-	}
-	if failure.Acceptance == upstream.NotSent {
-		return true
-	}
-	if failure.Acceptance != upstream.Terminal || failure.accepted {
-		return false
-	}
-	switch failure.Status {
-	case 400, 401, 403, 404, 405, 413, 415, 422, 429:
-		return true
-	}
-	return false
 }

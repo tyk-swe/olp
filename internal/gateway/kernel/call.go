@@ -42,7 +42,7 @@ type Call struct {
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
 	retained             retainedOperation
-	retainedAdmission    *retainedAdmissionPlan
+	retainedAdmission    *RetainedAdmissionPlan
 	PinnedHeaders        http.Header
 	PinnedBinary         bool
 	serving              *oif.ServingIdentity

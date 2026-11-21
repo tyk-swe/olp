@@ -53,7 +53,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter at
 	if x.request.release != nil && x.request.release.Snapshot() != nil {
 		generation = x.request.release.Snapshot().Generation().ID
 	}
-	x.request.trace.RecordSessionContext(x.surfaceName(), x.operationName(), string(x.family), x.named().Slug, generation)
+	x.request.trace.RecordSessionContext(x.surfaceName(), x.OperationName(), string(x.family), x.named().Slug, generation)
 	for {
 		out, conditions := runRoute(ctx, s, x, adapter)
 		if len(conditions) == 0 || !s.fallBack(ctx, x, conditions) {

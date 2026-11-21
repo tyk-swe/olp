@@ -1,4 +1,4 @@
-package kernel
+package retained
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -42,7 +43,7 @@ func (q retainedRequest) create() {
 		q.reply.fail(err)
 		return
 	}
-	pin, err := s.selectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", resourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
+	pin, err := s.kernel.SelectBoundPinSurface(q.r.Context(), q.x, route, e.Operation, e.Surface, "unary", kernel.ResourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
 		return provider.CredentialSource != "caller" && provider.Connector().Supports(e.Operation, e.Surface, "unary") && provider.Supports(model, e.Operation, e.Surface, "unary")
 	}, qualifiers...)
 	end.pin = pin
@@ -55,9 +56,9 @@ func (q retainedRequest) create() {
 		q.reply.fail(err)
 		return
 	}
-	ctx, cancel := s.StateDeadline(q.r.Context(), route)
+	ctx, cancel := s.kernel.StateDeadline(q.r.Context(), route)
 	defer cancel()
-	if err := s.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
+	if err := s.kernel.AdmitRetainedRequest(ctx, q.x, q.authority, pin, route, q.metersWork()); err != nil {
 		q.reply.fail(err)
 		return
 	}
@@ -71,12 +72,12 @@ func (q retainedRequest) create() {
 		q.reply.fail(err)
 		return
 	}
-	defer s.settleFence(q.r.Context(), lifecycle.Close)
-	end.status = s.retainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, e, lifecycle.Resource(), q.parent, endpoint, body, contentType, lifecycle, q.reply.fail)
+	defer s.kernel.SettleFence(q.r.Context(), lifecycle.Close)
+	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, e, lifecycle.Resource(), q.parent, endpoint, body, contentType, lifecycle, q.reply.fail)
 }
 
 func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
-	slug := strings.TrimSpace(q.r.Header.Get(StateRouteHeader))
+	slug := strings.TrimSpace(q.r.Header.Get(kernel.StateRouteHeader))
 	if q.parent != nil {
 		slug = q.parent.RouteSlug
 	}
@@ -91,7 +92,7 @@ func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	if q.parent != nil {
 		scope += "\x00" + q.parent.ID
 	}
-	digest, err := q.server.retainedBodyDigest(q.endpoint, scope, q.input.body, q.input.contentType)
+	digest, err := q.server.kernel.RetainedBodyDigest(q.endpoint, scope, q.input.body, q.input.contentType)
 	if err != nil {
 		return retainedSubmission{}, err
 	}
@@ -99,8 +100,8 @@ func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	return submission, q.server.unsubmitted(q.r.Context(), q.reply, q.endpoint.Operation, submission)
 }
 
-func (s *Server) unsubmitted(ctx context.Context, reply retainedReply, operation string, submission retainedSubmission) *fault.Error {
-	prior, err := s.Deps.Resources.LookupLifecycle(ctx, reply.x.keyID, operation, submission.key, submission.digest)
+func (s surface) unsubmitted(ctx context.Context, reply retainedReply, operation string, submission retainedSubmission) *fault.Error {
+	prior, err := s.kernel.Deps.Resources.LookupLifecycle(ctx, reply.x.KeyID(), operation, submission.key, submission.digest)
 	if errors.Is(err, resources.ErrSubmissionConflict) {
 		return retainedSubmissionConflict()
 	}
@@ -130,11 +131,11 @@ func (q retainedRequest) creationRoute(slug string) (*routing.Route, *fault.Erro
 	}
 	route := &candidate
 	q.x.Route = route
-	if !q.authority.Allows("inference", route.Slug, route.ProjectID, q.server.Now()) {
+	if !q.authority.Allows("inference", route.Slug, route.ProjectID, q.server.kernel.Now()) {
 		return nil, fault.PermissionError("route_forbidden", "The API key cannot use this route.")
 	}
 	if !slices.Contains(route.Operations, q.endpoint.Operation) {
-		return nil, PolicyUnavailable("operation_unavailable", "The route does not allow this operation.")
+		return nil, kernel.PolicyUnavailable("operation_unavailable", "The route does not allow this operation.")
 	}
 	if err := q.x.GuardrailSurfaceGate(route); err != nil {
 		return nil, err
@@ -154,25 +155,25 @@ func (q retainedRequest) boundResource() (*resources.Resource, *fault.Error) {
 		return nil, nil
 	}
 	for _, candidate := range referenced[1:] {
-		if !samePin(candidate, referenced[0]) {
+		if !kernel.SamePin(candidate, referenced[0]) {
 			return nil, retainedReferenceUnavailable()
 		}
 	}
 	return referenced[0], nil
 }
 
-func (q retainedRequest) slotQualifiers(route *routing.Route) ([]retainedSlotQualifier, *fault.Error) {
+func (q retainedRequest) slotQualifiers(route *routing.Route) ([]kernel.RetainedSlotQualifier, *fault.Error) {
 	if q.endpoint.Operation != "eval" {
 		return nil, nil
 	}
-	qualify, err := retainedEvalSlots(route, q.x.keyID, q.input.source, q.parent)
+	qualify, err := retainedEvalSlots(route, q.x.KeyID(), q.input.source, q.parent)
 	if err != nil {
 		return nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
 	}
-	return []retainedSlotQualifier{qualify}, nil
+	return []kernel.RetainedSlotQualifier{qualify}, nil
 }
 
-func (q retainedRequest) rewriteCreation(pin *Pin, route *routing.Route) ([]byte, string, *fault.Error) {
+func (q retainedRequest) rewriteCreation(pin *kernel.Pin, route *routing.Route) ([]byte, string, *fault.Error) {
 	if q.input.source.Root().Kind() != oif.Object {
 		return q.input.body, q.input.contentType, nil
 	}
@@ -187,23 +188,23 @@ func (q retainedRequest) rewriteCreation(pin *Pin, route *routing.Route) ([]byte
 	return body, contentType, nil
 }
 
-func (q retainedRequest) beginCreation(ctx context.Context, p *Pin, route *routing.Route, submission retainedSubmission, rewritten []byte) (*resources.Lifecycle, []byte, *fault.Error) {
+func (q retainedRequest) beginCreation(ctx context.Context, p *kernel.Pin, route *routing.Route, submission retainedSubmission, rewritten []byte) (*resources.Lifecycle, []byte, *fault.Error) {
 	s, e := q.server, q.endpoint
-	fields, err := retainedInputMetadata(p, route, q.x.keyID, e, q.input.source, q.parent)
+	fields, err := retainedInputMetadata(p, route, q.x.KeyID(), e, q.input.source, q.parent)
 	if err != nil {
 		return nil, nil, fault.InvalidRequest("unsupported_parameter", err.Error(), nil)
 	}
 	meta, _ := json.Marshal(fields)
 	version := retainedapi.Revision
-	candidate := &resources.Resource{Kind: e.Kind, APIKeyID: q.x.keyID, RouteSlug: route.Slug, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, Metadata: meta, ContractVersion: &version}
+	candidate := &resources.Resource{Kind: e.Kind, APIKeyID: q.x.KeyID(), RouteSlug: route.Slug, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, Metadata: meta, ContractVersion: &version}
 	if q.parent != nil {
 		candidate.ParentID = &q.parent.UUID
 		candidate.RouteRevisionID = q.parent.RouteRevisionID
 	}
-	if err := s.prepareRetainedAccounting(q.x, p, route, candidate, e); err != nil {
+	if err := s.kernel.PrepareRetainedAccounting(q.x, p, route, candidate, e); err != nil {
 		return nil, nil, err
 	}
-	lifecycle, err := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
+	lifecycle, err := s.kernel.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
 	if errors.Is(err, resources.ErrSubmissionConflict) {
 		return nil, nil, retainedSubmissionConflict()
 	}
