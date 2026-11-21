@@ -623,7 +623,7 @@ func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM olp.requests WHERE id=$1", event.RequestID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("requests after replay=%d, error=%v", count, err)
 	}
-	requestDetail := cacheLookupReports(t, fixture)
+	requestReport := requestReports(t, fixture)
 	for _, tc := range []struct {
 		token, id string
 		status    int
@@ -633,7 +633,7 @@ func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
 		{"owner-session", legacy.RequestID, http.StatusOK, ""},
 		{"other-project-session", event.RequestID, http.StatusNotFound, ""},
 	} {
-		status, body := requestDetail(tc.token, tc.id)
+		status, body := requestReport(tc.token, "/"+tc.id)
 		if status != tc.status {
 			t.Fatalf("request detail status=%d, want %d: %s", status, tc.status, body)
 		}
@@ -651,7 +651,66 @@ func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
 	}
 }
 
-func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string) (int, []byte) {
+func TestRequestDetailKeepsProviderRequestIDsOnReplayAndWithinProject(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	failed, succeeded := fixture.attempt(1), fixture.attempt(2)
+	failureStatus := http.StatusServiceUnavailable
+	failed.StatusCode, failed.Committed = &failureStatus, false
+	failed.Usage = &usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}
+	failed.ProviderRequestID, succeeded.ProviderRequestID = "req_Unavailable123", "req_Served456"
+	event := fixture.event(failed, succeeded)
+	requestReport := requestReports(t, fixture)
+
+	record, err := usage.NewAccountingEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []ingest.PersistOutcome{ingest.PersistOutcomePersisted, ingest.PersistOutcomeDuplicate} {
+		if result, err := ingest.PersistEvent(t.Context(), pool, record); err != nil || result.Outcome != want {
+			t.Fatalf("delivery outcome=%v error=%v, want %v", result.Outcome, err, want)
+		}
+	}
+	altered := *event
+	replacement := failed
+	replacement.ID, replacement.ProviderRequestID = uuid.NewString(), succeeded.ProviderRequestID
+	altered.Attempts = []usage.Attempt{replacement, succeeded}
+	conflict, err := usage.NewAccountingEvent(&altered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.PersistEvent(t.Context(), pool, conflict); !errors.Is(err, usage.ErrInvalidEvent) {
+		t.Fatalf("persisting an altered replay: %v", err)
+	}
+
+	status, body := requestReport("owner-session", "/"+event.RequestID)
+	var detail reports.RequestDetail
+	if err := json.Unmarshal(body, &detail); status != http.StatusOK || err != nil || detail.ID != event.RequestID || len(detail.Attempts) != 2 {
+		t.Fatalf("unexpected request detail: %d %s (decode error: %v)", status, body, err)
+	}
+	for i, want := range []usage.Attempt{failed, succeeded} {
+		got := detail.Attempts[i]
+		if got.ID != want.ID || got.ProviderRequestID == nil || *got.ProviderRequestID != want.ProviderRequestID {
+			t.Fatalf("attempt %d changed after replay: %s", i+1, body)
+		}
+	}
+	for _, tc := range []struct {
+		token, path string
+		status      int
+	}{
+		{"other-project-session", "/" + event.RequestID, http.StatusNotFound},
+		{"owner-session", "", http.StatusOK},
+		{"owner-session", "/export.csv", http.StatusOK},
+	} {
+		status, body := requestReport(tc.token, tc.path)
+		if status != tc.status || bytes.Contains(body, []byte(failed.ProviderRequestID)) || bytes.Contains(body, []byte(succeeded.ProviderRequestID)) {
+			t.Fatalf("%s %s returned %d and %s", tc.token, tc.path, status, body)
+		}
+	}
+}
+
+func requestReports(t *testing.T, fixture usageFixture) func(string, string) (int, []byte) {
 	t.Helper()
 	ctx, pool := t.Context(), fixture.pool
 	keys, installation := notificationKeys(t, pool)
@@ -683,9 +742,9 @@ func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string)
 	api.Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	return func(token, requestID string) (int, []byte) {
+	return func(token, suffix string) (int, []byte) {
 		t.Helper()
-		r, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/requests/"+requestID, nil)
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/requests"+suffix, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

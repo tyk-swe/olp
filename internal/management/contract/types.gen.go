@@ -8411,6 +8411,9 @@ type AttemptResponse struct {
 	ProviderId        openapi_types.UUID                    `json:"provider_id"`
 	ProviderName      string                                `json:"provider_name"`
 
+	// ProviderRequestId Request ID returned by the provider for this attempt. Omitted when no supported provider ID was captured.
+	ProviderRequestId *string `json:"provider_request_id,omitempty"`
+
 	// RateCardRevisionId The rate card revision the charge came from, when a card applied.
 	RateCardRevisionId nullable.Nullable[openapi_types.UUID]     `json:"rate_card_revision_id,omitempty"`
 	Routing            nullable.Nullable[AttemptRoutingMetadata] `json:"routing,omitempty"`

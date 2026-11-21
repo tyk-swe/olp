@@ -149,6 +149,7 @@ func UsageAttempt(e Envelope, index int) (usage.Attempt, error) {
 	attempt := usage.Attempt{
 		Execution:          fact.Execution,
 		GuardrailDecisions: fact.GuardrailDecisions,
+		ProviderRequestID:  fact.ProviderRequestID,
 		ID:                 attemptID.String(),
 		// The ordinal is the position in the sequence of attempts made.
 		Ordinal:       index + 1,

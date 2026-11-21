@@ -668,6 +668,12 @@
           "provider_name": {
             "type": "string"
           },
+          "provider_request_id": {
+            "description": "Request ID returned by the provider for this attempt. Omitted when no supported provider ID was captured.",
+            "maxLength": 128,
+            "pattern": "^req_[A-Za-z0-9]+$",
+            "type": "string"
+          },
           "routing": {
             "oneOf": [
               {

@@ -183,7 +183,7 @@ func (w wireEvent) decode() (*Event, error) {
 }
 
 func (w wireAttempt) decode() (*Attempt, error) {
-	attempt := &Attempt{GuardrailDecisions: w.GuardrailDecisions, Execution: w.Execution}
+	attempt := &Attempt{GuardrailDecisions: w.GuardrailDecisions, Execution: w.Execution, ProviderRequestID: w.ProviderRequestID}
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, err
 	}

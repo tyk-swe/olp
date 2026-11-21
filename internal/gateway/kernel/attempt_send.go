@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -15,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (run attemptRun) prepare() (attemptPlan, *attemptEnd) {
@@ -84,7 +86,7 @@ func (run attemptRun) send(plan attemptPlan, fact events.AttemptFact) (attemptSe
 	if err != nil {
 		return announced, ended(run.state.classify(err, false), nil)
 	}
-	return run.accept(attemptSent{plan: plan, config: config, fact: fact, parallel: parallel, response: resp})
+	return run.accept(attemptSent{plan: plan, config: config, fact: fact, parallel: parallel, response: resp}, req.URL)
 }
 
 func (run attemptRun) sendingConfig(plan attemptPlan, header http.Header) connectors.Config {
@@ -127,12 +129,13 @@ func (run attemptRun) announce(plan attemptPlan) (*parallelGuardrail, *attemptEn
 	return parallel, nil
 }
 
-func (run attemptRun) accept(sent attemptSent) (attemptSent, *attemptEnd) {
+func (run attemptRun) accept(sent attemptSent, endpoint *url.URL) (attemptSent, *attemptEnd) {
 	s, resp := run.server, sent.response
 	received := s.Now().Sub(sent.fact.StartedAt)
 	fact := sent.fact
 	fact.FirstByte = &received
 	fact.Status = resp.StatusCode
+	fact.ProviderRequestID = run.providerRequestID(sent, endpoint)
 	answered := attemptSent{plan: sent.plan, config: sent.config, fact: fact, parallel: sent.parallel, response: resp}
 	if resp.StatusCode == http.StatusOK {
 		run.state.accepted = true
@@ -146,4 +149,22 @@ func (run attemptRun) accept(sent attemptSent) (attemptSent, *attemptEnd) {
 		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.Now())
 	}
 	return answered, ended(class, f)
+}
+
+func (run attemptRun) providerRequestID(sent attemptSent, endpoint *url.URL) string {
+	if sent.config.Kind != connectors.KindAnthropic || sent.plan.format != wire.Anthropic {
+		return ""
+	}
+	target := *endpoint
+	if target.Scheme == "https" && target.Port() == "443" {
+		target.Host = target.Hostname()
+	}
+	if target.String() != connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")+"/messages" {
+		return ""
+	}
+	ids := sent.response.Header.Values("Request-Id")
+	if len(ids) != 1 || !usage.ValidProviderRequestID(ids[0]) || run.x.sensitive.Contains(ids[0]) {
+		return ""
+	}
+	return ids[0]
 }
