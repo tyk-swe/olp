@@ -82,7 +82,7 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 		VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Other key',$2,'{}',$1::uuid,$3)`, otherKey, f.ownerID, otherProject)
 	for _, user := range []struct{ id, project string }{{managerID, f.projectID}, {outsiderID, otherProject}} {
 		execLatencyFixture(t, pool, `INSERT INTO olp.users (id,email,display_name,role,access_scope,etag)
-			VALUES ($1::uuid,$1::text||'@example.test','Manager','developer','assigned',$1::uuid)`, user.id)
+			VALUES ($1::uuid,$1::text||'@example.test','Manager','operator','assigned',$1::uuid)`, user.id)
 		execLatencyFixture(t, pool, `INSERT INTO olp.project_members (project_id,user_id,role,added_by) VALUES ($1,$2,'manager',$3)`,
 			user.project, user.id, f.ownerID)
 	}
