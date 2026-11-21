@@ -31,6 +31,7 @@ import (
 type notificationCaller func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult
 
 func TestSavedWebhookTestIsSentOnceAcrossReplicas(t *testing.T) {
+	t.Parallel()
 	for _, ending := range []string{"acknowledged", "timeout", "interrupted"} {
 		t.Run(ending, func(t *testing.T) {
 			t.Parallel()
