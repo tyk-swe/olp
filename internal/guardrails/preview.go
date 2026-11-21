@@ -13,8 +13,8 @@ type resolvedEntry struct {
 }
 
 type Compatibility struct {
-	TypedUnary, RetainsOutput, Uninspected bool
-	StreamWindow                           int
+	TypedUnary, RetainsOutput, Uninspected, StreamTextRewriteUnavailable bool
+	StreamWindow                                                         int
 }
 
 type CompatibilityNote string
@@ -70,7 +70,8 @@ func (r compiledEntry) notes(c Compatibility) []CompatibilityNote {
 			}
 			return
 		}
-		if c.TypedUnary && r.rewriteConflict() && !yield(RewriteUnavailable) {
+		if (c.TypedUnary && r.rewriteConflict() || c.StreamTextRewriteUnavailable && r.streamTextRewriteConflict()) &&
+			!yield(RewriteUnavailable) {
 			return
 		}
 		if c.RetainsOutput && r.retainedOutputConflict() && !yield(RetainedOutputUninspected) {
@@ -88,6 +89,10 @@ func (r compiledEntry) enforcesUnavailable() bool {
 
 func (r compiledEntry) rewriteConflict() bool {
 	return !r.entry.Monitor && r.entry.Phase != InputParallel && (r.entry.Action == Redact || r.entry.Action == Mask)
+}
+
+func (r compiledEntry) streamTextRewriteConflict() bool {
+	return !r.entry.Monitor && r.entry.Phase == OutputStream && r.entry.Action == Redact && r.definition.Type != "builtin.tools"
 }
 
 func (r compiledEntry) retainedOutputConflict() bool {

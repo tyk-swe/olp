@@ -115,6 +115,14 @@ func (f Format) Operation() string {
 	return OperationGeneration
 }
 
+func (f Format) CanRewriteGuardrailStreamText() bool {
+	switch f {
+	case Completions, Chat, Responses, Gemini, GeminiStream, Anthropic:
+		return true
+	}
+	return false
+}
+
 func (f Format) Surface() string {
 	switch f {
 	case Anthropic, AnthropicCount:

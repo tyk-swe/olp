@@ -26,7 +26,10 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 			return guardrails.Compatibility{Uninspected: true}, nil
 		}
 		if in.mode == "streaming" {
-			return guardrails.Compatibility{StreamWindow: window, RetainsOutput: in.retainsOutput}, nil
+			return guardrails.Compatibility{
+				StreamWindow: window, RetainsOutput: in.retainsOutput,
+				StreamTextRewriteUnavailable: !family.CanRewriteGuardrailStreamText(),
+			}, nil
 		}
 		return guardrails.Compatibility{RetainsOutput: in.retainsOutput}, nil
 	}
