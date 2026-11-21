@@ -587,7 +587,8 @@ func (f usageFixture) event(attempts ...usage.Attempt) *usage.Event {
 
 func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
 	t.Parallel()
-	ctx, pool := t.Context(), harness.Database(t)
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	event := fixture.event(fixture.attempt(1))
 	event.CacheResult, event.CacheLookupReason = "bypass", usage.CacheLookupUnavailable
@@ -632,25 +633,25 @@ func TestRequestDetailKeepsTheObservedCacheLookupReason(t *testing.T) {
 		{"owner-session", legacy.RequestID, http.StatusOK, ""},
 		{"other-project-session", event.RequestID, http.StatusNotFound, ""},
 	} {
-		response := requestDetail(tc.token, tc.id)
-		if response.Code != tc.status {
-			t.Fatalf("request detail status=%d, want %d: %s", response.Code, tc.status, response.Body)
+		status, body := requestDetail(tc.token, tc.id)
+		if status != tc.status {
+			t.Fatalf("request detail status=%d, want %d: %s", status, tc.status, body)
 		}
 		if tc.status == http.StatusOK {
 			var detail struct {
 				Result string                  `json:"cache_result"`
 				Reason usage.CacheLookupReason `json:"cache_lookup_reason"`
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil || detail.Result != "bypass" || detail.Reason != tc.reason {
-				t.Fatalf("unexpected cache detail: %s (decode error: %v)", response.Body, err)
+			if err := json.Unmarshal(body, &detail); err != nil || detail.Result != "bypass" || detail.Reason != tc.reason {
+				t.Fatalf("unexpected cache detail: %s (decode error: %v)", body, err)
 			}
-		} else if strings.Contains(response.Body.String(), string(usage.CacheLookupUnavailable)) {
-			t.Fatalf("another project saw the reason: %s", response.Body)
+		} else if bytes.Contains(body, []byte(usage.CacheLookupUnavailable)) {
+			t.Fatalf("another project saw the reason: %s", body)
 		}
 	}
 }
 
-func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string) *httptest.ResponseRecorder {
+func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string) (int, []byte) {
 	t.Helper()
 	ctx, pool := t.Context(), fixture.pool
 	keys, installation := notificationKeys(t, pool)
@@ -678,14 +679,27 @@ func cacheLookupReports(t *testing.T, fixture usageFixture) func(string, string)
 		}
 	}
 	mux := http.NewServeMux()
-	api := reports.API{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)})}
+	api := reports.API{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.NewTextHandler(t.Output(), nil))})}
 	api.Register(mux)
-	return func(token, requestID string) *httptest.ResponseRecorder {
-		r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/requests/"+requestID, nil)
-		r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, r)
-		return w
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return func(token, requestID string) (int, []byte) {
+		t.Helper()
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/requests/"+requestID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.AddCookie(&http.Cookie{Name: access.SessionCookie, Value: token})
+		res, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode, body
 	}
 }
 
