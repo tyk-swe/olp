@@ -151,7 +151,7 @@ func (q retainedRequest) rewriteChange(pin *kernel.Pin, route *routing.Route, re
 	return body, nil
 }
 
-func (s *surface) fenceRetainedMutation(ctx context.Context, r *http.Request, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
+func (s surface) fenceRetainedMutation(ctx context.Context, r *http.Request, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
 		return nil, nil
 	}
