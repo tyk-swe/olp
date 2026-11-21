@@ -2783,6 +2783,11 @@ func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) fu
 
 func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 	t.Helper()
+	return notificationManagementWithPolicy(t, pool, userID, egress.Policy{})
+}
+
+func notificationManagementWithPolicy(t *testing.T, pool *pgxpool.Pool, userID string, policy egress.Policy) notificationCaller {
+	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
@@ -2794,7 +2799,7 @@ func notificationManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) f
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), egress.Policy{}).Register(mux)
+	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), policy).Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))

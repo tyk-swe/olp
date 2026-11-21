@@ -18,6 +18,7 @@ import { json, route, serve } from '#lib/management/test/transport.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import NotificationDeliveries from './NotificationDeliveries.svelte';
+import NotificationDestinationTest from './NotificationDestinationTest.svelte';
 import NotificationsPanel from './NotificationsPanel.svelte';
 import {
   createNotificationDestination,
@@ -112,6 +113,82 @@ function renderDeliveries() {
       )
   };
 }
+
+describe('saved destination test', () => {
+  it('checks and retries an unanswered action without starting a new test', async () => {
+    const send = vi
+      .fn<(path: string) => Response>()
+      .mockImplementationOnce(() => json({ status: 504 }, 504))
+      .mockImplementationOnce(() =>
+        json({ id: 'test-id', status: 'unconfirmed', failure: 'timeout' })
+      )
+      .mockImplementationOnce(() =>
+        json({ id: 'new-test-id', status: 'delivered' })
+      );
+    const read = vi.fn((path: string) => {
+      expect(path).toBe(send.mock.calls[0][0]);
+      return json({ status: 404 }, 404);
+    });
+    serve((request) => {
+      const { pathname } = new URL(request.url);
+      expect(pathname).toMatch(
+        /^\/api\/v1\/notifications\/destinations\/destination-id\/tests\/[a-f0-9-]+$/
+      );
+      return request.method === 'POST' ? send(pathname) : read(pathname);
+    });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(NotificationDestinationTest, {
+      target,
+      props: { destination }
+    });
+    onTestFinished(async () => {
+      await unmount(component);
+      target.remove();
+      vi.unstubAllGlobals();
+    });
+    const findButton = (label: string, scope: ParentNode = target) =>
+      [...scope.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === label
+      );
+    const click = async (label: string, inDialog = true) => {
+      const button = await vi.waitFor(() => {
+        const scope = inDialog ? target.querySelector('dialog') : target;
+        const found = scope ? findButton(label, scope) : undefined;
+        expect(found?.disabled).toBe(false);
+        return found;
+      });
+      button?.click();
+      return button;
+    };
+
+    await click('Send test', false);
+    expect(send).not.toHaveBeenCalled();
+    const confirm = await click('Send test');
+    confirm?.click();
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Result pending.')
+    );
+    await click('Refresh status');
+    await click('Retry same test');
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain(
+        'Delivery unconfirmed. The receiver may have accepted the test.'
+      )
+    );
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+
+    await click('Start a new test');
+    expect(send).toHaveBeenCalledTimes(2);
+    await click('Send test');
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Test delivered.')
+    );
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send.mock.calls[2]).not.toEqual(send.mock.calls[0]);
+  });
+});
 
 describe('notification delivery history', () => {
   it('shows one page at a time even when the history exceeds 10,000 deliveries', async () => {

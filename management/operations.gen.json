@@ -18859,6 +18859,68 @@
     }
   },
   {
+    "name": "get_notification_destination_test",
+    "group": "notifications",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}",
+    "description": "Read the current test result without sending.",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "notification_destination_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "action_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "notification_destination_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "action_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "notification_destination_id",
+            "action_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_notification_rule",
     "group": "notifications",
     "method": "GET",
@@ -41917,6 +41979,68 @@
           }
         }
       }
+    }
+  },
+  {
+    "name": "send_notification_destination_test",
+    "group": "notifications",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}",
+    "description": "Send one test from a saved, enabled webhook or email destination. Reusing an action ID returns the existing result without sending or consuming the rate limit.",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "notification_destination_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "action_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "notification_destination_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "action_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "notification_destination_id",
+            "action_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
