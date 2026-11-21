@@ -126,11 +126,13 @@
                 ><button
                   class="text-button"
                   type="button"
+                  disabled={busy}
                   onclick={() => onToggle(sink)}
                   >{sink.enabled ? 'Disable' : 'Enable'}</button
                 ><button
                   class="text-button"
                   type="button"
+                  disabled={busy}
                   onclick={() => onRemove(sink)}>Delete</button
                 >{/if}</td
             ></tr

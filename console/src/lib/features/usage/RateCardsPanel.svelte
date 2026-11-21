@@ -133,11 +133,14 @@
     };
     await publish.submit(
       {
-        ...input,
-        prices: input.prices.length ? input.prices : undefined
+        cardId,
+        revision: {
+          ...input,
+          prices: input.prices.length ? input.prices : undefined
+        }
       },
-      (submission, requestId) =>
-        createRateCardRevision(cardId, submission, requestId),
+      ({ cardId, revision }, requestId) =>
+        createRateCardRevision(cardId, revision, requestId),
       async () => {
         notice = 'Revision published. New usage will charge under it.';
         publishCardId = '';
@@ -151,8 +154,8 @@
 
   function startPublish(card: RateCard) {
     publishCardId = publishCardId === card.id ? '' : card.id;
-    create.reset();
-    publish.reset();
+    create.error = '';
+    publish.error = '';
     notice = '';
   }
 </script>
@@ -259,7 +262,7 @@
                 <button
                   class="text-button"
                   type="button"
-                  disabled={!canEdit}
+                  disabled={!canEdit || publish.busy}
                   onclick={() => startPublish(card)}
                   >{publishCardId === card.id
                     ? 'Close'

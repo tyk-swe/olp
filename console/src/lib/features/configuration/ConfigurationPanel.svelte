@@ -198,7 +198,6 @@
       error = errorMessage(inputs.error);
       return;
     }
-    let failureCause: unknown;
     const committed = await applyMutation.submit(
       { document: applied, ...inputs.value },
       (submission, requestId) =>
@@ -209,32 +208,30 @@
           undefined,
           submission.externalBindings,
           submission.codeBindings
-        ),
+        ).catch(async (problem: unknown) => {
+          if (
+            isCurrent() &&
+            artifactDocument === applied &&
+            problem instanceof ApiProblem &&
+            problem.problem.status === 409
+          ) {
+            const replanned = await readResult(() =>
+              withBindings(planConfiguration, applied)
+            );
+            if (isCurrent() && artifactDocument === applied && replanned.ok)
+              plan = replanned.value;
+          }
+          return Promise.reject(problem);
+        }),
       (result, current) => {
         if (!current() || artifactDocument !== applied) return;
         plan = result;
         applyResult = 'staged';
       },
-      {
-        key: 'apply',
-        failure: (problem) => {
-          failureCause = problem;
-          return errorMessage(problem);
-        }
-      }
+      { key: 'apply' }
     );
     if (committed || !isCurrent() || artifactDocument !== applied) return;
-    if (
-      failureCause instanceof ApiProblem &&
-      failureCause.problem.status === 409
-    ) {
-      const replanned = await readResult(() =>
-        withBindings(planConfiguration, applied)
-      );
-      if (!isCurrent() || artifactDocument !== applied) return;
-      if (replanned.ok) plan = replanned.value;
-    }
-    error = errorMessage(failureCause);
+    error = applyMutation.error;
   }
 
   const requiredSecrets = $derived(plan ? missingSecretBindings(plan) : []);

@@ -106,11 +106,13 @@
                 ><button
                   class="text-button"
                   type="button"
+                  disabled={busy}
                   onclick={() => onToggle(policy)}
                   >{policy.enabled ? 'Disable' : 'Enable'}</button
                 ><button
                   class="text-button"
                   type="button"
+                  disabled={busy}
                   onclick={() => onRemove(policy)}>Delete</button
                 >{/if}</td
             ></tr

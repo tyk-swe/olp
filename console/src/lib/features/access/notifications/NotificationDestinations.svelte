@@ -314,6 +314,7 @@
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={toggle.busy}
                       onclick={() => toggleDestination(destination)}
                       >{destination.enabled ? 'Disable' : 'Enable'}</button
                     >

@@ -49,6 +49,25 @@ func (r compiledEntry) legacyInput() bool {
 	return r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block
 }
 
+func (r compiledEntry) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
+	patterns, ok := r.detector.(*patternDetector)
+	if ok && r.legacyInput() && r.definition.Type == "builtin.regex" {
+		for _, text := range evaluation.LegacyInputTexts {
+			for _, pattern := range patterns.patterns {
+				if err := ctx.Err(); err != nil {
+					return Verdict{}, err
+				}
+				if pattern.re.MatchString(text) {
+					return Flag(pattern.category), nil
+				}
+			}
+		}
+	}
+	native := evaluation
+	native.LegacyInputTexts = nil
+	return r.detector.detect(ctx, native)
+}
+
 func (r compiledEntry) bound(external Evaluator) compiledEntry {
 	d, ok := r.detector.(externalDetector)
 	if !ok {
@@ -319,7 +338,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				continue
 			}
 		}
-		verdict, err := r.detector.detect(bounded, evaluation)
+		verdict, err := r.detect(bounded, evaluation)
 		if err == nil {
 			err = bounded.Err()
 		}

@@ -368,7 +368,7 @@
   items={policies.data ?? []}
   onRetry={() => policies.refetch()}
   {canMutate}
-  busy={saveAction.busy}
+  busy={saveAction.busy || rowAction.busy}
   onEdit={startPolicyEdit}
   onToggle={togglePolicy}
   onRemove={removePolicy}

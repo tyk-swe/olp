@@ -184,6 +184,7 @@ type Evaluation struct {
 	Route                string    `json:"route,omitempty"`
 	Phase                Phase     `json:"phase"`
 	Segments             []Segment `json:"segments"`
+	LegacyInputTexts     []string  `json:"-"`
 	CompressionExemptIDs []string  `json:"-"`
 	WorkflowRecovery     bool      `json:"-"`
 	// InternalModel prevents recursive evaluator invocations. It is not accepted

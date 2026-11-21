@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -222,8 +223,16 @@ func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
 }
 
 func TestMigratedInputBlocksCanonicalToolSchema(t *testing.T) {
+	for _, pattern := range []string{`"type":"string"`, "^term$", "^string$"} {
+		t.Run(pattern, func(t *testing.T) {
+			testMigratedInputBlocksToolSchema(t, pattern)
+		})
+	}
+}
+
+func testMigratedInputBlocksToolSchema(t *testing.T, pattern string) {
 	h := strictHarness(t, nil)
-	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", `{"rules":[{"id":"schema","pattern":"\"type\":\"string\""}]}`)
+	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", fmt.Sprintf(`{"rules":[{"id":"schema","pattern":%q}]}`, pattern))
 	current := h.rt.release
 	snapshot := current.Snapshot().Clone()
 	definition := snapshot.Guardrails.Definitions["revision"]

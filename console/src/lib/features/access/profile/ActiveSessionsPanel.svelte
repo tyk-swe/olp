@@ -30,6 +30,7 @@
   }));
 
   async function endSession(id: string, current: boolean) {
+    if (revoke.busy || exit.busy) return;
     if (
       !(await confirmAction({
         title: current ? 'Sign out here?' : 'Sign out that session?',
@@ -115,7 +116,7 @@
             class="button button-secondary"
             type="button"
             onclick={() => endSession(session.id, session.current)}
-            disabled={revoke.key === session.id || exit.key === session.id}
+            disabled={revoke.busy || exit.busy}
             >{revoke.key === session.id || exit.key === session.id
               ? 'Revoking…'
               : session.current

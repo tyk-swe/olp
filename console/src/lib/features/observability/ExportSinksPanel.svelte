@@ -321,7 +321,7 @@
   items={sinks.data ?? []}
   onRetry={() => sinks.refetch()}
   {canMutate}
-  busy={saveAction.busy}
+  busy={saveAction.busy || rowAction.busy}
   bind:gapSinkId
   bind:datasetSinkId
   onEdit={startSinkEdit}

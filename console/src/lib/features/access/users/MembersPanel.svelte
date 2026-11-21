@@ -138,6 +138,7 @@
   }
 
   async function changeActive(user: User) {
+    if (write.busy) return;
     const active = !user.active;
     const confirmed = await confirmAction(
       active
@@ -293,10 +294,12 @@
                   {#if canManage && user.id !== viewer?.id}
                     {#if user.active}<button
                         type="button"
+                        disabled={write.busy}
                         onclick={() => (editing = user)}>Change access</button
                       >{/if}
                     <button
                       type="button"
+                      disabled={write.busy}
                       class:danger={user.active}
                       onclick={() => changeActive(user)}
                       >{user.active ? 'Deactivate' : 'Reactivate'}</button

@@ -199,6 +199,9 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
 	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
+	if x.Strict() && x.guard.engine.HasLegacyInput() {
+		evaluation.LegacyInputTexts = contentpolicy.InputTexts(document)
+	}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
 		for _, segment := range surface.Segments {
 			if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {

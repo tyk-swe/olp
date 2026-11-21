@@ -361,6 +361,7 @@
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={toggle.busy}
                       onclick={() => toggleRule(rule)}
                       >{rule.enabled ? 'Disable' : 'Enable'}</button
                     >
