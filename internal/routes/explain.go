@@ -198,6 +198,10 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 		preferences = &copied
 	}
 	now := m.now
+	installationCurrency := ""
+	if m.inputs != nil {
+		installationCurrency = m.inputs.Currency
+	}
 	options := routing.Options{
 		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
@@ -205,23 +209,26 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 		Prepare: prepare, Supply: m.supply, Unhealthy: m.unhealthy, Now: now,
 		// A simulation reports what each target could cost and applies the
 		// caller's cost ceiling to the same worst case.
-		EstimateCost: true,
-		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
+		EstimateCost:         true,
+		InstallationCurrency: installationCurrency,
+		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 			if !operationregistry.PolicyFor(input.Operation).BoundedWork {
-				return rates.Cost{}, false
+				return routing.CostBound{}, false
 			}
 			if provider.Commitment != nil {
-				return rates.Cost{}, true
+				return routing.CostBound{}, true
 			}
 			if mediaRequest != nil {
 				seconds, video := mediaRequest.VideoSeconds()
 				if !video {
-					return rates.Cost{}, false
+					return routing.CostBound{}, false
 				}
-				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
+				cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
+				return routing.CostBound{Cost: cost}, ok
 			}
 			if input.Operation == "search" {
-				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
+				cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
+				return routing.CostBound{Cost: cost}, ok
 			}
 			if counted.prompt != nil {
 				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
@@ -236,15 +243,16 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 				if counted.prompt.Request().Family == wire.Completions && from.Output == nil && to.Output != nil {
 					from.Output = to.Output
 				}
-				output := max(from.Reply(), to.Reply())
-				return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
+				priced, output := max(from.InputExposure(), to.InputExposure()), max(from.Reply(), to.Reply())
+				cost, ok := price.CostBound(priced, output, output > 0, now, discount)
+				return routing.CostBound{Cost: cost, InputTokens: &priced, OutputTokens: &output}, ok
 			}
 			d := counted.fixed
 			if demand := counted.sourceDemand(); demand != nil {
 				d = demand(provider, target)
 			}
 			if d == nil {
-				return rates.Cost{}, false
+				return routing.CostBound{}, false
 			}
 			output := int64(0)
 			if d.MaxOutputTokens != nil {
@@ -252,7 +260,8 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 			} else if input.Operation == "generation" {
 				output = estimate.DefaultOutputTokens
 			}
-			return price.CostBound(d.EstimatedInputTokens, output, output > 0, now, discount)
+			cost, ok := price.CostBound(d.EstimatedInputTokens, output, output > 0, now, discount)
+			return routing.CostBound{Cost: cost, InputTokens: &d.EstimatedInputTokens, OutputTokens: &output}, ok
 		},
 	}
 	if key.reason != "" {

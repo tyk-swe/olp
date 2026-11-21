@@ -86,10 +86,25 @@ type Options struct {
 	// EstimateCost asks the plan to record each target's minimum and maximum
 	// possible cost; only simulations set it, so live planning adds nothing.
 	EstimateCost bool
+	// InstallationCurrency is the currency installation prices use. The
+	// bounded_cost strategy compares only bounds in this currency when it
+	// is set; without it, bounds compare only with bounds sharing a currency.
+	InstallationCurrency string
 	// WorstCost bounds one candidate's attempt cost — provider cost with the
 	// attempt's pinned discount — or reports it cannot be bounded. It runs only
-	// when an effective maximum-cost ceiling or cost estimation calls for it.
-	WorstCost func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (rates.Cost, bool)
+	// when an effective maximum-cost ceiling, cost estimation or the
+	// bounded_cost strategy calls for it.
+	WorstCost func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (CostBound, bool)
+}
+
+// CostBound is one candidate's upper attempt cost. InputTokens and
+// OutputTokens name the token counts the bound priced — the input estimate
+// and the reserved output allowance — or stay nil when the bound did not
+// price tokens, as a per-request or media price does not.
+type CostBound struct {
+	Cost         rates.Cost
+	InputTokens  *int64
+	OutputTokens *int64
 }
 type Decision struct {
 	Incompatibility       *Incompatibility           `json:"incompatibility,omitempty"`
@@ -114,6 +129,14 @@ type Decision struct {
 	Shadow                bool                       `json:"shadow,omitempty"`
 	Unhealthy             bool                       `json:"unhealthy,omitempty"`
 	Headroom              *float64                   `json:"headroom,omitempty"`
+	// MaxCost is the effective cost ceiling eligibility applied, in the
+	// installation currency, or null when no scope set one. It is the rule
+	// that admitted the attempt, never the attempt's own estimate.
+	MaxCost *string `json:"max_cost"`
+	// BoundedCostFallbackReason names why the bounded_cost strategy ordered
+	// this candidate by weight instead of by its upper estimate, or stays
+	// absent when the upper estimate decided its place or another strategy ran.
+	BoundedCostFallbackReason *string `json:"bounded_cost_fallback_reason,omitempty"`
 	// EstimatedCost is the attempt's cost bound pair for a simulation, null
 	// when the target's price cannot bound or no demand is known.
 	EstimatedCost *EstimatedCost `json:"estimated_cost"`
@@ -121,11 +144,15 @@ type Decision struct {
 
 // EstimatedCost is the minimum and maximum one attempt on a target could
 // cost: the floor prices the input estimate at the cheapest input rate; the
-// bound prices the worst case the gateway would reserve.
+// bound prices the worst case the gateway would reserve. The token counts
+// name what the maximum priced: the input estimate and the reserved output
+// allowance, or null when the bound did not price tokens.
 type EstimatedCost struct {
-	Minimum  string `json:"minimum"`
-	Maximum  string `json:"maximum"`
-	Currency string `json:"currency"`
+	Minimum              string `json:"minimum"`
+	Maximum              string `json:"maximum"`
+	Currency             string `json:"currency"`
+	PricedInputTokens    *int64 `json:"priced_input_tokens"`
+	ReservedOutputTokens *int64 `json:"reserved_output_tokens"`
 }
 
 // Incompatibility describes an unsatisfied semantic obligation without retaining
@@ -211,6 +238,9 @@ type rankedCandidate struct {
 	preference int
 	locality   int
 	shadow     bool
+	bound      CostBound
+	boundKnown bool
+	costRanked bool
 	// allowed marks a target that only the matching selector excluded.
 	allowed bool
 }
@@ -266,6 +296,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
 		plan.Baseline = baseline(rows, operation)
 	}
+	applyBoundedCost(rows, policy.Strategy, operation, options.InstallationCurrency)
 	orderCandidates(rows, policy.Strategy, operation)
 	plan.addCandidates(rows, options.CheckSlots)
 	return plan, nil
@@ -294,16 +325,28 @@ func baseline(rows []rankedCandidate, operation string) *Baseline {
 // estimatedCost is the bound pair a simulation reports for a target. A
 // committed provider can only charge zero; a target without a demand or a
 // boundable price reports nothing.
-func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates.RoutingDiscount, demand *TokenDemand, now time.Time, worst func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (rates.Cost, bool), target Target) *EstimatedCost {
+func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates.RoutingDiscount, demand *TokenDemand, now time.Time, bound CostBound, boundKnown bool, operation string) *EstimatedCost {
 	if price == nil || demand == nil {
 		return nil
 	}
 	estimated := &EstimatedCost{Minimum: "0", Maximum: "0", Currency: price.Currency}
+	if operation == "generation" {
+		estimated.PricedInputTokens, estimated.ReservedOutputTokens = bound.InputTokens, bound.OutputTokens
+		if estimated.PricedInputTokens == nil {
+			input := demand.EstimatedInputTokens
+			if demand.CostInputTokens != nil {
+				input = *demand.CostInputTokens
+			}
+			estimated.PricedInputTokens = &input
+		}
+		if estimated.ReservedOutputTokens == nil {
+			estimated.ReservedOutputTokens = demand.MaxOutputTokens
+		}
+	}
 	if provider.CommitmentAt(now) != nil {
 		return estimated
 	}
-	bound, ok := worst(provider, target, price, discount)
-	if !ok {
+	if !boundKnown {
 		return nil
 	}
 	input := demand.EstimatedInputTokens
@@ -314,8 +357,82 @@ func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates
 	if !ok {
 		return nil
 	}
-	estimated.Minimum, estimated.Maximum = floor.String(), bound.String()
+	estimated.Minimum, estimated.Maximum = floor.String(), bound.Cost.String()
 	return estimated
+}
+
+// applyBoundedCost marks the candidates the bounded_cost strategy orders by
+// upper estimate. Within each health, priority, locality and preference
+// tier — serving and shadow candidates apart — only known bounds in one
+// currency compare: the installation currency when the caller names it, or
+// else the currency the most bounds in the tier share. A tier ranks by bound
+// only when at least two candidates compare; the rest keep weighted order,
+// with the fallback named on their decisions. Eligibility is final when this
+// runs, so a fallback never revives an excluded target.
+func applyBoundedCost(rows []rankedCandidate, strategy, operation, installationCurrency string) {
+	if strategy != strategyBoundedCost {
+		return
+	}
+	type tier struct {
+		unhealthy                 bool
+		priority, locality, order int
+		preference                int
+		shadow                    bool
+	}
+	groups := map[tier][]int{}
+	for i := range rows {
+		if !rows[i].decision.Eligible {
+			continue
+		}
+		key := tier{rows[i].decision.Unhealthy, rows[i].attempt.Priority, rows[i].locality, rows[i].order, rows[i].preference, rows[i].shadow}
+		groups[key] = append(groups[key], i)
+	}
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		fallback := func(reason string) {
+			for _, i := range group {
+				rows[i].decision.BoundedCostFallbackReason = &reason
+			}
+		}
+		if operation != "generation" {
+			fallback("operation_not_generation")
+			continue
+		}
+		counts := map[string]int{}
+		for _, i := range group {
+			if rows[i].boundKnown && rows[i].decision.Price != nil {
+				counts[rows[i].decision.Price.Currency]++
+			}
+		}
+		currency := installationCurrency
+		if currency == "" {
+			for _, i := range group {
+				if price := rows[i].decision.Price; rows[i].boundKnown && price != nil && counts[price.Currency] > counts[currency] {
+					currency = price.Currency
+				}
+			}
+		}
+		ranked := 0
+		for _, i := range group {
+			if rows[i].boundKnown && rows[i].decision.Price != nil && rows[i].decision.Price.Currency == currency {
+				ranked++
+			}
+		}
+		if ranked < 2 {
+			fallback("insufficient_comparable_bounds")
+			continue
+		}
+		for _, i := range group {
+			if rows[i].boundKnown && rows[i].decision.Price != nil && rows[i].decision.Price.Currency == currency {
+				rows[i].costRanked = true
+			} else {
+				reason := "cost_bound_not_comparable"
+				rows[i].decision.BoundedCostFallbackReason = &reason
+			}
+		}
+	}
 }
 
 func strptr(s string) *string { return &s }
@@ -364,8 +481,13 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 		}
 		row.decision.Price = options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 		row.attempt.Discount = options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
+		row.decision.MaxCost = policy.MaxCost
+		needBound := options.WorstCost != nil && (options.EstimateCost || policy.MaxCost != nil || policy.Strategy == strategyBoundedCost)
+		if needBound {
+			row.bound, row.boundKnown = options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
+		}
 		if options.EstimateCost && options.WorstCost != nil {
-			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, row.bound, row.boundKnown, operation)
 		}
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
 		reason := ""
@@ -430,19 +552,21 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 				if reason == "" {
 					reason = constraintReason(policy, provider, metadata, row.decision.Price, prepared.Parameters)
 				}
+				if needBound {
+					row.bound, row.boundKnown = options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
+				}
 				if prepared.Demand != nil {
 					input := prepared.Demand.EstimatedInputTokens
 					row.decision.EstimatedInputTokens = &input
 					row.decision.RequestedOutputTokens = prepared.Demand.MaxOutputTokens
 					if options.EstimateCost && options.WorstCost != nil {
-						row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, options.WorstCost, target)
+						row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, row.bound, row.boundKnown, operation)
 					}
 				}
 			}
 		}
 		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
-			bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
-			if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
+			if !row.boundKnown || !lessOrEqual(strptr(row.bound.Cost.String()), policy.MaxCost) {
 				reason = "cost_limit_exceeded"
 			}
 		}
@@ -499,6 +623,18 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			ah, bh := a.decision.Headroom, b.decision.Headroom
 			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
 				return order
+			}
+		case strategyBoundedCost:
+			if a.costRanked != b.costRanked {
+				if a.costRanked {
+					return -1
+				}
+				return 1
+			}
+			if a.costRanked && b.costRanked {
+				if order := a.bound.Cost.Cmp(b.bound.Cost); order != 0 {
+					return order
+				}
 			}
 		case strategyPrice:
 			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)

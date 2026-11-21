@@ -32,6 +32,9 @@ export type ExplanationRow = {
   contextLimit: number | null;
   contextOutput: number | null;
   estimatedCost: RoutingDecision['estimated_cost'];
+  /** The effective cost ceiling eligibility applied: a decimal string, null
+   * when unset, or undefined when the surface reported no decision. */
+  maxCost: string | null | undefined;
   interaction: RoutingDecision['interaction'];
   incompatibility: RoutingDecision['incompatibility'];
   /** What adaptive routing contributed: shadowing, selectors, health and
@@ -48,8 +51,22 @@ export function adaptiveNotes(decision: RoutingDecision): string[] {
     notes.push('Unhealthy across the fleet, so ordered last');
   if (decision.headroom != null)
     notes.push(`${Math.round(decision.headroom * 100)}% capacity headroom`);
+  if (decision.bounded_cost_fallback_reason)
+    notes.push(
+      (boundedCostFallbackLabels[decision.bounded_cost_fallback_reason] ??
+        'Ordered by weight under bounded cost routing') +
+        ', so ordered by weight'
+    );
   return notes;
 }
+
+const boundedCostFallbackLabels: Record<string, string> = {
+  operation_not_generation: 'Bounded cost ordering applies to generation only',
+  insufficient_comparable_bounds:
+    'Fewer than two targets in this tier have a comparable cost bound in the installation currency',
+  cost_bound_not_comparable:
+    'No comparable cost bound in the installation currency'
+};
 
 const provenanceLabels: Record<string, string> = {
   tokenizer: 'exact count',
@@ -109,6 +126,7 @@ function decisionRow(
     contextLimit: decision.context_length ?? null,
     contextOutput: decision.requested_output_tokens ?? null,
     estimatedCost: decision.estimated_cost,
+    maxCost: decision.max_cost ?? null,
     interaction: decision.interaction,
     incompatibility: decision.incompatibility,
     notes: adaptiveNotes(decision)
@@ -175,6 +193,7 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
         typeof target.estimated_cost === 'object'
           ? (target.estimated_cost as ExplanationRow['estimatedCost'])
           : null,
+      maxCost: undefined,
       interaction: undefined,
       incompatibility: undefined,
       notes: []

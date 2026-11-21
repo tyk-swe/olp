@@ -40,15 +40,16 @@ type Preferences struct {
 }
 
 const (
-	strategyWeighted   = "weighted"
-	strategyPrice      = "price"
-	strategyLatency    = "latency"
-	strategyThroughput = "throughput"
-	strategyCapacity   = "capacity"
+	strategyWeighted    = "weighted"
+	strategyPrice       = "price"
+	strategyLatency     = "latency"
+	strategyThroughput  = "throughput"
+	strategyCapacity    = "capacity"
+	strategyBoundedCost = "bounded_cost"
 )
 
 func strategies() []string {
-	return []string{strategyWeighted, strategyPrice, strategyLatency, strategyThroughput, strategyCapacity}
+	return []string{strategyWeighted, strategyPrice, strategyLatency, strategyThroughput, strategyCapacity, strategyBoundedCost}
 }
 
 type Policy struct {

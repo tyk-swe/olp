@@ -33,6 +33,8 @@ type Inputs struct {
 	priceIndex  map[routingPriceKey][]*rates.RoutingPrice
 	Prices      []rates.RoutingPrice
 	Performance map[string]Performance
+	// Currency is the installation pricing currency every price uses.
+	Currency string
 	// Discounts are the multipliers in force now plus every scheduled one;
 	// the most specific scope at the plan time is pinned on the attempt.
 	Discounts []rates.RoutingDiscount
@@ -298,6 +300,20 @@ func Load(ctx context.Context, q Querier, now time.Time) (*Inputs, error) {
 		return nil, err
 	}
 	if err = loadRoutingRateCards(ctx, q, now, in); err != nil {
+		return nil, err
+	}
+	rows, err = q.Query(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`)
+	if err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		if err = rows.Scan(&in.Currency); err != nil {
+			rows.Close()
+			return nil, err
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 	in.priceIndex = indexRoutingPrices(in.Prices)

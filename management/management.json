@@ -12944,13 +12944,27 @@
               "null"
             ]
           },
+          "max_cost": {
+            "description": "The effective cost ceiling eligibility applied, in the installation currency. Null when no scope set one. The ceiling is the configured rule that admitted the attempt, separate from the attempt's own estimated_cost.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bounded_cost_fallback_reason": {
+            "description": "Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate: operation_not_generation, insufficient_comparable_bounds or cost_bound_not_comparable. Absent when the upper estimate decided its place or another strategy ran.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "estimated_cost": {
             "type": [
               "object",
               "null"
             ],
             "additionalProperties": false,
-            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.",
+            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve, with the priced input estimate and reserved output allowance the maximum covers. Null when the price cannot bound the request or no demand is known.",
             "properties": {
               "minimum": {
                 "type": "string"
@@ -12960,6 +12974,22 @@
               },
               "currency": {
                 "type": "string"
+              },
+              "priced_input_tokens": {
+                "description": "The input tokens the maximum priced. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reserved_output_tokens": {
+                "description": "The output allowance the maximum reserved: the declared reply bound, or the default allowance when none was declared. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -13390,7 +13420,8 @@
           "price",
           "latency",
           "throughput",
-          "capacity"
+          "capacity",
+          "bounded_cost"
         ],
         "type": "string"
       },

@@ -45,6 +45,21 @@ describe('routing explanations', () => {
     expect(adaptiveNotes({ ...decision, headroom: 0.456 })).toEqual([
       '46% capacity headroom'
     ]);
+    expect(
+      adaptiveNotes({
+        ...decision,
+        strategy: 'bounded_cost',
+        bounded_cost_fallback_reason: 'insufficient_comparable_bounds'
+      })
+    ).toEqual([
+      'Fewer than two targets in this tier have a comparable cost bound in the installation currency, so ordered by weight'
+    ]);
+    expect(
+      decisionRows([
+        { ...decision, strategy: 'bounded_cost', max_cost: '0.025' }
+      ])[0]
+    ).toMatchObject({ maxCost: '0.025' });
+    expect(decisionRows([decision])[0]).toMatchObject({ maxCost: null });
   });
 
   it.each([
