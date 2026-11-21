@@ -41,11 +41,7 @@ func (s *Server) certificationCredential(ctx context.Context, in Input, previous
 		if in.Endpoint != previous.Endpoint {
 			return nil, httpkit.Invalid("credential", "Supply a replacement credential or null when changing the MCP endpoint.")
 		}
-		material, err := s.access.Keys.Read(ctx, s.access.Pool, s.access.Installation, *previous.CredentialID, secrets.MCPCredential)
-		if err != nil {
-			return nil, httpkit.Fail(422, "mcp_credential_unavailable", "The registered credential is unavailable.")
-		}
-		return material, nil
+		return s.storedCredential(ctx, previous)
 	}
 	material, err := secrets.ParseBearer(in.Credential)
 	if err != nil {

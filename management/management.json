@@ -24685,6 +24685,205 @@
           "digest"
         ]
       },
+      "ApproveMCPServerCatalogRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ],
+            "description": "Protocol version discovered by the reviewed catalog preview."
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Catalog digest discovered by the reviewed catalog preview."
+          }
+        },
+        "required": [
+          "protocol_version",
+          "digest"
+        ]
+      },
+      "MCPCatalogModifiedTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "changed_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "description",
+                "input_schema"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          },
+          "saved_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "discovered_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "saved_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "discovered_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "changed_fields",
+          "saved_description",
+          "discovered_description",
+          "saved_input_schema",
+          "discovered_input_schema"
+        ]
+      },
+      "MCPCatalogToolsetReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "description": "Certified tool names referenced by this published toolset that the live catalog removes or modifies."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "revision_id",
+          "tools"
+        ]
+      },
+      "MCPCatalogPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "saved_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "saved_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "discovered_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "discovered_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "added": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "modified": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogModifiedTool"
+            }
+          },
+          "toolsets": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogToolsetReference"
+            },
+            "description": "Visible published toolsets whose current revision references a removed or modified tool on this server."
+          }
+        },
+        "required": [
+          "server_id",
+          "etag",
+          "revision_id",
+          "revision",
+          "saved_protocol_version",
+          "saved_digest",
+          "discovered_protocol_version",
+          "discovered_digest",
+          "added",
+          "removed",
+          "modified",
+          "toolsets"
+        ]
+      },
       "CreateMCPServerRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -64591,6 +64790,178 @@
           },
           "428": {
             "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/catalog-preview": {
+      "post": {
+        "operationId": "preview_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "preview mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Preview rediscovers the live catalog with the saved endpoint, transport and credential, and reports how it differs from the certified catalog. It never invokes a tool and never changes the registration, its certification or any toolset.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live catalog compared with the certified catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPCatalogPreviewResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration"
+          },
+          "422": {
+            "description": "Registration cannot be reviewed or upstream certification failed"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/catalog-approval": {
+      "post": {
+        "operationId": "approve_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "approve mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Approval rediscovers the live catalog with the saved binding and certifies it as a new immutable revision only when the discovered protocol version and digest still match the reviewed preview and the registration still matches If-Match. It never invokes a tool.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration or catalog changed since review"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid approval or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveMCPServerCatalogRequest"
+              }
+            }
           }
         }
       }

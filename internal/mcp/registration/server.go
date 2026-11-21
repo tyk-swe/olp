@@ -120,6 +120,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	a.Route(mux, "GET /api/v1/mcp-servers/{server_id}", s.get)
 	a.Route(mux, "GET /api/v1/mcp-servers/{server_id}/revisions/{revision_id}", s.revision)
 	a.Route(mux, "PUT /api/v1/mcp-servers/{server_id}", s.update, access.Deadline(20*time.Second))
+	a.Route(mux, "POST /api/v1/mcp-servers/{server_id}/catalog-preview", s.previewCatalog, access.Deadline(20*time.Second))
+	a.Route(mux, "POST /api/v1/mcp-servers/{server_id}/catalog-approval", s.approveCatalog, access.Deadline(20*time.Second))
 	a.Route(mux, "DELETE /api/v1/mcp-servers/{server_id}", s.retire)
 }
 func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
