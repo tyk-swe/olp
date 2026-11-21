@@ -89,14 +89,18 @@ func (runner Runner) generated(ctx context.Context, args []string, jsonErrors bo
 	if err != nil {
 		return commandFailure(management.InvalidInput, err)
 	}
-	if err := checkOptions(options, "body-file", "if-match", "idempotency-key", "output", "format", "path", "query"); err != nil {
+	if err := checkOptions(options, "body-file", "if-match", "idempotency-key", "output", "format", "path", "query", "all-pages"); err != nil {
+		return commandFailure(management.InvalidInput, err)
+	}
+	op := found[0]
+	allPages, err := allPagesOption(op, options)
+	if err != nil {
 		return commandFailure(management.InvalidInput, err)
 	}
 	format := options.one("format")
 	if format != "" && format != "json" && (format != "csv" || group != "usage") {
 		return commandFailure(management.InvalidInput, errors.New("--format must be json, or csv for usage"))
 	}
-	op := found[0]
 	input, err := generatedArguments(op, options, positional)
 	if err != nil {
 		return commandFailure(management.InvalidInput, err)
@@ -114,6 +118,13 @@ func (runner Runner) generated(ctx context.Context, args []string, jsonErrors bo
 	client, err := runner.client()
 	if err != nil {
 		return commandFailure(management.Local, err)
+	}
+	if allPages {
+		result, failure := collectPages(ctx, client, op, input)
+		if failure != nil {
+			return failure
+		}
+		return runner.generatedOutput(result, format, options.one("output"), jsonErrors)
 	}
 	result, failure := client.CallClassified(ctx, op, input)
 	if failure != nil {
@@ -257,9 +268,14 @@ func (runner Runner) help(group string) error {
 		fmt.Fprintln(runner.Out, "config export [--output FILE]\nconfig plan --file DOCUMENT [--bindings-file FILE] [--code-bindings-file FILE] [--output PLAN]\nconfig apply --plan-file PLAN [--bindings-file FILE] [--code-bindings-file FILE] [--idempotency-key KEY]")
 	}
 	for _, op := range management.Operations() {
-		if group == "api" || op.Group == group {
-			fmt.Fprintf(runner.Out, "%s\t%s\t%s %s\n", commandName(op), op.Name, op.Method, op.Path)
+		if group != "api" && op.Group != group {
+			continue
 		}
+		if supportsAllPages(op) {
+			fmt.Fprintf(runner.Out, "%s\t%s\t%s %s [--all-pages=true]\n", commandName(op), op.Name, op.Method, op.Path)
+			continue
+		}
+		fmt.Fprintf(runner.Out, "%s\t%s\t%s %s\n", commandName(op), op.Name, op.Method, op.Path)
 	}
 	return nil
 }
