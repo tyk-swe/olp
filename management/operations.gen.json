@@ -49757,6 +49757,160 @@
     }
   },
   {
+    "name": "usage_unpriced_breakdown",
+    "group": "usage",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/usage/unpriced-breakdown",
+    "description": "Unpriced billable attempts grouped by provider, upstream model, operation and recorded cause. Results are ranked by attempt count. Retained hourly rollups contribute only for whole hours.",
+    "scopes": [
+      [
+        "usage"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "start",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "end",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "route",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "provider_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "model",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "operation",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "attribution_value",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "route": {
+              "type": "string"
+            },
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "attribution_key": {
+              "type": "string"
+            },
+            "attribution_value": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
     "name": "validate_credential_slot",
     "group": "providers",
     "method": "POST",

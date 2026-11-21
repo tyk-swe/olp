@@ -34,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -980,6 +981,124 @@ func testWorkflowRecovery(t *testing.T, fixture usageFixture) {
 	if err := fixture.pool.QueryRow(t.Context(), `SELECT d.state='not_accepted' AND d.closed_at IS NOT NULL AND EXISTS(SELECT 1 FROM olp.workflow_model_nonacceptance_proofs p WHERE p.dispatch_id=d.id AND p.claim_id=d.claim_id) FROM olp.execution_debits d WHERE d.id=$1`, leases[0].id).Scan(&proved); err != nil || !proved {
 		t.Fatalf("late not-sent proof did not close recovered exposure: proved=%v error=%v", proved, err)
 	}
+}
+
+func TestUnpricedBreakdownKeepsAttemptCausesAfterPricesChangeAndUsageRollsUp(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	ctx := t.Context()
+	hour := fixture.observedAt.Truncate(time.Hour)
+	const missingModel, partialModel = "no-model-price", "partial-model-price"
+	var pricingID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO olp.prices
+		(pricing_revision_id,provider_kind,provider_id,model,operation,input_per_million,currency)
+		SELECT pricing_revision_id,provider_kind,provider_id,$2,operation,1,currency
+		FROM olp.prices WHERE provider_id=$1 RETURNING pricing_revision_id`,
+		fixture.providerID, partialModel).Scan(&pricingID); err != nil {
+		t.Fatal(err)
+	}
+	persist := func(event *usage.Event) {
+		t.Helper()
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := ingest.PersistEvent(ctx, pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("persist fixture: %+v %v", result, err)
+		}
+	}
+	missing := func(ordinal int) usage.Attempt {
+		attempt := fixture.attempt(ordinal)
+		attempt.UpstreamModel = missingModel
+		return attempt
+	}
+	noPrice := fixture.event(missing(1), missing(2), missing(3))
+	persist(noPrice)
+
+	incomplete := func(ordinal int) usage.Attempt {
+		attempt := missing(ordinal)
+		attempt.Usage.Evidence = usage.EvidenceObservedIncomplete
+		return attempt
+	}
+	answeredWithoutUsage := missing(1)
+	answeredWithoutUsage.Usage = &usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
+	unsettled := fixture.event(answeredWithoutUsage, incomplete(2))
+	unsettled.UsageComplete = false
+	persist(unsettled)
+
+	partial := fixture.attempt(1)
+	partial.UpstreamModel = partialModel
+	persist(fixture.event(partial))
+	persist(fixture.event(fixture.attempt(1)))
+	historical := fixture.event(missing(1))
+	persist(historical)
+	if _, err := pool.Exec(ctx, `UPDATE olp.attempt_usage_facts SET unpriced_cause = NULL WHERE event_id = $1`, historical.EventID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.prices
+		(pricing_revision_id,provider_kind,provider_id,model,operation,input_per_million,output_per_million,currency)
+		SELECT pricing_revision_id,provider_kind,provider_id,$3,operation,input_per_million,output_per_million,currency
+		FROM olp.prices WHERE provider_id=$1 AND model=$2`, fixture.providerID, vendor.Model, missingModel); err != nil {
+		t.Fatal(err)
+	}
+	filters := reports.Filters{Start: hour, End: hour.Add(time.Hour), Projects: reports.OnlyProjects(fixture.projectID)}
+	expected := []struct {
+		model   string
+		cause   contract.UnpricedBreakdownItemCause
+		count   int64
+		request string
+	}{
+		{missingModel, contract.NoApplicablePrice, 3, noPrice.RequestID},
+		{missingModel, contract.IncompleteUsage, 2, unsettled.RequestID},
+		{missingModel, contract.NotRecorded, 1, historical.RequestID},
+		{partialModel, contract.MissingPriceComponent, 1, ""},
+	}
+	assertBreakdown := func(live bool) {
+		t.Helper()
+		report, err := reports.ReadUnpricedBreakdown(ctx, pool, filters, 50)
+		if err != nil || len(report.Items) != len(expected) {
+			t.Fatalf("read unpriced groups: %+v %v", report, err)
+		}
+		for i, want := range expected {
+			row := report.Items[i]
+			if row.ProviderId.String() != fixture.providerID || row.Operation != noPrice.Operation ||
+				row.Model != want.model || row.Cause != want.cause || row.AttemptCount != want.count {
+				t.Errorf("group %d = %+v, want %+v", i, row, want)
+			}
+			if live && want.request != "" && (row.SampleRequestId == nil || row.SampleRequestId.String() != want.request) {
+				t.Errorf("group %d did not link the matching request %s", i, want.request)
+			}
+			if !live && row.SampleRequestId != nil {
+				t.Errorf("retained group %d linked expired request %s", i, row.SampleRequestId)
+			}
+		}
+	}
+	assertBreakdown(true)
+	limited, err := reports.ReadUnpricedBreakdown(ctx, pool, filters, 1)
+	if err != nil || len(limited.Items) != 1 || limited.Items[0].AttemptCount != 3 {
+		t.Fatalf("limit did not keep the highest-impact group: %+v %v", limited, err)
+	}
+	privateFilters := filters
+	privateFilters.Projects = reports.OnlyProjects(uuid.NewString())
+	private, err := reports.ReadUnpricedBreakdown(ctx, pool, privateFilters, 50)
+	if err != nil || len(private.Items) != 0 {
+		t.Fatalf("another project can see unpriced usage: %+v %v", private, err)
+	}
+	var pin *uuid.UUID
+	var cost, charge *string
+	if err := pool.QueryRow(ctx, `SELECT pricing_revision_id, estimated_cost::text, charge::text
+		FROM olp.attempt_usage_facts WHERE attempt_id=$1`, partial.ID).Scan(&pin, &cost, &charge); err != nil ||
+		pin == nil || *pin != pricingID || cost != nil || charge != nil {
+		t.Fatalf("partial rate changed its pin or historical cost/charge: %v %v %v %v", pin, cost, charge, err)
+	}
+
+	maintenance, err := retention.RunMaintenance(ctx, pool, hour.AddDate(0, 0, 91))
+	if err != nil || maintenance.UsageRows != 8 {
+		t.Fatalf("roll up fixture: %+v %v", maintenance, err)
+	}
+	assertBreakdown(false)
 }
 
 func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {

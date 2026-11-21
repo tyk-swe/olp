@@ -144,6 +144,19 @@ their fees, and batch usage needs a batch multiplier. Anything else is
 recorded *unpriced*, meaning it has no estimated cost. It is also *incomplete*
 when the usage itself is unsettled. Absent usage is not zero usage.
 
+Open **Unpriced attempts** on the **Usage** page to see the largest groups by provider,
+upstream model, operation, and cause. The breakdown counts attempts, including
+retries, and uses the selected Usage filters. Incomplete upstream usage takes
+precedence over rate issues because the missing usage can hide which rates
+apply. When usage is complete, the breakdown distinguishes a missing model
+price from a selected price that lacks a required component.
+
+The report reads the cause recorded during accounting. It does not look up
+current prices, change pricing revisions, or recalculate past charges. Rows
+from before cause tracking show **Cause not recorded**. Retained hourly totals
+keep the cause counts for whole hours. Sample requests are only linked when
+their detail is still available to you.
+
 ## What an attempt records
 
 The fact row keeps every counter it billed (including the modality shares,

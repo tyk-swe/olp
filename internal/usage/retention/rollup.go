@@ -26,7 +26,7 @@ const rollupSQL = `WITH candidates AS (
                 audio_input_tokens, cached_audio_input_tokens, audio_output_tokens,
                 image_input_tokens, cached_image_input_tokens, image_output_tokens,
                 media_units,
-                estimated_cost, currency, charge_status, unpriced,
+                estimated_cost, currency, charge_status, unpriced, unpriced_cause,
                 request_counted, provider_request_counted, model_request_counted,
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
@@ -53,7 +53,8 @@ const rollupSQL = `WITH candidates AS (
          model_family, estimate_provenance, estimated_input_tokens,
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
-         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,focus_cost_detail_missing,focus_charge_detail_missing)
+         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,focus_cost_detail_missing,focus_charge_detail_missing,
+         no_applicable_price_count, missing_price_component_count, incomplete_usage_unpriced_count)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, COALESCE(delegation_pair_digest,''),
@@ -94,7 +95,10 @@ const rollupSQL = `WITH candidates AS (
              SUM(cache_budget_cost), SUM(cache_budget_charge),
              COUNT(*) FILTER (WHERE response_cache AND provider_request_counted),
  COALESCE(SUM(training_tokens),0),COALESCE(SUM(storage_byte_seconds),0),COALESCE(SUM(cache_token_seconds),0),COALESCE(olp.container_session_totals(jsonb_agg(container_sessions)),'{}'::jsonb),
- bool_or(focus_cost_detail_missing),bool_or(focus_charge_detail_missing)
+ bool_or(focus_cost_detail_missing),bool_or(focus_charge_detail_missing),
+             COUNT(*) FILTER (WHERE unpriced_cause = 'no_applicable_price'),
+             COUNT(*) FILTER (WHERE unpriced_cause = 'missing_price_component'),
+             COUNT(*) FILTER (WHERE unpriced_cause = 'incomplete_usage')
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -132,6 +136,9 @@ const rollupSQL = `WITH candidates AS (
         model_unpriced_count = attempt_usage_hourly.model_unpriced_count + EXCLUDED.model_unpriced_count,
         target_unpriced_count = attempt_usage_hourly.target_unpriced_count + EXCLUDED.target_unpriced_count,
         unpriced_attempt_count = attempt_usage_hourly.unpriced_attempt_count + EXCLUDED.unpriced_attempt_count,
+        no_applicable_price_count = attempt_usage_hourly.no_applicable_price_count + EXCLUDED.no_applicable_price_count,
+        missing_price_component_count = attempt_usage_hourly.missing_price_component_count + EXCLUDED.missing_price_component_count,
+        incomplete_usage_unpriced_count = attempt_usage_hourly.incomplete_usage_unpriced_count + EXCLUDED.incomplete_usage_unpriced_count,
         request_incomplete_count = attempt_usage_hourly.request_incomplete_count + EXCLUDED.request_incomplete_count,
         provider_incomplete_count = attempt_usage_hourly.provider_incomplete_count + EXCLUDED.provider_incomplete_count,
         model_incomplete_count = attempt_usage_hourly.model_incomplete_count + EXCLUDED.model_incomplete_count,

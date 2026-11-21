@@ -9,7 +9,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     usageBreakdown,
     usageSeries,
@@ -21,6 +21,7 @@
     budgetWindowState
   } from '#lib/features/access/index.js';
   import UsageChart from '#lib/features/usage/UsageChart.svelte';
+  import UnpricedBreakdown from './UnpricedBreakdown.svelte';
   import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
   import {
     completenessFromSummary,
@@ -73,6 +74,7 @@
     }
   });
 
+  const queryClient = useQueryClient();
   const usage = createQuery(() => {
     const snapshot = applied;
     return {
@@ -99,6 +101,13 @@
       }
     };
   });
+
+  function refreshUsage() {
+    void usage.refetch();
+    void queryClient.invalidateQueries({
+      queryKey: usageKeys.unpriced(applied.filters)
+    });
+  }
 
   function showUsage(state: UsageState, replace = false) {
     return goto(resolve(`usage?${usageSearch(state)}`), {
@@ -156,7 +165,7 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => usage.refetch()}
+      onclick={refreshUsage}
       disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
     ><button
       class="button button-secondary"
@@ -535,6 +544,8 @@
       ? 'Requests per day'
       : 'Requests per hour'}
   />
+
+  <UnpricedBreakdown filters={applied.filters} />
 
   <section class="breakdown" aria-labelledby="breakdown-title">
     <div class="section-heading">

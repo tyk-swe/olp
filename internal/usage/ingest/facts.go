@@ -35,7 +35,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          tool_calls, batch, pricing_components,
          commitment_weight, commitment_amount, commitment_period,
          discount_id, charge, rate_card_revision_id,
-         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines, commitment_schedule_id, commitment_bucket, training_tokens, storage_byte_seconds, cache_token_seconds, container_sessions, invocation_count, agent_principal_id, delegation_pair_digest, member_principal_id)
+         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines, commitment_schedule_id, commitment_bucket, training_tokens, storage_byte_seconds, cache_token_seconds, container_sessions, invocation_count, agent_principal_id, delegation_pair_digest, member_principal_id, unpriced_cause)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULLIF($6, '')::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
             false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
@@ -43,7 +43,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
             $36, $37, $38, $39, $40, $41, $42::jsonb, $43, $44::text[],
             $45::numeric, $46::numeric, $47,
             $48::uuid, $49::numeric, $50::uuid,
-            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb, $56::uuid, $57::timestamptz, $58, $59::text::numeric, $60::text::numeric, $61::jsonb, $62, NULLIF($63, '')::uuid, NULLIF($64, ''), NULLIF($65, '')::uuid)
+            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb, $56::uuid, $57::timestamptz, $58, $59::text::numeric, $60::text::numeric, $61::jsonb, $62, NULLIF($63, '')::uuid, NULLIF($64, ''), NULLIF($65, '')::uuid, NULLIF($66, ''))
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -76,14 +76,8 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 		}
 	}
 	usageComplete := status == chargeNotBillable || usage.Evidence.Complete()
-	// A provider that answered successfully but reported no usage has been paid
-	// for something this installation cannot quantify; it counts as unpriced
-	// rather than as free.
-	successfulWithoutUsage := !usage.Evidence.Observed() && attempt.Attempt.ErrorClass == nil &&
-		attempt.StatusCode != nil && *attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
-	// Incomplete usage is never given a cost above, so a billable attempt
-	// with incomplete usage is unpriced spend, whatever rates exist.
-	unpriced := status != chargeNotBillable && (successfulWithoutUsage || !pricing.Complete || !usage.Evidence.Complete())
+	cause := classifyUnpriced(status, usage.Evidence, pricing)
+	unpriced := cause != costKnown
 	var selector, baselineCost *string
 	if routing := attempt.Attempt.Routing; routing != nil {
 		selector = routing.Selector
@@ -122,6 +116,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 		attempt.Attempt.Routing != nil && attempt.Attempt.Routing.CredentialSource == "caller",
 		pricing.CostLines, pricing.ChargeLines, pricing.CommitmentScheduleID, pricing.CommitmentBucket,
 		usage.TrainingTokens, usage.StorageByteSeconds, usage.CacheTokenSeconds, pricebook.OptionalJSON(usage.ContainerSessions), usage.InvocationCount, ev.AgentPrincipalID, ev.DelegationPairDigest, ev.MemberPrincipalID,
+		cause,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
 	}
@@ -138,6 +133,32 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 		}
 	}
 	return factCharge{billable: status != chargeNotBillable, cost: pricing.EstimatedCost, unpriced: unpriced}, nil
+}
+
+type unpricedCause string
+
+const (
+	costKnown             unpricedCause = ""
+	incompleteUsage       unpricedCause = "incomplete_usage"
+	noApplicablePrice     unpricedCause = "no_applicable_price"
+	missingPriceComponent unpricedCause = "missing_price_component"
+)
+
+// Incomplete usage is never costed, so it is unpriced whatever rates exist. A
+// provider that answered without reporting usage lands here, never as free.
+func classifyUnpriced(status string, evidence usage.UsageEvidence, pricing pricebook.AttemptPricing) unpricedCause {
+	switch {
+	case status == chargeNotBillable:
+		return costKnown
+	case !evidence.Complete():
+		return incompleteUsage
+	case pricing.Complete:
+		return costKnown
+	case pricing.PricingRevisionID == nil:
+		return noApplicablePrice
+	default:
+		return missingPriceComponent
+	}
 }
 
 // factCharge is what one attempt fact may be charged: its estimated cost, nil
