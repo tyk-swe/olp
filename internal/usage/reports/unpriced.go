@@ -54,9 +54,8 @@ func ReadUnpricedBreakdown(ctx context.Context, q database.Queryer, f Filters, l
 		    ('no_applicable_price', no_applicable_price_count),
 		    ('missing_price_component', missing_price_component_count),
 		    ('incomplete_usage', incomplete_usage_unpriced_count),
-		    ('unknown', unknown_unpriced_cause_count),
 		    ('not_recorded', unpriced_attempt_count - no_applicable_price_count
-		        - missing_price_component_count - incomplete_usage_unpriced_count - unknown_unpriced_cause_count)
+		        - missing_price_component_count - incomplete_usage_unpriced_count)
 		) counts(cause, attempts)
 		WHERE unpriced_attempt_count > 0 AND attempts > 0`)
 	b.pushBind(" AND bucket >= ", ceilHour(f.Start))

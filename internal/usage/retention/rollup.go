@@ -54,7 +54,7 @@ const rollupSQL = `WITH candidates AS (
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
          list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,focus_cost_detail_missing,focus_charge_detail_missing,
-         no_applicable_price_count, missing_price_component_count, incomplete_usage_unpriced_count, unknown_unpriced_cause_count)
+         no_applicable_price_count, missing_price_component_count, incomplete_usage_unpriced_count)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, COALESCE(delegation_pair_digest,''),
@@ -98,8 +98,7 @@ const rollupSQL = `WITH candidates AS (
  bool_or(focus_cost_detail_missing),bool_or(focus_charge_detail_missing),
              COUNT(*) FILTER (WHERE unpriced_cause = 'no_applicable_price'),
              COUNT(*) FILTER (WHERE unpriced_cause = 'missing_price_component'),
-             COUNT(*) FILTER (WHERE unpriced_cause = 'incomplete_usage'),
-             COUNT(*) FILTER (WHERE unpriced_cause = 'unknown')
+             COUNT(*) FILTER (WHERE unpriced_cause = 'incomplete_usage')
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -140,7 +139,6 @@ const rollupSQL = `WITH candidates AS (
         no_applicable_price_count = attempt_usage_hourly.no_applicable_price_count + EXCLUDED.no_applicable_price_count,
         missing_price_component_count = attempt_usage_hourly.missing_price_component_count + EXCLUDED.missing_price_component_count,
         incomplete_usage_unpriced_count = attempt_usage_hourly.incomplete_usage_unpriced_count + EXCLUDED.incomplete_usage_unpriced_count,
-        unknown_unpriced_cause_count = attempt_usage_hourly.unknown_unpriced_cause_count + EXCLUDED.unknown_unpriced_cause_count,
         request_incomplete_count = attempt_usage_hourly.request_incomplete_count + EXCLUDED.request_incomplete_count,
         provider_incomplete_count = attempt_usage_hourly.provider_incomplete_count + EXCLUDED.provider_incomplete_count,
         model_incomplete_count = attempt_usage_hourly.model_incomplete_count + EXCLUDED.model_incomplete_count,

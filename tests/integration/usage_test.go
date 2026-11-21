@@ -1021,7 +1021,9 @@ func TestUnpricedBreakdownKeepsAttemptCausesAfterPricesChangeAndUsageRollsUp(t *
 		attempt.Usage.Evidence = usage.EvidenceObservedIncomplete
 		return attempt
 	}
-	unsettled := fixture.event(incomplete(1), incomplete(2))
+	answeredWithoutUsage := missing(1)
+	answeredWithoutUsage.Usage = &usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
+	unsettled := fixture.event(answeredWithoutUsage, incomplete(2))
 	unsettled.UsageComplete = false
 	persist(unsettled)
 
@@ -1048,10 +1050,10 @@ func TestUnpricedBreakdownKeepsAttemptCausesAfterPricesChangeAndUsageRollsUp(t *
 		count   int64
 		request string
 	}{
-		{missingModel, contract.UnpricedBreakdownItemCauseNoApplicablePrice, 3, noPrice.RequestID},
-		{missingModel, contract.UnpricedBreakdownItemCauseIncompleteUsage, 2, unsettled.RequestID},
-		{missingModel, contract.UnpricedBreakdownItemCauseNotRecorded, 1, historical.RequestID},
-		{partialModel, contract.UnpricedBreakdownItemCauseMissingPriceComponent, 1, ""},
+		{missingModel, contract.NoApplicablePrice, 3, noPrice.RequestID},
+		{missingModel, contract.IncompleteUsage, 2, unsettled.RequestID},
+		{missingModel, contract.NotRecorded, 1, historical.RequestID},
+		{partialModel, contract.MissingPriceComponent, 1, ""},
 	}
 	assertBreakdown := func(live bool) {
 		t.Helper()

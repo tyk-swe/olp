@@ -6984,25 +6984,22 @@ func (e TransportMode) Valid() bool {
 
 // Defines values for UnpricedBreakdownItemCause.
 const (
-	UnpricedBreakdownItemCauseIncompleteUsage       UnpricedBreakdownItemCause = "incomplete_usage"
-	UnpricedBreakdownItemCauseMissingPriceComponent UnpricedBreakdownItemCause = "missing_price_component"
-	UnpricedBreakdownItemCauseNoApplicablePrice     UnpricedBreakdownItemCause = "no_applicable_price"
-	UnpricedBreakdownItemCauseNotRecorded           UnpricedBreakdownItemCause = "not_recorded"
-	UnpricedBreakdownItemCauseUnknown               UnpricedBreakdownItemCause = "unknown"
+	IncompleteUsage       UnpricedBreakdownItemCause = "incomplete_usage"
+	MissingPriceComponent UnpricedBreakdownItemCause = "missing_price_component"
+	NoApplicablePrice     UnpricedBreakdownItemCause = "no_applicable_price"
+	NotRecorded           UnpricedBreakdownItemCause = "not_recorded"
 )
 
 // Valid indicates whether the value is a known member of the UnpricedBreakdownItemCause enum.
 func (e UnpricedBreakdownItemCause) Valid() bool {
 	switch e {
-	case UnpricedBreakdownItemCauseIncompleteUsage:
+	case IncompleteUsage:
 		return true
-	case UnpricedBreakdownItemCauseMissingPriceComponent:
+	case MissingPriceComponent:
 		return true
-	case UnpricedBreakdownItemCauseNoApplicablePrice:
+	case NoApplicablePrice:
 		return true
-	case UnpricedBreakdownItemCauseNotRecorded:
-		return true
-	case UnpricedBreakdownItemCauseUnknown:
+	case NotRecorded:
 		return true
 	default:
 		return false

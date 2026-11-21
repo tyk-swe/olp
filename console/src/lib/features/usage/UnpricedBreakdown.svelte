@@ -36,7 +36,6 @@
     no_applicable_price: 'No applicable price',
     missing_price_component: 'Missing price component',
     incomplete_usage: 'Incomplete upstream usage',
-    unknown: 'Unknown cause',
     not_recorded: 'Cause not recorded'
   };
 </script>

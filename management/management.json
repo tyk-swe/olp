@@ -14244,7 +14244,6 @@
               "no_applicable_price",
               "missing_price_component",
               "incomplete_usage",
-              "unknown",
               "not_recorded"
             ],
             "description": "Cause recorded at accounting time. not_recorded identifies older usage with no stored cause."

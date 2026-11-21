@@ -76,14 +76,8 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 		}
 	}
 	usageComplete := status == chargeNotBillable || usage.Evidence.Complete()
-	// A provider that answered successfully but reported no usage has been paid
-	// for something this installation cannot quantify; it counts as unpriced
-	// rather than as free.
-	successfulWithoutUsage := !usage.Evidence.Observed() && attempt.Attempt.ErrorClass == nil &&
-		attempt.StatusCode != nil && *attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
-	// Incomplete usage is never given a cost above, so a billable attempt
-	// with incomplete usage is unpriced spend, whatever rates exist.
-	unpriced := status != chargeNotBillable && (successfulWithoutUsage || !pricing.Complete || !usage.Evidence.Complete())
+	cause := classifyUnpriced(status, usage.Evidence, pricing)
+	unpriced := cause != costKnown
 	var selector, baselineCost *string
 	if routing := attempt.Attempt.Routing; routing != nil {
 		selector = routing.Selector
@@ -122,7 +116,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 		attempt.Attempt.Routing != nil && attempt.Attempt.Routing.CredentialSource == "caller",
 		pricing.CostLines, pricing.ChargeLines, pricing.CommitmentScheduleID, pricing.CommitmentBucket,
 		usage.TrainingTokens, usage.StorageByteSeconds, usage.CacheTokenSeconds, pricebook.OptionalJSON(usage.ContainerSessions), usage.InvocationCount, ev.AgentPrincipalID, ev.DelegationPairDigest, ev.MemberPrincipalID,
-		unpricedCause(unpriced, usageComplete && !successfulWithoutUsage, pricing),
+		cause,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
 	}
@@ -141,18 +135,29 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *usage.Event, attempt usage.V
 	return factCharge{billable: status != chargeNotBillable, cost: pricing.EstimatedCost, unpriced: unpriced}, nil
 }
 
-func unpricedCause(unpriced, usageComplete bool, pricing pricebook.AttemptPricing) string {
+type unpricedCause string
+
+const (
+	costKnown             unpricedCause = ""
+	incompleteUsage       unpricedCause = "incomplete_usage"
+	noApplicablePrice     unpricedCause = "no_applicable_price"
+	missingPriceComponent unpricedCause = "missing_price_component"
+)
+
+// Incomplete usage is never costed, so it is unpriced whatever rates exist. A
+// provider that answered without reporting usage lands here, never as free.
+func classifyUnpriced(status string, evidence usage.UsageEvidence, pricing pricebook.AttemptPricing) unpricedCause {
 	switch {
-	case !unpriced:
-		return ""
-	case !usageComplete:
-		return "incomplete_usage"
-	case !pricing.Complete && pricing.PricingRevisionID == nil:
-		return "no_applicable_price"
-	case !pricing.Complete:
-		return "missing_price_component"
+	case status == chargeNotBillable:
+		return costKnown
+	case !evidence.Complete():
+		return incompleteUsage
+	case pricing.Complete:
+		return costKnown
+	case pricing.PricingRevisionID == nil:
+		return noApplicablePrice
 	default:
-		return "unknown"
+		return missingPriceComponent
 	}
 }
 
