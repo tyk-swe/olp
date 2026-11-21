@@ -1,6 +1,7 @@
 package budgets
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -46,30 +47,14 @@ func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
 	in.Amount = strings.TrimSpace(in.Amount)
-	if !limits.ValidCostLimit(in.Amount) {
-		return httpkit.Reply{}, httpkit.Invalid("amount", "Use a positive USD decimal with at most 12 integer and 12 fractional digits.")
-	}
-	if in.Reason == "" || utf8.RuneCountInString(in.Reason) > 256 || strings.ContainsAny(in.Reason, "\x00\r\n") {
-		return httpkit.Reply{}, httpkit.Invalid("reason", "Give a single-line reason of 1–256 characters.")
-	}
-	if in.Window != "day" && in.Window != "week" && in.Window != "month" {
-		return httpkit.Reply{}, httpkit.Invalid("window", "Choose day, week or month.")
+	if err := validateIncreaseTerms(in.Window, in.Amount, in.Reason); err != nil {
+		return httpkit.Reply{}, err
 	}
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (increaseTarget, error) {
 		owner, project, policy, err := a.target(r, tx, p, in.Target)
 		return increaseTarget{owner: owner, project: project, policy: policy}, err
 	}, func(tx pgx.Tx, p authz.Principal, target increaseTarget) (httpkit.Reply, access.Event, error) {
-		var cap *string
-		if target.policy != nil {
-			switch in.Window {
-			case "day":
-				cap = target.policy.DailyCostLimit
-			case "week":
-				cap = target.policy.WeeklyCostLimit
-			case "month":
-				cap = target.policy.MonthlyCostLimit
-			}
-		}
+		cap := capForWindow(target.policy, in.Window)
 		if cap == nil {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
 		}
@@ -86,12 +71,11 @@ func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if !expires.After(now) {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("expires_at", "Expiry must be in the future, within the current budget window.")
 		}
-		var count int
-		if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM olp.budget_increases WHERE owner_id=$1 AND window_kind=$2 AND revoked_at IS NULL AND expires_at>now()`, target.owner, in.Window).Scan(&count); err != nil {
+		if err := lockBudgetWindow(r.Context(), tx, target.owner, in.Window); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if count >= 8 {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
+		if err := checkActiveIncreaseLimit(r.Context(), tx, target.owner, in.Window); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
 		}
 		id, etag := httpkit.NewID(), httpkit.NewID()
 		encoded, _ := json.Marshal(in.Target)
@@ -164,6 +148,50 @@ func (a *API) increase(r *http.Request, p authz.Principal) (httpkit.Reply, error
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(data, etag), nil
+}
+
+func validateIncreaseTerms(window, amount, reason string) error {
+	if !limits.ValidCostLimit(amount) {
+		return httpkit.Invalid("amount", "Use a positive USD decimal with at most 12 integer and 12 fractional digits.")
+	}
+	if reason == "" || utf8.RuneCountInString(reason) > 256 || strings.ContainsAny(reason, "\x00\r\n") {
+		return httpkit.Invalid("reason", "Give a single-line reason of 1–256 characters.")
+	}
+	if window != "day" && window != "week" && window != "month" {
+		return httpkit.Invalid("window", "Choose day, week or month.")
+	}
+	return nil
+}
+
+func capForWindow(policy *keyauthority.BudgetPolicy, window string) *string {
+	if policy == nil {
+		return nil
+	}
+	switch window {
+	case "day":
+		return policy.DailyCostLimit
+	case "week":
+		return policy.WeeklyCostLimit
+	case "month":
+		return policy.MonthlyCostLimit
+	}
+	return nil
+}
+
+func lockBudgetWindow(ctx context.Context, tx pgx.Tx, owner, window string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('olp:budget-increase:'||$1||':'||$2,0))`, owner, window)
+	return err
+}
+
+func checkActiveIncreaseLimit(ctx context.Context, tx pgx.Tx, owner, window string) error {
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM olp.budget_increases WHERE owner_id=$1 AND window_kind=$2 AND revoked_at IS NULL AND expires_at>now()`, owner, window).Scan(&count); err != nil {
+		return err
+	}
+	if count >= 8 {
+		return httpkit.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
+	}
+	return nil
 }
 
 func budgetIncreaseScope(p authz.Principal, target BudgetTarget, project *string, need authz.Need) error {

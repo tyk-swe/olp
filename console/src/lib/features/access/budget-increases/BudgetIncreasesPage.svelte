@@ -21,6 +21,7 @@
   import { limitsError, limitForm } from '../budgets/limitForm';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
+  import BudgetIncreaseRequests from './BudgetIncreaseRequests.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -417,6 +418,8 @@
       >{/if}
   </div>
 {/if}
+
+<BudgetIncreaseRequests />
 
 <style>
   .fields {
