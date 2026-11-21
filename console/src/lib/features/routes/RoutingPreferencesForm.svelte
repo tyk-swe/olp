@@ -202,7 +202,7 @@
         >Latency</option
       ><option value="throughput">Throughput</option><option value="capacity"
         >Capacity headroom</option
-      ></select
+      ><option value="bounded_cost">Bounded cost</option></select
     >
   {/if}
   {#if !constraintsOnly}

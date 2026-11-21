@@ -59,7 +59,19 @@
         {#if row.estimatedCost}<dt>Estimated cost</dt>
           <dd>
             {row.estimatedCost.minimum} – {row.estimatedCost.maximum}
-            {row.estimatedCost.currency}
+            {row.estimatedCost
+              .currency}{#if row.estimatedCost.priced_input_tokens != null && row.estimatedCost.reserved_output_tokens != null}
+              · upper estimate prices {tokens(
+                row.estimatedCost.priced_input_tokens
+              )} in and reserves {tokens(
+                row.estimatedCost.reserved_output_tokens
+              )} out{/if}
+          </dd>{/if}
+        {#if row.maxCost !== undefined}<dt>Cost ceiling</dt>
+          <dd>
+            {row.maxCost === null
+              ? 'Unset'
+              : `${row.maxCost} ${row.estimatedCost?.currency ?? row.price?.currency ?? ''}`}
           </dd>{/if}
         {#if row.notes.length}<dt>Adaptive routing</dt>
           <dd>{row.notes.join(' · ')}</dd>{/if}

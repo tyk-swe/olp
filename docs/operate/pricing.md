@@ -340,7 +340,11 @@ input estimate at the cheapest input-side rate of the selected tier plus the
 per-request fee. The `maximum` value is the bound the gateway would reserve. It
 uses the highest input-side rate for the estimate, the declared or default reply
 allowance for generation, the per-request fee, the window multiplier at the
-instant, and the attempt's pinned discount. A committed provider reports zero
+instant, and the attempt's pinned discount. Generation estimates also carry
+the priced input tokens and reserved output tokens behind the maximum, and
+each decision separately carries the effective `max_cost` ceiling, null when
+unset. The `bounded_cost` routing strategy orders generation candidates by
+that same maximum within each tier. A committed provider reports zero
 for both. The pair is null when the target has no price, the price cannot bound
 the request, or no token demand is known; server-side tool fees and batch
 multipliers are excluded from both figures.
