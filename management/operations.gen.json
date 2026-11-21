@@ -6004,6 +6004,155 @@
     }
   },
   {
+    "name": "check_route_draft_fixtures",
+    "group": "routes",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/route-drafts/{draft_id}/check-fixtures",
+    "description": "Compare an active route revision and its saved draft against a bounded set of synthetic requests using one planning snapshot. Performs no upstream dispatch or storage.",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "draft_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "draft_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "draft_id"
+          ]
+        },
+        "body": {
+          "$ref": "#/$defs/RouteFixtureFile"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "body"
+      ],
+      "$defs": {
+        "RouteFixtureFile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A local synthetic fixture set. The complete JSON file must not exceed 256 KiB.",
+          "properties": {
+            "synthetic": {
+              "type": "boolean",
+              "enum": [
+                true
+              ],
+              "description": "Attest that every request, fixture name and classifier label is synthetic."
+            },
+            "fixtures": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RouteFixture"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "synthetic",
+            "fixtures"
+          ]
+        },
+        "RouteFixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_. -]{0,63}$"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "dialect": {
+              "type": "string"
+            },
+            "seed": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "request": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Synthetic native request for this operation, surface and mode."
+            },
+            "attribution": {
+              "type": "object",
+              "maxProperties": 16,
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "propertyNames": {
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "description": "Optional synthetic attribution labels. Supply any label the key or project policy requires without a default."
+            },
+            "classifier_labels": {
+              "type": "object",
+              "maxProperties": 16,
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "propertyNames": {
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "description": "Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run."
+            },
+            "expect_eligible": {
+              "type": "boolean",
+              "description": "Assert whether the draft can plan a serving attempt."
+            }
+          },
+          "required": [
+            "name",
+            "operation",
+            "surface",
+            "mode",
+            "seed",
+            "request"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "continue_grant_enrollment",
     "group": "providers",
     "method": "POST",

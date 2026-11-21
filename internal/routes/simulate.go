@@ -236,22 +236,7 @@ func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	fidelity, err := routing.DecodeFidelity(d.Fidelity)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.ProjectID = d.ProjectID
-	if route.Behavior, err = routing.DecodeBehavior(d.Behavior); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
-		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	route.Policy, _, err = loadPolicy(r.Context(), tx, "route-draft", d.ID, false)
+	route, err := draftSimulationRoute(r.Context(), tx, d, routingID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -306,6 +291,31 @@ func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Repl
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+func draftSimulationRoute(ctx context.Context, q database.Queryer, d *draft, routingID string) (routing.Route, error) {
+	fidelity, err := routing.DecodeFidelity(d.Fidelity)
+	if err != nil {
+		return routing.Route{}, err
+	}
+	behavior, err := routing.DecodeBehavior(d.Behavior)
+	if err != nil {
+		return routing.Route{}, err
+	}
+	var content *contentpolicy.Policy
+	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
+		content, err = contentpolicy.Decode(d.ContentPolicy)
+		if err != nil {
+			return routing.Route{}, err
+		}
+	}
+	policy, _, err := loadPolicy(ctx, q, "route-draft", d.ID, false)
+	if err != nil {
+		return routing.Route{}, err
+	}
+	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
+	route.ProjectID, route.Behavior, route.ContentPolicy, route.Policy = d.ProjectID, behavior, content, policy
+	return route, nil
+}
 
 type simulationRequest struct {
 	Operation            map[string]json.RawMessage `json:"operation"`
@@ -432,6 +442,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/validate", s.validateDraft)
 	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/activate", s.activateDraft)
 	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/simulate", s.simulateDraft, access.MaxBody(1<<20))
+	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/check-fixtures", s.checkFixtures, access.MaxBody(maxFixtureFileBytes))
 	s.Access.Route(mux, "GET /api/v1/routes", s.routes)
 	s.Access.Route(mux, "POST /api/v1/routes", s.createRoute)
 	s.Access.Route(mux, "PUT /api/v1/routes/{route_id}", s.updateRoute)

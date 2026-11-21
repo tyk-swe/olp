@@ -638,6 +638,69 @@ fallback planned/standby/skipped legs, affinity, capacity headroom, shadow and
 unhealthy targets. Selectors never use attribution; configured session affinity may.
 Capacity/authority can change between preview and serving.
 
+### Check a draft against saved fixtures
+
+Open a saved route draft and choose **Check saved request fixtures**. Select a
+local JSON file, then choose **Compare fixtures**. The check needs an active
+published revision for the same slug and project. It uses the revision that is
+active at the time of the check, even if you started the draft from an older one.
+
+Keep the file local and use only invented requests, names and classifier labels.
+Never copy production prompts, credentials, real identifiers, or personal data
+into it. OLP accepts up to 16 uniquely named fixtures in a 256 KiB JSON file.
+The file is sent only to the management API and is not stored. The check does
+not run inference, tools, classifier routes or selector plugins.
+
+```json
+{
+  "synthetic": true,
+  "fixtures": [
+    {
+      "name": "Structured output",
+      "operation": "generation",
+      "surface": "openai",
+      "mode": "unary",
+      "seed": "regression-suite",
+      "expect_eligible": true,
+      "request": {
+        "model": "replace-with-your-route-slug",
+        "messages": [{"role": "user", "content": "Return a JSON object naming a green square."}],
+        "response_format": {"type": "json_object"},
+        "max_completion_tokens": 128
+      }
+    }
+  ]
+}
+```
+
+Each pair uses one configuration snapshot and the same request, seed, observed
+routing inputs and planner time. It reports changes in eligibility, the first
+planned attempt, selector outcomes that affected the request or could not be
+evaluated, and reasons. Target details include context window estimates where
+available. Optionally set `dialect` and supply `classifier_labels` keyed by
+selector ID. When a needed verdict is absent, the trace says
+`classifier_not_simulated` and the selector is skipped. When the project
+requires attribution labels without defaults, supply synthetic values in each
+fixture's `attribution`.
+
+This is a point-in-time planning check. Pricing, performance and credential
+eligibility can change between runs. Live capacity, spend and circuit state
+are excluded, so a configured spend cap without a reading stays unknown and
+can exclude a target. Checks have no caller API key and cannot verify key-specific
+policies or gateway tool execution.
+
+For CI, use a management token with read scope and access to the draft's project.
+An HTTP 200 response means the comparison ran. Its `passed` field is false if
+any `expect_eligible` assertion failed on the draft. Use `true` to require a
+serving attempt, `false` to require no attempt, or omit the field to only report
+changes. The response includes the baseline revision, draft ETag, planning time
+and per-fixture results without any request bodies.
+
+```sh
+olp api check_route_draft_fixtures DRAFT_ID --body-file fixtures.json --output fixture-report.json &&
+  jq -e '.passed' fixture-report.json
+```
+
 Request history records immutable connection/slot/version/revision/policy/prices,
 retry/fallback/leg/selector/caps, caller/shadow/classifier/probe origin/parent and
 meaningful output timing. No prompts, outputs, secret headers or raw controls.

@@ -11489,6 +11489,364 @@
         ],
         "type": "object"
       },
+      "RouteFixtureFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A local synthetic fixture set. The complete JSON file must not exceed 256 KiB.",
+        "properties": {
+          "synthetic": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Attest that every request, fixture name and classifier label is synthetic."
+          },
+          "fixtures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixture"
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "synthetic",
+          "fixtures"
+        ]
+      },
+      "RouteFixture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_. -]{0,63}$"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "dialect": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Synthetic native request for this operation, surface and mode."
+          },
+          "attribution": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "Optional synthetic attribution labels. Supply any label the key or project policy requires without a default."
+          },
+          "classifier_labels": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run."
+          },
+          "expect_eligible": {
+            "type": "boolean",
+            "description": "Assert whether the draft can plan a serving attempt."
+          }
+        },
+        "required": [
+          "name",
+          "operation",
+          "surface",
+          "mode",
+          "seed",
+          "request"
+        ]
+      },
+      "RouteFixtureReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "published_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "published_revision": {
+            "type": "integer"
+          },
+          "draft_etag": {
+            "type": "string"
+          },
+          "planning_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "live_supply": {
+            "type": "string",
+            "enum": [
+              "not_simulated"
+            ],
+            "description": "Live capacity, spend and circuit state were not read. Configured caps without a spend reading remain unknown."
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "True when all specified draft assertions pass, even if an unasserted fixture changed."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureResult"
+            }
+          }
+        },
+        "required": [
+          "published_revision_id",
+          "published_revision",
+          "draft_etag",
+          "planning_time",
+          "live_supply",
+          "passed",
+          "results"
+        ]
+      },
+      "RouteFixtureResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "published": {
+            "$ref": "#/components/schemas/RouteFixturePlan"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/RouteFixturePlan"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "winner",
+                "eligibility",
+                "selector",
+                "reason"
+              ]
+            }
+          },
+          "expect_eligible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "published",
+          "draft",
+          "changes",
+          "expect_eligible",
+          "passed"
+        ]
+      },
+      "RouteFixturePlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "winner": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteFixtureTarget"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureDecision"
+            }
+          },
+          "selectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureSelector"
+            }
+          },
+          "fallbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FallbackStep"
+            }
+          }
+        },
+        "required": [
+          "winner",
+          "reason",
+          "targets",
+          "selectors",
+          "fallbacks"
+        ]
+      },
+      "RouteFixtureTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "provider_id",
+          "provider_name",
+          "model"
+        ]
+      },
+      "RouteFixtureDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A redacted target decision. Multiple rows may describe a target if its credential slots differed.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "shadow": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context_window": {
+            "$ref": "#/components/schemas/RouteContextWindowPreview"
+          },
+          "context_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "estimated_input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "requested_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "estimate_provenance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "route",
+          "provider_id",
+          "provider_name",
+          "model",
+          "eligible",
+          "shadow",
+          "reason",
+          "context_length",
+          "estimated_input_tokens",
+          "requested_output_tokens",
+          "estimate_provenance"
+        ]
+      },
+      "RouteFixtureSelector": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Includes classifier_not_simulated for a missing verdict and plugin_not_simulated for a plugin predicate."
+          }
+        },
+        "required": [
+          "route",
+          "id",
+          "matched",
+          "outcome"
+        ]
+      },
       "RouteDraftResponse": {
         "properties": {
           "etag": {
@@ -44333,6 +44691,112 @@
           {
             "managementToken": [
               "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}/check-fixtures": {
+      "post": {
+        "operationId": "check_route_draft_fixtures",
+        "description": "Compare an active route revision and its saved draft against a bounded set of synthetic requests using one planning snapshot. Performs no upstream dispatch or storage.",
+        "x-olp-read-only": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteFixtureFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteFixtureReport"
+                }
+              }
+            },
+            "description": "Comparison completed, including any failed assertions"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid or oversized JSON file"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller cannot view the draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Draft not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No published baseline in the draft's project"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid or unsupported fixture"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
             ]
           }
         ],

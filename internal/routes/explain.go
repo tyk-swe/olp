@@ -39,6 +39,7 @@ type simulation struct {
 	snapshot         *routing.Snapshot
 	input            simulationInput
 	inputs           *routinginputs.Inputs
+	now              time.Time
 	demand           *routing.TokenDemand
 	inspectionBudget inspectionBudget
 	// named is the route the request names; every leg parses the request as
@@ -80,9 +81,10 @@ type explanation struct {
 
 // newSimulation reads the shared state a simulation plans with once.
 func (s *Server) newSimulation(ctx context.Context, snapshot *routing.Snapshot, input simulationInput, inputs *routinginputs.Inputs, demand *routing.TokenDemand) *simulation {
-	m := &simulation{ctx: ctx, snapshot: snapshot, input: input, inputs: inputs, demand: demand, supply: s.Supply}
+	now := time.Now()
+	m := &simulation{ctx: ctx, snapshot: snapshot, input: input, inputs: inputs, now: now, demand: demand, supply: s.Supply}
 	if s.Fleet != nil {
-		if circuits, err := s.Fleet.Circuits(ctx, time.Now()); err == nil && len(circuits) > 0 {
+		if circuits, err := s.Fleet.Circuits(ctx, now); err == nil && len(circuits) > 0 {
 			m.unhealthy = func(providerID string) bool { _, open := circuits[providerID]; return open }
 		}
 	}
@@ -195,7 +197,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 		copied.MaxAttempts = nil
 		preferences = &copied
 	}
-	now := time.Now()
+	now := m.now
 	options := routing.Options{
 		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
@@ -373,14 +375,14 @@ func workflowCallerBounds(request *wire.Request) (*limits.WorkflowBounds, bool) 
 }
 
 func (s *Server) workflowInspectionCapability(m *simulation, named, serving routing.Route, key inspectionKeyContext, request *wire.Request) *routing.WorkflowCapability {
-	if m.input.Operation != "generation" || s.WorkflowRelease == nil {
+	if m.input.Operation != "generation" || key.id == "" || s.WorkflowRelease == nil {
 		return nil
 	}
 	caller, valid := workflowCallerBounds(request)
 	if !valid {
 		return nil
 	}
-	return mcp.DescribeWorkflow(m.ctx, s.Workflows, key.authority, s.WorkflowRelease(), named, serving, m.input.Surface, caller, s.Workflows != nil, time.Now())
+	return mcp.DescribeWorkflow(m.ctx, s.Workflows, key.authority, s.WorkflowRelease(), named, serving, m.input.Surface, caller, s.Workflows != nil, m.now)
 }
 
 func workflowModelInspectionCost(m *simulation, provider routing.Provider, target routing.Target, request *wire.Request, capability *routing.WorkflowCapability) error {
@@ -399,7 +401,7 @@ func workflowModelInspectionCost(m *simulation, provider routing.Provider, targe
 	if output == nil || *output < 1 {
 		return workflowUnboundedInspection()
 	}
-	now := time.Now()
+	now := m.now
 	price := m.inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, "generation", now)
 	discount := m.inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
 	bound, priced := price.WorkflowModelCostBound(*metadata.ContextLength, *output, discount)

@@ -23,9 +23,18 @@ func newVendor(t *testing.T) *httptest.Server {
 // through probe, certification and activation.
 func (s *service) activeProvider(owner *harness.Caller, name, endpoint string, projectID string) map[string]any {
 	s.T.Helper()
+	return s.activeProviderWithModelFacts(owner, name, endpoint, projectID, nil)
+}
+
+func (s *service) activeProviderWithModelFacts(owner *harness.Caller, name, endpoint, projectID string, facts map[string]any) map[string]any {
+	s.T.Helper()
+	configuration := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": endpoint + "/v1"}
+	if facts != nil {
+		configuration["options"] = map[string]any{"models": map[string]any{vendor.Model: facts}}
+	}
 	provider := s.Want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          name,
-		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": endpoint + "/v1"},
+		"configuration": configuration,
 		"credential":    vendor.Secret,
 		"model":         vendor.Model,
 		"project_id":    projectID,
