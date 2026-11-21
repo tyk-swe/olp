@@ -41,6 +41,7 @@
   } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import AccountDrainControl from './AccountDrainControl.svelte';
+  import AccountStatus from './AccountStatus.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
   import { managementSections, type CodeManagementKind } from './sections';
@@ -287,23 +288,7 @@
             <dd>{account.id} / {account.principal}</dd>
             <dt>Maximum simultaneous generations</dt>
             <dd>{account.max_concurrency ?? 'Not set'}</dd>
-            <dt>New conversation routing</dt>
-            <dd>
-              {account.draining
-                ? 'Draining'
-                : account.eligible
-                  ? 'Eligible'
-                  : 'Ineligible'}
-              · {account.enabled ? 'enabled' : 'disabled'}
-            </dd>
-            <dt>Remaining eligible pins</dt>
-            <dd>{account.remaining_pins}</dd>
-            <dt>Last activity</dt>
-            <dd>
-              {account.last_activity_at
-                ? formatDate(account.last_activity_at)
-                : 'No activity recorded'}
-            </dd>
+            <AccountStatus {account} />
             <dt>Grant state</dt>
             <dd>
               {account.grant_state === 'lapsed'

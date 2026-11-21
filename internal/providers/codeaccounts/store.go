@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -114,9 +115,7 @@ const remainingPins = `SELECT count(*) FROM olp.code_pins pin
 	JOIN olp.code_pool_keys pk ON pk.pool_id=pa.pool_id AND pk.api_key_id=k.id
 	WHERE pin.account_id=x.id AND pin.principal=x.principal AND b.retired_at IS NULL
 	AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-	AND (k.workload_issuer_id IS NULL OR wi.document->>'enabled'='true')
-	AND u.active AND u.oidc_authorized
-	AND (u.access_scope='global' OR EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=r.project_id))
+	AND ` + codesessions.LiveKeyIssuerCondition + `
 	AND k.policy->'scopes' ? 'inference'
 	AND ((coalesce(nullif(k.policy->'allowed_routes','null'::jsonb),'[]'::jsonb)='[]'::jsonb
 		AND coalesce(nullif(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb)='[]'::jsonb)

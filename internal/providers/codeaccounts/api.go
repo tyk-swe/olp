@@ -80,12 +80,15 @@ func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 		if err := tx.QueryRow(ctx, accountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		action := "code_account.resume"
-		if *input.Draining {
-			action = "code_account.drain"
-		}
-		return httpkit.Detail(body, etag), access.Event{Action: action, Resource: "code_account", ID: id, Project: &project}, nil
+		return httpkit.Detail(body, etag), access.Event{Action: drainAction(*input.Draining), Resource: "code_account", ID: id, Project: &project}, nil
 	})
+}
+
+func drainAction(draining bool) string {
+	if draining {
+		return "code_account.drain"
+	}
+	return "code_account.resume"
 }
 
 type connectionProfile struct {
