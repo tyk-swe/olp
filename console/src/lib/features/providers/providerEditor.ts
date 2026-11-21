@@ -73,7 +73,8 @@ export function emptyProviderOptions(): NonNullable<
     limits: null,
     credential_headers: [],
     parameter_defaults: {},
-    models: {}
+    models: {},
+    shared_token_quotas: []
   };
 }
 

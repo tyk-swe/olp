@@ -180,6 +180,7 @@ func cloneProvider(provider Provider) Provider {
 		p.PendingCommitment.EndsAt = copyPointer(p.PendingCommitment.EndsAt)
 	}
 	p.HealthProbe = copyPointer(p.HealthProbe)
+	p.SharedTokenQuotas = slices.Clone(p.SharedTokenQuotas)
 	p.Slots = slices.Clone(p.Slots)
 	for i := range p.Slots {
 		p.Slots[i] = cloneSlot(p.Slots[i])
@@ -294,6 +295,7 @@ func cloneConfiguration(c Configuration) Configuration {
 	c.Options.Limits = cloneLimits(c.Options.Limits)
 	c.Options.Commitment = copyPointer(c.Options.Commitment)
 	c.Options.HealthProbe = copyPointer(c.Options.HealthProbe)
+	c.Options.SharedTokenQuotas = slices.Clone(c.Options.SharedTokenQuotas)
 	return c
 }
 

@@ -61,6 +61,9 @@ type Options struct {
 	// HealthProbe opts the connection into active health probing, which
 	// sends billable synthetic requests.
 	HealthProbe *routing.HealthProbe `json:"health_probe,omitempty"`
+	// SharedTokenQuotas assigns deployment models to named token quota
+	// groups shared with same-project connections.
+	SharedTokenQuotas []routing.SharedTokenQuota `json:"shared_token_quotas,omitempty"`
 }
 
 // Configuration is the contract's ProviderConfiguration verbatim. A plugin
@@ -223,7 +226,7 @@ func FromProvider(p routing.Provider) Configuration {
 			SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings,
 			CredentialHeaders: append([]string{}, p.CredentialHeaders...), Limits: limitsOf(p.Limits), Models: maps.Clone(p.Models),
 			ParameterDefaults: maps.Clone(p.ParameterDefaults), VendorID: optional(p.VendorID), Commitment: p.Commitment,
-			PluginOptions: p.PluginOptions, HealthProbe: p.HealthProbe,
+			PluginOptions: p.PluginOptions, HealthProbe: p.HealthProbe, SharedTokenQuotas: p.SharedTokenQuotas,
 		},
 	}
 }

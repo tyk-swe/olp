@@ -177,6 +177,8 @@ type Manager struct {
 
 	grantRefreshed func(providerID, credentialID string)
 
+	sharedQuotaSync atomic.Pointer[sharedQuotaSyncFunc]
+
 	mu        sync.RWMutex
 	taskStore taskCapabilityStore
 	authority authorityState
@@ -218,6 +220,17 @@ func NewManager(config ManagerConfig) *Manager {
 		instanceID:       completeness.GatewayInstance(config.Hostname),
 		refreshRequested: map[string]int64{},
 	}
+}
+
+type sharedQuotaSyncFunc func(ctx context.Context, previous, next *routing.View) error
+
+func (m *Manager) SetSharedQuotaSync(sync func(ctx context.Context, previous, next *routing.View) error) {
+	if sync == nil {
+		m.sharedQuotaSync.Store(nil)
+		return
+	}
+	fn := sharedQuotaSyncFunc(sync)
+	m.sharedQuotaSync.Store(&fn)
 }
 
 func (m *Manager) Region() string { return m.region }
@@ -732,6 +745,12 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 	for credentialID, previous := range m.grants {
 		if seeded, ok := candidate.grants[credentialID]; ok && previous.generation >= seeded.generation {
 			candidate.grants[credentialID] = previous
+		}
+	}
+	if sync := m.sharedQuotaSync.Load(); sync != nil {
+		if err := (*sync)(ctx, m.release.Snapshot(), candidate.release.Snapshot()); err != nil {
+			m.mu.Unlock()
+			return false, err
 		}
 	}
 	refreshed := advancedGrants(grantProviders(candidate.release.Snapshot()), m.grants, candidate.grants)

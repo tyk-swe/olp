@@ -2193,6 +2193,14 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
+            },
+            "shared_token_quotas": {
+              "description": "Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.",
+              "items": {
+                "$ref": "#/$defs/SharedTokenQuota"
+              },
+              "maxItems": 2000,
+              "type": "array"
             }
           },
           "type": "object"
@@ -2591,6 +2599,34 @@
           "required": [
             "amount",
             "period"
+          ],
+          "type": "object"
+        },
+        "SharedTokenQuota": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "description": "Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "model": {
+              "description": "Deployment model on this connection that joins the group.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "tokens_per_minute": {
+              "description": "Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "group",
+            "model",
+            "tokens_per_minute"
           ],
           "type": "object"
         },
@@ -11042,6 +11078,14 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
+            },
+            "shared_token_quotas": {
+              "description": "Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.",
+              "items": {
+                "$ref": "#/$defs/SharedTokenQuota"
+              },
+              "maxItems": 2000,
+              "type": "array"
             }
           },
           "type": "object"
@@ -11440,6 +11484,34 @@
           "required": [
             "amount",
             "period"
+          ],
+          "type": "object"
+        },
+        "SharedTokenQuota": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "description": "Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "model": {
+              "description": "Deployment model on this connection that joins the group.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "tokens_per_minute": {
+              "description": "Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "group",
+            "model",
+            "tokens_per_minute"
           ],
           "type": "object"
         },
@@ -28424,6 +28496,14 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
+            },
+            "shared_token_quotas": {
+              "description": "Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.",
+              "items": {
+                "$ref": "#/$defs/SharedTokenQuota"
+              },
+              "maxItems": 2000,
+              "type": "array"
             }
           },
           "type": "object"
@@ -28822,6 +28902,34 @@
           "required": [
             "amount",
             "period"
+          ],
+          "type": "object"
+        },
+        "SharedTokenQuota": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "description": "Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "model": {
+              "description": "Deployment model on this connection that joins the group.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "tokens_per_minute": {
+              "description": "Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "group",
+            "model",
+            "tokens_per_minute"
           ],
           "type": "object"
         },
@@ -46871,6 +46979,14 @@
                 "maxLength": 1024
               },
               "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
+            },
+            "shared_token_quotas": {
+              "description": "Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.",
+              "items": {
+                "$ref": "#/$defs/SharedTokenQuota"
+              },
+              "maxItems": 2000,
+              "type": "array"
             }
           },
           "type": "object"
@@ -47269,6 +47385,34 @@
           "required": [
             "amount",
             "period"
+          ],
+          "type": "object"
+        },
+        "SharedTokenQuota": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "description": "Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "model": {
+              "description": "Deployment model on this connection that joins the group.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "tokens_per_minute": {
+              "description": "Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "group",
+            "model",
+            "tokens_per_minute"
           ],
           "type": "object"
         }

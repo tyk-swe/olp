@@ -59,6 +59,7 @@ type Configuration struct {
 		PluginOptions            map[string]string                `json:"plugin_options,omitempty"`
 		Commitment               *Commitment                      `json:"commitment,omitempty"`
 		HealthProbe              *HealthProbe                     `json:"health_probe,omitempty"`
+		SharedTokenQuotas        []SharedTokenQuota               `json:"shared_token_quotas,omitempty"`
 	} `json:"options"`
 }
 
@@ -122,7 +123,8 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
 		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Commitment: cfg.Options.Commitment,
-		Capabilities: []Capability{},
+		SharedTokenQuotas: cfg.Options.SharedTokenQuotas,
+		Capabilities:      []Capability{},
 	}
 	for _, model := range models {
 		for _, capability := range model.Capabilities {

@@ -403,7 +403,8 @@ it('preserves native provider numbers when exporting a configuration document', 
             limits: null,
             models: {},
             vendor_id: null,
-            parameter_defaults: { seed: 'native-number' }
+            parameter_defaults: { seed: 'native-number' },
+            shared_token_quotas: []
           }
         })
       ]

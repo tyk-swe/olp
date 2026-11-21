@@ -32,6 +32,8 @@ var (
 	providerUsageSource string
 	//go:embed provider_cooldown.lua
 	providerCooldownSource string
+	//go:embed sync_membership.lua
+	syncMembershipSource string
 )
 
 type script struct{ source, digest string }
@@ -51,6 +53,7 @@ var (
 	settleCost         = newScript(settleCostSource)
 	providerUsage      = newScript(providerUsageSource)
 	providerCooldown   = newScript(providerCooldownSource)
+	syncMembership     = newScript(syncMembershipSource)
 )
 
 type Commander interface {

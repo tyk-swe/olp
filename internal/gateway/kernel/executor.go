@@ -245,6 +245,8 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection " + f.exceededLimit() + " was exceeded.", RetryAfter: f.retryAfter}
 		case quota.Slot:
 			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential " + f.exceededLimit() + " was exceeded.", RetryAfter: f.retryAfter}
+		case quota.SharedGroup:
+			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The shared provider token quota " + f.exceededLimit() + " was exceeded.", RetryAfter: f.retryAfter}
 		}
 		return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classBudget:
