@@ -32,23 +32,35 @@ type budgetRequestBody struct {
 	IncreaseID  *string `json:"increase_id"`
 }
 
-func budgetRequestManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) notificationCaller {
+type budgetRequestServers struct {
+	pool         *pgxpool.Pool
+	auth         *secrets.AuthKey
+	keys         *secrets.KeyRing
+	installation string
+}
+
+func newBudgetRequestServers(t *testing.T, pool *pgxpool.Pool) budgetRequestServers {
 	t.Helper()
-	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
-	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+	if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
 		t.Fatal(err)
 	}
+	return budgetRequestServers{pool: pool, auth: auth, keys: keys, installation: installation}
+}
+
+func (s budgetRequestServers) caller(t *testing.T, userID string) notificationCaller {
+	t.Helper()
+	ctx := t.Context()
 	token := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), userID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), userID, s.auth.Digest(secrets.SessionDigest, token)); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	budgets.NewAPI(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)})).Register(mux)
+	budgets.NewAPI(access.New(access.Config{Pool: s.pool, Installation: s.installation, Origin: "https://test.example", Auth: s.auth, Keys: s.keys, Log: slog.New(slog.DiscardHandler)})).Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))
+	csrf := base64.RawURLEncoding.EncodeToString(s.auth.Digest(secrets.CSRFDigest, token))
 	return func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
 		t.Helper()
 		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
@@ -78,6 +90,41 @@ func budgetRequestManagementAs(t *testing.T, pool *pgxpool.Pool, userID string) 
 		}
 		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), body: raw}
 	}
+}
+
+type budgetRequestFixture struct {
+	pool                                                           *pgxpool.Pool
+	ownerID, requesterOneID, requesterTwoID, managerID, outsiderID string
+	owner, requesterOne, requesterTwo, manager, outsider           notificationCaller
+}
+
+func newBudgetRequestFixture(t *testing.T) budgetRequestFixture {
+	t.Helper()
+	pool, _ := harness.Database(t)
+	servers := newBudgetRequestServers(t, pool)
+	f := budgetRequestFixture{
+		pool:           pool,
+		ownerID:        insertBudgetRequestUser(t, pool, "owner", "global"),
+		requesterOneID: insertBudgetRequestUser(t, pool, "developer", "assigned"),
+		requesterTwoID: insertBudgetRequestUser(t, pool, "developer", "assigned"),
+		managerID:      insertBudgetRequestUser(t, pool, "operator", "assigned"),
+		outsiderID:     insertBudgetRequestUser(t, pool, "operator", "assigned"),
+	}
+	f.owner = servers.caller(t, f.ownerID)
+	f.requesterOne = servers.caller(t, f.requesterOneID)
+	f.requesterTwo = servers.caller(t, f.requesterTwoID)
+	f.manager = servers.caller(t, f.managerID)
+	f.outsider = servers.caller(t, f.outsiderID)
+	return f
+}
+
+func (f budgetRequestFixture) project(t *testing.T, dailyCap string) string {
+	t.Helper()
+	project := insertBudgetRequestProject(t, f.pool, f.ownerID, dailyCap)
+	addBudgetRequestMember(t, f.pool, project, f.requesterOneID, "viewer", f.ownerID)
+	addBudgetRequestMember(t, f.pool, project, f.requesterTwoID, "viewer", f.ownerID)
+	addBudgetRequestMember(t, f.pool, project, f.managerID, "manager", f.ownerID)
+	return project
 }
 
 func insertBudgetRequestUser(t *testing.T, pool *pgxpool.Pool, role, scope string) string {
@@ -173,25 +220,27 @@ func runBudgetRequestPair(first, second func() apiResult) (apiResult, apiResult)
 	return <-results, <-results
 }
 
-func TestBudgetIncreaseRequestsApproveConcurrentlyToCombinedCap(t *testing.T) {
+func TestBudgetIncreaseRequests(t *testing.T) {
 	t.Parallel()
-	pool, _ := harness.Database(t)
-	ownerID := insertBudgetRequestUser(t, pool, "owner", "global")
-	project := insertBudgetRequestProject(t, pool, ownerID, "100")
-	other := insertBudgetRequestProject(t, pool, ownerID, "100")
-	requesterOneID := insertBudgetRequestUser(t, pool, "developer", "assigned")
-	requesterTwoID := insertBudgetRequestUser(t, pool, "developer", "assigned")
-	managerID := insertBudgetRequestUser(t, pool, "operator", "assigned")
-	outsiderID := insertBudgetRequestUser(t, pool, "operator", "assigned")
-	addBudgetRequestMember(t, pool, project, requesterOneID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, project, requesterTwoID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, project, managerID, "manager", ownerID)
-	addBudgetRequestMember(t, pool, other, outsiderID, "manager", ownerID)
-	owner := budgetRequestManagementAs(t, pool, ownerID)
-	requesterOne := budgetRequestManagementAs(t, pool, requesterOneID)
-	requesterTwo := budgetRequestManagementAs(t, pool, requesterTwoID)
-	manager := budgetRequestManagementAs(t, pool, managerID)
-	outsider := budgetRequestManagementAs(t, pool, outsiderID)
+	f := newBudgetRequestFixture(t)
+	t.Run("concurrent approvals add to the effective cap", func(t *testing.T) {
+		testBudgetRequestCombinedCap(t, f)
+	})
+	t.Run("stale cap and window approvals are refused", func(t *testing.T) {
+		testBudgetRequestStale(t, f)
+	})
+	t.Run("approvals share the active limit with direct grants", func(t *testing.T) {
+		testBudgetRequestLimitSplit(t, f)
+	})
+}
+
+func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
+	t.Helper()
+	pool := f.pool
+	project := f.project(t, "100")
+	other := insertBudgetRequestProject(t, pool, f.ownerID, "100")
+	addBudgetRequestMember(t, pool, other, f.outsiderID, "manager", f.ownerID)
+	owner, requesterOne, requesterTwo, manager, outsider := f.owner, f.requesterOne, f.requesterTwo, f.manager, f.outsider
 
 	own := createBudgetRequest(t, owner, project, "5")
 	selfApproval := expectBudgetRequestStatus(t, "self approval", owner("POST", budgetRequestPath(own.ID, "approve"), "", ""), http.StatusForbidden)
@@ -269,17 +318,11 @@ func TestBudgetIncreaseRequestsApproveConcurrentlyToCombinedCap(t *testing.T) {
 	}
 }
 
-func TestBudgetIncreaseRequestsRejectStaleCapAndWindow(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.Database(t)
-	ownerID := insertBudgetRequestUser(t, pool, "owner", "global")
-	project := insertBudgetRequestProject(t, pool, ownerID, "100")
-	requesterID := insertBudgetRequestUser(t, pool, "developer", "assigned")
-	managerID := insertBudgetRequestUser(t, pool, "operator", "assigned")
-	addBudgetRequestMember(t, pool, project, requesterID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, project, managerID, "manager", ownerID)
-	requester := budgetRequestManagementAs(t, pool, requesterID)
-	manager := budgetRequestManagementAs(t, pool, managerID)
+func testBudgetRequestStale(t *testing.T, f budgetRequestFixture) {
+	t.Helper()
+	pool := f.pool
+	project := f.project(t, "100")
+	requester, manager := f.requesterOne, f.manager
 
 	staleCap := createBudgetRequest(t, requester, project, "10")
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.projects SET budget_policy='{"daily_cost_limit":"110"}' WHERE id=$1`, project); err != nil {
@@ -343,22 +386,12 @@ func budgetRequestLimitSplit(t *testing.T, results ...apiResult) {
 	}
 }
 
-func TestBudgetIncreaseRequestsShareActiveLimitWithDirectGrants(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.Database(t)
-	ownerID := insertBudgetRequestUser(t, pool, "owner", "global")
-	requesterOneID := insertBudgetRequestUser(t, pool, "developer", "assigned")
-	requesterTwoID := insertBudgetRequestUser(t, pool, "developer", "assigned")
-	managerID := insertBudgetRequestUser(t, pool, "operator", "assigned")
-	owner := budgetRequestManagementAs(t, pool, ownerID)
-	requesterOne := budgetRequestManagementAs(t, pool, requesterOneID)
-	requesterTwo := budgetRequestManagementAs(t, pool, requesterTwoID)
-	manager := budgetRequestManagementAs(t, pool, managerID)
+func testBudgetRequestLimitSplit(t *testing.T, f budgetRequestFixture) {
+	t.Helper()
+	pool := f.pool
+	owner, requesterOne, requesterTwo, manager := f.owner, f.requesterOne, f.requesterTwo, f.manager
 
-	approvalsProject := insertBudgetRequestProject(t, pool, ownerID, "100")
-	addBudgetRequestMember(t, pool, approvalsProject, requesterOneID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, approvalsProject, requesterTwoID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, approvalsProject, managerID, "manager", ownerID)
+	approvalsProject := f.project(t, "100")
 	seedBudgetRequestDirectGrants(t, owner, approvalsProject, 7)
 	first := createBudgetRequest(t, requesterOne, approvalsProject, "20")
 	second := createBudgetRequest(t, requesterTwo, approvalsProject, "30")
@@ -381,9 +414,7 @@ func TestBudgetIncreaseRequestsShareActiveLimitWithDirectGrants(t *testing.T) {
 		t.Fatalf("pending requests after limit split = %d, want the losing request still pending", pending)
 	}
 
-	directProject := insertBudgetRequestProject(t, pool, ownerID, "100")
-	addBudgetRequestMember(t, pool, directProject, requesterOneID, "viewer", ownerID)
-	addBudgetRequestMember(t, pool, directProject, managerID, "manager", ownerID)
+	directProject := f.project(t, "100")
 	seedBudgetRequestDirectGrants(t, owner, directProject, 7)
 	request := createBudgetRequest(t, requesterOne, directProject, "20")
 	directBody := fmt.Sprintf(`{"target":{"kind":"project","id":%q},"window":"day","amount":"5","reason":"urgent grant"}`, directProject)
