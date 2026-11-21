@@ -133,9 +133,7 @@ dispatch a model or tool, reserve budget, or guarantee live admission.
 Former local gateway fixtures exercised unary and streaming workflows for Chat
 Completions, Responses, Anthropic and Gemini, including bounds, target
 certification, approval, authority changes, `typesafe` pruning and compression
-recovery. The caller-filtered discovery fixture is
-`TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
-`internal/gateway/kernel/tool_loop_test.go`.
+recovery, and caller-filtered tool discovery.
 A former process test checked same-key simulation authorization and request bounds for draft and
 published routes, a run and its durable settlement, and rollback with local
 services.

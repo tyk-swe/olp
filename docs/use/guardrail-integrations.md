@@ -228,9 +228,10 @@ Evidence keys:
 - **B**: [`engine_test.go`](../../internal/guardrails/engine_test.go) and
   [`registry_test.go`](../../internal/guardrails/registry_test.go), bounded built-in
   detector and engine fixtures. These are semantic analogues, not vendor adapters.
-- **M**: `guardrails_evaluator_regression_test.go`
-  and `guardrail_platform_test.go`,
-  operator-configured model evaluator routing/accounting; no dedicated vendor proof.
+- **M**: operator-configured model evaluator routing/accounting.
+  [`external_test.go`](../../internal/guardrails/external_test.go) checks that a
+  model evaluator is selected and that recursive evaluation is skipped. The routing
+  and accounting in `modelGuardrail` have no test, and there is no dedicated vendor proof.
 - **W**: [`external.go`](../../internal/guardrails/external.go), inspected shared
   webhook implementation; [`guardrails_test.go`](../../internal/gateway/kernel/guardrails_test.go)
   has a parallel evaluation fixture. No named third-party API compatibility proof.
