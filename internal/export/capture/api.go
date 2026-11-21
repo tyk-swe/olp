@@ -117,13 +117,6 @@ func (u updateRequest) expiry(current *time.Time) *time.Time {
 	return &at
 }
 
-func (u updateRequest) action() string {
-	if u.ExpiresAt.IsSpecified() {
-		return "capture_policy.expiry.update"
-	}
-	return "capture_policy.update"
-}
-
 func (u updateRequest) disablesOnly() bool {
 	return u.Enabled != nil && !*u.Enabled && u.SinkID == nil && u.SampleRatio == nil && u.Include == nil &&
 		u.Redact == nil && u.KeyIDs == nil && u.EndUsers == nil && u.MaxBytes == nil && !u.ExpiresAt.IsSpecified()
@@ -287,8 +280,25 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Detail(policy, policy.ETag), access.Event{Action: input.action(), Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
+		if err := auditExpiry(r, tx, p, current, policy); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		return httpkit.Detail(policy, policy.ETag), access.Event{Action: "capture_policy.update", Resource: "capture_policy", ID: current.ID, Project: current.ProjectID}, nil
 	})
+}
+
+func auditExpiry(r *http.Request, tx pgx.Tx, p authz.Principal, before, after Policy) error {
+	if sameDeadline(before.ExpiresAt, after.ExpiresAt) {
+		return nil
+	}
+	return access.Audit(r.Context(), tx, r, p.Actor(), "capture_policy.expiry.update", "capture_policy", after.ID, "success")
+}
+
+func sameDeadline(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 func revise(ctx context.Context, tx pgx.Tx, input updateRequest, current Policy, settings Settings) (string, error) {
@@ -347,10 +357,6 @@ func readPolicy(ctx context.Context, q database.Queryer, query, id string) (Poli
 func decodePolicy(raw []byte) (Policy, error) {
 	var p Policy
 	err := json.Unmarshal(raw, &p)
-	if p.ExpiresAt != nil {
-		utc := p.ExpiresAt.UTC()
-		p.ExpiresAt = &utc
-	}
 	return p, err
 }
 

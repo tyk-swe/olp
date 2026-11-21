@@ -174,12 +174,11 @@ func (c *Collector) spoil() {
 func (c *Collector) Finish(ctx context.Context, identity Identity, at time.Time) bool {
 	defer c.release()
 	if !beforeExpiry(c.expiresAt, time.Now()) {
-		c.manager.drop(false)
 		return false
 	}
 	record, err := c.record(ctx, identity, at)
 	switch {
-	case errors.Is(err, errClosed):
+	case !beforeExpiry(c.expiresAt, time.Now()), errors.Is(err, errClosed):
 		return false
 	case errors.Is(err, errEmpty):
 		c.manager.dropped.Add(1)
@@ -188,7 +187,7 @@ func (c *Collector) Finish(ctx context.Context, identity Identity, at time.Time)
 		c.manager.drop(c.redactor != nil)
 		return false
 	}
-	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record}, c.expiresAt)
+	return c.manager.enqueue(queued{policyID: c.policyID, etag: c.etag, requestID: c.requestID, projectID: identity.ProjectID, at: at, record: record})
 }
 
 func (c *Collector) record(ctx context.Context, identity Identity, at time.Time) ([]byte, error) {
