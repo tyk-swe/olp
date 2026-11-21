@@ -11545,12 +11545,29 @@
             "additionalProperties": true,
             "description": "Synthetic native request for this operation, surface and mode."
           },
+          "attribution": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "Optional synthetic attribution labels. Supply any label the key or project policy requires without a default."
+          },
           "classifier_labels": {
             "type": "object",
             "maxProperties": 16,
             "additionalProperties": {
               "type": "string",
               "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
             },
             "description": "Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run."
           },

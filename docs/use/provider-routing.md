@@ -642,8 +642,8 @@ Capacity/authority can change between preview and serving.
 
 Open a saved route draft and choose **Check saved request fixtures**. Select a
 local JSON file, then choose **Compare fixtures**. The check needs an active
-published revision for the same slug and project. It uses the latest published
-revision at the time of the check, even if you started the draft from an older one.
+published revision for the same slug and project. It uses the revision that is
+active at the time of the check, even if you started the draft from an older one.
 
 Keep the file local and use only invented requests, names and classifier labels.
 Never copy production prompts, credentials, real identifiers, or personal data
@@ -679,7 +679,9 @@ planned attempt, selector outcomes that affected the request or could not be
 evaluated, and reasons. Target details include context window estimates where
 available. Optionally set `dialect` and supply `classifier_labels` keyed by
 selector ID. When a needed verdict is absent, the trace says
-`classifier_not_simulated` and the selector is skipped.
+`classifier_not_simulated` and the selector is skipped. When the project
+requires attribution labels without defaults, supply synthetic values in each
+fixture's `attribution`.
 
 This is a point-in-time planning check. Pricing, performance and credential
 eligibility can change between runs. Live capacity, spend and circuit state

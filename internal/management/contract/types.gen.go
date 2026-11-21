@@ -15777,6 +15777,9 @@ type RouteFidelityMode string
 
 // RouteFixture defines model for RouteFixture.
 type RouteFixture struct {
+	// Attribution Optional synthetic attribution labels. Supply any label the key or project policy requires without a default.
+	Attribution *map[string]string `json:"attribution,omitempty"`
+
 	// ClassifierLabels Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run.
 	ClassifierLabels *map[string]string `json:"classifier_labels,omitempty"`
 	Dialect          *string            `json:"dialect,omitempty"`

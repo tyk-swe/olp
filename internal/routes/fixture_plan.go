@@ -66,28 +66,55 @@ func (s *Server) fixturePlan(shared simulation, snapshot *routing.Snapshot, inpu
 }
 
 func summarizeFixturePlan(plan explanation, snapshot *routing.Snapshot) fixturePlan {
-	out := fixturePlan{Targets: []fixtureDecision{}, Selectors: []fixtureSelector{}, Fallbacks: plan.Fallbacks}
-	for _, leg := range plan.Legs {
-		for _, selector := range leg.Selectors {
-			out.Selectors = append(out.Selectors, fixtureSelector{leg.Route, selector.ID, selector.Matched, selector.Outcome})
-		}
-		for _, decision := range leg.Decisions {
-			target := fixtureTarget{Route: leg.Route, ProviderID: decision.ProviderID, ProviderName: snapshot.Providers[decision.ProviderID].Name, Model: decision.UpstreamModel}
-			if decision.Attempt != nil && *decision.Attempt == 1 {
-				out.Winner = &target
+	winner := fixtureWinner(plan, snapshot)
+	return fixturePlan{
+		Winner: winner, Reason: noWinnerReason(winner), Fallbacks: plan.Fallbacks,
+		Targets: slices.Collect(func(yield func(fixtureDecision) bool) {
+			for _, leg := range plan.Legs {
+				for _, decision := range leg.Decisions {
+					if !yield(fixtureDecision{
+						fixtureTarget: newFixtureTarget(leg.Route, decision, snapshot), Eligible: decision.Eligible, Shadow: decision.Shadow,
+						Reason: decision.Reason, ContextWindow: decision.ContextWindow, ContextLength: decision.ContextLength,
+						EstimatedInputTokens: decision.EstimatedInputTokens, RequestedOutputTokens: decision.RequestedOutputTokens,
+						EstimateProvenance: decision.EstimateProvenance,
+					}) {
+						return
+					}
+				}
 			}
-			out.Targets = append(out.Targets, fixtureDecision{
-				fixtureTarget: target, Eligible: decision.Eligible, Shadow: decision.Shadow, Reason: decision.Reason,
-				ContextWindow: decision.ContextWindow, ContextLength: decision.ContextLength,
-				EstimatedInputTokens: decision.EstimatedInputTokens, RequestedOutputTokens: decision.RequestedOutputTokens,
-				EstimateProvenance: decision.EstimateProvenance,
-			})
+		}),
+		Selectors: slices.Collect(func(yield func(fixtureSelector) bool) {
+			for _, leg := range plan.Legs {
+				for _, selector := range leg.Selectors {
+					if !yield(fixtureSelector{leg.Route, selector.ID, selector.Matched, selector.Outcome}) {
+						return
+					}
+				}
+			}
+		}),
+	}
+}
+
+func fixtureWinner(plan explanation, snapshot *routing.Snapshot) *fixtureTarget {
+	for _, leg := range plan.Legs {
+		for _, decision := range leg.Decisions {
+			if decision.Attempt != nil && *decision.Attempt == 1 {
+				return new(newFixtureTarget(leg.Route, decision, snapshot))
+			}
 		}
 	}
-	if out.Winner == nil {
-		out.Reason = new(routing.NoEligibleTargets)
+	return nil
+}
+
+func newFixtureTarget(route string, decision inspectedDecision, snapshot *routing.Snapshot) fixtureTarget {
+	return fixtureTarget{Route: route, ProviderID: decision.ProviderID, ProviderName: snapshot.Providers[decision.ProviderID].Name, Model: decision.UpstreamModel}
+}
+
+func noWinnerReason(winner *fixtureTarget) *string {
+	if winner != nil {
+		return nil
 	}
-	return out
+	return new(routing.NoEligibleTargets)
 }
 
 func diffFixturePlans(before, after fixturePlan) []string {

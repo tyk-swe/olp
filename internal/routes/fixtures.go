@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,6 +38,7 @@ type routeFixture struct {
 	Dialect          string            `json:"dialect"`
 	Seed             string            `json:"seed"`
 	Request          json.RawMessage   `json:"request"`
+	Attribution      map[string]string `json:"attribution"`
 	ClassifierLabels map[string]string `json:"classifier_labels"`
 	ExpectEligible   *bool             `json:"expect_eligible"`
 }
@@ -44,7 +46,7 @@ type routeFixture struct {
 func (f routeFixture) input() simulationInput {
 	return simulationInput{
 		Operation: f.Operation, Surface: f.Surface, Mode: f.Mode, Dialect: f.Dialect,
-		Seed: f.Seed, Request: f.Request, ClassifierLabels: f.ClassifierLabels,
+		Seed: f.Seed, Request: f.Request, Attribution: f.Attribution, ClassifierLabels: f.ClassifierLabels,
 	}
 }
 
@@ -72,7 +74,7 @@ func (f fixtureFile) validate() error {
 			return httpkit.Invalid(field+".request", "Provide a synthetic native request object.")
 		}
 		if err := validSimulationLabels(item.input()); err != nil {
-			return httpkit.Invalid(field+".classifier_labels", "Use at most 16 labels with names of 1 to 64 bytes and values of at most 256 bytes.")
+			return httpkit.Invalid(field, "Use at most 16 attribution labels and 16 classifier labels, with names of 1 to 64 bytes and values of at most 256 bytes.")
 		}
 	}
 	return nil
@@ -139,10 +141,7 @@ func (s *Server) checkFixtures(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	passed := true
-	for _, result := range results {
-		passed = passed && result.Passed
-	}
+	passed := !slices.ContainsFunc(results, func(result fixtureResult) bool { return !result.Passed })
 	return httpkit.OK(fixtureReport{
 		PublishedRevisionID: published.RevisionID, PublishedRevision: published.Revision, DraftETag: d.ETag,
 		PlanningTime: shared.now, LiveSupply: "not_simulated", Passed: passed, Results: results,

@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,10 @@ func TestRouteFixtureComparisonKeepsPlainTextAndFlagsStructuredOutput(t *testing
 		"name": "fixtures in CI", "scopes": []string{"read"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 	}, harness.Idempotent(), http.StatusCreated)
 	reader := &harness.Caller{Name: "read-only automation", Token: readToken["secret"].(string)}
+	policy := s.Want(owner, "GET", "/api/v1/projects/"+project+"/attribution-policy", nil, nil, http.StatusOK)
+	s.Want(owner, "PUT", "/api/v1/projects/"+project+"/attribution-policy", map[string]any{
+		"policy": map[string]any{"required_attribution_keys": []string{"team"}},
+	}, harness.Idempotent(harness.ETag(policy)), http.StatusOK)
 	beforeCalls, beforeAudit := calls.Load(), fixtureAuditCount(t, s)
 	result := s.Want(reader, "POST", path+"/check-fixtures", body, nil, http.StatusOK)
 	if result["passed"] != false || result["published_revision_id"] != published["revision_id"] || result["draft_etag"] != draft["etag"] || result["live_supply"] != "not_simulated" {
@@ -98,8 +103,17 @@ func TestRouteFixtureComparisonKeepsPlainTextAndFlagsStructuredOutput(t *testing
 	body["synthetic"] = false
 	s.Want(reader, "POST", path+"/check-fixtures", body, nil, http.StatusUnprocessableEntity)
 	body["synthetic"] = true
-	body["fixtures"] = slices.Repeat(body["fixtures"].([]any), 9)
-	s.Want(reader, "POST", path+"/check-fixtures", body, nil, http.StatusUnprocessableEntity)
+	plainRequest := body["fixtures"].([]any)[1].(map[string]any)["request"].(map[string]any)
+	body["fixtures"] = slices.Collect(func(yield func(any) bool) {
+		for i := range 17 {
+			if !yield(syntheticFixture(fmt.Sprintf("Fixture %d", i), plainRequest)) {
+				return
+			}
+		}
+	})
+	if problem := s.Want(reader, "POST", path+"/check-fixtures", body, nil, http.StatusUnprocessableEntity); problem["errors"].(map[string]any)["fixtures"] == nil {
+		t.Fatalf("17 distinct fixtures blamed %v, want the fixture count", problem["errors"])
+	}
 	s.Want(reader, "POST", path+"/check-fixtures", map[string]any{"synthetic": true, "fixtures": []any{strings.Repeat("x", 256<<10)}}, nil, http.StatusBadRequest)
 }
 
@@ -110,10 +124,14 @@ func fixtureComparisonFile(slug string) map[string]any {
 	}
 	structured := maps.Clone(request)
 	structured["response_format"] = map[string]string{"type": "json_object"}
-	fixture := func(name string, sample map[string]any) map[string]any {
-		return map[string]any{"name": name, "operation": "generation", "surface": "openai", "mode": "unary", "seed": "same-seed", "expect_eligible": true, "request": sample}
+	return map[string]any{"synthetic": true, "fixtures": []any{syntheticFixture("Structured output", structured), syntheticFixture("Plain text", request)}}
+}
+
+func syntheticFixture(name string, request map[string]any) map[string]any {
+	return map[string]any{
+		"name": name, "operation": "generation", "surface": "openai", "mode": "unary", "seed": "same-seed",
+		"attribution": map[string]string{"team": "synthetic"}, "expect_eligible": true, "request": request,
 	}
-	return map[string]any{"synthetic": true, "fixtures": []any{fixture("Structured output", structured), fixture("Plain text", request)}}
 }
 
 func fixtureAuditCount(t *testing.T, s *service) int {

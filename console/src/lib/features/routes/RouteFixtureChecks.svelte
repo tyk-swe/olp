@@ -64,7 +64,7 @@
 >
   <h2 id="fixture-heading">Check saved request fixtures</h2>
   <p id="fixture-file-help">
-    Compare the saved draft with the latest published revision. Use a local JSON
+    Compare the saved draft with the active published revision. Use a local JSON
     file with up to 16 synthetic fixtures (256 KiB total). Do not include real
     prompts, secrets or personal data. The check sends no upstream requests and
     does not store the file or request bodies.
