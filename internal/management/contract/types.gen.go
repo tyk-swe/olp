@@ -385,6 +385,24 @@ func (e ApiKeyBudgetResponseCostBasis) Valid() bool {
 	}
 }
 
+// Defines values for ApiKeyDetailResponseActiveOverlapsObservationStatus.
+const (
+	Degraded ApiKeyDetailResponseActiveOverlapsObservationStatus = "degraded"
+	Ok       ApiKeyDetailResponseActiveOverlapsObservationStatus = "ok"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyDetailResponseActiveOverlapsObservationStatus enum.
+func (e ApiKeyDetailResponseActiveOverlapsObservationStatus) Valid() bool {
+	switch e {
+	case Degraded:
+		return true
+	case Ok:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApiKeyDetailResponseCostBasis.
 const (
 	ApiKeyDetailResponseCostBasisCharge ApiKeyDetailResponseCostBasis = "charge"
@@ -8207,10 +8225,19 @@ type ApiKeyBudgetWindowResponse struct {
 
 // ApiKeyDetailResponse defines model for ApiKeyDetailResponse.
 type ApiKeyDetailResponse struct {
-	// ActiveOverlaps Previous secret lookup segments and their remaining authentication deadlines. Digests and secrets are never returned.
+	// ActiveOverlaps Previous secret lookup segments and their remaining authentication deadlines. Key detail also includes best-effort observation evidence. Digests and secrets are never returned.
 	ActiveOverlaps *[]struct {
 		ExpiresAt time.Time `json:"expires_at"`
-		LookupId  string    `json:"lookup_id"`
+
+		// LastObservedUse Key detail only. Latest observed admitted HTTP generation request using this overlap, or null when none was recorded.
+		LastObservedUse nullable.Nullable[time.Time] `json:"last_observed_use,omitempty"`
+
+		// LastRecordingErrorAt Key detail only. Latest request timestamp affected by a recording failure, or null.
+		LastRecordingErrorAt nullable.Nullable[time.Time] `json:"last_recording_error_at,omitempty"`
+		LookupId             string                       `json:"lookup_id"`
+
+		// ObservationStatus Key detail only. Degraded means that uses of this overlap may have been missed.
+		ObservationStatus *ApiKeyDetailResponseActiveOverlapsObservationStatus `json:"observation_status,omitempty"`
 	} `json:"active_overlaps,omitempty"`
 
 	// AllowProviderState Permits stateful provider resources (stored responses, background
@@ -8303,6 +8330,9 @@ type ApiKeyDetailResponse struct {
 	// WorkloadMapping Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret.
 	WorkloadMapping nullable.Nullable[string] `json:"workload_mapping,omitempty"`
 }
+
+// ApiKeyDetailResponseActiveOverlapsObservationStatus Key detail only. Degraded means that uses of this overlap may have been missed.
+type ApiKeyDetailResponseActiveOverlapsObservationStatus string
 
 // ApiKeyDetailResponseCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
 type ApiKeyDetailResponseCostBasis string

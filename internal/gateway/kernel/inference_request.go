@@ -299,6 +299,9 @@ func (q inferenceRequest) run(authority keyauthority.Authority, parsed *wire.Req
 		q.refuse(e)
 		return
 	}
+	if x.OperationName() == "generation" {
+		s.ObserveAdmittedGeneration(x, authority)
+	}
 	q.respond(ctx, authority, parsed)
 }
 

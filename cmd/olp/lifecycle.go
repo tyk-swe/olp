@@ -91,6 +91,7 @@ type running struct {
 
 	background, delivered sync.WaitGroup
 	metadata              *delivery.DeliveryRun
+	overlapsStopped       chan struct{}
 	probesStopped         chan struct{}
 	workersStopped        func()
 	listeners             []boundListener
@@ -117,6 +118,13 @@ func (r *running) startTasks() {
 	core.rt.Start(context.WithoutCancel(r.root), r.grantRefreshed())
 	if r.serving.monitor != nil {
 		r.background.Go(r.supervise(func() { r.serving.monitor.Run(r.auxiliary) }))
+	}
+	if recorder := r.serving.overlaps; recorder != nil {
+		r.overlapsStopped = make(chan struct{})
+		r.background.Go(r.supervise(func() {
+			defer close(r.overlapsStopped)
+			recorder.Run(r.auxiliary)
+		}))
 	}
 	sources := r.observed()
 	r.background.Go(r.supervise(func() { r.health.Run(r.auxiliary, sources, log) }))
@@ -261,6 +269,9 @@ func (r *running) shutdown() {
 	r.stopAuxiliary()
 	drainListeners(shutdown, r.listeners, accounting)
 	r.cancelRequests()
+	if r.overlapsStopped != nil && awaitPlane(shutdown, func() { <-r.overlapsStopped }, log, "API key overlap recorder") {
+		r.serving.overlaps.Flush(shutdown)
+	}
 	r.drainShadows(shutdown)
 	drainProbes(shutdown, r.stopProbes, r.probesStopped, accounting, log)
 	// Accepted requests and probes have stopped producing while their live

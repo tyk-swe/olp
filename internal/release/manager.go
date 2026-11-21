@@ -896,6 +896,7 @@ func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authori
 			overlap := *record
 			overlap.digest = digest
 			overlap.expiresAt = &until
+			overlap.authority.SecretOverlap = &keyauthority.SecretOverlap{LookupID: lookup, ExpiresAt: until}
 			state.keys[lookup] = &overlap
 		}
 	}
