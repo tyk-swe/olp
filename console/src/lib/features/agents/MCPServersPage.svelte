@@ -13,6 +13,7 @@
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import MCPServerEditor from './MCPServerEditor.svelte';
+  import MCPCatalogReview from './MCPCatalogReview.svelte';
   import {
     listServers,
     getServer,
@@ -163,6 +164,11 @@
         <summary>Certified tool catalog</summary>
         <pre class="code-block">{JSON.stringify(current.catalog, null, 2)}</pre>
       </details>
+    {/if}
+    {#if current && !current.retired_at && current.transport !== 'stdio' && access.allows('POST /api/v1/mcp-servers/{server_id}/catalog-preview')}
+      {#key `${current.id}:${current.etag}`}
+        <MCPCatalogReview {current} onsaved={saved} />
+      {/key}
     {/if}
     {#if !current?.retired_at && access.allows(current ? 'PUT /api/v1/mcp-servers/{server_id}' : 'POST /api/v1/mcp-servers')}
       {#key `${current?.id ?? 'new'}:${editorVersion}`}

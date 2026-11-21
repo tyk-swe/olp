@@ -208,6 +208,44 @@ describe('server and execution HTTP contracts', () => {
     ).rejects.toMatchObject({ problem: { status: 409 } });
   });
 
+  it('previews a catalog without write identity and approves only the reviewed discovery', async () => {
+    const preview: api.MCPCatalogPreview = {
+      server_id: id,
+      etag: 'before',
+      revision_id: 'revision-a',
+      revision: 1,
+      saved_protocol_version: '2025-11-25',
+      saved_digest: 'a'.repeat(64),
+      discovered_protocol_version: '2025-11-25',
+      discovered_digest: 'b'.repeat(64),
+      added: [],
+      removed: [],
+      modified: [],
+      toolsets: []
+    };
+    serve(async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith('/catalog-preview')) {
+        route(request, 'POST', `/api/v1/mcp-servers/${id}/catalog-preview`);
+        expect(request.headers.has('If-Match')).toBe(false);
+        expect(request.headers.has('Idempotency-Key')).toBe(false);
+        return json(preview);
+      }
+      route(request, 'POST', `/api/v1/mcp-servers/${id}/catalog-approval`);
+      expect(request.headers.get('If-Match')).toBe('"before"');
+      expect(request.headers.get('Idempotency-Key')).toBe('catalog-write');
+      expect(await request.json()).toEqual({
+        protocol_version: '2025-11-25',
+        digest: 'b'.repeat(64)
+      });
+      return json({ ...server, revision: 2 });
+    });
+    expect(await api.previewServerCatalog(id)).toEqual(preview);
+    expect(
+      (await api.approveServerCatalog(preview, 'catalog-write')).revision
+    ).toBe(2);
+  });
+
   it('keeps project, key and cursor filters on execution history and omits blank filters', async () => {
     serve((request) => {
       route(request, 'GET', '/api/v1/mcp-tool-calls');

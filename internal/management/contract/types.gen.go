@@ -442,6 +442,30 @@ func (e ApiKeyDetailResponseEndUserSource) Valid() bool {
 	}
 }
 
+// Defines values for ApproveMCPServerCatalogRequestProtocolVersion.
+const (
+	ApproveMCPServerCatalogRequestProtocolVersionN20241105 ApproveMCPServerCatalogRequestProtocolVersion = "2024-11-05"
+	ApproveMCPServerCatalogRequestProtocolVersionN20250326 ApproveMCPServerCatalogRequestProtocolVersion = "2025-03-26"
+	ApproveMCPServerCatalogRequestProtocolVersionN20250618 ApproveMCPServerCatalogRequestProtocolVersion = "2025-06-18"
+	ApproveMCPServerCatalogRequestProtocolVersionN20251125 ApproveMCPServerCatalogRequestProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the ApproveMCPServerCatalogRequestProtocolVersion enum.
+func (e ApproveMCPServerCatalogRequestProtocolVersion) Valid() bool {
+	switch e {
+	case ApproveMCPServerCatalogRequestProtocolVersionN20241105:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20250326:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20250618:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttemptInteractionMetadataClientState.
 const (
 	AttemptInteractionMetadataClientStateActionable        AttemptInteractionMetadataClientState = "actionable"
@@ -4246,6 +4270,72 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPCatalogModifiedToolChangedFields.
+const (
+	Description MCPCatalogModifiedToolChangedFields = "description"
+	InputSchema MCPCatalogModifiedToolChangedFields = "input_schema"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogModifiedToolChangedFields enum.
+func (e MCPCatalogModifiedToolChangedFields) Valid() bool {
+	switch e {
+	case Description:
+		return true
+	case InputSchema:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPCatalogPreviewResponseDiscoveredProtocolVersion.
+const (
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20241105 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2024-11-05"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250326 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-03-26"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250618 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-06-18"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20251125 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogPreviewResponseDiscoveredProtocolVersion enum.
+func (e MCPCatalogPreviewResponseDiscoveredProtocolVersion) Valid() bool {
+	switch e {
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20241105:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250326:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250618:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPCatalogPreviewResponseSavedProtocolVersion.
+const (
+	MCPCatalogPreviewResponseSavedProtocolVersionN20241105 MCPCatalogPreviewResponseSavedProtocolVersion = "2024-11-05"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20250326 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-03-26"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20250618 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-06-18"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20251125 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogPreviewResponseSavedProtocolVersion enum.
+func (e MCPCatalogPreviewResponseSavedProtocolVersion) Valid() bool {
+	switch e {
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20241105:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20250326:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20250618:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPGrantAuthorizationState.
 const (
 	MCPGrantAuthorizationStateActive  MCPGrantAuthorizationState = "active"
@@ -4371,22 +4461,22 @@ func (e MCPIdentityDecisionOutcome) Valid() bool {
 
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
-	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
-	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
-	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
-	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
+	MCPRegisteredCatalogProtocolVersionN20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
+	MCPRegisteredCatalogProtocolVersionN20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
+	MCPRegisteredCatalogProtocolVersionN20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
+	MCPRegisteredCatalogProtocolVersionN20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
 )
 
 // Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
 func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 	switch e {
-	case N20241105:
+	case MCPRegisteredCatalogProtocolVersionN20241105:
 		return true
-	case N20250326:
+	case MCPRegisteredCatalogProtocolVersionN20250326:
 		return true
-	case N20250618:
+	case MCPRegisteredCatalogProtocolVersionN20250618:
 		return true
-	case N20251125:
+	case MCPRegisteredCatalogProtocolVersionN20251125:
 		return true
 	default:
 		return false
@@ -8499,6 +8589,18 @@ type AppliedRoutingPolicy struct {
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
+// ApproveMCPServerCatalogRequest defines model for ApproveMCPServerCatalogRequest.
+type ApproveMCPServerCatalogRequest struct {
+	// Digest Catalog digest discovered by the reviewed catalog preview.
+	Digest string `json:"digest"`
+
+	// ProtocolVersion Protocol version discovered by the reviewed catalog preview.
+	ProtocolVersion ApproveMCPServerCatalogRequestProtocolVersion `json:"protocol_version"`
+}
+
+// ApproveMCPServerCatalogRequestProtocolVersion Protocol version discovered by the reviewed catalog preview.
+type ApproveMCPServerCatalogRequestProtocolVersion string
+
 // AttemptInteractionMetadata Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
 type AttemptInteractionMetadata struct {
 	ClientState   AttemptInteractionMetadataClientState   `json:"client_state"`
@@ -12338,6 +12440,53 @@ type LimitTemplates map[string]EndUserLimits
 type LoginRequest struct {
 	Email    string  `json:"email"`
 	Password *string `json:"password,omitempty"`
+}
+
+// MCPCatalogModifiedTool defines model for MCPCatalogModifiedTool.
+type MCPCatalogModifiedTool struct {
+	ChangedFields         []MCPCatalogModifiedToolChangedFields `json:"changed_fields"`
+	DiscoveredDescription string                                `json:"discovered_description"`
+	DiscoveredInputSchema map[string]interface{}                `json:"discovered_input_schema"`
+	Name                  string                                `json:"name"`
+	SavedDescription      string                                `json:"saved_description"`
+	SavedInputSchema      map[string]interface{}                `json:"saved_input_schema"`
+}
+
+// MCPCatalogModifiedToolChangedFields defines model for MCPCatalogModifiedTool.ChangedFields.
+type MCPCatalogModifiedToolChangedFields string
+
+// MCPCatalogPreviewResponse defines model for MCPCatalogPreviewResponse.
+type MCPCatalogPreviewResponse struct {
+	Added                     []MCPRegisteredTool                                `json:"added"`
+	DiscoveredDigest          string                                             `json:"discovered_digest"`
+	DiscoveredProtocolVersion MCPCatalogPreviewResponseDiscoveredProtocolVersion `json:"discovered_protocol_version"`
+	Etag                      openapi_types.UUID                                 `json:"etag"`
+	Modified                  []MCPCatalogModifiedTool                           `json:"modified"`
+	Removed                   []MCPRegisteredTool                                `json:"removed"`
+	Revision                  int64                                              `json:"revision"`
+	RevisionId                openapi_types.UUID                                 `json:"revision_id"`
+	SavedDigest               string                                             `json:"saved_digest"`
+	SavedProtocolVersion      MCPCatalogPreviewResponseSavedProtocolVersion      `json:"saved_protocol_version"`
+	ServerId                  openapi_types.UUID                                 `json:"server_id"`
+
+	// Toolsets Visible published toolsets whose current revision references a removed or modified tool on this server.
+	Toolsets []MCPCatalogToolsetReference `json:"toolsets"`
+}
+
+// MCPCatalogPreviewResponseDiscoveredProtocolVersion defines model for MCPCatalogPreviewResponse.DiscoveredProtocolVersion.
+type MCPCatalogPreviewResponseDiscoveredProtocolVersion string
+
+// MCPCatalogPreviewResponseSavedProtocolVersion defines model for MCPCatalogPreviewResponse.SavedProtocolVersion.
+type MCPCatalogPreviewResponseSavedProtocolVersion string
+
+// MCPCatalogToolsetReference defines model for MCPCatalogToolsetReference.
+type MCPCatalogToolsetReference struct {
+	Id         openapi_types.UUID `json:"id"`
+	Name       string             `json:"name"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+
+	// Tools Certified tool names referenced by this published toolset that the live catalog removes or modifies.
+	Tools []string `json:"tools"`
 }
 
 // MCPDelegationConfiguration defines model for MCPDelegationConfiguration.
@@ -18832,6 +18981,12 @@ type UpdateMcpServerParams struct {
 	IfMatch        string `json:"If-Match"`
 }
 
+// ApproveMcpServerCatalogParams defines parameters for ApproveMcpServerCatalog.
+type ApproveMcpServerCatalogParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
 // ListMcpToolCallsParams defines parameters for ListMcpToolCalls.
 type ListMcpToolCallsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -20553,6 +20708,9 @@ type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
+
+// ApproveMcpServerCatalogJSONRequestBody defines body for ApproveMcpServerCatalog for application/json ContentType.
+type ApproveMcpServerCatalogJSONRequestBody = ApproveMCPServerCatalogRequest
 
 // StartMcpGrantEnrollmentJSONRequestBody defines body for StartMcpGrantEnrollment for application/json ContentType.
 type StartMcpGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest
