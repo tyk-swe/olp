@@ -28,6 +28,7 @@ func (s *API) Register(mux *http.ServeMux) {
 	s.route(mux, "GET /api/v1/usage/unpriced-breakdown", s.unpricedBreakdown)
 	s.route(mux, "GET /api/v1/usage/time-series", s.usageTimeSeries)
 	s.route(mux, "GET /api/v1/usage/completeness", s.usageCompleteness)
+	s.route(mux, "GET /api/v1/usage/comparison", s.usageComparison)
 	s.route(mux, "GET /api/v1/usage/selector-savings", s.selectorSavings)
 	s.route(mux, "GET /api/v1/usage/shadow-experiments", s.shadowExperiments)
 	s.stream(mux, "GET /api/v1/requests/export.csv", s.exportRequestsCSV)

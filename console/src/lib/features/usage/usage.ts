@@ -83,6 +83,22 @@ export async function usageCompleteness(
   return unwrap({ data, error, response });
 }
 
+export type UsageComparisonFilters = UsageFilters & { project_id: string };
+
+export async function usageComparison(
+  filters: UsageComparisonFilters,
+  signal?: AbortSignal
+) {
+  return unwrap(
+    await apiClient.GET('/api/v1/usage/comparison', {
+      params: {
+        query: { ...compactQuery(filters), project_id: filters.project_id }
+      },
+      signal
+    })
+  );
+}
+
 export async function unpricedBreakdown(
   filters: UsageFilters,
   signal?: AbortSignal

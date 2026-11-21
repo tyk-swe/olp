@@ -14811,6 +14811,124 @@
         ],
         "type": "object"
       },
+      "UsageComparisonResponse": {
+        "type": "object",
+        "required": [
+          "previous",
+          "current",
+          "status",
+          "currency",
+          "items"
+        ],
+        "properties": {
+          "previous": {
+            "$ref": "#/components/schemas/UsageComparisonPeriod"
+          },
+          "current": {
+            "$ref": "#/components/schemas/UsageComparisonPeriod"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "incomplete",
+              "incompatible_currency",
+              "no_priced_usage"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageRouteSpendChange"
+            },
+            "maxItems": 25
+          }
+        }
+      },
+      "UsageComparisonPeriod": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "completeness",
+          "subtotals"
+        ],
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/UsageCompletenessResponse"
+          },
+          "subtotals": {
+            "type": "array",
+            "description": "Observed estimated cost by recorded currency. Missing costs are not represented by zero.",
+            "items": {
+              "$ref": "#/components/schemas/UsageCostSubtotal"
+            }
+          }
+        }
+      },
+      "UsageCostSubtotal": {
+        "type": "object",
+        "required": [
+          "currency",
+          "estimated_cost"
+        ],
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": "string"
+          }
+        }
+      },
+      "UsageRouteSpendChange": {
+        "type": "object",
+        "required": [
+          "route",
+          "previous_cost",
+          "current_cost",
+          "change",
+          "percent_change"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "previous_cost": {
+            "type": "string"
+          },
+          "current_cost": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string"
+          },
+          "percent_change": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Percent change, rounded to six decimal places, or null when the previous amount is zero."
+          }
+        }
+      },
       "UsageCompletenessResponse": {
         "properties": {
           "complete": {
@@ -47233,6 +47351,135 @@
         "tags": [
           "usage"
         ]
+      }
+    },
+    "/api/v1/usage/comparison": {
+      "get": {
+        "operationId": "usage_comparison",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageComparisonResponse"
+                }
+              }
+            },
+            "description": "Observed subtotals, accounting completeness, and comparable route changes if available"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ],
+        "description": "Compare recorded estimated costs by route against the immediately preceding period of equal length. Both range bounds are UTC midnights. The start is inclusive, the end exclusive, and the range must cover 1 to 31 closed days. Route changes are returned only for complete periods with compatible currency."
       }
     },
     "/api/v1/usage/completeness": {

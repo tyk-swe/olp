@@ -89,6 +89,47 @@ func TestUsagePagingParametersAreBounded(t *testing.T) {
 	}
 }
 
+func TestUsageComparisonRequiresAProjectAndClosedUTCDays(t *testing.T) {
+	const project = "0d2f5f4e-2b8a-4a51-8f3c-5c7a3e9b1d20"
+	closedRange := "start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z"
+	api := &API{}
+	for _, test := range []struct {
+		note, query, code string
+		principal         authz.Principal
+		status            int
+	}{
+		{"missing project", closedRange, "invalid_filter", authz.Principal{AllProjects: true}, 400},
+		{"repeated project", closedRange + "&project_id=" + project + "&project_id=" + project, "invalid_filter", authz.Principal{AllProjects: true}, 400},
+		{"inaccessible project", closedRange + "&project_id=" + project, "not_found", authz.Principal{}, 404},
+	} {
+		t.Run(test.note, func(t *testing.T) {
+			_, err := api.usageComparison(usageRequest(t, test.query), test.principal)
+			if got := usageProblem(t, problem(err)); got.Status != test.status || got.Code != test.code {
+				t.Fatalf("HTTP %d %s, want %d %s", got.Status, got.Code, test.status, test.code)
+			}
+		})
+	}
+	end := time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)
+	now := end.Add(12 * time.Hour)
+	for _, days := range []int{1, 31} {
+		start := end.AddDate(0, 0, -days)
+		previous, err := comparisonBaseline(Filters{Start: start, End: end}, now)
+		if err != nil || !previous.Start.Equal(start.AddDate(0, 0, -days)) || !previous.End.Equal(start) {
+			t.Errorf("%d closed days gave previous range %s to %s (%v)", days, previous.Start, previous.End, err)
+		}
+	}
+	for _, rangeFilter := range []Filters{
+		{Start: end, End: end.AddDate(0, 0, 1)},
+		{Start: end.Add(-time.Hour), End: end},
+		{Start: end.AddDate(0, 0, -32), End: end},
+		{Start: end.AddDate(0, 0, -2).Add(time.Nanosecond), End: end},
+	} {
+		if _, err := comparisonBaseline(rangeFilter, now); err == nil {
+			t.Errorf("accepted non-comparable range %s to %s", rangeFilter.Start, rangeFilter.End)
+		}
+	}
+}
+
 func TestRequestFiltersApplyAttribution(t *testing.T) {
 	key, value, bad := "team", "billing", "not a key!"
 	if problem := usageProblem(t, RequestFilters{AttributionValue: &value}.validate()); problem.Status != 400 || problem.Code != "invalid_filter" {
