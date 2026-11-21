@@ -146,7 +146,7 @@ connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 | --- | --- | --- |
 | `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below; also supports [workload-identity wrapped keys](external-secrets.md). |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first-owner setup on `all` or `control` | Random 32–256-byte token for one-time owner setup. Read on every setup attempt, so it may be mounted after start or removed after setup. A missing, unreadable or wrongly sized file makes setup report that no token is configured. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first-owner setup on `all` or `control` | Random 32–256-byte token for one-time owner setup. Read on every setup attempt, so it may be mounted after start or removed after setup. A missing, unreadable or wrongly sized file makes setup report that no token is configured. The final path component must be a regular file. For projected Kubernetes Secrets, point to the token file under `..data`. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
 ```json

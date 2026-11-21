@@ -134,14 +134,10 @@ func TestInitSecretsProducesAStartableInstallationAndKeepsExistingFiles(t *testi
 		if err := os.WriteFile(filepath.Join(dir, revision, "olp_bootstrap_token"), []byte(token+"\n"), 0o440); err != nil {
 			t.Fatal(err)
 		}
-		projectedFile := filepath.Join(dir, "olp_bootstrap_token")
 		if err := os.Symlink(revision, filepath.Join(dir, "..data")); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink("..data/olp_bootstrap_token", projectedFile); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("OLP_BOOTSTRAP_TOKEN_FILE", projectedFile)
+		t.Setenv("OLP_BOOTSTRAP_TOKEN_FILE", filepath.Join(dir, "..data", "olp_bootstrap_token"))
 		var printed bytes.Buffer
 		if err := setupToken(os.Getenv, &printed); err != nil {
 			t.Fatal(err)
