@@ -67,9 +67,16 @@ type dispatchHold struct {
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
+func generationOrdinal(x *Call) int64 {
+	if x == nil || x.request.release == nil || x.request.release.Snapshot() == nil {
+		return 0
+	}
+	return x.request.release.Snapshot().Generation().Ordinal
+}
+
 func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time) gateResult {
 	if x.workflow != nil {
-		gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority)
+		gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority, attempt.UpstreamModel, generationOrdinal(x))
 		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
 			for _, owner := range quota.AttemptCaps(x.Route, provider, slot) {
 				if owner.Limits != nil {
@@ -86,7 +93,7 @@ func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attem
 		}
 		return gateResult{verdict: gateUnmeterable, quota: caps.quota}
 	}
-	gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority)
+	gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority, attempt.UpstreamModel, generationOrdinal(x))
 	if gate.hold != nil {
 		gate.hold.budgets = caps.owners
 	}
@@ -358,7 +365,7 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
-func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time, priority string) gateResult {
+func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time, priority string, model string, generation int64) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
 	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
@@ -380,11 +387,11 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
-	return acquireDispatchHold(ctx, s, provider, slot, demand, ttl, priority)
+	return acquireDispatchHold(ctx, s, provider, slot, demand, ttl, priority, model, generation)
 }
 
-func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, ttl time.Duration, priority string) gateResult {
-	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, demand, ttl, priority)
+func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, ttl time.Duration, priority string, model string, generation int64) gateResult {
+	reservation, rejection, skip := s.Deps.Admission.ReserveTarget(ctx, provider, slot, demand, ttl, priority, model, generation)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}

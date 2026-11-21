@@ -10775,6 +10775,9 @@ type ConnectionOptions struct {
 	// SemanticHeaders Profile-allowlisted semantic and version headers, separate from encrypted credential headers.
 	SemanticHeaders *map[string]string `json:"semantic_headers,omitempty"`
 
+	// SharedTokenQuotas Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.
+	SharedTokenQuotas *[]SharedTokenQuota `json:"shared_token_quotas,omitempty"`
+
 	// TuningDatasetUriPrefixes Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets.
 	TuningDatasetUriPrefixes *[]string                 `json:"tuning_dataset_uri_prefixes,omitempty"`
 	VendorId                 nullable.Nullable[string] `json:"vendor_id,omitempty"`
@@ -17137,6 +17140,27 @@ type ShadowTarget struct {
 	SampleRate float32 `json:"sample_rate"`
 }
 
+// SharedTokenQuota defines model for SharedTokenQuota.
+type SharedTokenQuota struct {
+	// Group Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.
+	Group string `json:"group"`
+
+	// Model Deployment model on this connection that joins the group.
+	Model string `json:"model"`
+
+	// TokensPerMinute Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.
+	TokensPerMinute int64 `json:"tokens_per_minute"`
+}
+
+// SharedTokenQuotaUsage defines model for SharedTokenQuotaUsage.
+type SharedTokenQuotaUsage struct {
+	// TokensPerMinute Tokens per minute ceiling every member connection of the group shares.
+	TokensPerMinute int64 `json:"tokens_per_minute"`
+
+	// TokensThisMinute Tokens the shared group counted in the current minute across every member connection.
+	TokensThisMinute int64 `json:"tokens_this_minute"`
+}
+
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
 	// ApiKeyId Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission.
@@ -17319,6 +17343,9 @@ type SlotList struct {
 	Etag            openapi_types.UUID                    `json:"etag"`
 	Health          map[string]SlotHealth                 `json:"health"`
 	Items           []CredentialSlot                      `json:"items"`
+
+	// SharedGroupUsage Live shared token quota usage by group name for the groups this connection belongs to, so group headroom reads apart from connection and slot usage. Empty when the connection joins no group or the counters cannot be read.
+	SharedGroupUsage *map[string]SharedTokenQuotaUsage `json:"shared_group_usage,omitempty"`
 }
 
 // SlotWrite defines model for SlotWrite.

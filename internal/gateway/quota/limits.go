@@ -508,16 +508,36 @@ func (a *Admission) Fleet() *fleet.State { return a.fleet }
 
 // TargetReservation holds what one attempt reserved on its provider.
 type TargetReservation struct {
-	connection *admission.Lease
-	slot       *admission.Lease
-	log        *slog.Logger
+	connection  *admission.Lease
+	slot        *admission.Lease
+	shared      *admission.Lease
+	sharedGroup string
+	settled     atomic.Bool
+	log         *slog.Logger
 }
 
-// Settle reconciles and releases both leases once the attempt has ended.
-func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, usage *admission.TokenUsage) {
+func (t *TargetReservation) SharedGroup() string {
 	if t == nil {
+		return ""
+	}
+	return t.sharedGroup
+}
+
+func (t *TargetReservation) SharedLease() (lookup, leaseID string, ok bool) {
+	if t == nil {
+		return "", "", false
+	}
+	return t.shared.RateLease()
+}
+
+// Settle reconciles and releases every lease once the attempt has ended. It
+// runs at most once, so a settlement replayed after a move or a retry still
+// lands on the original leases exactly once.
+func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, usage *admission.TokenUsage) {
+	if t == nil || !t.settled.CompareAndSwap(false, true) {
 		return
 	}
+	SettleLease(ctx, t.shared, dispatched, usage, t.log)
 	SettleLease(ctx, t.connection, dispatched, usage, t.log)
 	SettleLease(ctx, t.slot, dispatched, usage, t.log)
 }
@@ -554,7 +574,7 @@ func slotRequest(slot *routing.Slot, demand TokenDemand, ttl time.Duration, prio
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
-func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand TokenDemand, ttl time.Duration, priority string) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
+func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, demand TokenDemand, ttl time.Duration, priority string, model string, generation int64) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
 	if provider.Limits.TokenLimited() {
 		if a.checkPendingTokenAccounting(ctx, provider.ID) != nil {
 			return nil, nil, true
@@ -565,9 +585,14 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 			return nil, nil, true
 		}
 	}
+	assignment, shared := sharedQuotaFor(provider, model)
+	var group admission.Request
+	if shared {
+		group = sharedRequest(assignment, generation, demand, ttl)
+	}
 	connection := connectionRequest(provider, demand, ttl, priority)
 	credential := slotRequest(slot, demand, ttl, priority)
-	if !connection.HasHardLimits() && !credential.HasHardLimits() {
+	if !group.HasHardLimits() && !connection.HasHardLimits() && !credential.HasHardLimits() {
 		return nil, nil, false
 	}
 	if !a.Ready() {
@@ -575,11 +600,14 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 		return nil, nil, true
 	}
 	reservation = &TargetReservation{log: a.Logger()}
+	if shared {
+		reservation.sharedGroup = assignment.groupID
+	}
 	for _, step := range [...]struct {
 		request admission.Request
 		lease   **admission.Lease
 		quota   string
-	}{{connection, &reservation.connection, Connection}, {credential, &reservation.slot, Slot}} {
+	}{{group, &reservation.shared, SharedGroup}, {connection, &reservation.connection, Connection}, {credential, &reservation.slot, Slot}} {
 		if !step.request.HasHardLimits() {
 			continue
 		}
@@ -590,8 +618,6 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 			*step.lease = lease
 			continue
 		}
-		// Whatever was taken for this attempt is given back before the target
-		// is abandoned: the attempt never happened.
 		settleTargetRefund(ctx, reservation)
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			return nil, &TargetRefusal{Quota: step.quota, Dimension: exceeded.Dimension, RetryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
@@ -604,6 +630,7 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 
 // settleTargetRefund returns everything a partially reserved attempt took.
 func settleTargetRefund(ctx context.Context, reservation *TargetReservation) {
+	SettleKey(ctx, reservation.shared, false, nil, reservation.log)
 	SettleKey(ctx, reservation.connection, false, nil, reservation.log)
 	SettleKey(ctx, reservation.slot, false, nil, reservation.log)
 }

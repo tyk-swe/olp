@@ -80,6 +80,10 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 		reservation.LeaseID = r.Rate.Share.Class + "." + id
 		reservation.Share = (*scripts.Share)(&r.Rate.Share)
 	}
+	if r.Membership != nil {
+		reservation.Member = r.Membership.Member
+		reservation.Generation = r.Membership.Generation
+	}
 	granted, err := l.scripts.ReserveRate(ctx, reservation)
 	if err != nil {
 		return nil, err
@@ -96,6 +100,7 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 		countsOutput:     r.Rate.OutputTokensPerMinute != nil,
 		countsRequest:    r.Rate.RequestsPerMinute != nil,
 		holdsConcurrency: granted.HoldsConcurrency,
+		creditCombined:   r.Rate.CreditCombined,
 	}
 	if reservation.Stated {
 		hold.reported = &rateAnswer{state: granted.Rate, at: time.Now()}
@@ -149,6 +154,19 @@ func (l *Limiter) repaired(ctx context.Context, ownerID string, decision error, 
 		return err
 	}
 	return again()
+}
+
+type MembershipEntry struct {
+	Member string
+	Active bool
+}
+
+func (l *Limiter) SyncSharedMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
+	synced := make([]scripts.MembershipEntry, len(entries))
+	for i, entry := range entries {
+		synced[i] = scripts.MembershipEntry(entry)
+	}
+	return l.scripts.SyncMembership(ctx, lookup, generation, synced)
 }
 
 func (l *Limiter) InstallSnapshot(ctx context.Context, s limits.Snapshot) (limits.Installed, error) {

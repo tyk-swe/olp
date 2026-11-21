@@ -29,6 +29,8 @@ type RateReservation struct {
 	TTL                   time.Duration
 	Stated                bool
 	Share                 *Share
+	Member                string
+	Generation            int64
 }
 
 type RateGrant struct {
@@ -62,13 +64,46 @@ func (q RateReservation) args() []string {
 			strconv.FormatInt(q.Share.SaturationPercent, 10))
 	}
 	if q.TrackConcurrency {
-		return append(shared, "1")
+		shared = append(shared, "1")
+	}
+	if q.Member != "" {
+		return append(shared, q.Member, strconv.FormatInt(q.Generation, 10))
 	}
 	return shared
 }
 
+func (r Runner) reservationKeys(q RateReservation) []string {
+	keys := r.rateKeys(q.Lookup)
+	if q.Member != "" {
+		return append(keys, r.Key("{"+q.Lookup+"}:members"))
+	}
+	return keys
+}
+
+type MembershipEntry struct {
+	Member string
+	Active bool
+}
+
+func (r Runner) SyncMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	args := make([]string, 0, 1+2*len(entries))
+	args = append(args, strconv.FormatInt(generation, 10))
+	for _, entry := range entries {
+		state := "0"
+		if entry.Active {
+			state = "1"
+		}
+		args = append(args, entry.Member, state)
+	}
+	_, err := r.run(ctx, call{script: syncMembership, keys: []string{r.Key("{" + lookup + "}:members")}, args: args})
+	return err
+}
+
 func (r Runner) ReserveRate(ctx context.Context, q RateReservation) (RateGrant, error) {
-	value, err := r.run(ctx, call{script: reserveLimits, keys: r.rateKeys(q.Lookup), args: q.args()})
+	value, err := r.run(ctx, call{script: reserveLimits, keys: r.reservationKeys(q), args: q.args()})
 	if err != nil {
 		return RateGrant{}, err
 	}
@@ -88,6 +123,8 @@ func decodeRate(value any, q RateReservation) (RateGrant, error) {
 		return RateGrant{}, exactly(items, headFields, limits.ErrMalformedState)
 	case failed && window == 0 && (h.detail == "invalid_arguments" || h.detail == "invalid_server_time"):
 		return RateGrant{}, limits.ErrUnexpectedResponse
+	case failed && window > 0 && h.detail == "stale_membership":
+		return RateGrant{}, exactly(items, headFields, limits.ErrStaleMembership)
 	}
 	dimension, ok := rateDimension(h)
 	if !ok {

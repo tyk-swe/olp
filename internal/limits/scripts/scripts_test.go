@@ -61,6 +61,23 @@ func rateReply(status int64, detail string, retry, window, expiry int64, a allow
 	return append(headReply(status, detail, retry, window, expiry), a.requestLimit, a.requestRemaining, a.tokenLimit, a.tokenRemaining, a.resetMS)
 }
 
+func TestReserveRateReportsStaleMembership(t *testing.T) {
+	t.Parallel()
+	runner, err := NewRunner(&scripted{answer: func([]string) (any, error) {
+		return headReply(-1, "stale_membership", 0, testWindow, 0), nil
+	}}, "olp:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.ReserveRate(t.Context(), RateReservation{
+		Lookup: "sg_lookup_abc", LeaseID: "lease", TokensPerMinute: 1000, Tokens: 5,
+		TTL: time.Second, Member: "member", Generation: 3,
+	})
+	if !errors.Is(err, limits.ErrStaleMembership) {
+		t.Fatalf("stale membership answer = %v, want ErrStaleMembership", err)
+	}
+}
+
 func TestReserveRateRejectsMalformedResponses(t *testing.T) {
 	t.Parallel()
 	both := allowance{requestLimit: 10, requestRemaining: 4, tokenLimit: 1000, tokenRemaining: 900, resetMS: 30_000}

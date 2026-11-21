@@ -42,8 +42,9 @@ func reporting(rate admission.RateLimits, report bool) admission.RateLimits {
 
 // The quotas that can reject an attempt before it is dispatched.
 const (
-	Connection = "connection"
-	Slot       = "slot"
+	Connection  = "connection"
+	Slot        = "slot"
+	SharedGroup = "shared_group"
 	// quotaRoute is a route's own spend cap, which every target shares.
 	Route = "route"
 )

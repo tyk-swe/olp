@@ -348,7 +348,7 @@ func (s *Server) ReserveStateAndSlot(ctx context.Context, x *Call, authority key
 	if p.Hold != nil {
 		return nil
 	}
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(ResourceEstimate), s.Now().Add(overall), "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(ResourceEstimate), s.Now().Add(overall), "", "", 0)
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

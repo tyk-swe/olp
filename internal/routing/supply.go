@@ -101,6 +101,7 @@ type SupplyQuery struct {
 type SupplySlot struct {
 	Provider *Provider
 	Slot     Slot
+	Model    string
 }
 
 // SpendCap is a cost-capped owner: a connection, credential slot or route.
@@ -122,6 +123,9 @@ type SupplyState struct {
 	// Headroom maps a credential slot ID to the smallest remaining fraction of
 	// the request, token and concurrency windows of the slot and its connection.
 	Headroom map[string]float64
+	// GroupHeadroom maps a shared token quota group ID to the remaining
+	// fraction of its tokens per minute ceiling.
+	GroupHeadroom map[string]float64
 	// Spend maps a capped owner ID to whether its caps still allow spending.
 	Spend map[string]Spend
 }
@@ -192,7 +196,7 @@ func supplyQuery(route Route, rows []rankedCandidate, capacity bool) SupplyQuery
 				query.Caps = append(query.Caps, SpendCap{OwnerID: slot.ID, Limits: *costs})
 			}
 			if capacity {
-				query.Slots = append(query.Slots, SupplySlot{Provider: &provider, Slot: slot})
+				query.Slots = append(query.Slots, SupplySlot{Provider: &provider, Slot: slot, Model: row.attempt.UpstreamModel})
 			}
 		}
 	}
