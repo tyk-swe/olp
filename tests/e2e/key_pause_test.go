@@ -60,8 +60,11 @@ func TestPausedAPIKeyRefusesEverySecretUntilResume(t *testing.T) {
 		rollout := s.Want(owner, "GET", path+"/pause-rollout", nil, nil, http.StatusOK)
 		return rollout["enforced"] == true, "pause rollout not enforced"
 	})
-	s.Eventually("current secret refused while paused", harness.StartupLimit, refusesPaused(rotated["secret"].(string)))
-	s.Eventually("overlap secret refused while paused", harness.StartupLimit, refusesPaused(created["secret"].(string)))
+	for _, secret := range []string{rotated["secret"].(string), created["secret"].(string)} {
+		if refused, got := refusesPaused(secret)(); !refused {
+			t.Fatalf("secret served after the pause rollout reported enforcement: %s", got)
+		}
+	}
 
 	replacement := s.Want(owner, "POST", path+"/rotate", map[string]int{"overlap_seconds": 0}, harness.Idempotent(harness.ETag(detail())), http.StatusOK)
 	s.Eventually("rotated secret still refused while paused", harness.StartupLimit, refusesPaused(replacement["secret"].(string)))
@@ -80,18 +83,7 @@ func TestPausedAPIKeyRefusesEverySecretUntilResume(t *testing.T) {
 	if status, raw := call(created["secret"].(string)); status == http.StatusOK {
 		t.Fatalf("retired secret served after resume: %s", describe(status, raw))
 	}
-}
 
-func TestResumeRefusedAfterRevocationDuringPause(t *testing.T) {
-	t.Parallel()
-	s := startService(t)
-	owner := s.Owner()
-	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "pause-revoke"}, harness.Idempotent(), http.StatusCreated)["id"].(string)
-	created := s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{
-		"name": "pause-revoke", "scopes": []string{"inference"}, "project_id": project,
-	}, harness.Idempotent(), http.StatusCreated)
-	path := "/api/v1/api-keys/" + created["id"].(string)
-	detail := func() map[string]any { return s.Want(owner, "GET", path, nil, nil, http.StatusOK) }
 	s.Want(owner, "POST", path+"/pause", nil, harness.Idempotent(harness.ETag(detail())), http.StatusOK)
 	s.Want(owner, "POST", path+"/revoke", nil, harness.Idempotent(harness.ETag(detail())), http.StatusOK)
 	s.Want(owner, "POST", path+"/resume", nil, harness.Idempotent(harness.ETag(detail())), http.StatusConflict)

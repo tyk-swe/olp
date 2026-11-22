@@ -57,6 +57,24 @@ func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	}
 }
 
+func TestDerivedAuthoritiesFollowTheSourceKeyPause(t *testing.T) {
+	project := "project"
+	now := time.Now()
+	expires := now.Add(time.Hour)
+	for _, pausedAt := range []*time.Time{nil, &now} {
+		key := keyauthority.Authority{ID: "key", ProjectID: &project, PausedAt: pausedAt, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+		derived := map[string]keyauthority.Authority{
+			"task":       key.TaskAuthority(key, "snapshot", "", &expires, "", nil),
+			"delegation": *key.Delegated([]string{"inference"}, nil, nil, nil, keyauthority.Authority{ID: "agent"}, "member", "pair", "token", expires),
+		}
+		for name, authority := range derived {
+			if got, want := authority.Allows("inference", "route", &project, now), pausedAt == nil; got != want {
+				t.Fatalf("%s authority from key paused=%v allows = %v, want %v", name, pausedAt != nil, got, want)
+			}
+		}
+	}
+}
+
 func TestKeyCostBoundaryCarriesKeyBudgetsAndStableLookup(t *testing.T) {
 	daily, weekly, monthly := "1", "2", "3"
 	authority := keyauthority.Authority{
