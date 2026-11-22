@@ -119,6 +119,8 @@ func (m Management) registerGuardrails(mux *http.ServeMux) {
 	definition.NewAPI(m.Access, publish).Register(mux)
 	policy.NewAPI(m.Access, publish, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
+	}, func(r *http.Request, p authz.Principal, batch []guardrails.PinnedApplication) ([]guardrails.Result, error) {
+		return m.Gateway.EvaluateGuardrailsBatch(r, p, batch)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publish).Register(mux)
 	preview.Register(m.Access, mux, m.Runtime.Release)
