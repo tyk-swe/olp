@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
 const fixtureBaselineID = "00000000-0000-0000-0000-000000000001"
@@ -59,23 +61,22 @@ func reportHandler(passed bool) http.HandlerFunc {
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
-		var run guardrailFixtureRun
-		if json.Unmarshal(body, &run) != nil || run.BaselinePolicyRevisionID != fixtureBaselineID || run.CandidatePolicyRevisionID != fixtureCandidateID || !run.Synthetic || len(run.Fixtures) != 2 {
+		var run contract.GuardrailFixtureRunInput
+		if json.Unmarshal(body, &run) != nil || run.BaselinePolicyRevisionId.String() != fixtureBaselineID || run.CandidatePolicyRevisionId.String() != fixtureCandidateID || !run.Synthetic || len(run.Fixtures) != 2 {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		redactPassed := passed
-		report := guardrailFixtureReport{
-			BaselinePolicyRevisionID: fixtureBaselineID, CandidatePolicyRevisionID: fixtureCandidateID, Passed: passed,
-			Results: []guardrailFixtureResult{
-				{ID: "allow-case", Phase: "input", Expected: "allow", Baseline: guardrailFixtureOutcome{Outcome: "allow", Matched: true}, Candidate: guardrailFixtureOutcome{Outcome: "allow", Matched: true}, Passed: true},
-				{ID: "redact-case", Phase: "input", Expected: "redact", Baseline: guardrailFixtureOutcome{Outcome: "redact", Matched: true}, Candidate: guardrailFixtureOutcome{Outcome: "redact", Matched: redactPassed}, Passed: redactPassed},
-			},
-		}
+		candidate := contract.GuardrailFixtureOutcome{Outcome: "redact", Matched: true}
 		if !passed {
-			report.Results[1].Candidate = guardrailFixtureOutcome{Outcome: "allow", Matched: false}
+			candidate = contract.GuardrailFixtureOutcome{Outcome: "allow", Matched: false}
 		}
-		json.NewEncoder(w).Encode(report)
+		json.NewEncoder(w).Encode(contract.GuardrailFixtureReport{
+			BaselinePolicyRevisionId: run.BaselinePolicyRevisionId, CandidatePolicyRevisionId: run.CandidatePolicyRevisionId, Passed: passed,
+			Results: []contract.GuardrailFixtureResult{
+				{Id: "allow-case", Phase: "input", Expected: "allow", Baseline: contract.GuardrailFixtureOutcome{Outcome: "allow", Matched: true}, Candidate: contract.GuardrailFixtureOutcome{Outcome: "allow", Matched: true}, Passed: true},
+				{Id: "redact-case", Phase: "input", Expected: "redact", Baseline: contract.GuardrailFixtureOutcome{Outcome: "redact", Matched: true}, Candidate: candidate, Passed: passed},
+			},
+		})
 	}
 }
 
@@ -123,20 +124,5 @@ func TestGuardrailsRunFixturesServerFailurePrintsNoResults(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatalf("output = %q", out.String())
-	}
-}
-
-func TestGuardrailsRunFixturesRejectsStreamingBeforeCallingAPI(t *testing.T) {
-	calls := 0
-	runner, _, path := fixtureRunner(t, func(w http.ResponseWriter, _ *http.Request) { calls++ })
-	suite := `{"synthetic":true,"fixtures":[{"id":"stream-case","phase":"output_stream","text":"text","expected":"allow"}]}`
-	if err := os.WriteFile(path, []byte(suite), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := runner.Run(t.Context(), fixtureArgs(path)); err == nil {
-		t.Fatal("streaming fixture returned no error")
-	}
-	if calls != 0 {
-		t.Fatalf("API calls = %d", calls)
 	}
 }

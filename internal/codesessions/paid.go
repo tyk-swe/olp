@@ -218,54 +218,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidAdmission, current code
 			return binding, nil
 		}
 	}
-	parent, parentErr := func() (paidCodeBinding, error) {
-		if bindingErr == nil {
-			return binding, nil
-		}
-		if identity.Parent == "" {
-			return paidCodeBinding{}, nil
-		}
-		return paidCodeConversation(ctx, tx, in, identity.Parent)
-	}()
-	if errors.Is(parentErr, pgx.ErrNoRows) {
-		return binding, codemode.Refuse(409, "code_parent_unresolved")
-	}
-	if parentErr != nil {
-		return binding, parentErr
-	}
-	if referenceRoot != "" && parent.RootID != referenceRoot {
-		return binding, codemode.Refuse(409, "code_response_account_conflict")
-	}
-	if parent.ID != "" {
-		var pinned paidCodeBinding
-		err := tx.QueryRow(ctx, `SELECT selected_model,provider_id::text,slot_id::text,credential_id::text FROM olp.code_paid_bindings WHERE root_id=$1 AND model=$2 ORDER BY id LIMIT 1`, parent.RootID, in.Operation.PublicModel()).Scan(&pinned.Model, &pinned.ProviderID, &pinned.SlotID, &pinned.CredentialID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return binding, err
-		}
-		if err == nil && (pinned.Model != in.Operation.Model || pinned.ProviderID != in.Provider.ID || pinned.SlotID != in.Slot.ID || pinned.CredentialID != *in.Slot.CredentialID) {
-			return binding, codemode.Refuse(409, "code_paid_target_conflict")
-		}
-	}
-	id := httpkit.NewID()
-	root := func() string {
-		if parent.ID != "" {
-			return parent.RootID
-		}
-		return id
-	}()
-	parentID := func() *string {
-		if bindingErr == nil {
-			return binding.ParentID
-		}
-		if parent.ID != "" {
-			return &parent.ID
-		}
-		return nil
-	}()
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,model,selected_model,provider_id,slot_id,credential_id,subscription_root_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, in.Route.ProjectID, in.Route.ID, in.APIKeyID, identity.Conversation, parentID, root, in.Operation.PublicModel(), in.Operation.Model, in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID, source); err != nil {
-		return binding, err
-	}
-	return paidCodeBinding{ID: id, ParentID: parentID, RootID: root, Model: in.Operation.Model, PublicModel: in.Operation.PublicModel(), ProviderID: in.Provider.ID, SlotID: in.Slot.ID, CredentialID: *in.Slot.CredentialID}, nil
+	return insertPaidCodeBinding(ctx, tx, in, binding, bindingErr == nil, identity, referenceRoot, source)
 }
 
 func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidAdmission, conversation string) (paidCodeBinding, error) {
@@ -440,4 +393,55 @@ func codePaidInitialFallback(ctx context.Context, tx pgx.Tx, in PaidAdmission, c
 		return availabilityErr
 	}
 	return nil
+}
+
+func insertPaidCodeBinding(ctx context.Context, tx pgx.Tx, in PaidAdmission, binding paidCodeBinding, found bool, identity codemode.Identity, referenceRoot string, source *string) (paidCodeBinding, error) {
+	parent, parentErr := func() (paidCodeBinding, error) {
+		if found {
+			return binding, nil
+		}
+		if identity.Parent == "" {
+			return paidCodeBinding{}, nil
+		}
+		return paidCodeConversation(ctx, tx, in, identity.Parent)
+	}()
+	if errors.Is(parentErr, pgx.ErrNoRows) {
+		return binding, codemode.Refuse(409, "code_parent_unresolved")
+	}
+	if parentErr != nil {
+		return binding, parentErr
+	}
+	if referenceRoot != "" && parent.RootID != referenceRoot {
+		return binding, codemode.Refuse(409, "code_response_account_conflict")
+	}
+	if parent.ID != "" {
+		var pinned paidCodeBinding
+		err := tx.QueryRow(ctx, `SELECT selected_model,provider_id::text,slot_id::text,credential_id::text FROM olp.code_paid_bindings WHERE root_id=$1 AND model=$2 ORDER BY id LIMIT 1`, parent.RootID, in.Operation.PublicModel()).Scan(&pinned.Model, &pinned.ProviderID, &pinned.SlotID, &pinned.CredentialID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return binding, err
+		}
+		if err == nil && (pinned.Model != in.Operation.Model || pinned.ProviderID != in.Provider.ID || pinned.SlotID != in.Slot.ID || pinned.CredentialID != *in.Slot.CredentialID) {
+			return binding, codemode.Refuse(409, "code_paid_target_conflict")
+		}
+	}
+	id := httpkit.NewID()
+	root := func() string {
+		if parent.ID != "" {
+			return parent.RootID
+		}
+		return id
+	}()
+	parentID := func() *string {
+		if found {
+			return binding.ParentID
+		}
+		if parent.ID != "" {
+			return &parent.ID
+		}
+		return nil
+	}()
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,model,selected_model,provider_id,slot_id,credential_id,subscription_root_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, in.Route.ProjectID, in.Route.ID, in.APIKeyID, identity.Conversation, parentID, root, in.Operation.PublicModel(), in.Operation.Model, in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID, source); err != nil {
+		return binding, err
+	}
+	return paidCodeBinding{ID: id, ParentID: parentID, RootID: root, Model: in.Operation.Model, PublicModel: in.Operation.PublicModel(), ProviderID: in.Provider.ID, SlotID: in.Slot.ID, CredentialID: *in.Slot.CredentialID}, nil
 }

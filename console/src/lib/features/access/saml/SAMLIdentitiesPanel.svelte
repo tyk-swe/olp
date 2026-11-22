@@ -1,59 +1,63 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { page } from '$app/state';
   import { errorMessage } from '#lib/management/http.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { profileKeys } from '../profile/profileKeys';
   import {
     reauthenticateWithPassword,
     beginIdentityReauthentication
   } from '../profile/api';
   import { listSAMLIdentities, beginSAMLLink, unlinkSAML } from './api';
+  type SamlOutcome = { redirect: string } | { unlinked: boolean };
   let { hasLocalPassword = false }: { hasLocalPassword?: boolean } = $props();
   const client = useQueryClient();
   const identities = createQuery(() => ({
     queryKey: profileKeys.saml(),
     queryFn: ({ signal }) => listSAMLIdentities(signal)
   }));
+  const saml = useAction();
   let password = $state(''),
-    busy = $state(false),
-    error = $state(''),
     notice = $state('');
   async function act(kind: 'saml_link' | 'saml_unlink', id?: string) {
-    if (busy) return;
-    busy = true;
-    error = '';
     notice = '';
-    try {
-      const verified =
-        page.url.searchParams.get('reauthenticated') === kind &&
-        (kind === 'saml_link' ||
-          page.url.searchParams.get('resource_id') === id);
-      if (!verified) {
-        if (hasLocalPassword) {
-          await reauthenticateWithPassword(password, kind, id);
-          password = '';
-        } else {
-          window.location.assign(await beginIdentityReauthentication(kind, id));
+    await saml.run(
+      async (): Promise<SamlOutcome> => {
+        const verified =
+          page.url.searchParams.get('reauthenticated') === kind &&
+          (kind === 'saml_link' ||
+            page.url.searchParams.get('resource_id') === id);
+        if (!verified) {
+          if (hasLocalPassword) {
+            await reauthenticateWithPassword(password, kind, id);
+            password = '';
+          } else {
+            return { redirect: await beginIdentityReauthentication(kind, id) };
+          }
+        }
+        if (kind === 'saml_link') return { redirect: await beginSAMLLink() };
+        if (id) {
+          await unlinkSAML(id);
+          return { unlinked: true };
+        }
+        return { unlinked: false };
+      },
+      async (outcome, current) => {
+        if ('redirect' in outcome) {
+          window.location.assign(outcome.redirect);
           return;
         }
-      }
-      if (kind === 'saml_link') window.location.assign(await beginSAMLLink());
-      else if (id) {
-        await unlinkSAML(id);
+        if (!outcome.unlinked) return;
         await authLifecycle.validateSession();
         await client.invalidateQueries({ queryKey: profileKeys.current() });
+        if (!current()) return;
         notice = 'SAML identity unlinked. Previous sessions were revoked.';
-      }
-    } catch (e) {
-      error = errorMessage(
-        e,
-        'The SAML identity operation could not be completed.'
-      );
-    } finally {
-      busy = false;
-    }
+      },
+      { fallback: 'The SAML identity operation could not be completed.' }
+    );
   }
 </script>
 
@@ -64,17 +68,14 @@
     response. An email match alone never links an account. Unlinking must leave
     another usable sign-in method.
   </p>
-  {#if error}<p class="inline-problem" role="alert">
-      {error}
+  {#if saml.error}<p class="inline-problem" role="alert">
+      {saml.error}
     </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
-  {#if identities.isPending}<p role="status">
-      Loading SAML identities…
-    </p>{:else if identities.isError}<p class="inline-problem" role="alert">
-      {errorMessage(identities.error, 'SAML identities are unavailable.')}
-    </p>
-    <button class="button button-secondary" onclick={() => identities.refetch()}
-      >Retry</button
-    >{:else}
+  <QueryView
+    query={identities}
+    loading="Loading SAML identities…"
+    failure={errorMessage(identities.error, 'SAML identities are unavailable.')}
+  >
     {#if hasLocalPassword}<div class="form-field">
         <label for="saml-identity-password"
           >Current password for SAML changes</label
@@ -83,7 +84,7 @@
           type="password"
           autocomplete="current-password"
           bind:value={password}
-          disabled={busy}
+          disabled={saml.busy}
         />
       </div>{/if}
     {#each identities.data?.items ?? [] as identity (identity.id)}<div
@@ -96,16 +97,17 @@
         </div>
         <button
           class="button button-secondary"
-          disabled={busy}
+          disabled={saml.busy}
           onclick={() => act('saml_unlink', identity.id)}
           >Unlink SAML identity</button
         >
       </div>{:else}<p>No SAML identities linked.</p>{/each}
     {#if identities.data?.linking_available}<button
         class="button button-primary"
-        disabled={busy}
+        disabled={saml.busy}
         onclick={() => act('saml_link')}>Link SAML identity</button
-      >{/if}{/if}
+      >{/if}
+  </QueryView>
 </section>
 
 <style>

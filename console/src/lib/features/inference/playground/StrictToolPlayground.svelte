@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import { onDestroy } from 'svelte';
   import {
     nativeChatRequest,
@@ -12,7 +14,8 @@
 
   let { route, requestText }: { route: string; requestText: string } = $props();
   let key = $state('');
-  let busy = $state('');
+  const turnAction = useAction();
+  const busy = $derived(turnAction.key);
   let error = $state('');
   let turns = $state<ReadyTurn[]>([]);
   let activeIndex = $state(0);
@@ -38,7 +41,6 @@
     abort?.abort();
     abort = null;
     error = '';
-    busy = '';
     pending = null;
     turns = [];
     results = [];
@@ -56,91 +58,103 @@
     if (busy) return;
     reset();
     const owner = epoch;
-    let request: ReadyTurn['request'];
-    try {
-      request = nativeChatRequest(requestText, route);
-    } catch (reason) {
-      error = problem(reason);
+    const built = captureResult(() => nativeChatRequest(requestText, route));
+    if (!built.ok) {
+      error = problem(built.error);
       return;
     }
+    const request = built.value;
     const submission = submissionID();
     pending = { submission, request };
-    busy = 'first';
-    abort = new AbortController();
-    try {
-      const turn = await streamTurn(key, request, submission, abort.signal);
-      if (owner === epoch) addTurn(turn);
-    } catch (reason) {
-      if (owner === epoch) error = problem(reason);
-    } finally {
-      if (owner === epoch) {
-        busy = '';
-        abort = null;
+    const firstController = new AbortController();
+    abort = firstController;
+    await turnAction.run(
+      () => streamTurn(key, request, submission, firstController.signal),
+      (turn, current) => {
+        if (owner === epoch && current()) addTurn(turn);
+      },
+      {
+        key: 'first',
+        failure: (reason) => (owner === epoch ? problem(reason) : error)
       }
+    );
+    if (owner === epoch) {
+      error = turnAction.error;
+      abort = null;
     }
   }
 
   async function continueWithResults() {
     if (busy || !active || !calls.length) return;
     const owner = epoch;
-    let request: ReadyTurn['request'];
-    try {
-      request = nextTurn(
+    const built = captureResult(() =>
+      nextTurn(
         active,
         calls.map((call, index) => ({
           tool_call_id: call.id,
           content: results[index] ?? ''
         }))
-      );
-    } catch (reason) {
-      error = problem(reason);
+      )
+    );
+    if (!built.ok) {
+      error = problem(built.error);
       return;
     }
+    const request = built.value;
     const submission = submissionID();
     pending = { submission, request };
-    busy = 'next';
     error = '';
-    abort = new AbortController();
-    try {
-      const turn = await unaryTurn(
-        key,
-        request,
-        submission,
-        active.handle,
-        abort.signal
-      );
-      if (owner === epoch) addTurn(turn);
-    } catch (reason) {
-      if (owner === epoch) error = problem(reason);
-    } finally {
-      if (owner === epoch) {
-        busy = '';
-        abort = null;
+    const nextController = new AbortController();
+    abort = nextController;
+    await turnAction.run(
+      () =>
+        unaryTurn(
+          key,
+          request,
+          submission,
+          active.handle,
+          nextController.signal
+        ),
+      (turn, current) => {
+        if (owner === epoch && current()) addTurn(turn);
+      },
+      {
+        key: 'next',
+        failure: (reason) => (owner === epoch ? problem(reason) : error)
       }
+    );
+    if (owner === epoch) {
+      error = turnAction.error;
+      abort = null;
     }
   }
 
   async function recover() {
     if (busy || !pending) return;
     const owner = epoch;
-    busy = 'recover';
     error = '';
-    abort = new AbortController();
-    try {
-      const turn = await recoverTurn(
-        key,
-        pending.submission,
-        pending.request,
-        abort.signal
-      );
-      if (owner === epoch) addTurn(turn);
-    } catch (reason) {
-      if (owner === epoch) error = problem(reason);
-    } finally {
-      if (owner === epoch) {
-        busy = '';
-        abort = null;
+    const pendingTurn = pending;
+    const recoverController = new AbortController();
+    abort = recoverController;
+    await turnAction.run(
+      () =>
+        recoverTurn(
+          key,
+          pendingTurn.submission,
+          pendingTurn.request,
+          recoverController.signal
+        ),
+      (turn, current) => {
+        if (owner === epoch && current()) addTurn(turn);
+      },
+      {
+        key: 'recover',
+        failure: (reason) => (owner === epoch ? problem(reason) : error)
       }
+    );
+    if (owner === epoch) {
+      error = turnAction.error;
+      abort = null;
     }
   }
 

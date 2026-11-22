@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -18,7 +20,9 @@
   let logo = $state('');
   let accent = $state('');
   let etag = $state('');
-  let busy = $state(false);
+  const saveAction = useAction();
+  let reading = $state(false);
+  const busy = $derived(saveAction.busy || reading);
   let error = $state('');
   const editable = $derived(access.can('settings.update') && !busy && !!etag);
 
@@ -40,19 +44,20 @@
       error = 'Choose a PNG or JPEG logo of at most 64 KiB.';
       return;
     }
-    try {
-      busy = true;
-      logo = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error('The logo could not be read.'));
-        reader.readAsDataURL(file);
-      });
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    reading = true;
+    const result = await readResult(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () =>
+            reject(new Error('The logo could not be read.'));
+          reader.readAsDataURL(file);
+        })
+    );
+    reading = false;
+    if (!result.ok) error = errorMessage(result.error);
+    else logo = result.value;
   }
 
   async function reload() {
@@ -65,18 +70,18 @@
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    busy = true;
     error = '';
-    try {
-      const updated = await updateBranding({ name, logo, accent }, etag);
-      queryClient.setQueryData(brandingKey, updated);
-      load(updated);
-      notify('Installation branding saved.');
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    await saveAction.run(
+      () => updateBranding({ name, logo, accent }, etag),
+      (updated, current) => {
+        if (!current()) return;
+        queryClient.setQueryData(brandingKey, updated);
+        load(updated);
+        notify('Installation branding saved.');
+      },
+      { key: 'save', failure: (cause) => errorMessage(cause) }
+    );
+    error = saveAction.error;
   }
 </script>
 

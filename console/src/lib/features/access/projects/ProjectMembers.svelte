@@ -10,6 +10,7 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
@@ -49,8 +50,7 @@
       : []
   );
 
-  let busy = $state('');
-  let problem = $state('');
+  const action = useAction();
   let addUserId = $state('');
   let addRole = $state<ProjectRole>('viewer');
 
@@ -59,29 +59,26 @@
     viewer: 'Viewer'
   };
 
-  async function run(
-    key: string,
-    action: () => Promise<unknown>,
-    done: string
-  ) {
-    busy = key;
-    problem = '';
-    try {
-      await action();
-      notify(done);
-      await queryClient.invalidateQueries({ queryKey: projectKeys.root });
-    } catch (error) {
-      problem = isEtagMismatch(error)
-        ? 'Someone else changed this project. Reload the page and try again.'
-        : errorMessage(error);
-    } finally {
-      busy = '';
-    }
+  async function run(key: string, send: () => Promise<unknown>, done: string) {
+    await action.run(
+      send,
+      async () => {
+        notify(done);
+        await queryClient.invalidateQueries({ queryKey: projectKeys.root });
+      },
+      {
+        key,
+        failure: (cause) =>
+          isEtagMismatch(cause)
+            ? 'Someone else changed this project. Reload the page and try again.'
+            : errorMessage(cause)
+      }
+    );
   }
 
   async function add(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !addUserId || memberIds.has(addUserId)) return;
+    if (action.busy || !addUserId || memberIds.has(addUserId)) return;
     await run(
       'add',
       () => putProjectMember(project, addUserId, addRole),
@@ -128,7 +125,7 @@
   }
 </script>
 
-{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
+{#if action.error}<Callout tone="danger">{action.error}</Callout>{/if}
 
 {#if members.isPending}
   <div class="loading-state" role="status">Loading members…</div>
@@ -160,7 +157,7 @@
               ><select
                 aria-label="Role for {member.email}"
                 value={member.project_role}
-                disabled={Boolean(busy)}
+                disabled={action.busy}
                 onchange={(event) => changeRole(member, event.currentTarget)}
                 ><option value="manager">Manager</option><option value="viewer"
                   >Viewer</option
@@ -171,9 +168,9 @@
               ><button
                 class="text-button danger"
                 type="button"
-                disabled={Boolean(busy)}
+                disabled={action.busy}
                 onclick={() => remove(member)}
-                >{busy === `remove:${member.user_id}`
+                >{action.key === `remove:${member.user_id}`
                   ? 'Removing…'
                   : 'Remove'}</button
               ></td
@@ -196,7 +193,7 @@
     <label for="member-user">Person</label><select
       id="member-user"
       bind:value={addUserId}
-      disabled={Boolean(busy) || !allMembers.data}
+      disabled={action.busy || !allMembers.data}
       required
       ><option value="" disabled
         >{candidates.length
@@ -212,7 +209,7 @@
     <label for="member-role">Role</label><select
       id="member-role"
       bind:value={addRole}
-      disabled={Boolean(busy)}
+      disabled={action.busy}
       ><option value="viewer">Viewer</option><option value="manager"
         >Manager</option
       ></select
@@ -221,8 +218,8 @@
   <button
     class="button button-secondary"
     type="submit"
-    disabled={Boolean(busy) || !addUserId}
-    >{busy === 'add' ? 'Adding…' : 'Add member'}</button
+    disabled={action.busy || !addUserId}
+    >{action.key === 'add' ? 'Adding…' : 'Add member'}</button
   >
 </form>
 

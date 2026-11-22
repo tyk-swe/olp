@@ -1,8 +1,9 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
+  import ModelInventoryTable from './ModelInventoryTable.svelte';
   import { overviewKeys } from '#lib/features/overview/index.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
@@ -23,9 +24,7 @@
     type ProviderModelInventory
   } from '#lib/features/providers/models.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { formatInteger, stateLabel } from '#lib/format.js';
-  import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
-  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
 
   const access = useRole();
@@ -89,12 +88,11 @@
       placeholderData: (previous) => previous
     };
   });
-  let busyModel = $state('');
+  const toggleAction = useAction();
   // Bumped whenever a toggle fails so the eligibility checkboxes are rebuilt
   // from stored state; the browser already flipped them optimistically, and a
   // one-way `checked` binding will not write back an unchanged value.
   let eligibilityVersion = $state(0);
-  let mutationError = $state('');
   let notice = $state('');
 
   const inventory = $derived(models.data?.items ?? []);
@@ -119,34 +117,43 @@
 
   async function toggle(entry: ProviderModelInventory, enabled: boolean) {
     if (!canManage) return;
-    busyModel = entry.model.id;
-    mutationError = '';
     notice = '';
-    try {
-      const provider = await getProvider(entry.provider_id);
-      const capabilities = entry.model.capabilities.map(
-        ({ operation, surface, mode }) => ({ operation, surface, mode })
-      );
-      await setProviderModel(provider, entry.model.id, enabled, capabilities);
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: providerKeys.summaries
-        }),
-        queryClient.invalidateQueries({
-          queryKey: providerKeys.modelCatalog
-        }),
-        queryClient.invalidateQueries({ queryKey: overviewKeys.root })
-      ]);
-      notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
-    } catch (error) {
-      mutationError = message(error);
-      eligibilityVersion += 1;
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.modelCatalog
-      });
-    } finally {
-      busyModel = '';
-    }
+    await toggleAction.run(
+      async () => {
+        const provider = await getProvider(entry.provider_id);
+        const capabilities = entry.model.capabilities.map(
+          ({ operation, surface, mode }) => ({ operation, surface, mode })
+        );
+        return setProviderModel(
+          provider,
+          entry.model.id,
+          enabled,
+          capabilities
+        );
+      },
+      async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: providerKeys.summaries
+          }),
+          queryClient.invalidateQueries({
+            queryKey: providerKeys.modelCatalog
+          }),
+          queryClient.invalidateQueries({ queryKey: overviewKeys.root })
+        ]);
+        notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
+      },
+      {
+        key: entry.model.id,
+        failure: (error) => {
+          eligibilityVersion += 1;
+          void queryClient.invalidateQueries({
+            queryKey: providerKeys.modelCatalog
+          });
+          return message(error);
+        }
+      }
+    );
   }
 </script>
 
@@ -184,8 +191,8 @@
   </article>
 </div>
 
-{#if mutationError}
-  <div class="inline-problem" role="alert">{mutationError}</div>
+{#if toggleAction.error}
+  <div class="inline-problem" role="alert">{toggleAction.error}</div>
 {/if}
 
 {#if notice}<Callout tone="success">{notice}</Callout>{/if}
@@ -233,118 +240,53 @@
   outdated={models.isPlaceholderData}
 />
 
-{#if models.isPending}
-  <div class="loading-state" role="status">Loading certified models…</div>
-{:else if models.isError}
-  <div class="inline-problem" role="alert">
-    {message(models.error)}
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => models.refetch()}>Retry</button
-    >
-  </div>
-{:else if inventory.length === 0 && !filtering}
-  <section class="card empty-state">
-    <div>
-      <h2>No models discovered</h2>
-      <p>Run a provider probe and capability review first.</p>
+<QueryView
+  query={models}
+  loading="Loading certified models…"
+  failure={message(models.error)}
+  emptyWhen={!inventory.length}
+>
+  {#snippet empty()}
+    {#if !filtering}
+      <section class="card empty-state">
+        <div>
+          <h2>No models discovered</h2>
+          <p>Run a provider probe and capability review first.</p>
 
-      <a class="button button-primary" href={resolve('providers')}
-        >Open providers</a
-      >
-    </div>
-  </section>
-{:else if inventory.length === 0}
-  <section class="card empty-state">
-    <div>
-      <h2>No matching models</h2>
-      <p>
-        Clear the filters, or use the pagination below to search another page.
-      </p>
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={clearFilters}>Clear filters</button
-      >
-    </div>
-  </section>
-{:else}
+          <a class="button button-primary" href={resolve('providers')}
+            >Open providers</a
+          >
+        </div>
+      </section>
+    {:else}
+      <section class="card empty-state">
+        <div>
+          <h2>No matching models</h2>
+          <p>
+            Clear the filters, or use the pagination below to search another
+            page.
+          </p>
+          <button
+            class="button button-secondary"
+            type="button"
+            onclick={clearFilters}>Clear filters</button
+          >
+        </div>
+      </section>
+    {/if}
+  {/snippet}
   {#if models.isPlaceholderData}
     <p class="updating" role="status">Updating…</p>
   {/if}
-  <ScrollTable label="Provider models" busy={models.isPlaceholderData}>
-    <table class="data-table">
-      <thead
-        ><tr
-          ><th>Model</th><th>Provider</th><th>Context</th><th>Max output</th><th
-            >Capability tuples / provenance</th
-          ><th>Route eligibility</th></tr
-        ></thead
-      ><tbody>
-        {#each inventory as entry (`${entry.provider_id}-${entry.model.id}`)}
-          {@const facts = metadataFacts(entry.metadata)}
-          {@const lifecycle = lifecycleNotice(entry.lifecycle)}
-          <tr>
-            <td
-              ><strong>{entry.model.display_name}</strong><br /><code
-                >{entry.model.upstream_model}</code
-              >{#if lifecycle}<small
-                  class="lifecycle-notice"
-                  class:danger={lifecycle.tone === 'danger'}
-                  >{lifecycle.text}</small
-                >{/if}{#if facts.length}<details class="model-facts">
-                  <summary>Upstream metadata</summary>
-                  <dl>
-                    {#each facts as fact (fact.label)}<div>
-                        <dt>{fact.label}</dt>
-                        <dd>{fact.value}</dd>
-                      </div>{/each}
-                  </dl>
-                </details>
-              {/if}
-            </td>
-            <td>
-              <a href={resolve(`providers/${entry.provider_id}`)}
-                >{entry.provider_name}</a
-              >
-              <br />
-              <span class="badge">{stateLabel(entry.provider_kind)}</span>
-            </td>
-            <td>{formatInteger(entry.metadata.context_length)}</td>
-            <td>{formatInteger(entry.metadata.max_output_tokens)}</td>
-            <td
-              ><div class="capabilities">
-                {#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
-                    class:success={capability.source === 'certified'}
-                    class:accent={capability.source !== 'certified'}
-                    class="badge"
-                    ><strong>{capability.operation}</strong>
-                    {capability.surface} · {capability.mode} · {capability.source}</span
-                  >{/each}
-              </div></td
-            >
-            <td
-              ><label class="eligibility"
-                >{#key `${entry.model.id}:${eligibilityVersion}`}<input
-                    type="checkbox"
-                    checked={entry.model.enabled}
-                    disabled={!canManage ||
-                      Boolean(busyModel) ||
-                      models.isPlaceholderData}
-                    onchange={(event) =>
-                      toggle(entry, event.currentTarget.checked)}
-                  />{/key}<span
-                  >{entry.model.enabled ? 'Enabled' : 'Disabled'}</span
-                ></label
-              ></td
-            >
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </ScrollTable>
-{/if}
+  <ModelInventoryTable
+    {inventory}
+    {canManage}
+    busy={toggleAction.busy}
+    updating={models.isPlaceholderData}
+    {eligibilityVersion}
+    onToggle={toggle}
+  />
+</QueryView>
 
 {#if !models.isPending && !models.isError}<CursorPagination
     {...cursorPaginationProps(
@@ -379,68 +321,6 @@
     font-size: var(--text-body-sm);
     font-weight: 500;
   }
-  code {
-    font-size: var(--text-caption);
-  }
-  .model-facts {
-    margin-top: 0.4rem;
-    max-width: 22rem;
-  }
-  .model-facts summary {
-    cursor: pointer;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
-  .model-facts dl {
-    display: grid;
-    margin: 0.5rem 0 0;
-    gap: 0.3rem;
-  }
-  .model-facts div {
-    display: grid;
-    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
-    gap: 0.5rem;
-  }
-  .model-facts dt {
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
-  .model-facts dd {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    overflow-wrap: anywhere;
-  }
-  td a {
-    color: var(--foreground);
-    font-weight: 400;
-    text-decoration: underline;
-    text-decoration-color: var(--border-strong);
-    text-underline-offset: 4px;
-    transition:
-      color var(--motion),
-      text-decoration-color var(--motion);
-  }
-  td a:hover {
-    color: var(--foreground-hover);
-    text-decoration-color: currentColor;
-  }
-  .capabilities {
-    display: flex;
-    max-width: 38rem;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-  }
-  .capabilities .badge {
-    gap: 0.25rem;
-  }
-  .eligibility {
-    display: inline-flex;
-    min-height: 2.75rem;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 500;
-  }
   .policy-note {
     margin-top: 1rem;
     padding: 1rem;
@@ -468,14 +348,5 @@
     .filter-choice {
       display: grid;
     }
-  }
-  .lifecycle-notice {
-    display: block;
-    margin-top: 0.3rem;
-    color: var(--warning);
-    font-size: var(--text-caption);
-  }
-  .lifecycle-notice.danger {
-    color: var(--danger);
   }
 </style>

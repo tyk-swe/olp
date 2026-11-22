@@ -21,6 +21,9 @@
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import OidcRoleMappings from './OidcRoleMappings.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -55,12 +58,10 @@
   let emailMappings = $state('');
   let groupMappings = $state('');
   let editVersion = 0;
-  let busy = $state('');
-  let error = $state('');
+  const write = useAction();
+  const reauth = useAction();
   let notice = $state('');
   let reauthenticating = $state(false);
-  let reauthenticationBusy = $state(false);
-  let reauthenticationError = $state('');
   const concurrentNotice = $derived(conflictNotice(sync));
 
   $effect(() => {
@@ -116,87 +117,102 @@
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    if (!canManage || busy) return;
-    error = notice = '';
+    if (!canManage || write.busy) return;
+    notice = '';
     if (!discoveryUrl || !issuer || !clientId) {
-      error = 'Issuer, discovery URL, and client ID are required.';
+      write.error = 'Issuer, discovery URL, and client ID are required.';
       return;
     }
 
-    busy = 'oidc-save';
-    try {
-      const input: OidcConfigurationInput = {
-        discovery_url: discoveryUrl.trim(),
-        issuer: issuer.trim(),
-        client_id: clientId.trim(),
-        client_secret: clientSecret || null,
-        enabled,
-        scopes: scopes.split(/[ ,]+/).filter(Boolean),
-        email_claim: emailClaim.trim() || 'email',
-        groups_claim: groupsClaim.trim() || 'groups',
-        default_role: defaultRole || null,
-        email_role_mappings: parseRoleMappings(emailMappings),
-        group_role_mappings: parseRoleMappings(groupMappings)
-      };
-      const submittedVersion = editVersion;
-      const submittedClientSecret = clientSecret;
-      const etag = sync.snapshotEtag;
-      const updated = await putOidcConfiguration(
-        input,
-        etag && etag !== 'new' ? etag : undefined
-      );
-      if (clientSecret === submittedClientSecret) clientSecret = '';
-      sync = markSaved(updated.etag, editVersion !== submittedVersion);
-      queryClient.setQueryData(oidcKeys.configuration(), updated);
-      const savedNotice = updated.enabled
-        ? 'OIDC configuration validated and enabled.'
-        : 'OIDC configuration saved but disabled.';
-      notice = sync.dirty
-        ? `${savedNotice} You have additional unsaved changes.`
-        : savedNotice;
-    } catch (cause) {
-      if (isEtagMismatch(cause)) sync = markConflict(sync);
-      else error = errorMessage(cause);
-    } finally {
-      busy = '';
-    }
+    const submittedVersion = editVersion;
+    const submittedClientSecret = clientSecret;
+    await write.run(
+      () => {
+        const input: OidcConfigurationInput = {
+          discovery_url: discoveryUrl.trim(),
+          issuer: issuer.trim(),
+          client_id: clientId.trim(),
+          client_secret: clientSecret || null,
+          enabled,
+          scopes: scopes.split(/[ ,]+/).filter(Boolean),
+          email_claim: emailClaim.trim() || 'email',
+          groups_claim: groupsClaim.trim() || 'groups',
+          default_role: defaultRole || null,
+          email_role_mappings: parseRoleMappings(emailMappings),
+          group_role_mappings: parseRoleMappings(groupMappings)
+        };
+        const etag = sync.snapshotEtag;
+        return putOidcConfiguration(
+          input,
+          etag && etag !== 'new' ? etag : undefined
+        );
+      },
+      (updated) => {
+        if (clientSecret === submittedClientSecret) clientSecret = '';
+        sync = markSaved(updated.etag, editVersion !== submittedVersion);
+        queryClient.setQueryData(oidcKeys.configuration(), updated);
+        const savedNotice = updated.enabled
+          ? 'OIDC configuration validated and enabled.'
+          : 'OIDC configuration saved but disabled.';
+        notice = sync.dirty
+          ? `${savedNotice} You have additional unsaved changes.`
+          : savedNotice;
+      },
+      {
+        key: 'oidc-save',
+        failure: (cause) => {
+          if (isEtagMismatch(cause)) {
+            sync = markConflict(sync);
+            return '';
+          }
+          return errorMessage(cause);
+        }
+      }
+    );
   }
 
   async function linkIdentity() {
-    busy = 'oidc-link';
-    error = notice = '';
-    try {
-      const identities = await listOidcIdentities();
-      if (!identities.has_local_password) {
-        window.location.assign(
-          await beginIdentityReauthentication('oidc_link')
-        );
-        return;
-      }
-      reauthenticationError = '';
-      reauthenticating = true;
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = '';
-    }
+    notice = '';
+    await write.run(
+      async () => {
+        const identities = await listOidcIdentities();
+        if (identities.has_local_password) return { reauth: true as const };
+        return {
+          redirect: await beginIdentityReauthentication('oidc_link')
+        };
+      },
+      (outcome) => {
+        if ('redirect' in outcome) {
+          if (outcome.redirect !== undefined)
+            window.location.assign(outcome.redirect);
+          return;
+        }
+        reauth.error = '';
+        reauthenticating = true;
+      },
+      { key: 'oidc-link', failure: (cause) => errorMessage(cause) }
+    );
   }
 
   async function confirmLinkIdentity(password: string) {
-    reauthenticationBusy = true;
-    reauthenticationError = '';
-    error = '';
-    try {
-      await reauthenticateWithPassword(password, 'oidc_link');
-      reauthenticating = false;
-      window.location.assign(await beginOidcLink());
-    } catch (cause) {
-      const detail = errorMessage(cause);
-      if (reauthenticating) reauthenticationError = detail;
-      else error = detail;
-    } finally {
-      reauthenticationBusy = false;
-    }
+    write.error = '';
+    await reauth.run(
+      () => reauthenticateWithPassword(password, 'oidc_link'),
+      async () => {
+        reauthenticating = false;
+        window.location.assign(await beginOidcLink());
+      },
+      {
+        failure: (cause) => {
+          const detail = errorMessage(cause);
+          if (!reauthenticating) {
+            write.error = detail;
+            return '';
+          }
+          return detail;
+        }
+      }
+    );
   }
 </script>
 
@@ -204,28 +220,23 @@
   <ReauthenticateDialog
     title="Confirm the OIDC link"
     description="Linking an OIDC identity changes how you sign in, so confirm your current password first."
-    busy={reauthenticationBusy}
-    error={reauthenticationError}
+    busy={reauth.busy}
+    error={reauth.error}
     onConfirm={confirmLinkIdentity}
     onCancel={() => (reauthenticating = false)}
   />
 {/if}
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+{#if write.error}<div class="inline-problem" role="alert">
+    {write.error}
+  </div>{/if}
 {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
-{#if oidc.isPending}
-  <div class="loading-state" role="status">Loading OIDC configuration…</div>
-{:else if oidc.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(oidc.error)}
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => oidc.refetch()}>Retry</button
-    >
-  </div>
-{:else}
+<QueryView
+  query={oidc}
+  loading="Loading OIDC configuration…"
+  failure={errorMessage(oidc.error)}
+>
   {#if !canManage}
     <ReadOnlyNote>
       Your role can view the OIDC configuration but not change it.
@@ -234,7 +245,7 @@
   <ConflictNotice
     notice={concurrentNotice}
     onReload={reload}
-    disabled={Boolean(busy)}
+    disabled={write.busy}
   />
   <form class="oidc-grid" onsubmit={save} oninput={touch} onchange={touch}>
     <section class="card oidc-form" aria-labelledby="oidc-heading">
@@ -334,48 +345,17 @@
         </div>
       </div>
     </section>
-    <section class="card mapping-form" aria-labelledby="mapping-heading">
-      <h2 id="mapping-heading">Roles from your identity provider</h2>
-      <p class="muted">
-        One mapping per line in <code>claim-value=role</code> form. Email mappings
-        take precedence over group mappings and the default.
-      </p>
-      <div class="form-field">
-        <label for="email-mappings">Email mappings</label><textarea
-          id="email-mappings"
-          bind:value={emailMappings}
-          disabled={!canManage}
-          placeholder="owner@example.com=owner"></textarea>
-      </div>
-      <div class="form-field">
-        <label for="group-mappings">Group mappings</label><textarea
-          id="group-mappings"
-          bind:value={groupMappings}
-          disabled={!canManage}
-          placeholder="platform-team=operator"></textarea>
-      </div>
-      {#if !oidc.data?.enabled}
-        <ReadOnlyNote role={undefined}>
-          Save with OIDC enabled before linking your identity.
-        </ReadOnlyNote>
-      {/if}
-      <div class="oidc-actions">
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={linkIdentity}
-          disabled={!oidc.data?.enabled || Boolean(busy)}
-          >{busy === 'oidc-link' ? 'Redirecting…' : 'Link my identity'}</button
-        ><button
-          class="button button-primary"
-          type="submit"
-          disabled={!canManage || Boolean(busy)}
-          >{busy === 'oidc-save' ? 'Validating…' : 'Save and validate'}</button
-        >
-      </div>
-    </section>
+    <OidcRoleMappings
+      bind:emailMappings
+      bind:groupMappings
+      {canManage}
+      oidcEnabled={Boolean(oidc.data?.enabled)}
+      busy={write.busy}
+      busyKey={write.key}
+      onLinkIdentity={linkIdentity}
+    />
   </form>
-{/if}
+</QueryView>
 
 <style>
   h2 {
@@ -389,8 +369,7 @@
     grid-template-columns: minmax(0, 1.2fr) minmax(22rem, 0.8fr);
     gap: 1rem;
   }
-  .oidc-form,
-  .mapping-form {
+  .oidc-form {
     display: grid;
     align-content: start;
     gap: 1rem;
@@ -409,26 +388,9 @@
     gap: 0.45rem;
     font-weight: 500;
   }
-  .mapping-form h2,
-  .mapping-form p {
-    margin: 0;
-  }
-  .oidc-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.65rem;
-  }
-  code {
-    font-size: var(--text-caption);
-  }
   @media (max-width: 64rem) {
     .oidc-grid {
       grid-template-columns: 1fr;
-    }
-  }
-  @media (max-width: 42rem) {
-    .oidc-actions {
-      display: grid;
     }
   }
 </style>

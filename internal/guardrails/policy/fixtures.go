@@ -84,28 +84,22 @@ func (in fixtureRunInput) validate() error {
 	if len(in.Fixtures) < 1 || len(in.Fixtures) > maxGuardrailFixtures {
 		return httpkit.Invalid("fixtures", "Use between 1 and 32 fixtures.")
 	}
-	seen := make(map[string]bool, len(in.Fixtures))
-	total := 0
 	for i, fixture := range in.Fixtures {
-		if err := fixture.validate(fmt.Sprintf("fixtures.%d", i), seen); err != nil {
+		field := fmt.Sprintf("fixtures.%d", i)
+		if slices.ContainsFunc(in.Fixtures[:i], func(earlier guardrailFixture) bool { return earlier.ID == fixture.ID }) {
+			return httpkit.Invalid(field+".id", "Use a distinct fixture ID.")
+		}
+		if err := fixture.validate(field); err != nil {
 			return err
-		}
-		total += len(fixture.Text)
-		if fixture.ExpectedRedactedText != nil {
-			total += len(*fixture.ExpectedRedactedText)
-		}
-		if total > maxFixtureRunBytes {
-			return httpkit.Invalid("fixtures", "Keep the fixture suite within its size bound.")
 		}
 	}
 	return nil
 }
 
-func (f guardrailFixture) validate(field string, seen map[string]bool) error {
-	if !fixtureIDPattern.MatchString(f.ID) || seen[f.ID] {
-		return httpkit.Invalid(field+".id", "Use a distinct fixture ID of 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or digit.")
+func (f guardrailFixture) validate(field string) error {
+	if !fixtureIDPattern.MatchString(f.ID) {
+		return httpkit.Invalid(field+".id", "Use a fixture ID of 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or digit.")
 	}
-	seen[f.ID] = true
 	if f.Phase != guardrails.Input && f.Phase != guardrails.Output {
 		return httpkit.Invalid(field+".phase", "Choose the unary input or output phase.")
 	}
@@ -201,17 +195,15 @@ func (a *API) runFixtureSuite(r *http.Request, p authz.Principal, baseline, cand
 	if err := fixtureReady(candidate); err != nil {
 		return fixtureReport{}, err
 	}
-	pinneds := make([]guardrails.Pinned, 0, 2*len(fixtures))
-	applications := make([]guardrails.Application, 0, 2*len(fixtures))
+	batch := make([]guardrails.PinnedApplication, 0, 2*len(fixtures))
 	for _, fixture := range fixtures {
-		pinneds = append(pinneds, baseline, candidate)
-		applications = append(applications, fixture.application(baseline), fixture.application(candidate))
+		batch = append(batch, fixture.application(baseline), fixture.application(candidate))
 	}
-	evaluated, err := a.evaluateBatch(r, p, pinneds, applications)
+	evaluated, err := a.evaluateBatch(r, p, batch)
 	if err != nil {
 		return fixtureReport{}, err
 	}
-	if len(evaluated) != len(applications) {
+	if len(evaluated) != len(batch) {
 		return fixtureReport{}, fixtureUnevaluable()
 	}
 	results := make([]fixtureResult, 0, len(fixtures))
@@ -235,35 +227,43 @@ func (a *API) runFixtureSuite(r *http.Request, p authz.Principal, baseline, cand
 	}, nil
 }
 
-func (fixture guardrailFixture) application(pinned guardrails.Pinned) guardrails.Application {
-	role := guardrails.User
-	if fixture.Phase == guardrails.Output {
-		role = guardrails.Assistant
-	}
-	return guardrails.Application{
+func (fixture guardrailFixture) application(pinned guardrails.Pinned) guardrails.PinnedApplication {
+	return guardrails.PinnedApplication{Pinned: pinned, Application: guardrails.Application{
 		PolicyRevisionID: pinned.Policy.ID, Phase: fixture.Phase,
-		Segments: []guardrails.Segment{{ID: fixtureSegmentID, Role: role, Text: fixture.Text}},
+		Segments: []guardrails.Segment{{ID: fixtureSegmentID, Role: fixtureRole(fixture.Phase), Text: fixture.Text}},
+	}}
+}
+
+func fixtureRole(phase guardrails.Phase) guardrails.Role {
+	if phase == guardrails.Output {
+		return guardrails.Assistant
 	}
+	return guardrails.User
 }
 
 func fixtureOutcomeOf(result guardrails.Result, fixture guardrailFixture) (fixtureOutcomeResult, error) {
-	if slices.ContainsFunc(result.Decisions, func(decision guardrails.Evidence) bool { return decision.Outcome == guardrails.FailedOpen }) {
+	if hasDecision(result, guardrails.FailedOpen) {
 		return fixtureOutcomeResult{}, fixtureUnevaluable()
 	}
 	index := slices.IndexFunc(result.Segments, func(segment guardrails.Segment) bool { return segment.ID == fixtureSegmentID })
 	if index < 0 {
 		return fixtureOutcomeResult{}, fixtureUnevaluable()
 	}
-	text := result.Segments[index].Text
-	outcome := outcomeAllow
-	switch {
-	case slices.ContainsFunc(result.Decisions, func(decision guardrails.Evidence) bool {
-		return decision.Outcome == guardrails.Blocked || decision.Outcome == guardrails.FailedClosed
-	}):
-		outcome = outcomeBlock
-	case result.Changed || slices.ContainsFunc(result.Decisions, func(decision guardrails.Evidence) bool { return decision.Outcome == guardrails.Redacted }):
-		outcome = outcomeRedact
-	}
-	matched := outcome == fixture.Expected && (fixture.ExpectedRedactedText == nil || outcome == outcomeRedact && text == *fixture.ExpectedRedactedText)
+	outcome := observedOutcome(result)
+	matched := outcome == fixture.Expected && (fixture.ExpectedRedactedText == nil || result.Segments[index].Text == *fixture.ExpectedRedactedText)
 	return fixtureOutcomeResult{Outcome: outcome, Matched: matched}, nil
+}
+
+func observedOutcome(result guardrails.Result) fixtureOutcome {
+	if hasDecision(result, guardrails.Blocked, guardrails.FailedClosed) {
+		return outcomeBlock
+	}
+	if result.Changed || hasDecision(result, guardrails.Redacted) {
+		return outcomeRedact
+	}
+	return outcomeAllow
+}
+
+func hasDecision(result guardrails.Result, outcomes ...guardrails.Outcome) bool {
+	return slices.ContainsFunc(result.Decisions, func(decision guardrails.Evidence) bool { return slices.Contains(outcomes, decision.Outcome) })
 }

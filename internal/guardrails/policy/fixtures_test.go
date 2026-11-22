@@ -33,14 +33,14 @@ func fixturePinned(policyRevisionID, blockPattern, redactPattern string) guardra
 	}
 }
 
-func directBatchEvaluator(r *http.Request, _ authz.Principal, pinneds []guardrails.Pinned, ins []guardrails.Application) ([]guardrails.Result, error) {
-	results := make([]guardrails.Result, 0, len(ins))
-	for i, in := range ins {
-		_, engine, err := pinneds[i].Compile()
+func directBatchEvaluator(r *http.Request, _ authz.Principal, batch []guardrails.PinnedApplication) ([]guardrails.Result, error) {
+	results := make([]guardrails.Result, 0, len(batch))
+	for _, item := range batch {
+		_, engine, err := item.Pinned.Compile()
 		if err != nil {
 			return nil, err
 		}
-		result, err := engine.Evaluate(r.Context(), guardrails.Evaluation{Phase: in.Phase, Segments: in.Segments}, &guardrails.Masking{})
+		result, err := engine.Evaluate(r.Context(), guardrails.Evaluation{Phase: item.Application.Phase, Segments: item.Application.Segments}, &guardrails.Masking{})
 		if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
 			return nil, err
 		}
@@ -123,7 +123,7 @@ func TestRunFixtureSuiteNamesFailingCandidateWithoutContent(t *testing.T) {
 
 func TestRunFixtureSuiteRefusesUnsupportedBeforeEvaluation(t *testing.T) {
 	calls := 0
-	api := &API{evaluateBatch: func(*http.Request, authz.Principal, []guardrails.Pinned, []guardrails.Application) ([]guardrails.Result, error) {
+	api := &API{evaluateBatch: func(*http.Request, authz.Principal, []guardrails.PinnedApplication) ([]guardrails.Result, error) {
 		calls++
 		return nil, nil
 	}}

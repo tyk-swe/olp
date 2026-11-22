@@ -87,63 +87,9 @@ func Patch(current, body Document, group bool, selectValues Select) (Document, e
 			}
 			continue
 		}
-		parent, key, err := parentField(result, parts, false)
-		if err != nil {
+		if err = patchFiltered(result, parts, p, kind, value, selectValues); err != nil {
 			return nil, err
 		}
-		items, ok := parent[key].([]any)
-		if !ok {
-			return nil, Fail(400, "noTarget", "The filtered attribute has no values.")
-		}
-		indices, err := selectValues(items, p.ValueExpression)
-		if err != nil {
-			return nil, err
-		}
-		if len(indices) == 0 {
-			return nil, Fail(400, "noTarget", "No value matches the PATCH filter.")
-		}
-		if kind != "remove" && parts[len(parts)-1] == "emails" && ((p.SubAttribute != nil && strings.EqualFold(*p.SubAttribute, "primary") && value == true) || (p.SubAttribute == nil && hasPrimary(value))) {
-			clearPrimary(items)
-		}
-		selected := map[int]bool{}
-		for _, i := range indices {
-			selected[i] = true
-		}
-		out := make([]any, 0, len(items))
-		for i, item := range items {
-			if !selected[i] {
-				out = append(out, item)
-				continue
-			}
-			if p.SubAttribute != nil {
-				object, ok := item.(map[string]any)
-				if !ok {
-					return nil, Fail(400, "invalidPath", "A subattribute requires a complex value.")
-				}
-				if err = change(object, []string{Canonical(*p.SubAttribute)}, kind, value, true); err != nil {
-					return nil, err
-				}
-				out = append(out, object)
-			} else if kind != "remove" {
-				if kind == "add" {
-					if object, ok := item.(map[string]any); ok {
-						if fields, ok := value.(map[string]any); ok {
-							for k, v := range fields {
-								object[k] = v
-							}
-							out = append(out, object)
-							continue
-						}
-					}
-				}
-				if values, ok := value.([]any); ok {
-					out = append(out, values...)
-				} else {
-					out = append(out, value)
-				}
-			}
-		}
-		parent[key] = out
 	}
 	data, err := json.Marshal(result)
 	if err != nil || len(data) > 4*MaxBody {
@@ -300,4 +246,65 @@ func clearPrimary(values []any) {
 			}
 		}
 	}
+}
+
+func patchFiltered(result Document, parts []string, p filter.Path, kind string, value any, selectValues Select) error {
+	parent, key, err := parentField(result, parts, false)
+	if err != nil {
+		return err
+	}
+	items, ok := parent[key].([]any)
+	if !ok {
+		return Fail(400, "noTarget", "The filtered attribute has no values.")
+	}
+	indices, err := selectValues(items, p.ValueExpression)
+	if err != nil {
+		return err
+	}
+	if len(indices) == 0 {
+		return Fail(400, "noTarget", "No value matches the PATCH filter.")
+	}
+	if kind != "remove" && parts[len(parts)-1] == "emails" && ((p.SubAttribute != nil && strings.EqualFold(*p.SubAttribute, "primary") && value == true) || (p.SubAttribute == nil && hasPrimary(value))) {
+		clearPrimary(items)
+	}
+	selected := map[int]bool{}
+	for _, i := range indices {
+		selected[i] = true
+	}
+	out := make([]any, 0, len(items))
+	for i, item := range items {
+		if !selected[i] {
+			out = append(out, item)
+			continue
+		}
+		if p.SubAttribute != nil {
+			object, ok := item.(map[string]any)
+			if !ok {
+				return Fail(400, "invalidPath", "A subattribute requires a complex value.")
+			}
+			if err = change(object, []string{Canonical(*p.SubAttribute)}, kind, value, true); err != nil {
+				return err
+			}
+			out = append(out, object)
+		} else if kind != "remove" {
+			if kind == "add" {
+				if object, ok := item.(map[string]any); ok {
+					if fields, ok := value.(map[string]any); ok {
+						for k, v := range fields {
+							object[k] = v
+						}
+						out = append(out, object)
+						continue
+					}
+				}
+			}
+			if values, ok := value.([]any); ok {
+				out = append(out, values...)
+			} else {
+				out = append(out, value)
+			}
+		}
+	}
+	parent[key] = out
+	return nil
 }

@@ -3,12 +3,9 @@ package nativeduplex
 import (
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 )
-
-const nativeDuplexSession = time.Hour
 
 var (
 	errDuplexProviderError  = errors.New("native duplex provider reported an error")

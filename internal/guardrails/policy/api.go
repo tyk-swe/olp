@@ -15,7 +15,7 @@ import (
 
 type Evaluator func(*http.Request, authz.Principal, guardrails.Pinned, guardrails.Application) (guardrails.Result, error)
 
-type BatchEvaluator func(*http.Request, authz.Principal, []guardrails.Pinned, []guardrails.Application) ([]guardrails.Result, error)
+type BatchEvaluator func(*http.Request, authz.Principal, []guardrails.PinnedApplication) ([]guardrails.Result, error)
 
 type API struct {
 	server        *access.Server
@@ -173,23 +173,11 @@ func (a *API) apply(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if uuid.Validate(in.PolicyRevisionID) != nil {
 		return httpkit.Reply{}, httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
-	ctx := r.Context()
-	selected, err := revisionOf(ctx, a.server.Pool, in.PolicyRevisionID)
+	pinned, err := a.pinnedRevision(r, p, in.PolicyRevisionID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(guardrails.ProjectPointer(selected.ProjectID), authz.View); err != nil {
-		return httpkit.Reply{}, err
-	}
-	ids := revisionIDs(selected.Entries)
-	definitions, err := guardrails.ReadRevisions(ctx, a.server.Pool, ids)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !owned(definitions, ids, selected.ProjectID) {
-		return httpkit.Reply{}, httpkit.Invalid("policy", "Policy references must stay in their project.")
-	}
-	result, err := a.evaluate(r, p, guardrails.Pinned{Policy: selected, Definitions: definitions}, in)
+	result, err := a.evaluate(r, p, pinned, in)
 	if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
 		return httpkit.Reply{}, err
 	}

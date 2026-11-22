@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 )
 
-func (s *Server) enter(w http.ResponseWriter, r *http.Request, x *Call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {
+func (s *Server) EnterCall(w http.ResponseWriter, r *http.Request, x *Call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {
 	if !s.Gate.Admit(r.Context()) {
 		s.Refuse(x, w, fault.Overloaded)
 		return keyauthority.Authority{}, false

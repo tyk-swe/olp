@@ -223,129 +223,145 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 	if parsed == nil {
 		return nil, inspections, nil
 	}
-	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*wire.Request{}
-	effective := func(request *wire.Request, target routing.Target) *routing.CandidatePreparation {
-		if !route.Fidelity.Strict() && parsed.Family != wire.Completions {
-			return nil
-		}
-		if request == nil {
-			return &routing.CandidatePreparation{Demand: demand.source(target)}
-		}
-		output := demand.outputBound(request)
-		var resolved *routing.TokenDemand
-		if prepared := demand.prepared(target, request); prepared != nil || output != nil {
-			resolved = &routing.TokenDemand{MaxOutputTokens: output}
-			if prepared != nil {
-				resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
-				resolved.CostInputTokens = prepared.CostInputTokens
-				if output == nil {
-					resolved.MaxOutputTokens = prepared.MaxOutputTokens
-				}
-			}
-		}
-		return &routing.CandidatePreparation{Parameters: sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), Demand: resolved}
-	}
 	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		if !workflow {
 			defer delete(effectiveRequests, target.ID)
 		}
-		result := &interactionInspection{Status: "incompatible", Fidelity: fidelity, Evidence: []string{}}
+		result := &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}
 		inspections[target.ID] = result
-		config := provider.Connector()
 		if !route.Fidelity.Strict() {
-			// Transformed previews show the translated invocation and never
-			// acquire a strict qualification class from a successful encode.
-			if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
-				return nil, &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
-			}
-			invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
-			if err == nil && route.PromptCache != nil {
-				invocation, err = providerinvoke.ApplyPromptCache(invocation, config, route.PromptCache, "olp-preview-key")
-			}
-			if err != nil {
+			if err := inspectTransformedCandidate(route, parsed, context, provider, target, workflow, result, effectiveRequests); err != nil {
 				return nil, err
 			}
-			if parsed.Family == wire.Completions || workflow {
-				request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
-				if err != nil {
-					return nil, err
-				}
-				effectiveRequests[target.ID] = request
-			}
-			result.Status, result.Class = routing.FidelityTransformed, fidelity
-			result.Operation = parsed.Family.Operation()
-			result.IngressDialect = wire.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
-			result.EgressDialect = wire.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
-			result.ReturnDialect = result.IngressDialect
-			result.Representation = "oif"
-			summary := inspectRequest(invocation.Prepared.Document(), invocation.Prepared.Provenance())
-			result.EffectiveRequest = &summary
-			return effective(effectiveRequests[target.ID], target), nil
+			return inspectionEffectivePrep(route, parsed, demand, effectiveRequests[target.ID], target), nil
 		}
-		template, err := interaction.Compile(interaction.Config{Provider: config, ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+		effectiveRequest, err := inspectStrictCandidate(route, parsed, context, provider, target, budget, result)
 		if err != nil {
-			return nil, safeInspectionError(err)
+			return nil, err
 		}
-		binding := context
-		binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
-		plan, err := template.Bind(parsed, binding)
-		if err != nil {
-			return nil, safeInspectionError(err)
-		}
-		receipt, obligations := plan.Receipt(), plan.Obligations()
-		result.Class, result.Operation = receipt.Class, receipt.Operation
-		result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
-		result.Representation = "oif"
-		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
-		result.Serving = inspectServing(provider, plan.Serving())
-		result.Evidence = append([]string{}, receipt.Evidence...)
-		result.Obligations = &inspectedObligations{
-			Delivery: obligations.Delivery, Lifetime: obligations.Lifetime, Continuation: obligations.Continuation, Retry: obligations.Retry,
-			Submission: obligations.Submission, Effects: append([]string{}, obligations.Effects...),
-			MaxBodyBytes: obligations.MaxBodyBytes, MaxEventBytes: obligations.MaxEventBytes, MaxContinuationBytes: obligations.MaxContinuationBytes, Actionability: obligations.Actionability, RejectAmbiguousFailover: obligations.RejectAmbiguousFailover, GuardResults: obligations.GuardResults,
-		}
-		seen := map[inspectedDisposition]bool{}
-		for _, disposition := range receipt.Dispositions {
-			entry := inspectedDisposition{inspectionField(disposition.Field), disposition.Disposition, disposition.Rule, disposition.Evidence}
-			if !seen[entry] && len(result.Dispositions) < 64 {
-				result.Dispositions = append(result.Dispositions, entry)
-				seen[entry] = true
-			} else {
-				result.OmittedDispositions++
-			}
-		}
-		effectiveRequest := plan.EffectiveRequest()
-		summary := inspectRequest(effectiveRequest.OIF().Document(), plan.Prepared().Provenance())
-		result.EffectiveRequest = &summary
-		preparedConfig := plan.Config()
-		for name := range preparedConfig.SemanticHeaders {
-			origin := "provider_default"
-			if _, supplied := context.Headers[textproto.CanonicalMIMEHeaderKey(name)]; supplied {
-				origin = "caller"
-			}
-			result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/headers/" + textproto.CanonicalMIMEHeaderKey(name), Kind: "string", Origin: origin, Redacted: true})
-		}
-		for name := range preparedConfig.QuerySettings {
-			origin := "provider_default"
-			if _, supplied := context.Query[name]; supplied {
-				origin = "caller"
-			}
-			result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/query/" + name, Kind: "string", Origin: origin, Redacted: true})
-		}
-		slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
-		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
-			safe := safeInspectionError(err)
-			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
-				result.Status = "blocked"
-			}
-			return nil, safe
-		}
-		result.Status = "admitted"
 		effectiveRequests[target.ID] = effectiveRequest
-		return effective(effectiveRequest, target), nil
+		return inspectionEffectivePrep(route, parsed, demand, effectiveRequest, target), nil
 	}
 	return prepare, inspections, effectiveRequests
+}
+
+func inspectionEffectivePrep(route routing.Route, parsed *wire.Request, demand *simulatedDemand, request *wire.Request, target routing.Target) *routing.CandidatePreparation {
+	if !route.Fidelity.Strict() && parsed.Family != wire.Completions {
+		return nil
+	}
+	if request == nil {
+		return &routing.CandidatePreparation{Demand: demand.source(target)}
+	}
+	output := demand.outputBound(request)
+	var resolved *routing.TokenDemand
+	if prepared := demand.prepared(target, request); prepared != nil || output != nil {
+		resolved = &routing.TokenDemand{MaxOutputTokens: output}
+		if prepared != nil {
+			resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
+			resolved.CostInputTokens = prepared.CostInputTokens
+			if output == nil {
+				resolved.MaxOutputTokens = prepared.MaxOutputTokens
+			}
+		}
+	}
+	return &routing.CandidatePreparation{Parameters: sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), Demand: resolved}
+}
+
+func inspectTransformedCandidate(route routing.Route, parsed *wire.Request, context interaction.Context, provider routing.Provider, target routing.Target, workflow bool, result *interactionInspection, effectiveRequests map[string]*wire.Request) error {
+	// Transformed previews show the translated invocation and never
+	// acquire a strict qualification class from a successful encode.
+	if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
+		return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
+	}
+	config := provider.Connector()
+	invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
+	if err == nil && route.PromptCache != nil {
+		invocation, err = providerinvoke.ApplyPromptCache(invocation, config, route.PromptCache, "olp-preview-key")
+	}
+	if err != nil {
+		return err
+	}
+	if parsed.Family == wire.Completions || workflow {
+		request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
+		if err != nil {
+			return err
+		}
+		effectiveRequests[target.ID] = request
+	}
+	result.Status, result.Class = routing.FidelityTransformed, route.Fidelity.Mode
+	result.Operation = parsed.Family.Operation()
+	result.IngressDialect = wire.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
+	result.EgressDialect = wire.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
+	result.ReturnDialect = result.IngressDialect
+	result.Representation = "oif"
+	summary := inspectRequest(invocation.Prepared.Document(), invocation.Prepared.Provenance())
+	result.EffectiveRequest = &summary
+	return nil
+}
+
+func inspectStrictCandidate(route routing.Route, parsed *wire.Request, context interaction.Context, provider routing.Provider, target routing.Target, budget *inspectionBudget, result *interactionInspection) (*wire.Request, error) {
+	config := provider.Connector()
+	template, err := interaction.Compile(interaction.Config{Provider: config, ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+	if err != nil {
+		return nil, safeInspectionError(err)
+	}
+	binding := context
+	binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
+	plan, err := template.Bind(parsed, binding)
+	if err != nil {
+		return nil, safeInspectionError(err)
+	}
+	receipt, obligations := plan.Receipt(), plan.Obligations()
+	result.Class, result.Operation = receipt.Class, receipt.Operation
+	result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
+	result.Representation = "oif"
+	result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
+	result.Serving = inspectServing(provider, plan.Serving())
+	result.Evidence = append([]string{}, receipt.Evidence...)
+	result.Obligations = &inspectedObligations{
+		Delivery: obligations.Delivery, Lifetime: obligations.Lifetime, Continuation: obligations.Continuation, Retry: obligations.Retry,
+		Submission: obligations.Submission, Effects: append([]string{}, obligations.Effects...),
+		MaxBodyBytes: obligations.MaxBodyBytes, MaxEventBytes: obligations.MaxEventBytes, MaxContinuationBytes: obligations.MaxContinuationBytes, Actionability: obligations.Actionability, RejectAmbiguousFailover: obligations.RejectAmbiguousFailover, GuardResults: obligations.GuardResults,
+	}
+	seen := map[inspectedDisposition]bool{}
+	for _, disposition := range receipt.Dispositions {
+		entry := inspectedDisposition{inspectionField(disposition.Field), disposition.Disposition, disposition.Rule, disposition.Evidence}
+		if !seen[entry] && len(result.Dispositions) < 64 {
+			result.Dispositions = append(result.Dispositions, entry)
+			seen[entry] = true
+		} else {
+			result.OmittedDispositions++
+		}
+	}
+	effectiveRequest := plan.EffectiveRequest()
+	summary := inspectRequest(effectiveRequest.OIF().Document(), plan.Prepared().Provenance())
+	result.EffectiveRequest = &summary
+	preparedConfig := plan.Config()
+	for name := range preparedConfig.SemanticHeaders {
+		origin := "provider_default"
+		if _, supplied := context.Headers[textproto.CanonicalMIMEHeaderKey(name)]; supplied {
+			origin = "caller"
+		}
+		result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/headers/" + textproto.CanonicalMIMEHeaderKey(name), Kind: "string", Origin: origin, Redacted: true})
+	}
+	for name := range preparedConfig.QuerySettings {
+		origin := "provider_default"
+		if _, supplied := context.Query[name]; supplied {
+			origin = "caller"
+		}
+		result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/query/" + name, Kind: "string", Origin: origin, Redacted: true})
+	}
+	slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
+	if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
+		safe := safeInspectionError(err)
+		if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
+			result.Status = "blocked"
+		}
+		return nil, safe
+	}
+	result.Status = "admitted"
+	return effectiveRequest, nil
 }
 
 func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, demand *simulatedDemand, capability *routing.WorkflowCapability) []inspectedDecision {
