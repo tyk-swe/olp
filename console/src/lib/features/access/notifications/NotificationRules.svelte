@@ -2,19 +2,17 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
-  import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { notificationKeys } from './notificationKeys';
   import { canChangeNotification } from './presentation';
-  import RuleSilenceEditor from './RuleSilenceEditor.svelte';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import NotificationRuleDialog from './NotificationRuleDialog.svelte';
+  import NotificationRuleEditRow from './NotificationRuleEditRow.svelte';
   import { listApiKeys } from '#lib/features/access/api-keys/api.js';
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
   import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
@@ -50,8 +48,10 @@
       installation: installationWide
     });
   let creating = $state(false);
-  let error = $state('');
-  const ruleIntent = useMutationIntent();
+  const create = useMutation();
+  const edit = useAction();
+  const toggle = useAction();
+  const problem = $derived(create.error || edit.error || toggle.error);
   const destinations = createQuery(() => ({
     queryKey: notificationKeys.destinations(),
     queryFn: ({ signal }) => listNotificationDestinations(signal)
@@ -71,15 +71,9 @@
 
   let draft = $state<RuleDraft>(newRuleDraft('budget.threshold'));
   const ruleEvent = $derived(draft.event);
-  const watchesBudget = $derived(ruleEvent === 'budget.threshold');
-  const watchesKey = $derived(ruleEvent === 'key.expiring');
-  const genericRule = $derived(
-    !watchesBudget && ruleEvent !== 'provider.grant.lapsed'
-  );
   const ruleProjectScoped = $derived(
     notificationEvents[ruleEvent].scope === 'project'
   );
-  let ruleBusy = $state(false);
 
   const subjectOptions = $derived(
     !(
@@ -122,7 +116,7 @@
     event.preventDefault();
     if (
       !canManage ||
-      ruleBusy ||
+      create.busy ||
       !draft.name.trim() ||
       ('subjectId' in draft && !draft.subjectId) ||
       !draft.destinationId
@@ -130,59 +124,50 @@
       return;
     const parsed = createRuleInput(draft);
     if (parsed.kind === 'invalid') {
-      error = parsed.message;
+      create.error = parsed.message;
       return;
     }
-    ruleBusy = true;
-    const isCurrent = captureOwner();
-    error = '';
-    let committed = false;
-    try {
-      const submission = ruleIntent.prepare(parsed.input);
-      await createNotificationRule(submission.input, submission.requestId);
-      if (!isCurrent()) return;
-      ruleIntent.reset();
-      committed = true;
-      draft = resetRuleDraft(draft);
-      creating = false;
-      notify('Rule created');
-      await queryClient.invalidateQueries(
-        {
-          queryKey: notificationKeys.root
-        },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = committed
-        ? `Rule created, but refreshing failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The rule could not be created.');
-    } finally {
-      if (isCurrent()) ruleBusy = false;
-    }
+    await create.submit(
+      parsed.input,
+      (input, requestId) => createNotificationRule(input, requestId),
+      async () => {
+        draft = resetRuleDraft(draft);
+        creating = false;
+        notify('Rule created');
+        await queryClient.invalidateQueries(
+          {
+            queryKey: notificationKeys.root
+          },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Rule created, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The rule could not be created.')
+      }
+    );
   }
 
   let editRuleId = $state('');
   let editingRule = $state.raw<NotificationRule | null>(null);
   let editRuleName = $state('');
   let editRuleDestinationId = $state('');
-  let editRuleBusy = $state(false);
 
   let editConfiguration = $state<RuleConfigurationDraft>(
     newRuleConfiguration('budget.threshold')
   );
 
-  const captureOwner = usePrincipalLifetime(() => {
+  usePrincipalLifetime(() => {
     draft = newRuleDraft(ruleEvent);
     editRuleId = editRuleName = editRuleDestinationId = '';
     editingRule = null;
     editConfiguration = newRuleConfiguration('budget.threshold');
-    ruleBusy = editRuleBusy = false;
-    error = '';
   });
 
   function startRuleEdit(rule: NotificationRule) {
-    if (editRuleBusy || !canChange(rule)) return;
+    if (edit.busy || !canChange(rule)) return;
     editingRule = rule;
     editRuleId = rule.id;
     editRuleName = rule.name;
@@ -191,70 +176,64 @@
       rule.event,
       rule.configuration ?? {}
     );
-    error = '';
+    edit.error = '';
   }
 
   async function saveRule(rule: NotificationRule) {
     if (
       !canChange(rule) ||
-      editRuleBusy ||
+      edit.busy ||
       !editRuleName.trim() ||
       !editRuleDestinationId
     )
       return;
     const current = editingRule;
     if (!current || current.id !== rule.id) return;
-    editRuleBusy = true;
-    const isCurrent = captureOwner();
-    error = '';
     const parsed = parseRuleConfiguration(editConfiguration);
     if (parsed.kind === 'invalid') {
-      error = parsed.message;
-      editRuleBusy = false;
+      edit.error = parsed.message;
       return;
     }
-    let committed = false;
-    try {
-      await updateNotificationRule(current, {
-        name: editRuleName.trim(),
-        destination_id: editRuleDestinationId,
-        configuration: parsed.configuration
-      });
-      committed = true;
-      if (!isCurrent()) return;
-      editRuleId = '';
-      editingRule = null;
-      notify('Rule updated.');
-      await queryClient.invalidateQueries(
-        {
-          queryKey: notificationKeys.root
-        },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = committed
-        ? `Rule updated, but refreshing failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The rule could not be updated.');
-    } finally {
-      if (isCurrent()) editRuleBusy = false;
-    }
+    await edit.run(
+      () =>
+        updateNotificationRule(current, {
+          name: editRuleName.trim(),
+          destination_id: editRuleDestinationId,
+          configuration: parsed.configuration
+        }),
+      async () => {
+        editRuleId = '';
+        editingRule = null;
+        notify('Rule updated.');
+        await queryClient.invalidateQueries(
+          {
+            queryKey: notificationKeys.root
+          },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Rule updated, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The rule could not be updated.')
+      }
+    );
   }
 
   async function toggleRule(rule: NotificationRule) {
     if (!canChange(rule)) return;
-    const isCurrent = captureOwner();
-    error = '';
-    try {
-      await updateNotificationRule(rule, { enabled: !rule.enabled });
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.root
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = errorMessage(cause, 'The rule could not be updated.');
-    }
+    await toggle.run(
+      () => updateNotificationRule(rule, { enabled: !rule.enabled }),
+      () =>
+        queryClient.invalidateQueries({
+          queryKey: notificationKeys.root
+        }),
+      {
+        failure: (cause) =>
+          errorMessage(cause, 'The rule could not be updated.')
+      }
+    );
   }
 
   function subjectLabel(rule: NotificationRule) {
@@ -282,7 +261,7 @@
   }
 </script>
 
-{#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
+{#if problem && !creating}<Callout tone="danger">{problem}</Callout>{/if}
 
 {#if canManage}<div class="toolbar">
     <p class="section-help">
@@ -293,185 +272,36 @@
         class="button button-primary"
         type="button"
         onclick={() => {
-          error = '';
+          create.error = '';
           creating = true;
         }}>New rule</button
       >
     </div>
   </div>{/if}
 {#if creating}
-  <Dialog
-    title="New alert rule"
-    description="Send an alert to a destination when something happens, such as a budget threshold."
-    placement="side"
+  <NotificationRuleDialog
+    bind:draft
+    busy={create.busy}
+    error={problem}
+    {installationWide}
+    {subjectOptions}
+    {destinationOptions}
     onClose={() => (creating = false)}
-  >
-    {#if error}<Callout tone="danger">{error}</Callout>{/if}
-    <form class="create-form" onsubmit={submitRule}>
-      <fieldset class="submission-fields" disabled={ruleBusy}>
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="rule-name">Rule name</label><input
-              id="rule-name"
-              bind:value={draft.name}
-              required
-            />
-          </div>
-          <div class="form-field">
-            <label for="rule-event">Event</label><select
-              id="rule-event"
-              value={ruleEvent}
-              onchange={(event) => {
-                const selected = Object.values(notificationEvents).find(
-                  (definition) => definition.event === event.currentTarget.value
-                );
-                if (selected) draft = newRuleDraft(selected.event, draft);
-              }}
-              >{#each Object.values(notificationEvents) as definition (definition.event)}<option
-                  value={definition.event}
-                  disabled={!installationWide && definition.scope !== 'project'}
-                  >{definition.label}</option
-                >{/each}</select
-            >
-          </div>
-          {#if ruleProjectScoped}
-            <ProjectScopeField
-              id="rule-project"
-              bind:value={draft.projectId}
-              unassigned={installationWide && draft.event !== 'spend.spike'}
-            />
-          {/if}
-          {#if draft.event === 'budget.threshold' || draft.event === 'key.expiring'}
-            <div class="form-field">
-              <label for="rule-subject-kind">Subject</label><select
-                id="rule-subject-kind"
-                disabled={watchesKey}
-                bind:value={draft.subjectKind}
-                ><option value="api_key">API key</option><option
-                  value="budget_group">Budget group</option
-                ></select
-              >
-            </div>
-            <div class="form-field">
-              <label for="rule-subject">
-                {draft.subjectKind === 'api_key'
-                  ? 'API key'
-                  : 'Budget group'}</label
-              ><select id="rule-subject" bind:value={draft.subjectId} required
-                ><option value="" disabled>Choose a subject</option
-                >{#each subjectOptions as subject (subject.id)}<option
-                    value={subject.id}>{subject.name}</option
-                  >{/each}</select
-              >
-            </div>
-            {#if draft.event === 'budget.threshold'}
-              <div class="form-field">
-                <label for="rule-window">Window</label><select
-                  id="rule-window"
-                  bind:value={draft.window}
-                  ><option value="day">Budget day</option><option value="week"
-                    >Budget week</option
-                  ><option value="month">Budget month</option></select
-                >
-              </div>
-              <div class="form-field">
-                <label for="rule-threshold">Threshold %</label><input
-                  id="rule-threshold"
-                  inputmode="numeric"
-                  bind:value={draft.threshold}
-                  required
-                />
-              </div>
-            {/if}
-          {/if}
-          {#each notificationEvents[ruleEvent].fields as field (field.key)}
-            <div class="form-field">
-              <label for="rule-config-{field.key}">{field.label}</label><input
-                id="rule-config-{field.key}"
-                inputmode={field.inputmode}
-                value={draft.values[field.key] ?? ''}
-                oninput={(e) =>
-                  (draft.values = {
-                    ...draft.values,
-                    [field.key]: e.currentTarget.value
-                  })}
-                placeholder="Default"
-              />
-            </div>
-          {/each}
-          {#if draft.event === 'route.latency'}
-            <div class="form-field">
-              <label for="rule-metric">Metric</label><select
-                id="rule-metric"
-                bind:value={draft.metric}
-                ><option value="ttft">Time to first token</option><option
-                  value="latency">Total latency</option
-                ></select
-              >
-            </div>
-          {/if}
-          {#if draft.event === 'report.spend'}
-            <div class="form-field">
-              <label for="rule-period">Period</label><select
-                id="rule-period"
-                bind:value={draft.period}
-                ><option value="daily">Daily</option><option value="weekly"
-                  >Weekly</option
-                ><option value="monthly">Monthly</option></select
-              >
-            </div>
-          {/if}
-          <div class="form-field">
-            <label for="rule-destination">Destination</label><select
-              id="rule-destination"
-              bind:value={draft.destinationId}
-              required
-              ><option value="" disabled>Choose a destination</option
-              >{#each destinationOptions as destination (destination.id)}<option
-                  value={destination.id}>{destination.name}</option
-                >{/each}</select
-            >
-          </div>
-        </div>
-        <div class="form-actions">
-          <button
-            class="button button-primary"
-            type="submit"
-            disabled={ruleBusy ||
-              !draft.name.trim() ||
-              ('subjectId' in draft && !draft.subjectId) ||
-              !draft.destinationId}
-            >{ruleBusy ? 'Creating…' : 'Create rule'}</button
-          >
-        </div>
-        <p class="section-help">
-          {#if draft.event === 'budget.threshold'}A delivery is sent when a
-            subject's accrued spend crosses the threshold within the window.{:else if watchesKey}Sent
-            once when the key expires or reaches its rotation date within the
-            lead time.{:else if draft.event === 'spend.spike'}Sent once when a
-            complete UTC day of project spend jumps above its recent baseline by
-            both thresholds.{:else if genericRule}Metadata-only trigger and
-            recovery deliveries; cooldown repeats share the incident key.{:else}A
-            grant lapses when its provider plugin can no longer refresh it.{/if}
-        </p>
-      </fieldset>
-    </form>
-  </Dialog>
+    onSubmit={submitRule}
+  />
 {/if}
 
-{#if rules.isPending}<span class="inline-status" role="status"
-    >Loading rules…</span
-  >
-{:else if rules.isError}<span class="inline-problem" role="alert"
-    >Rules are unavailable.
-    <button class="text-button" type="button" onclick={() => rules.refetch()}
-      >Retry</button
-    ></span
-  >
-{:else if !(rules.data ?? []).length}<EmptyState title="No alert rules yet"
-    >Rules decide which events send an alert, and to which destination.</EmptyState
-  >
-{:else}
+<QueryView
+  query={rules}
+  loading="Loading rules…"
+  failure="Rules are unavailable."
+  emptyWhen={!(rules.data ?? []).length}
+>
+  {#snippet empty()}
+    <EmptyState title="No alert rules yet"
+      >Rules decide which events send an alert, and to which destination.</EmptyState
+    >
+  {/snippet}
   <ScrollTable label="Notification rules">
     <table class="data-table">
       <thead
@@ -488,93 +318,28 @@
       <tbody>
         {#each rules.data ?? [] as rule (rule.id)}
           {#if editRuleId === rule.id}
-            <tr
-              ><td
-                ><input
-                  aria-label="Rule name"
-                  bind:value={editRuleName}
-                  disabled={editRuleBusy}
-                  required
-                /><br /><small>{rule.project_name ?? 'Installation-wide'}</small
-                ></td
-              ><td>{notificationEvents[rule.event].label}</td><td
-                >{subjectLabel(rule)}</td
-              ><td>{windowLabel(rule.window_kind)}</td><td
-                ><div class="form-grid">
-                  {#each notificationEvents[rule.event].fields as field (field.key)}
-                    <input
-                      aria-label={field.label}
-                      inputmode={field.inputmode}
-                      value={editConfiguration.values[field.key] ?? ''}
-                      disabled={editRuleBusy}
-                      oninput={(e) =>
-                        (editConfiguration.values = {
-                          ...editConfiguration.values,
-                          [field.key]: e.currentTarget.value
-                        })}
-                      placeholder={`${field.key} (default)`}
-                    />
-                  {/each}
-                  {#if editConfiguration.event === 'route.latency'}<select
-                      aria-label="Metric"
-                      bind:value={editConfiguration.metric}
-                      disabled={editRuleBusy}
-                      ><option value="ttft">Time to first token</option><option
-                        value="latency">Total latency</option
-                      ></select
-                    >{/if}
-                  {#if editConfiguration.event === 'report.spend'}<select
-                      aria-label="Period"
-                      bind:value={editConfiguration.period}
-                      disabled={editRuleBusy}
-                      ><option value="daily">Daily</option><option
-                        value="weekly">Weekly</option
-                      ><option value="monthly">Monthly</option></select
-                    >{/if}
-                </div></td
-              ><td
-                ><select
-                  aria-label="Destination"
-                  bind:value={editRuleDestinationId}
-                  disabled={editRuleBusy}
-                  >{#each (destinations.data ?? []).filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
-                      value={destination.id}>{destination.name}</option
-                    >{/each}</select
-                ></td
-              ><td>{rule.enabled ? 'Yes' : 'No'}</td><td
-                ><button
-                  class="text-button"
-                  type="button"
-                  disabled={editRuleBusy}
-                  onclick={() => saveRule(rule)}
-                  >{editRuleBusy ? 'Saving…' : 'Save'}</button
-                ><button
-                  class="text-button"
-                  type="button"
-                  disabled={editRuleBusy}
-                  onclick={() => {
-                    editRuleId = '';
-                    editingRule = null;
-                  }}>Cancel</button
-                ></td
-              ></tr
-            >
-            {#if editingRule?.event === 'route.latency' && editingRule.project_id && (destinations.data ?? []).some((destination) => destination.id === editingRule?.destination_id && destination.type === 'webhook')}
-              <tr>
-                <td colspan="8">
-                  <RuleSilenceEditor
-                    rule={editingRule}
-                    disabled={editRuleBusy}
-                    saved={async (value) => {
-                      if (editRuleId === value.id) editingRule = value;
-                      await queryClient.invalidateQueries({
-                        queryKey: notificationKeys.rules()
-                      });
-                    }}
-                  />
-                </td>
-              </tr>
-            {/if}
+            <NotificationRuleEditRow
+              {rule}
+              bind:name={editRuleName}
+              bind:destinationId={editRuleDestinationId}
+              bind:configuration={editConfiguration}
+              destinations={destinations.data ?? []}
+              busy={edit.busy}
+              {editingRule}
+              onSave={() => saveRule(rule)}
+              onCancel={() => {
+                editRuleId = '';
+                editingRule = null;
+              }}
+              onSilenceSaved={async (value) => {
+                if (editRuleId === value.id) editingRule = value;
+                await queryClient.invalidateQueries({
+                  queryKey: notificationKeys.rules()
+                });
+              }}
+              {subjectLabel}
+              {windowLabel}
+            />
           {:else}
             <tr
               ><td
@@ -591,11 +356,12 @@
                   >{#if canChange(rule)}<button
                       class="text-button"
                       type="button"
-                      disabled={editRuleBusy}
+                      disabled={edit.busy}
                       onclick={() => startRuleEdit(rule)}>Edit</button
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={toggle.busy}
                       onclick={() => toggleRule(rule)}
                       >{rule.enabled ? 'Disable' : 'Enable'}</button
                     >
@@ -619,4 +385,4 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>

@@ -301,98 +301,9 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 			done <- err
 			_ = writer.CloseWithError(err)
 		})
-		scanner := bufio.NewScanner(opened.File)
-		scanner.Buffer(make([]byte, 64<<10), managedBatchLineLimit+2)
-		for scanner.Scan() {
-			var line struct {
-				Key      string          `json:"key"`
-				Response json.RawMessage `json:"response"`
-				Error    json.RawMessage `json:"error"`
-			}
-			raw := scanner.Bytes()
-			if json.Unmarshal(raw, &line) != nil || line.Key == "" ||
-				(len(line.Response) == 0 || string(line.Response) == "null") && (len(line.Error) == 0 || string(line.Error) == "null") ||
-				len(line.Response) > 0 && string(line.Response) != "null" && len(line.Error) > 0 && string(line.Error) != "null" {
-				done <- ErrGeminiBatchFidelity
-				_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-				return
-			}
-			if role == "output" && (len(line.Response) == 0 || string(line.Response) == "null") ||
-				role == "error" && (len(line.Error) == 0 || string(line.Error) == "null") {
-				continue
-			}
-			var translated map[string]any
-			if role == "output" {
-				completion, decodeErr := protocols.Decode(wire.Gemini, wire.Chat, line.Response, routeSlug, "")
-				if decodeErr != nil || completion == nil {
-					done <- ErrGeminiBatchFidelity
-					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-					return
-				}
-				body := completion.Body
-				if completion.UpstreamID == "" {
-					var fields map[string]json.RawMessage
-					if json.Unmarshal(body, &fields) != nil {
-						done <- ErrGeminiBatchFidelity
-						_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-						return
-					}
-					delete(fields, "id")
-					body = MustJSON(fields)
-				}
-				var decoded any
-				if json.Unmarshal(body, &decoded) != nil {
-					done <- ErrGeminiBatchFidelity
-					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-					return
-				}
-				translated = map[string]any{
-					"custom_id": line.Key,
-					"response":  map[string]any{"status_code": http.StatusOK, "body": decoded},
-					"error":     nil,
-				}
-			} else {
-				var providerError struct {
-					Code    json.RawMessage `json:"code"`
-					Message string          `json:"message"`
-				}
-				if json.Unmarshal(line.Error, &providerError) != nil {
-					done <- ErrGeminiBatchFidelity
-					_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-					return
-				}
-				code := ""
-				if json.Unmarshal(providerError.Code, &code) != nil {
-					var number json.Number
-					if json.Unmarshal(providerError.Code, &number) == nil {
-						code = number.String()
-					}
-				}
-				translated = map[string]any{
-					"custom_id": line.Key, "response": nil,
-					"error": map[string]string{"code": code, "message": providerError.Message},
-				}
-			}
-			encoded, err := json.Marshal(translated)
-			if err != nil {
-				done <- ErrGeminiBatchFidelity
-				_ = writer.CloseWithError(ErrGeminiBatchFidelity)
-				return
-			}
-			if _, err := writer.Write(append(encoded, '\n')); err != nil {
-				done <- err
-				_ = writer.CloseWithError(err)
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			failure := geminiResultScanError(err)
-			done <- failure
-			_ = writer.CloseWithError(failure)
-			return
-		}
-		done <- nil
-		_ = writer.Close()
+		streamErr := translateGeminiManagedStream(opened.File, writer, routeSlug, role)
+		done <- streamErr
+		_ = writer.CloseWithError(streamErr)
 	}()
 	artifact, spoolErr := s.Deps.Staging.Put(ctx, staging.Upload{
 		Filename: source.Filename, ContentType: "application/jsonl", MaximumLength: limit, Body: reader,
@@ -409,6 +320,104 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		return nil, translateErr
 	}
 	return &staging.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
+}
+
+func translateGeminiManagedStream(src io.Reader, dst io.Writer, routeSlug, role string) error {
+	scanner := bufio.NewScanner(src)
+	scanner.Buffer(make([]byte, 64<<10), managedBatchLineLimit+2)
+	for scanner.Scan() {
+		encoded, ok, err := translateGeminiManagedLine(scanner.Bytes(), routeSlug, role)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if _, err := dst.Write(append(encoded, '\n')); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return geminiResultScanError(err)
+	}
+	return nil
+}
+
+func translateGeminiManagedLine(raw []byte, routeSlug, role string) ([]byte, bool, error) {
+	var line struct {
+		Key      string          `json:"key"`
+		Response json.RawMessage `json:"response"`
+		Error    json.RawMessage `json:"error"`
+	}
+	hasResponse := func() bool { return len(line.Response) > 0 && string(line.Response) != "null" }
+	hasError := func() bool { return len(line.Error) > 0 && string(line.Error) != "null" }
+	if json.Unmarshal(raw, &line) != nil || line.Key == "" || (!hasResponse() && !hasError()) || (hasResponse() && hasError()) {
+		return nil, false, ErrGeminiBatchFidelity
+	}
+	if role == "output" && !hasResponse() || role == "error" && !hasError() {
+		return nil, false, nil
+	}
+	var translated map[string]any
+	var err error
+	if role == "output" {
+		translated, err = translateGeminiOutputLine(line.Key, line.Response, routeSlug)
+	} else {
+		translated, err = translateGeminiErrorLine(line.Key, line.Error)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	encoded, err := json.Marshal(translated)
+	if err != nil {
+		return nil, false, ErrGeminiBatchFidelity
+	}
+	return encoded, true, nil
+}
+
+func translateGeminiOutputLine(key string, response json.RawMessage, routeSlug string) (map[string]any, error) {
+	completion, err := protocols.Decode(wire.Gemini, wire.Chat, response, routeSlug, "")
+	if err != nil || completion == nil {
+		return nil, ErrGeminiBatchFidelity
+	}
+	body := completion.Body
+	if completion.UpstreamID == "" {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(body, &fields) != nil {
+			return nil, ErrGeminiBatchFidelity
+		}
+		delete(fields, "id")
+		body = MustJSON(fields)
+	}
+	var decoded any
+	if json.Unmarshal(body, &decoded) != nil {
+		return nil, ErrGeminiBatchFidelity
+	}
+	return map[string]any{
+		"custom_id": key,
+		"response":  map[string]any{"status_code": http.StatusOK, "body": decoded},
+		"error":     nil,
+	}, nil
+}
+
+func translateGeminiErrorLine(key string, rawError json.RawMessage) (map[string]any, error) {
+	var providerError struct {
+		Code    json.RawMessage `json:"code"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(rawError, &providerError) != nil {
+		return nil, ErrGeminiBatchFidelity
+	}
+	code := ""
+	if json.Unmarshal(providerError.Code, &code) != nil {
+		var number json.Number
+		if json.Unmarshal(providerError.Code, &number) == nil {
+			code = number.String()
+		}
+	}
+	return map[string]any{
+		"custom_id": key, "response": nil,
+		"error": map[string]string{"code": code, "message": providerError.Message},
+	}, nil
 }
 
 func geminiResultScanError(err error) error {

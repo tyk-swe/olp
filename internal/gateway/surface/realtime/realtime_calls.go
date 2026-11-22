@@ -288,7 +288,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		t.refuse(e)
 		return
 	}
-	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), webRTCBound)
+	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), kernel.SessionExposureWindow)
 	x.SessionEstimate()
 	p, e := t.pinCall(bg, route)
 	if e != nil {
@@ -308,7 +308,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		t.refuse(e)
 		return
 	}
-	if e := s.kernel.ReserveState(bg, x, authority, webRTCBound); e != nil {
+	if e := s.kernel.ReserveState(bg, x, authority, kernel.SessionExposureWindow); e != nil {
 		releasePin()
 		cancel()
 		t.refuse(e)
@@ -321,7 +321,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		t.refuse(e)
 		return
 	}
-	if e := s.kernel.ReserveSessionCost(bg, x, authority, p, webRTCBound); e != nil {
+	if e := s.kernel.ReserveSessionCost(bg, x, authority, p, kernel.SessionExposureWindow); e != nil {
 		s.kernel.AbandonSessionDebit(r.Context(), x)
 		s.kernel.ReleaseLease(r.Context(), x)
 		releasePin()
@@ -442,10 +442,10 @@ func (t callTurn) launchCall(bg context.Context, cancel context.CancelFunc, sess
 		fault.WriteSurfaceError(t.w, e, "openai")
 		return
 	}
-	created, e := t.kernel.CreateWebRTCCall(bg, t.x, sess.p, body, contentType, webrtcCloseTimeout, maxWebRTCSDPBytes)
+	created, e := t.surface.createWebRTCCall(bg, t.x, sess.p, body, contentType, webrtcCloseTimeout, maxWebRTCSDPBytes)
 	sess.rejected, sess.callID, sess.conn = created.Rejected, created.CallID, created.Conn
 	if created.Exposure {
-		t.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		t.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 	}
 	if e != nil {
 		t.surface.settleWebRTC(sess, e)
@@ -458,8 +458,8 @@ func (t callTurn) launchCall(bg context.Context, cancel context.CancelFunc, sess
 func (t callTurn) deliverCall(bg context.Context, cancel context.CancelFunc, sess *webrtcSession, answer []byte, status int, controller *http.ResponseController) {
 	abandoned := fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
 	if t.r.Context().Err() != nil {
-		if err := t.kernel.HangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
-			t.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		if err := t.surface.hangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); err != nil {
+			t.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 		}
 		t.surface.settleWebRTC(sess, abandoned)
 		cancel()
@@ -475,8 +475,8 @@ func (t callTurn) deliverCall(bg context.Context, cancel context.CancelFunc, ses
 		werr = controller.Flush()
 	}
 	if werr != nil || t.r.Context().Err() != nil {
-		if herr := t.kernel.HangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); herr != nil {
-			t.kernel.HoldWebRTCExposure(sess.keyID, sess.started.Add(webRTCBound))
+		if herr := t.surface.hangupWebRTCCall(bg, sess.x, sess.p, sess.callID, webrtcCloseTimeout); herr != nil {
+			t.kernel.HoldSessionExposure(sess.keyID, sess.started.Add(kernel.SessionExposureWindow))
 		}
 		t.surface.settleWebRTC(sess, abandoned)
 		cancel()

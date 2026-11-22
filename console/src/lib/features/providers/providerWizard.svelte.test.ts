@@ -1,12 +1,14 @@
 import { useQueryClient } from '@tanstack/svelte-query';
 import { providerKeys } from './providerKeys';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import type { ProviderKindCapability } from './models';
 import type { Provider, ProviderProbe } from './providers';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import { networkCredentialPath } from './configurationDraft.svelte';
+import BillingImportSection from './BillingImportSection.svelte';
+import type { BillingImport } from './billing';
 import { ProviderEditor } from './providerEditor.svelte';
 import { ProviderWizardState } from './providerWizard.svelte';
 
@@ -562,4 +564,83 @@ it('uses the reloaded version and a fresh request identity after explicitly disc
   expect(activate).toHaveBeenCalledTimes(2);
   expect(activate.mock.calls[1][0]).not.toBe(activate.mock.calls[0][0]);
   expect(activate.mock.calls[1][1]).toBe(`"${etag}"`);
+});
+
+it('clears a billing import delete conflict after loading the new version', async () => {
+  const initial: BillingImport = {
+    provider_id: provider.id,
+    source: 'openai_costs',
+    enabled: true,
+    scope: {},
+    credential_configured: true,
+    etag: 'initial',
+    status: {
+      next_import_at: null,
+      last_import_at: null,
+      last_success_at: null,
+      last_error_code: null,
+      imported_from: null,
+      imported_through: null,
+      source_revision: null
+    }
+  };
+  const read = vi
+    .fn(() => json({ ...initial, enabled: false, etag: 'refreshed' }))
+    .mockReturnValueOnce(json(initial));
+  serve(
+    (request) => {
+      if (request.method === 'GET') return read();
+      route(
+        request,
+        'DELETE',
+        `/api/v1/providers/${provider.id}/billing-import`
+      );
+      return json(
+        {
+          type: 'https://openllmproxy.dev/problems/etag_mismatch',
+          title: 'The import changed',
+          status: 412
+        },
+        412
+      );
+    },
+    ['read', 'configure']
+  );
+
+  const target = document.createElement('div');
+  document.body.append(target);
+  const setup = vi.fn(() =>
+    mount(BillingImportSection, {
+      target,
+      props: {
+        provider: {
+          ...provider,
+          configuration: { ...provider.configuration, kind: 'openai' }
+        },
+        canManage: true
+      },
+      context: getAllContexts()
+    })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+    target.remove();
+  });
+  const button = (root: ParentNode, label: string) =>
+    [...root.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === label
+    );
+
+  await vi.waitFor(() => expect(button(target, 'Remove')).toBeDefined());
+  button(target, 'Remove')?.click();
+  await vi.waitFor(() => expect(button(document, 'Delete')).toBeDefined());
+  button(document, 'Delete')?.click();
+  await vi.waitFor(() => expect(button(target, 'Reload')).toBeDefined());
+  button(target, 'Reload')?.click();
+  await vi.waitFor(() => {
+    expect(target.querySelector('dd')?.textContent).toBe('No');
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+  });
 });

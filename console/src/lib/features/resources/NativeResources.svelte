@@ -1,9 +1,12 @@
 <script lang="ts">
+  import NativeResourceFields from './NativeResourceFields.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
   import { ResourceRequestError } from './lifecycle';
   import {
@@ -36,7 +39,9 @@
   let result = $state('');
   let problem = $state('');
   let notice = $state('');
-  let busy = $state(false);
+  const runAction = useAction();
+  const busy = $derived(runAction.busy);
+  const apiKeyMissing = $derived(!apiKey.trim());
   let downloadUrl = $state('');
   let downloadName = $state('');
   let downloadBytes = $state(0);
@@ -67,7 +72,6 @@
     result = '';
     problem = '';
     notice = '';
-    busy = false;
     pendingFingerprint = pendingKey = pendingApiKey = '';
   });
   const operations = $derived([
@@ -152,62 +156,65 @@
     };
     controller = new AbortController();
     request.signal = controller.signal;
-    busy = true;
     problem = notice = result = '';
     clearDownload();
-    try {
-      if (selected.method !== 'GET') {
-        const fingerprint = await nativeResourceFingerprint(request);
-        if (!isCurrent() || version !== epoch || request.signal.aborted) return;
-        if (
-          fingerprint !== pendingFingerprint ||
-          request.apiKey !== pendingApiKey
-        ) {
-          pendingFingerprint = fingerprint;
-          pendingApiKey = request.apiKey;
-          pendingKey = crypto.randomUUID();
+    await runAction.run(
+      async () => {
+        if (selected.method !== 'GET') {
+          const fingerprint = await nativeResourceFingerprint(request);
+          if (version !== epoch || request.signal?.aborted) return;
+          if (
+            fingerprint !== pendingFingerprint ||
+            request.apiKey !== pendingApiKey
+          ) {
+            pendingFingerprint = fingerprint;
+            pendingApiKey = request.apiKey;
+            pendingKey = crypto.randomUUID();
+          }
+          request.submissionKey = pendingKey;
         }
-        request.submissionKey = pendingKey;
-      }
-      const response = await runNativeResourceRequest(request);
-      if (!isCurrent() || version !== epoch) return;
-      captureId(response.resourceId, selected);
-      if (response.download) {
-        downloadUrl = URL.createObjectURL(response.download);
-        downloadName = `${request.id.trim()}.bin`;
-        downloadBytes = response.download.size;
-        notice = 'File content is ready to download.';
-      } else {
-        result = response.text;
-        notice = response.text
-          ? 'Resource operation completed.'
-          : 'Resource operation completed without a response body.';
-        if (response.text) {
-          try {
-            const parsed = parseNativeJSON(response.text);
-            if (nativeObject(parsed)) {
-              if (typeof parsed.id === 'string') captureId(parsed.id, selected);
-              if (typeof parsed.name === 'string')
-                captureId(parsed.name, selected);
+        return runNativeResourceRequest(request);
+      },
+      (response, current) => {
+        if (!response || !current() || version !== epoch) return;
+        captureId(response.resourceId, selected);
+        if (response.download) {
+          downloadUrl = URL.createObjectURL(response.download);
+          downloadName = `${request.id.trim()}.bin`;
+          downloadBytes = response.download.size;
+          notice = 'File content is ready to download.';
+        } else {
+          result = response.text;
+          notice = response.text
+            ? 'Resource operation completed.'
+            : 'Resource operation completed without a response body.';
+          if (response.text) {
+            const parsed = captureResult(() => parseNativeJSON(response.text));
+            if (parsed.ok && nativeObject(parsed.value)) {
+              if (typeof parsed.value.id === 'string')
+                captureId(parsed.value.id, selected);
+              if (typeof parsed.value.name === 'string')
+                captureId(parsed.value.name, selected);
             }
-          } catch {
-            /* Non-JSON native responses remain local display text. */
           }
         }
+        if (selected.method !== 'GET')
+          pendingFingerprint = pendingKey = pendingApiKey = '';
+      },
+      {
+        key: 'run',
+        failure: (cause) => {
+          if (version !== epoch || request.signal?.aborted) return problem;
+          if (cause instanceof ResourceRequestError)
+            captureId(cause.resourceId, selected);
+          return errorMessage(
+            cause,
+            'The resource operation could not be completed.'
+          );
+        }
       }
-      if (selected.method !== 'GET')
-        pendingFingerprint = pendingKey = pendingApiKey = '';
-    } catch (cause) {
-      if (!isCurrent() || version !== epoch || request.signal.aborted) return;
-      problem = errorMessage(
-        cause,
-        'The resource operation could not be completed.'
-      );
-      if (cause instanceof ResourceRequestError)
-        captureId(cause.resourceId, selected);
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
-    }
+    );
+    if (version === epoch && isCurrent()) problem = runAction.error;
   }
 </script>
 
@@ -264,118 +271,29 @@
           >
         </div>
         {#if endpoint}
-          <code class="endpoint">{endpoint.method} {endpoint.pattern}</code>
-          {#if requiresRoute || endpoint.action === 'list'}
-            <label
-              >Published route{requiresRoute ? '' : ' (optional)'}<select
-                bind:value={route}
-                required={requiresRoute}
-                disabled={routes.isPending}
-              >
-                <option value=""
-                  >{requiresRoute
-                    ? 'Choose a route'
-                    : 'All routes allowed by the key'}</option
-                >
-                {#each eligibleRoutes as item (item.slug)}<option
-                    value={item.slug}>{item.slug}</option
-                  >{/each}
-              </select></label
-            >
-            {#if routes.isError}<p class="inline-problem" role="alert">
-                {errorMessage(
-                  routes.error,
-                  'Published routes are unavailable.'
-                )}
-              </p>
-              <button
-                class="text-button"
-                type="button"
-                onclick={() => routes.refetch()}>Reload routes</button
-              >{/if}
-          {/if}
-          <div class="resource-fields">
-            {#each endpoint.ancestors as kind, index (index)}<label
-                >{kind.replaceAll('_', ' ')} parent ID<input
-                  bind:value={parents[index]}
-                  placeholder={`${kind}_…`}
-                  required
-                /></label
-              >{/each}
-            {#if endpoint.pattern.includes('{id}')}<label
-                >{endpoint.kind.replaceAll('_', ' ')} ID<input
-                  bind:value={id}
-                  placeholder={`${endpoint.kind}_…`}
-                  required
-                /></label
-              >{/if}
-          </div>
-          <label
-            >Query parameters (JSON string values)<textarea
-              bind:value={query}
-              rows="3"
-              spellcheck="false"
-              placeholder={'{"limit":"20","after":"gateway cursor"}'}
-            ></textarea></label
-          >
-          <small
-            >Use native pagination controls and gateway cursors returned by the
-            selected endpoint. Cache TTL updates can include updateMask.</small
-          >
-          {#if writesBody}
-            {#if supportsMultipart && !requiresMultipart}<label class="check"
-                ><input type="checkbox" bind:checked={upload} />Upload a file
-                instead of referencing an existing file</label
-              >{/if}
-            <label
-              >{multipart
-                ? 'Multipart text fields (JSON string values)'
-                : 'Request body (native JSON)'}<textarea
-                bind:value={body}
-                rows="7"
-                spellcheck="false"
-                placeholder={endpoint.kind === 'container_file' && !multipart
-                  ? '{"file_id":"gateway file ID"}'
-                  : '{}'}></textarea></label
-            >
-            <small
-              >Use gateway IDs for resource references. Match the native request
-              fields of the selected provider.</small
-            >
-            {#if multipart}
-              {#key filePickerKey}<label
-                  >{requiresMultipart ? 'Skill files' : 'Container file'}<input
-                    type="file"
-                    multiple={requiresMultipart}
-                    onchange={(event) => {
-                      files = Array.from(event.currentTarget.files ?? []);
-                    }}
-                    required
-                  /></label
-                >{/key}
-              <small
-                >Uploads are limited to 4 MiB total. Container uploads require
-                an empty JSON object above.</small
-              >
-            {/if}
-          {/if}
-          {#if endpoint.metered && endpoint.action === 'create'}<p
-              class="muted"
-            >
-              This action can start paid provider work or retained storage.
-              Applicable prices and budget restrictions are checked before
-              dispatch.
-            </p>{/if}
-          <button
-            class="button button-primary"
-            type="submit"
-            disabled={!apiKey.trim() ||
-              (requiresRoute && !route) ||
-              (multipart && !files.length)}
-            >{endpoint.action === 'content'
-              ? 'Fetch file content'
-              : `${endpoint.action[0]?.toUpperCase()}${endpoint.action.slice(1)} resource`}</button
-          >
+          <NativeResourceFields
+            {endpoint}
+            {eligibleRoutes}
+            routesPending={routes.isPending}
+            routesError={routes.isError
+              ? errorMessage(routes.error, 'Published routes are unavailable.')
+              : null}
+            onReloadRoutes={() => routes.refetch()}
+            {requiresRoute}
+            {writesBody}
+            {supportsMultipart}
+            {requiresMultipart}
+            {multipart}
+            {apiKeyMissing}
+            {filePickerKey}
+            bind:route
+            bind:parents
+            bind:id
+            bind:query
+            bind:body
+            bind:upload
+            bind:files
+          />
         {/if}
       </fieldset>
       {#if busy}<div class="resource-actions">
@@ -423,27 +341,19 @@
     display: grid;
     gap: 0.4rem;
   }
-  .check,
   .resource-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
     align-items: center;
   }
-  textarea,
   pre {
     font-family: var(--font-mono, monospace);
-  }
-  .endpoint {
-    overflow-wrap: anywhere;
   }
   pre {
     max-height: 28rem;
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  small {
-    color: var(--foreground-muted);
   }
 </style>

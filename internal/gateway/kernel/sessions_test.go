@@ -330,17 +330,17 @@ func TestRealtimeResponseDoneSettlesModalityShares(t *testing.T) {
 	assertUsageShare(t, "audio output", settled.AudioOutputTokens, 20)
 }
 
-func TestHoldWebRTCExposureSweepsExpired(t *testing.T) {
+func TestHoldSessionExposureSweepsExpired(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := &Server{Now: func() time.Time { return now }}
-	s.HoldWebRTCExposure("live", now.Add(time.Hour))
-	s.HoldWebRTCExposure("expired", now.Add(-time.Hour))
-	s.HoldWebRTCExposure("other", now.Add(time.Hour))
-	if _, ok := s.webrtcExposures["expired"]; ok {
+	s := &Server{Now: func() time.Time { return now }, exposures: newSessionExposures()}
+	s.HoldSessionExposure("live", now.Add(time.Hour))
+	s.HoldSessionExposure("expired", now.Add(-time.Hour))
+	s.HoldSessionExposure("other", now.Add(time.Hour))
+	if _, ok := s.exposures.held["expired"]; ok {
 		t.Error("expired exposure remained after holding another key")
 	}
-	if !s.webrtcExposureHeld("live") || !s.webrtcExposureHeld("other") {
-		t.Errorf("live exposures = %v, want both keys held", s.webrtcExposures)
+	if !s.localExposureHeld("live") || !s.localExposureHeld("other") {
+		t.Errorf("live exposures = %v, want both keys held", s.exposures.held)
 	}
 }

@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -35,6 +37,36 @@ type PinnedResponse struct {
 
 func (e *PinnedExchange) fact() *events.AttemptFact {
 	return &e.request.facts[e.index]
+}
+
+func (e *PinnedExchange) ObserveUsage(observed *wire.Usage, complete bool) {
+	e.fact().ObserveUsage(observed, complete)
+}
+
+func (e *PinnedExchange) RecordEvidence() {
+	e.recordEvidence()
+}
+
+func AttemptClassFault(class string) *fault.Error {
+	return (&AttemptFailure{class: class}).Fault()
+}
+
+func (s *Server) PinnedPost(ctx context.Context, x *Call, p *Pin, endpoint string, body []byte, contentType, accept string, decodeError func([]byte) *wire.UpstreamError) (*PinnedResponse, *AttemptFailure) {
+	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, exchange.fail(ClassConnect, nil)
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", "olp/gateway")
+	if err := s.applySlotCredential(ctx, x, req, p.Provider.Connector(), p.Slot, body, &p.Provider, p.Model); err != nil {
+		if ctx.Err() != nil {
+			return nil, exchange.fail(ClassCancelled, nil)
+		}
+		return nil, exchange.fail(ClassCredential, nil)
+	}
+	return s.doPinnedRequest(ctx, p, exchange, req, decodeError)
 }
 
 func (s *Server) beginPinned(ctx context.Context, x *Call, p *Pin, method string) *PinnedExchange {

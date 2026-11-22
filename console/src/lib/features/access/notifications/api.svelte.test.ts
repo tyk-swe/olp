@@ -297,6 +297,7 @@ describe.each([
         project_id: projectDestination.project_id,
         project_name: projectDestination.project_name
       };
+      const toggle = Promise.withResolvers<Response>();
       authLifecycle.establishSession({
         user: {
           id: 'user-id',
@@ -311,6 +312,7 @@ describe.each([
         csrf_token: 'fixture-csrf'
       });
       vi.stubGlobal('fetch', (request: Request) => {
+        if (request.method === 'PATCH') return toggle.promise;
         switch (new URL(request.url).pathname) {
           case '/api/v1/auth/capabilities':
             return json({ notifications_active: true });
@@ -338,15 +340,15 @@ describe.each([
         target.remove();
         vi.unstubAllGlobals();
       });
-      const rowActions = (name: string) => {
+      const rowButtons = (name: string) => {
         const row = [...target.querySelectorAll('tr')].find((row) =>
           row.textContent?.includes(name)
         );
         expect(row).toBeDefined();
-        return [...(row?.querySelectorAll('button') ?? [])].map((button) =>
-          button.textContent?.trim()
-        );
+        return [...(row?.querySelectorAll('button') ?? [])];
       };
+      const rowActions = (name: string) =>
+        rowButtons(name).map((button) => button.textContent?.trim());
       const actions = ['Edit', 'Disable', deletion];
       const [globalRow, projectRow] =
         view === 'destinations'
@@ -362,6 +364,20 @@ describe.each([
           actions.filter((action) => globalActions.includes(action))
         ).toEqual(installation ? actions : []);
       });
+      if (installation) {
+        const disable = (name: string) =>
+          rowButtons(name).find(
+            (button) => button.textContent?.trim() === 'Disable'
+          );
+        disable(globalRow.name)?.click();
+        await vi.waitFor(() =>
+          expect(disable(projectRow.name)?.disabled).toBe(true)
+        );
+        toggle.resolve(json({ ...globalRow, enabled: false }));
+        await vi.waitFor(() =>
+          expect(disable(projectRow.name)?.disabled).toBe(false)
+        );
+      }
     }
   );
 });

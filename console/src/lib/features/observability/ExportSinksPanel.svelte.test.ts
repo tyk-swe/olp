@@ -24,11 +24,12 @@ const sink: ExportSink = {
 
 it('deletes a sink only after the deletion is confirmed', async () => {
   const deleted = vi.fn();
+  const deletion = Promise.withResolvers<Response>();
   serve(
     (request) => {
       if (request.method === 'DELETE') {
         deleted(new URL(request.url).pathname);
-        return new Response(null, { status: 204 });
+        return deletion.promise;
       }
       if (new URL(request.url).pathname === '/api/v1/observability/sinks')
         return json({ items: [sink] });
@@ -76,5 +77,11 @@ it('deletes a sink only after the deletion is confirmed', async () => {
     expect(deleted).toHaveBeenCalledExactlyOnceWith(
       `/api/v1/observability/sinks/${sink.export_sink_id}`
     )
+  );
+  expect(button(target, 'Disable')?.disabled).toBe(true);
+  expect(button(target, 'Delete')?.disabled).toBe(true);
+  deletion.resolve(new Response(null, { status: 204 }));
+  await vi.waitFor(() =>
+    expect(button(target, 'Disable')?.disabled).toBe(false)
   );
 });

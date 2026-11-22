@@ -25,11 +25,14 @@ const policy: CapturePolicy = {
 
 it('keeps the stored expiry when an edit leaves the expiry picker untouched', async () => {
   const patched = vi.fn();
+  const toggle = Promise.withResolvers<Response>();
   serve(
     async (request) => {
       const path = new URL(request.url).pathname;
       if (request.method === 'PATCH') {
-        patched(path, await request.json());
+        const body = await request.json();
+        patched(path, body);
+        if (body.enabled === false) return toggle.promise;
         return json(policy);
       }
       if (path === '/api/v1/observability/capture')
@@ -82,4 +85,12 @@ it('keeps the stored expiry when an edit leaves the expiry picker untouched', as
   expect(path).toBe(`/api/v1/observability/capture-policies/${policy.id}`);
   expect(body).toMatchObject({ sink: policy.sink, sample_ratio: '0.5' });
   expect(body).not.toHaveProperty('expires_at');
+
+  await vi.waitFor(() => expect(button('Disable')?.disabled).toBe(false));
+  button('Disable')?.click();
+  await vi.waitFor(() => expect(patched).toHaveBeenCalledTimes(2));
+  expect(button('Disable')?.disabled).toBe(true);
+  expect(button('Delete')?.disabled).toBe(true);
+  toggle.resolve(json({ ...policy, enabled: false }));
+  await vi.waitFor(() => expect(button('Delete')?.disabled).toBe(false));
 });
