@@ -446,6 +446,7 @@ func (*promotionSnapshotCommands) Pipeline(context.Context, ...[]string) ([]any,
 }
 
 func TestPromotionStopsSnapshotInstallationOnFailure(t *testing.T) {
+	t.Parallel()
 	commands := &promotionSnapshotCommands{fail: true}
 	runner, err := scripts.NewRunner(commands, "olp:promotion:")
 	if err != nil {

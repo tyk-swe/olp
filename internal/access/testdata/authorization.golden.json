@@ -292,6 +292,7 @@
     "POST /api/v1/guardrail-policies/{policy_id}/activate": "YYYY----YYYY",
     "POST /api/v1/guardrails": "YYYY----YYYY",
     "POST /api/v1/guardrails/evaluate": "YYYYYY------",
+    "POST /api/v1/guardrails/run-fixtures": "YYYYYY--YYY-",
     "POST /api/v1/guardrails/{guardrail_id}/activate": "YYYY----YYYY",
     "POST /api/v1/investigations": "YYYY----YYYY",
     "POST /api/v1/invitations": "Y-------Y---",

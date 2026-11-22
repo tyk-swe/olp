@@ -3004,6 +3004,7 @@ func (p *storeProvider) status(request string) int {
 }
 
 func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCallerMayRepeat(t *testing.T) {
+	t.Parallel()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	const slug, model = "stores", "stores-model"
@@ -3152,6 +3153,7 @@ type storePage struct {
 }
 
 func TestAVectorStoreListPagesNewestFirstRefillsPastLostStoresAndRefusesWhatItCannotPage(t *testing.T) {
+	t.Parallel()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	const slug, model = "stores", "stores-model"
@@ -3274,6 +3276,7 @@ func TestAVectorStoreListPagesNewestFirstRefillsPastLostStoresAndRefusesWhatItCa
 }
 
 func TestStoreSearchAndCompactionTranslateFileIdentifiersBothWaysAccountTheirWorkAndRefuseWhatTheyCannotBind(t *testing.T) {
+	t.Parallel()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	const slug, model = "stores", "stores-model"
@@ -3464,6 +3467,7 @@ func agentObjects(issues string) map[string]string {
 }
 
 func TestAgentResourcesBindTheirBaseAgentPageNewestFirstAndKeepOrForgetWhatEachProviderAnswerDecides(t *testing.T) {
+	t.Parallel()
 	pool, _ := harness.Database(t)
 	provider := &storeProvider{issues: "1", objects: agentObjects, scripted: map[string]string{}, statuses: map[string]int{}}
 	upstream := &retainedUpstream{replies: provider.replies, status: provider.status}
@@ -4111,6 +4115,7 @@ type contractReply struct {
 }
 
 func TestANegotiatedToolContinuationKeepsTheProvidersTurnReplaysItsDeliveryAndRefusesWhatItCannotContinue(t *testing.T) {
+	t.Parallel()
 	pool, _ := harness.Database(t)
 	provider := &contractProvider{}
 	sink := &terminals{}
