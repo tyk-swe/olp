@@ -38,9 +38,9 @@ func translateCandidates(encodedWire, target wire.Format, body []byte, route str
 	translated := []json.RawMessage{}
 	for i, value := range values {
 		item, _ := object(value)
-		index, ok := count(item["index"])
+		index, ok := position(item["index"])
 		if !ok {
-			index = int64(i)
+			index = i
 		}
 		item["index"] = raw(0)
 		source[candidateField(encodedWire)] = raw([]Object{item})
@@ -119,11 +119,11 @@ func (m *candidateStream) frame(frame []byte) error {
 		field := candidateField(m.source)
 		for i, value := range arr(f[field]) {
 			item, _ := object(value)
-			index, ok := count(item["index"])
+			index, ok := position(item["index"])
 			if !ok {
-				index = int64(i)
+				index = i
 			}
-			child := m.child(int(index))
+			child := m.child(index)
 			if m.retained > m.limit {
 				return wire.ErrEventTooLarge
 			}
@@ -134,7 +134,7 @@ func (m *candidateStream) frame(frame []byte) error {
 				}
 			}
 			if reason != "" {
-				m.finishes[int(index)] = reason
+				m.finishes[index] = reason
 			}
 			item["index"] = raw(0)
 			single := Object{}

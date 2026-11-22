@@ -3,8 +3,8 @@
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
-    readSavedFilters,
-    saveFilters,
+    sessionFilters,
+    writeSessionFilters,
     type FilterScope,
     type SavedFilter
   } from './savedFilters';
@@ -28,41 +28,39 @@
       selected = '';
       filters = [];
       if (session) {
-        try {
-          filters = readSavedFilters(window.sessionStorage, session, scope);
-        } catch {
-          error = 'Saved views are unavailable in this browser.';
-        }
+        const result = sessionFilters(session, scope);
+        if (!result.ok) error = 'Saved views are unavailable in this browser.';
+        else filters = result.value;
       }
     })
   );
 
   function save(event: SubmitEvent) {
     event.preventDefault();
-    try {
-      const label = name.trim();
-      const next = [
-        ...filters.filter((entry) => entry.name !== label),
-        { name: label, search }
-      ];
-      saveFilters(window.sessionStorage, session, scope, next);
-      filters = next;
-      selected = label;
-      name = error = '';
-    } catch (cause) {
-      error = errorMessage(cause);
+    const label = name.trim();
+    const next = [
+      ...filters.filter((entry) => entry.name !== label),
+      { name: label, search }
+    ];
+    const result = writeSessionFilters(session, scope, next);
+    if (!result.ok) {
+      error = errorMessage(result.error);
+      return;
     }
+    filters = next;
+    selected = label;
+    name = error = '';
   }
 
   function remove() {
-    try {
-      const next = filters.filter((entry) => entry.name !== selected);
-      saveFilters(window.sessionStorage, session, scope, next);
-      filters = next;
-      selected = error = '';
-    } catch (cause) {
-      error = errorMessage(cause);
+    const next = filters.filter((entry) => entry.name !== selected);
+    const result = writeSessionFilters(session, scope, next);
+    if (!result.ok) {
+      error = errorMessage(result.error);
+      return;
     }
+    filters = next;
+    selected = error = '';
   }
 </script>
 

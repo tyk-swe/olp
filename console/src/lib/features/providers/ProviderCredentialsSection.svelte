@@ -1,6 +1,8 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { providerKeys } from './providerKeys';
@@ -41,7 +43,8 @@
   let credentialValue = $state('');
   let useExternal = $state(false);
   let externalValue = $state('');
-  const captureOwner = usePrincipalLifetime(() => {
+  const rotateAction = useAction();
+  usePrincipalLifetime(() => {
     credentialValue = externalValue = '';
     useExternal = false;
   });
@@ -54,19 +57,29 @@
       refreshPending
     )
       return;
-    const isCurrent = captureOwner();
     const submitted = credentialValue;
     const external = externalValue;
-    try {
-      const confirmed = await editor.stageCredential(
-        useExternal ? parseExternalReference(external) : submitted
-      );
-      if (!confirmed || !isCurrent()) return;
-      if (credentialValue === submitted) credentialValue = '';
-      if (externalValue === external) externalValue = '';
-    } catch (error) {
-      if (isCurrent()) editor.reportError(errorMessage(error));
+    const parsed = useExternal
+      ? captureResult(() => parseExternalReference(external))
+      : null;
+    if (parsed && !parsed.ok) {
+      editor.reportError(errorMessage(parsed.error));
+      return;
     }
+    await rotateAction.run(
+      () => editor.stageCredential(parsed?.ok ? parsed.value : submitted),
+      (confirmed, current) => {
+        if (!confirmed || !current()) return;
+        if (credentialValue === submitted) credentialValue = '';
+        if (externalValue === external) externalValue = '';
+      },
+      {
+        failure: (error) => {
+          editor.reportError(errorMessage(error));
+          return '';
+        }
+      }
+    );
   }
   async function revoke(credential: ProviderCredential) {
     if (refreshPending) return;

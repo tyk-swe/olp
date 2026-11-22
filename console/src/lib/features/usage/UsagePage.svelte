@@ -1,8 +1,5 @@
 <script lang="ts">
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
-  import Advanced from '#lib/components/Advanced.svelte';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
 
   import { goto } from '$app/navigation';
@@ -14,29 +11,16 @@
     usageSeries,
     usageSummary
   } from '#lib/features/usage/usage.js';
-  import {
-    getApiKey,
-    budgetStateNote,
-    budgetWindowState
-  } from '#lib/features/access/index.js';
-  import UsageChart from '#lib/features/usage/UsageChart.svelte';
-  import UnpricedBreakdown from './UnpricedBreakdown.svelte';
-  import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
-  import {
-    completenessFromSummary,
-    presentUsageCompleteness
-  } from '#lib/features/usage/completenessPresentation.js';
+  import { getApiKey } from '#lib/features/access/index.js';
+  import UsageDetails from './UsageDetails.svelte';
+  import UsageReport from './UsageReport.svelte';
+  import UsageFilterForm from './UsageFilterForm.svelte';
+  import { completenessFromSummary } from '#lib/features/usage/completenessPresentation.js';
   import UsageCompletenessStatus from '#lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { downloadBlob } from '#lib/download.js';
+  import { readResult } from '#lib/editing/result.js';
   import { exportUsageCsv } from '#lib/features/usage/usage.js';
-  import {
-    formatBudget,
-    formatCompact,
-    formatCost,
-    formatDate,
-    formatInteger
-  } from '#lib/format.js';
 
   import {
     applyUsageDraft,
@@ -126,10 +110,6 @@
     void showUsage(clearedUsageState(draft));
   }
 
-  function titleCase(value: string) {
-    return value.charAt(0).toUpperCase() + value.slice(1);
-  }
-
   let exporting = $state(false);
   let exportError = $state('');
 
@@ -137,14 +117,21 @@
     if (exporting) return;
     exporting = true;
     exportError = '';
-    try {
-      const csv = await exportUsageCsv(applied.filters, applied.dimension);
-      downloadBlob(new Blob([csv], { type: 'text/csv' }), 'olp-usage.csv');
-    } catch (cause) {
-      exportError = errorMessage(cause, 'The export could not be created.');
-    } finally {
-      exporting = false;
+    const result = await readResult(() =>
+      exportUsageCsv(applied.filters, applied.dimension)
+    );
+    exporting = false;
+    if (!result.ok) {
+      exportError = errorMessage(
+        result.error,
+        'The export could not be created.'
+      );
+      return;
     }
+    downloadBlob(
+      new Blob([result.value], { type: 'text/csv' }),
+      'olp-usage.csv'
+    );
   }
 </script>
 
@@ -176,111 +163,12 @@
 {#if exportError}<div class="inline-problem" role="alert">
     {exportError}
   </div>{/if}
-
-<form class="card filters" aria-label="Usage filters" onsubmit={apply}>
-  <div class="filter-grid">
-    <label
-      >From <input
-        bind:value={draft.start}
-        type="datetime-local"
-        required
-      /></label
-    >
-    <label
-      >To <input bind:value={draft.end} type="datetime-local" required /></label
-    >
-    <label
-      >Break down by <select bind:value={draft.dimension}
-        ><option value="route">Route</option><option value="provider"
-          >Provider</option
-        ><option value="end_user">End user (digest)</option><option
-          value="model">Model</option
-        ><option value="model_family">Model family</option><option
-          value="estimate_provenance">Estimate provenance</option
-        ><option value="api_key">API key</option><option value="operation"
-          >Operation</option
-        ><option value="attribution">Attribution</option><option value="project"
-          >Project</option
-        ><option value="session">Session</option></select
-      ></label
-    >
-    <label
-      >Time buckets <select bind:value={draft.granularity}
-        ><option value="hour">Hourly</option><option value="day">Daily</option
-        ></select
-      ></label
-    >
-  </div>
-  <Advanced label="More filters" open={hasNarrowingFilters}>
-    <div class="filter-grid">
-      <label
-        >Route <input
-          bind:value={draft.route}
-          placeholder="All routes"
-        /></label
-      >
-      <label
-        >Provider ID <input
-          bind:value={draft.provider_id}
-          class="mono"
-          placeholder="All providers"
-        /></label
-      >
-      <label
-        >Model <input
-          bind:value={draft.model}
-          placeholder="All models"
-        /></label
-      >
-      <label
-        >API key ID <input
-          bind:value={draft.api_key_id}
-          class="mono"
-          placeholder="All keys"
-        /></label
-      >
-      <label
-        >Operation <input
-          bind:value={draft.operation}
-          placeholder="All operations"
-        /></label
-      >
-      <label
-        >Project ID <input
-          bind:value={draft.project_id}
-          class="mono"
-          placeholder="All projects"
-        /></label
-      >
-      <label
-        >Session ID <input
-          bind:value={draft.session_id}
-          class="mono"
-          placeholder="All sessions"
-        /></label
-      >
-      <label
-        >Attribution key <input
-          bind:value={draft.attribution_key}
-          placeholder="e.g. team"
-        /></label
-      >
-      <label
-        >Attribution value <input
-          bind:value={draft.attribution_value}
-          placeholder="Any value"
-        /></label
-      >
-    </div>
-  </Advanced>
-  <div class="filter-actions">
-    <button class="button button-primary" type="submit">Apply</button><button
-      class="button button-secondary"
-      type="button"
-      onclick={clear}>Reset</button
-    >
-  </div>
-</form>
+<UsageFilterForm
+  bind:draft
+  {hasNarrowingFilters}
+  onApply={apply}
+  onReset={clear}
+/>
 
 {#if validation}<div class="inline-problem" role="alert">{validation}</div>{/if}
 
@@ -296,517 +184,19 @@
     >
   </div>
 {:else if usage.data}
-  {@const estimate = presentEstimate(usage.data.summary)}
   <UsageCompletenessStatus completeness={usage.data.completeness} />
-
-  {#if usage.data.apiKey}
-    {@const budget = usage.data.apiKey.budget}
-    {@const currency = usage.data.summary.currency}
-    {@const daily = budgetWindowState(budget, 'daily')}
-    {@const monthly = budgetWindowState(budget, 'monthly')}
-    {@const dailyNote = budgetStateNote(daily)}
-    {@const monthlyNote = budgetStateNote(monthly)}
-    <section class="card budget-line" aria-label="Filtered API key budget">
-      <div class="budget-key">
-        <p>API key budget</p>
-        <strong>{usage.data.apiKey.name}</strong>
-        <span class="mono">{usage.data.apiKey.id}</span>
-      </div>
-      <div>
-        <p>Daily accrued / limit</p>
-        <strong class:danger-text={daily === 'exhausted'}
-          >{formatBudget(budget.daily.accrued, currency)} / {budget.daily
-            .limit === null
-            ? 'No limit'
-            : formatBudget(budget.daily.limit, currency)}</strong
-        >
-        <span>Window ends {formatDate(budget.daily.window_ends_at)}</span>
-        {#if dailyNote}<span class:danger-text={daily === 'exhausted'}
-            >{dailyNote}</span
-          >{/if}
-      </div>
-      <div>
-        <p>Monthly accrued / limit</p>
-        <strong class:danger-text={monthly === 'exhausted'}
-          >{formatBudget(budget.monthly.accrued, currency)} / {budget.monthly
-            .limit === null
-            ? 'No limit'
-            : formatBudget(budget.monthly.limit, currency)}</strong
-        >
-        <span>Window ends {formatDate(budget.monthly.window_ends_at)}</span>
-        {#if monthlyNote}<span class:danger-text={monthly === 'exhausted'}
-            >{monthlyNote}</span
-          >{/if}
-      </div>
-      <div>
-        <p>Unpriced attempts this UTC month</p>
-        <strong class:unpriced={budget.unpriced_attempts > 0}
-          >{formatInteger(budget.unpriced_attempts)}</strong
-        >
-        <span>Unpriced attempts accrue 0.</span>
-      </div>
-    </section>
-  {/if}
-
-  <Advanced
-    label="Data pipeline details"
-    open={presentUsageCompleteness(usage.data.completeness).kind !== 'complete'}
-  >
-    <section
-      class="pipeline-grid"
-      aria-label="Request metadata persistence and usage range coverage"
-    >
-      <article class="card pipeline-card">
-        <p>Request metadata consumer</p>
-        <strong
-          class:danger-text={usage.data.completeness.request_metadata_consumer
-            .state === 'stale'}
-          >{titleCase(
-            usage.data.completeness.request_metadata_consumer.state
-          )}</strong
-        >
-        <span
-          >{!usage.data.completeness.request_metadata_consumer.checked_at
-            ? 'No worker checkpoint recorded'
-            : usage.data.completeness.request_metadata_consumer
-                  .heartbeat_age_seconds == null
-              ? 'Checkpoint age unknown'
-              : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
-        >
-      </article>
-      <article class="card pipeline-card">
-        <p>Pending acknowledgements</p>
-        <strong
-          >{formatCompact(
-            usage.data.completeness.request_metadata_consumer.pending_events
-          )}</strong
-        >
-        <span
-          >{usage.data.completeness.request_metadata_consumer.oldest_pending_at
-            ? 'Oldest pending event is tracked'
-            : 'No delivered events waiting'}</span
-        >
-      </article>
-      <article class="card pipeline-card">
-        <p>Stream lag</p>
-        <strong
-          >{formatCompact(
-            usage.data.completeness.request_metadata_consumer.lag_events
-          )}</strong
-        >
-        <span>Events not yet delivered to the worker</span>
-      </article>
-      <article class="card pipeline-card">
-        <p>Range coverage</p>
-        <strong class:danger-text={usage.data.completeness.coverage.approximate}
-          >{usage.data.completeness.coverage.range_complete
-            ? 'Exact'
-            : 'Incomplete'}</strong
-        >
-        <span
-          >{usage.data.completeness.coverage.approximate
-            ? 'Approximate totals · '
-            : ''}{usage.data.completeness.coverage
-            .excluded_partial_aggregate_boundaries} partial retained-hour {usage
-            .data.completeness.coverage
-            .excluded_partial_aggregate_boundaries === 1
-            ? 'boundary'
-            : 'boundaries'} excluded</span
-        >
-      </article>
-      <article class="card pipeline-card">
-        <p>Priced requests</p>
-        <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
-        <span
-          >of {formatCompact(usage.data.completeness.request_count)} requests in range</span
-        >
-      </article>
-      <article class="card pipeline-card">
-        <p>Gateway epoch uncertainty</p>
-        <strong
-          class:danger-text={usage.data.completeness
-            .uncertain_request_metadata_gap_count > 0}
-          >{formatCompact(
-            usage.data.completeness.uncertain_request_metadata_gap_count
-          )}</strong
-        >
-        <span>Unclean process epochs with an unknown exact loss count</span>
-      </article>
-    </section>
-  </Advanced>
-
-  <section class="metric-grid usage-metrics" aria-label="Usage summary">
-    <article class="card metric-card">
-      <p>Requests</p>
-      <strong>{formatCompact(usage.data.summary.request_count)}</strong>
-    </article>
-    <article class="card metric-card">
-      <p>Input / output tokens</p>
-      <strong
-        >{formatCompact(usage.data.summary.input_tokens)} / {formatCompact(
-          usage.data.summary.output_tokens
-        )}</strong
-      >
-    </article>
-    <article class="card metric-card">
-      <p>Cached input tokens</p>
-      <strong>{formatCompact(usage.data.summary.cached_input_tokens)}</strong>
-    </article>
-    <article class="card metric-card">
-      <p>Cache write tokens</p>
-      <strong
-        >{formatCompact(usage.data.summary.cache_write_input_tokens)}</strong
-      >
-      <small
-        >5m {formatCompact(usage.data.summary.cache_write_5m_input_tokens)} · 1h {formatCompact(
-          usage.data.summary.cache_write_1h_input_tokens
-        )}</small
-      >
-    </article>
-    <article class="card metric-card">
-      <p>Audio / image tokens</p>
-      <strong
-        >{formatCompact(usage.data.summary.audio_input_tokens)} · {formatCompact(
-          usage.data.summary.image_input_tokens
-        )}</strong
-      >
-      <small
-        >in — {formatCompact(usage.data.summary.audio_output_tokens)} · {formatCompact(
-          usage.data.summary.image_output_tokens
-        )} out</small
-      >
-    </article>
-    <article class="card metric-card">
-      <p>Media units</p>
-      <strong>{formatCompact(usage.data.summary.media_units)}</strong>
-    </article>
-    <article class="card metric-card">
-      <p>Allocated commitment</p>
-      <small
-        >Provisioned-capacity share priced at zero above, allocated across the
-        period's committed usage.</small
-      >
-      <strong
-        >{formatCost(
-          usage.data.summary.allocated_commitment,
-          usage.data.summary.currency
-        )}</strong
-      >
-    </article>
-    <article class="card metric-card">
-      <p>Charge</p>
-      <small
-        >What consumers are billed under the applicable rate card; identical to
-        cost when no card applies.</small
-      >
-      <strong class:unpriced={usage.data.summary.charge == null}
-        >{formatCost(
-          usage.data.summary.charge,
-          usage.data.summary.currency
-        )}</strong
-      >
-      {#if usage.data.summary.uncharged_attempt_count > 0}<span
-          class="badge warning"
-          >{usage.data.summary.uncharged_attempt_count} uncharged</span
-        >{/if}
-    </article>
-    <article class="card metric-card">
-      <p>Estimated cost</p>
-      <small
-        >Estimate from recorded, priced usage. Review delivery and coverage
-        above; this is not an upstream invoice.</small
-      >
-      <strong class:unpriced={usage.data.summary.estimated_cost == null}
-        >{formatCost(
-          usage.data.summary.estimated_cost,
-          usage.data.summary.currency
-        )}</strong
-      >
-    </article>
-    <article class="card metric-card">
-      <p>Input estimate error</p>
-      <strong>{estimate.error}</strong>
-      <small
-        >{estimate.note}{#if estimate.hasSample}
-          {estimate.comparison} estimated / reported input across {estimate.sample}
-          that had both.{/if}</small
-      >
-    </article>
-  </section>
-
-  <UsageChart
-    points={usage.data.points}
-    granularity={applied.granularity}
-    title={applied.granularity === 'day'
-      ? 'Requests per day'
-      : 'Requests per hour'}
+  <UsageDetails
+    apiKey={usage.data.apiKey}
+    completeness={usage.data.completeness}
+    summary={usage.data.summary}
   />
 
-  <UnpricedBreakdown filters={applied.filters} />
-
-  <section class="breakdown" aria-labelledby="breakdown-title">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Breakdown</p>
-        <h2 id="breakdown-title">
-          By {applied.dimension === 'attribution'
-            ? `attribution: ${applied.filters.attribution_key ?? ''}`
-            : applied.dimension.replace('_', ' ')}
-        </h2>
-      </div>
-      <span class="badge">Top {usage.data.breakdown.length}</span>
-    </div>
-    {#if usage.data.breakdown.length === 0}
-      <EmptyState title="No usage in this time range"
-        >Try a wider date range or fewer filters.</EmptyState
-      >
-    {:else}
-      <ScrollTable label="Usage breakdown">
-        <table class="data-table">
-          <caption class="sr-only"
-            >Usage breakdown by {applied.dimension}</caption
-          >
-          <thead>
-            <tr>
-              <th scope="col">{applied.dimension.replace('_', ' ')}</th>
-              <th scope="col">Requests</th>
-              <th scope="col">Input tokens</th>
-              <th scope="col">Cached input</th>
-              <th scope="col">Cache write</th>
-              <th scope="col">Output tokens</th>
-              <th scope="col">Audio tokens</th>
-              <th scope="col">Image tokens</th>
-              <th scope="col">Allocated commitment</th>
-              <th scope="col">Estimated / reported input</th>
-              <th scope="col">Estimate error</th>
-              <th scope="col">Estimated cost</th>
-              <th scope="col">Charge</th>
-              <th scope="col">Completeness</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each usage.data.breakdown as row (row.dimension)}
-              {@const rowEstimate = presentEstimate(row)}
-              <tr>
-                <td><strong>{row.dimension}</strong></td>
-                <td>{formatCompact(row.request_count)}</td>
-                <td>{formatCompact(row.input_tokens)}</td>
-                <td>{formatCompact(row.cached_input_tokens)}</td>
-                <td>{formatCompact(row.cache_write_input_tokens)}</td>
-                <td>{formatCompact(row.output_tokens)}</td>
-                <td
-                  >{formatCompact(row.audio_input_tokens)} / {formatCompact(
-                    row.audio_output_tokens
-                  )}</td
-                >
-                <td
-                  >{formatCompact(row.image_input_tokens)} / {formatCompact(
-                    row.image_output_tokens
-                  )}</td
-                >
-                <td>{formatCost(row.allocated_commitment, row.currency)}</td>
-                <td>{rowEstimate.comparison}</td>
-                <td>{rowEstimate.error}</td>
-                <td>{formatCost(row.estimated_cost, row.currency)}</td>
-                <td>
-                  {formatCost(
-                    row.charge,
-                    row.currency
-                  )}{#if row.uncharged_attempt_count > 0}
-                    <span class="badge warning"
-                      >{row.uncharged_attempt_count}</span
-                    >
-                  {/if}
-                </td>
-                <td>
-                  {#if row.incomplete_count > 0}
-                    <span class="badge danger"
-                      >{row.incomplete_count} incomplete</span
-                    >
-                  {:else if row.unpriced_count > 0}
-                    <span class="badge warning"
-                      >{row.unpriced_count} unpriced</span
-                    >
-                  {:else}
-                    <span class="badge success">Complete</span>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </ScrollTable>
-    {/if}
-  </section>
+  <UsageReport
+    report={{
+      summary: usage.data.summary,
+      points: usage.data.points,
+      breakdown: usage.data.breakdown
+    }}
+    {applied}
+  />
 {/if}
-
-<style>
-  .filters {
-    margin-top: 1.5rem;
-    padding: 1.5rem;
-  }
-  .filter-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.8rem;
-  }
-  label {
-    display: grid;
-    gap: 0.35rem;
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  /* Controls sit inside their caption label and outside .form-field, so the
-     caption typography is reset and the shared control recipe restated. */
-  input,
-  select {
-    width: 100%;
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    transition: border-color var(--motion);
-    font-family: var(--font-sans);
-    font-size: var(--text-body-sm);
-    letter-spacing: normal;
-    text-transform: none;
-  }
-  input.mono {
-    font-family: var(--font-mono);
-  }
-  input:hover,
-  select:hover {
-    border-color: var(--border-strong);
-  }
-  input::placeholder {
-    color: var(--foreground-muted);
-  }
-  .filter-actions {
-    display: flex;
-    gap: 0.65rem;
-    margin-top: 1rem;
-  }
-  /* Five summary cards do not divide into the shared four-column grid, so this
-     page fits as many as the row holds. Scoped to its own class and its own
-     widths so Health and Models keep the shared 4 -> 2 -> 1 rhythm, and so the
-     app.css breakpoints below still take over on narrow screens. */
-  @media (min-width: 56.0625rem) {
-    .metric-grid.usage-metrics {
-      grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
-    }
-  }
-  .usage-metrics small {
-    display: block;
-    margin-top: 0.5rem;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
-  .pipeline-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-    gap: 0.75rem;
-    margin-top: 1rem;
-  }
-  .budget-line {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-    padding: 1.5rem;
-  }
-  .budget-line > div {
-    display: grid;
-    align-content: start;
-    gap: 0.2rem;
-  }
-  .budget-line p {
-    margin: 0;
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  .budget-line span {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
-  .budget-key .mono {
-    overflow-wrap: anywhere;
-  }
-  /* Wins over the muted caption colour the notes would otherwise inherit. */
-  .budget-line .danger-text {
-    color: var(--danger);
-  }
-  .pipeline-card {
-    display: grid;
-    gap: 0.2rem;
-    padding: 1rem 1.25rem;
-  }
-  .pipeline-card p {
-    margin: 0;
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  .pipeline-card span {
-    margin: 0;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
-  .pipeline-card strong {
-    font-size: 1.25rem;
-    font-weight: 400;
-    letter-spacing: -0.02em;
-  }
-  .danger-text {
-    color: var(--danger);
-  }
-  .unpriced {
-    color: var(--warning);
-  }
-  .breakdown {
-    margin-top: 2rem;
-  }
-  .section-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-  }
-  h2 {
-    margin: 0;
-    font-size: var(--text-body);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
-  @media (max-width: 68rem) {
-    .filter-grid,
-    .pipeline-grid,
-    .budget-line {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 40rem) {
-    .filter-grid,
-    .pipeline-grid,
-    .budget-line {
-      grid-template-columns: 1fr;
-    }
-    .filters {
-      padding: 1rem;
-    }
-  }
-</style>

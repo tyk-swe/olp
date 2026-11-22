@@ -299,48 +299,14 @@ func encodeTransformed(r *wire.Request, encodedWire wire.Format, kind, vendor, m
 	if r.Family.Operation() == "token_count" {
 		defaults = countDefaults(encodedWire, defaults)
 	}
-	var f Object
-	if r.Family.Surface() != "openai" {
-		f = r.Document()
-	}
 	native := encodedWire == r.Family || (encodedWire == wire.Gemini && r.Family == wire.GeminiStream)
-	sourceDefaults := defaults
-	if !native {
-		sourceDefaults = nil
-	}
 	_, shape, _ := vendors.Shape(vendor, r.Family.Operation())
-	if err := refuseRewriteConflicts(shape, r); err != nil {
-		return nil, encodedWire, err
-	}
-	sourceDefaults = yieldDefaults(shape, r, sourceDefaults)
-	if r.Family.Surface() != "openai" {
-		mergeDefaultsTracked(f, sourceDefaults, applied)
-	}
-	if r.Family.Surface() == "openai" {
-		fields, provenance, err := openai.EncodeFieldsWithProvenance(r, model, sourceDefaults)
-		*applied = append(*applied, provenance...)
-		if err != nil {
-			return nil, encodedWire, err
-		}
-		f = fields
-	}
-	if err := validateProfile(vendor, r.Family, f); err != nil {
+	f, err := prepareSourceFields(r, vendor, model, shape, defaults, native, applied)
+	if err != nil {
 		return nil, encodedWire, err
 	}
 	if native {
-		if r.Family.Surface() != "gemini" {
-			f["model"] = raw(model)
-		} else if present(f["generateContentRequest"]) {
-			nested, _ := object(f["generateContentRequest"])
-			nested["model"] = raw("models/" + strings.TrimPrefix(model, "models/"))
-			f["generateContentRequest"] = raw(nested)
-		}
-		if r.Family == wire.Rerank {
-			encoded, err := encodeRerank(vendor, f)
-			return encoded, encodedWire, err
-		}
-		conform(shape, f)
-		encoded, err := json.Marshal(f)
+		encoded, err := encodeNativeTarget(r.Family, vendor, model, shape, f)
 		return encoded, encodedWire, err
 	}
 	if r.Family == wire.Embeddings {
@@ -350,50 +316,7 @@ func encodeTransformed(r *wire.Request, encodedWire wire.Format, kind, vendor, m
 		encoded, err := encodeBedrockRerank(f, model)
 		return encoded, encodedWire, err
 	}
-	c, err := decodeCanonical(r.Family, f)
-	if err != nil {
-		return nil, encodedWire, err
-	}
-	if len(c.Extensions) > 0 {
-		return nil, encodedWire, requestError(c.Extensions[0], "The selected provider cannot preserve request semantics at "+strings.Join(c.Extensions, ", "))
-	}
-	c.Stream = r.Stream
-	if encodedWire == wire.Anthropic && !present(c.Parameters["max_output_tokens"]) {
-		if _, explicit := f["max_tokens"]; !explicit {
-			c.Parameters["max_output_tokens"] = defaults["max_tokens"]
-			if present(defaults["max_tokens"]) {
-				*applied = append(*applied, oif.Provenance{Pointer: "/max_tokens", Origin: oif.ProviderDefault, Reason: "absent translated token control inherited native provider default"})
-			}
-		}
-	}
-	out, err := encodeCanonical(c, encodedWire, model, r.Family.Operation())
-	if err != nil {
-		return nil, encodedWire, err
-	}
-	targetDefaults := Object{}
-	maps.Copy(targetDefaults, defaults)
-	if present(c.Parameters["max_output_tokens"]) {
-		delete(targetDefaults, "max_tokens")
-		delete(targetDefaults, "max_completion_tokens")
-		delete(targetDefaults, "max_output_tokens")
-	}
-	for _, key := range []string{"temperature", "top_p", "seed", "stop", "max_tokens", "max_completion_tokens", "max_output_tokens"} {
-		if v, ok := f[key]; ok && !present(v) {
-			delete(targetDefaults, key)
-			if strings.HasPrefix(key, "max_") {
-				delete(targetDefaults, "max_tokens")
-				delete(targetDefaults, "max_completion_tokens")
-				delete(targetDefaults, "max_output_tokens")
-			}
-		}
-	}
-	mergeDefaultsTracked(out, targetDefaults, applied)
-	conform(shape, out)
-	if err := validateProfile(vendor, encodedWire, out); err != nil {
-		return nil, encodedWire, err
-	}
-	encoded, err := json.Marshal(out)
-	return encoded, encodedWire, err
+	return encodeCanonicalTarget(r, encodedWire, vendor, model, shape, f, defaults, applied)
 }
 func textInput(v json.RawMessage) bool {
 	var s string

@@ -120,56 +120,7 @@ func (server *MCP) serveMCP(r *http.Request, principal authz.Principal) (httpkit
 			Tools []managementTool `json:"tools"`
 		}{Tools: tools})
 	case "tools/call":
-		var params struct {
-			Name      string           `json:"name"`
-			Arguments client.Arguments `json:"arguments"`
-			Meta      json.RawMessage  `json:"_meta,omitempty"`
-		}
-		decoder := json.NewDecoder(bytes.NewReader(request.Params))
-		decoder.DisallowUnknownFields()
-		decoder.UseNumber()
-		if err := decoder.Decode(&params); err != nil {
-			return rpcFailure(request.ID, -32602, "Invalid tool arguments"), nil
-		}
-		operation, ok := client.Lookup(params.Name)
-		if !ok {
-			return rpcFailure(request.ID, -32602, "Unknown management tool"), nil
-		}
-		requirements, err := access.ContractRequirements()
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err = requirements[operation.Method+" "+operation.Path].Admits(principal); err != nil {
-			return rpcFailure(request.ID, -32602, "Tool is outside the token's authority"), nil
-		}
-		inner, err := operation.Request(r.Context(), params.Arguments)
-		if err != nil {
-			return rpcFailure(request.ID, -32602, "Missing or invalid tool parameters"), nil
-		}
-		inner.Header.Set("Authorization", r.Header.Get("Authorization"))
-		inner.RemoteAddr = r.RemoteAddr
-		inner.Header.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
-		reply := &mcpWriter{header: http.Header{}, status: 200}
-		server.api.ServeHTTP(reply, inner)
-		body, failed := managementResponseBody(reply)
-		result := maps.Collect(func(yield func(string, json.RawMessage) bool) {
-			if !yield("status", json.RawMessage(strconv.Itoa(reply.status))) || !yield("body", body) {
-				return
-			}
-			for key, value := range operation.ResponseMetadata(reply.header) {
-				encoded, _ := json.Marshal(value)
-				if !yield(key, encoded) {
-					return
-				}
-			}
-		})
-		text, err := json.Marshal(result)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		return rpcResult(request.ID, managementToolResult{
-			Content: []upstream.ToolContent{{Type: "text", Text: string(text)}}, StructuredContent: text, IsError: failed,
-		})
+		return server.callManagementTool(r, principal, request)
 	default:
 		return rpcFailure(request.ID, -32601, "Method not found"), nil
 	}
@@ -286,4 +237,57 @@ func redactMCP(value oif.Value, mode redactionMode) json.RawMessage {
 	default:
 		return value.Bytes()
 	}
+}
+
+func (server *MCP) callManagementTool(r *http.Request, principal authz.Principal, request messages.Request) (httpkit.Reply, error) {
+	var params struct {
+		Name      string           `json:"name"`
+		Arguments client.Arguments `json:"arguments"`
+		Meta      json.RawMessage  `json:"_meta,omitempty"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(request.Params))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	if err := decoder.Decode(&params); err != nil {
+		return rpcFailure(request.ID, -32602, "Invalid tool arguments"), nil
+	}
+	operation, ok := client.Lookup(params.Name)
+	if !ok {
+		return rpcFailure(request.ID, -32602, "Unknown management tool"), nil
+	}
+	requirements, err := access.ContractRequirements()
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if err = requirements[operation.Method+" "+operation.Path].Admits(principal); err != nil {
+		return rpcFailure(request.ID, -32602, "Tool is outside the token's authority"), nil
+	}
+	inner, err := operation.Request(r.Context(), params.Arguments)
+	if err != nil {
+		return rpcFailure(request.ID, -32602, "Missing or invalid tool parameters"), nil
+	}
+	inner.Header.Set("Authorization", r.Header.Get("Authorization"))
+	inner.RemoteAddr = r.RemoteAddr
+	inner.Header.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+	reply := &mcpWriter{header: http.Header{}, status: 200}
+	server.api.ServeHTTP(reply, inner)
+	body, failed := managementResponseBody(reply)
+	result := maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		if !yield("status", json.RawMessage(strconv.Itoa(reply.status))) || !yield("body", body) {
+			return
+		}
+		for key, value := range operation.ResponseMetadata(reply.header) {
+			encoded, _ := json.Marshal(value)
+			if !yield(key, encoded) {
+				return
+			}
+		}
+	})
+	text, err := json.Marshal(result)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	return rpcResult(request.ID, managementToolResult{
+		Content: []upstream.ToolContent{{Type: "text", Text: string(text)}}, StructuredContent: text, IsError: failed,
+	})
 }

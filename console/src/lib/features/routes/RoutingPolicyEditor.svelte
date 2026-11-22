@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import Callout from '#lib/components/Callout.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
@@ -48,6 +50,7 @@
   // the editor — same scope:id, no newer action, component alive — so a slow
   // save can never clear a newer operation's flags or call the callback a
   // different resource is now bound to.
+  const saveAction = useAction();
   let destroyed = false;
   let actionSerial = 0;
   let busyAction = 0;
@@ -131,12 +134,15 @@
     dirty = true;
     editSerial += 1;
     notice = '';
-    try {
-      const next = JSON.parse(text);
+    const parsed = captureResult(() => {
+      const next = JSON.parse(text) as Record<string, unknown>;
       next[key] = JSON.parse(value);
-      text = JSON.stringify(next, null, 2);
+      return next;
+    });
+    if (parsed.ok) {
+      text = JSON.stringify(parsed.value, null, 2);
       error = '';
-    } catch {
+    } else {
       error = 'Correct the policy JSON before changing fields.';
     }
   }
@@ -161,36 +167,39 @@
     busyAction = action;
     error = '';
     notice = '';
-    try {
-      const body: Policy = JSON.parse(text);
-      const previousEtag = policy.data.etag;
-      const saved = await replaceRoutingPolicyIntent.submit(
-        [actionScope, actionId, previousEtag, body] as const,
-        (input, requestId) => replaceRoutingPolicy(...input, requestId)
-      );
+    const previousEtag = policy.data.etag;
+    await saveAction.run(
+      () => {
+        const body = JSON.parse(text) as Policy;
+        return replaceRoutingPolicyIntent.submit(
+          [actionScope, actionId, previousEtag, body] as const,
+          (input, requestId) => replaceRoutingPolicy(...input, requestId)
+        );
+      },
       // The mutation may have committed on the server even when this editor
       // has moved on; never replay it, but also never apply its outcome to a
       // resource the action no longer owns.
-      if (!isCurrent()) return;
-      dirty = editSerial !== submittedEdit;
-      baseline = JSON.stringify(saved.policy, null, 2);
-      await onSaved(saved.etag, previousEtag);
-      if (!isCurrent()) return;
-      await policy.refetch();
-      if (!isCurrent()) return;
-      notice =
-        actionScope === 'route-draft'
-          ? 'Routing policy staged. Validate and publish the route to apply it.'
-          : 'Routing policy published.';
-    } catch (e) {
-      if (isCurrent()) error = errorMessage(e, 'Enter a valid routing policy.');
-    } finally {
-      // A stale save must not clear a newer action's busy flag, and a
-      // destroyed component must not write through the parent's binding.
-      if (!destroyed && busyAction === action) {
-        busy = false;
-        busyAction = 0;
-      }
+      async (saved, current) => {
+        if (!isCurrent() || !current()) return;
+        dirty = editSerial !== submittedEdit;
+        baseline = JSON.stringify(saved.policy, null, 2);
+        await onSaved(saved.etag, previousEtag);
+        if (!isCurrent()) return;
+        await policy.refetch();
+        if (!isCurrent()) return;
+        notice =
+          actionScope === 'route-draft'
+            ? 'Routing policy staged. Validate and publish the route to apply it.'
+            : 'Routing policy published.';
+      },
+      { failure: (e) => errorMessage(e, 'Enter a valid routing policy.') }
+    );
+    if (isCurrent()) error = saveAction.error;
+    // A stale save must not clear a newer action's busy flag, and a
+    // destroyed component must not write through the parent's binding.
+    if (!destroyed && busyAction === action) {
+      busy = false;
+      busyAction = 0;
     }
   }
 </script>

@@ -54,53 +54,8 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 	default:
 		return p.certifyNativeMedia(ctx, t, model, tuple)
 	}
-	family := wire.Chat
-	payload := map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
-	switch tuple.Operation {
-	case "token_count":
-		family = wire.InputTokens
-		payload = map[string]any{"model": "certification", "input": "Count these tokens."}
-	case "embeddings":
-		family = wire.Embeddings
-		payload = map[string]any{"model": "certification", "input": "embedding probe"}
-	case "moderation":
-		family = wire.Moderation
-		payload = map[string]any{"model": "certification", "input": "A friendly greeting."}
-	case "rerank":
-		family = wire.Rerank
-		payload = map[string]any{"model": "certification", "query": "rerank probe", "documents": []string{"first document", "second document"}}
-	}
-	if tuple.Surface == "anthropic" {
-		family = wire.Anthropic
-		if tuple.Operation == "token_count" {
-			family = wire.AnthropicCount
-			delete(payload, "input")
-			payload["messages"] = []map[string]string{{"role": "user", "content": "Count these tokens."}}
-			delete(payload, "max_tokens")
-		}
-	}
-	if tuple.Surface == "gemini" {
-		family = wire.Gemini
-		if tuple.Operation == "token_count" {
-			family = wire.GeminiCount
-		}
-		payload = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []map[string]string{{"text": "Reply with OK."}}}}}
-		if tuple.Operation == "generation" {
-			payload["generationConfig"] = map[string]int{"maxOutputTokens": 16}
-		}
-	}
-	if tuple.Surface == "native" {
-		// A native generation dialect is probed in its own grammar.
-		family, _ = t.Connection.Transport().TargetFamily(wire.Chat)
-		payload = protocols.NativeGenerationProbe(family)
-	}
-	if tuple.Mode == "streaming" {
-		if tuple.Surface == "gemini" {
-			family = wire.GeminiStream
-		} else {
-			payload["stream"] = true
-		}
-	}
+	family, payload := certificationPayload(t, tuple)
+
 	families := []wire.Format{family}
 	if t.Connection.Document().ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
 		profile, _ := t.Connection.Transport().Profile()
@@ -114,50 +69,8 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 		families = append(families, wire.Responses)
 	}
 	for _, family := range families {
-		current := payload
-		if family == wire.Completions {
-			current = map[string]any{"model": "certification", "prompt": "Reply with OK.", "max_tokens": 16, "stream": tuple.Mode == "streaming"}
-		} else if family == wire.Responses {
-			current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == "streaming"}
-		}
-		data, _ := json.Marshal(current)
-		parsed, err := protocols.Parse(family, data, "certification")
-		if err != nil {
+		if err := p.certifyFamily(ctx, t, model, tuple, family, payload); err != nil {
 			return err
-		}
-		transport := t.Connection.Transport()
-		invocation, err := providerinvoke.Prepare(parsed, transport, model, t.Connection.Document().Options.ParameterDefaults)
-		if err != nil {
-			return err
-		}
-		body, encodedWire := invocation.Prepared.Document().Bytes(), invocation.Wire
-		// A profile that forces streaming serves a non-streaming tuple through
-		// the stream the gateway aggregates.
-		aggregated := tuple.Mode != "streaming" && transport.ForcesStreaming()
-		endpoint, err := transport.URL(encodedWire, model, tuple.Mode == "streaming" || aggregated)
-		if err != nil {
-			return err
-		}
-		status, data, err := p.call(ctx, t, http.MethodPost, endpoint, transport.WrapRequest(body, model))
-		if err != nil {
-			return err
-		}
-		if status != http.StatusOK {
-			return statusError(t, status, data)
-		}
-		switch {
-		case tuple.Mode == "streaming":
-			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, "certification", func([]byte) error { return nil })
-		case aggregated:
-			var streamed *wire.Completion
-			if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, bodyLimit); err == nil {
-				_, err = protocols.DecodeRequest(encodedWire, family, streamed.Body, "certification", "", parsed)
-			}
-		default:
-			_, err = protocols.DecodeRequest(encodedWire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, t.Connection.Document().Options.ParameterDefaults), parsed)
-		}
-		if err != nil {
-			return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not satisfy the requested native codec contract."}
 		}
 	}
 	return nil
@@ -274,4 +187,103 @@ func (p *Prober) certifyListedModel(ctx context.Context, t Target, model string)
 		return nil
 	}
 	return &Failure{Reason: ModelUnavailable, Detail: "The credential cannot discover the requested media model."}
+}
+
+func certificationPayload(t Target, tuple connection.Capability) (wire.Format, map[string]any) {
+	family := wire.Chat
+	payload := map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
+	switch tuple.Operation {
+	case "token_count":
+		family = wire.InputTokens
+		payload = map[string]any{"model": "certification", "input": "Count these tokens."}
+	case "embeddings":
+		family = wire.Embeddings
+		payload = map[string]any{"model": "certification", "input": "embedding probe"}
+	case "moderation":
+		family = wire.Moderation
+		payload = map[string]any{"model": "certification", "input": "A friendly greeting."}
+	case "rerank":
+		family = wire.Rerank
+		payload = map[string]any{"model": "certification", "query": "rerank probe", "documents": []string{"first document", "second document"}}
+	}
+	if tuple.Surface == "anthropic" {
+		family = wire.Anthropic
+		if tuple.Operation == "token_count" {
+			family = wire.AnthropicCount
+			delete(payload, "input")
+			payload["messages"] = []map[string]string{{"role": "user", "content": "Count these tokens."}}
+			delete(payload, "max_tokens")
+		}
+	}
+	if tuple.Surface == "gemini" {
+		family = wire.Gemini
+		if tuple.Operation == "token_count" {
+			family = wire.GeminiCount
+		}
+		payload = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []map[string]string{{"text": "Reply with OK."}}}}}
+		if tuple.Operation == "generation" {
+			payload["generationConfig"] = map[string]int{"maxOutputTokens": 16}
+		}
+	}
+	if tuple.Surface == "native" {
+		// A native generation dialect is probed in its own grammar.
+		family, _ = t.Connection.Transport().TargetFamily(wire.Chat)
+		payload = protocols.NativeGenerationProbe(family)
+	}
+	if tuple.Mode == "streaming" {
+		if tuple.Surface == "gemini" {
+			family = wire.GeminiStream
+		} else {
+			payload["stream"] = true
+		}
+	}
+	return family, payload
+}
+func (p *Prober) certifyFamily(ctx context.Context, t Target, model string, tuple connection.Capability, family wire.Format, payload map[string]any) error {
+	current := payload
+	if family == wire.Completions {
+		current = map[string]any{"model": "certification", "prompt": "Reply with OK.", "max_tokens": 16, "stream": tuple.Mode == "streaming"}
+	} else if family == wire.Responses {
+		current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == "streaming"}
+	}
+	data, _ := json.Marshal(current)
+	parsed, err := protocols.Parse(family, data, "certification")
+	if err != nil {
+		return err
+	}
+	transport := t.Connection.Transport()
+	invocation, err := providerinvoke.Prepare(parsed, transport, model, t.Connection.Document().Options.ParameterDefaults)
+	if err != nil {
+		return err
+	}
+	body, encodedWire := invocation.Prepared.Document().Bytes(), invocation.Wire
+	// A profile that forces streaming serves a non-streaming tuple through
+	// the stream the gateway aggregates.
+	aggregated := tuple.Mode != "streaming" && transport.ForcesStreaming()
+	endpoint, err := transport.URL(encodedWire, model, tuple.Mode == "streaming" || aggregated)
+	if err != nil {
+		return err
+	}
+	status, data, err := p.call(ctx, t, http.MethodPost, endpoint, transport.WrapRequest(body, model))
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return statusError(t, status, data)
+	}
+	switch {
+	case tuple.Mode == "streaming":
+		_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, "certification", func([]byte) error { return nil })
+	case aggregated:
+		var streamed *wire.Completion
+		if streamed, err = openai.Aggregate(encodedWire, transport.StreamPayload(bytes.NewReader(data), bodyLimit), bodyLimit, bodyLimit); err == nil {
+			_, err = protocols.DecodeRequest(encodedWire, family, streamed.Body, "certification", "", parsed)
+		}
+	default:
+		_, err = protocols.DecodeRequest(encodedWire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, t.Connection.Document().Options.ParameterDefaults), parsed)
+	}
+	if err != nil {
+		return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not satisfy the requested native codec contract."}
+	}
+	return nil
 }

@@ -12,7 +12,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import {
     listOrganizations,
     listProjects,
@@ -28,20 +28,14 @@
     createRateCard,
     createRateCardRevision,
     listRateCards,
-    type CardPriceDraft,
     type RateCard
   } from '#lib/features/usage/rateCards.js';
   import { rateCardKeys } from '#lib/features/usage/discountKeys.js';
-  import PriceFields from './PriceFields.svelte';
-  import {
-    emptyPriceFields,
-    priceEntryFields,
-    type PriceFieldValues
-  } from './priceEntry';
-  import { operationKinds } from './history/api';
+  import RateCardRevisionForm from './RateCardRevisionForm.svelte';
+  import { prepareRateCardRevision, type PriceEntryRow } from './priceEntry';
 
-  const createIntent = useMutationIntent();
-  const publishIntent = useMutationIntent();
+  const create = useMutation();
+  const publish = useMutation();
   const queryClient = useQueryClient();
   const access = useRole();
   const canEdit = $derived(access.can('pricing.update'));
@@ -51,30 +45,15 @@
   );
   let ownerOrganization = $state('');
   let ownerProject = $state('');
-  let creating = $state(false);
-  let error = $state('');
   let notice = $state('');
+  const error = $derived(create.error || publish.error);
   const pagination = $state(emptyCursorHistory());
 
   // The revision form edits one card at a time.
   let publishCardId = $state('');
   let markup = $state('');
   let effectiveAt = $state('');
-  let publishing = $state(false);
-  type PriceRow = PriceFieldValues & {
-    providerKind: string;
-    vendorId: string;
-    model: string;
-    operation: string;
-  };
-  const emptyRow = (): PriceRow => ({
-    providerKind: providerKinds.data?.[0]?.kind ?? '',
-    vendorId: '',
-    model: '',
-    operation: 'generation',
-    ...emptyPriceFields()
-  });
-  let rows = $state<PriceRow[]>([]);
+  let rows = $state<PriceEntryRow[]>([]);
 
   const organizations = createQuery(() => ({
     queryKey: organizationKeys.all,
@@ -112,83 +91,61 @@
 
   async function addCard(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEdit || creating) return;
-    error = notice = '';
+    if (!canEdit || create.busy) return;
+    notice = '';
     const owner: { kind: typeof ownerKind; id?: string | null } = {
       kind: ownerKind
     };
     if (ownerKind === 'organization') owner.id = ownerOrganization || null;
     if (ownerKind === 'project') owner.id = ownerProject || null;
     if (ownerKind !== 'installation' && !owner.id) {
-      error = `Choose the ${ownerKind} this card belongs to.`;
+      create.error = `Choose the ${ownerKind} this card belongs to.`;
       return;
     }
-    const submission = createIntent.prepare(owner);
-    creating = true;
-    try {
-      await createRateCard(submission.input, submission.requestId);
-      createIntent.reset();
-      notice = 'Rate card created. Publish a revision to charge with it.';
-      await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
-    } catch (problem) {
-      error = errorMessage(problem);
-    } finally {
-      creating = false;
-    }
-  }
-
-  function rowDraft(row: PriceRow): CardPriceDraft | null {
-    if (!row.providerKind || !row.model.trim()) return null;
-    return {
-      provider_kind: row.providerKind as CardPriceDraft['provider_kind'],
-      vendor_id: row.vendorId || null,
-      model: row.model.trim(),
-      operation: row.operation as CardPriceDraft['operation'],
-      ...priceEntryFields(row)
-    };
+    await create.submit(
+      owner,
+      (input, requestId) => createRateCard(input, requestId),
+      async () => {
+        notice = 'Rate card created. Publish a revision to charge with it.';
+        await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
+      },
+      { failure: (problem) => errorMessage(problem) }
+    );
   }
 
   async function publishRevision(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEdit || publishing || !publishCardId) return;
-    error = notice = '';
+    if (!canEdit || publish.busy || !publishCardId) return;
+    notice = '';
     if (!markup.trim()) {
-      error = 'A revision needs a markup.';
+      publish.error = 'A revision needs a markup.';
       return;
     }
-    publishing = true;
-    try {
-      const prices = rows
-        .map(rowDraft)
-        .filter((price): price is CardPriceDraft => price != null);
-      const submission = publishIntent.prepare({
-        effective_at: effectiveAt
-          ? new Date(effectiveAt).toISOString()
-          : undefined,
-        markup: markup.trim(),
-        prices: prices.length ? prices : undefined
-      });
-      await createRateCardRevision(
-        publishCardId,
-        submission.input,
-        submission.requestId
-      );
-      publishIntent.reset();
-      notice = 'Revision published. New usage will charge under it.';
-      publishCardId = '';
-      rows = [];
-      markup = '';
-      await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
-    } catch (problem) {
-      error = errorMessage(problem);
-    } finally {
-      publishing = false;
+    const prepared = prepareRateCardRevision(markup, effectiveAt, rows);
+    if (!prepared.ok) {
+      publish.error = errorMessage(prepared.error);
+      return;
     }
+    await publish.submit(
+      { cardId: publishCardId, revision: prepared.value },
+      ({ cardId, revision }, requestId) =>
+        createRateCardRevision(cardId, revision, requestId),
+      async () => {
+        notice = 'Revision published. New usage will charge under it.';
+        publishCardId = '';
+        rows = [];
+        markup = '';
+        await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
+      },
+      { failure: (problem) => errorMessage(problem) }
+    );
   }
 
   function startPublish(card: RateCard) {
     publishCardId = publishCardId === card.id ? '' : card.id;
-    error = notice = '';
+    create.error = '';
+    publish.error = '';
+    notice = '';
   }
 </script>
 
@@ -249,8 +206,8 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={!canEdit || creating}
-      >{creating ? 'Creating…' : 'Create card'}</button
+      disabled={!canEdit || create.busy}
+      >{create.busy ? 'Creating…' : 'Create card'}</button
     >
   </form>
   {#if cards.isPending}<div class="loading-state" role="status">
@@ -294,7 +251,7 @@
                 <button
                   class="text-button"
                   type="button"
-                  disabled={!canEdit}
+                  disabled={!canEdit || publish.busy}
                   onclick={() => startPublish(card)}
                   >{publishCardId === card.id
                     ? 'Close'
@@ -305,133 +262,17 @@
             {#if publishCardId === card.id}
               <tr>
                 <td colspan="4">
-                  <form class="revision-form" onsubmit={publishRevision}>
-                    <div class="form-grid">
-                      <div class="form-field">
-                        <label for={`markup-${card.id}`}>Markup</label><input
-                          id={`markup-${card.id}`}
-                          bind:value={markup}
-                          inputmode="decimal"
-                          placeholder="1.25"
-                          required
-                          disabled={!canEdit}
-                        />
-                      </div>
-                      <div class="form-field">
-                        <label for={`revision-effective-${card.id}`}
-                          >Effective at</label
-                        ><input
-                          id={`revision-effective-${card.id}`}
-                          bind:value={effectiveAt}
-                          type="datetime-local"
-                          aria-describedby="card-effective-help"
-                          disabled={!canEdit}
-                        /><small id="card-effective-help"
-                          >Leave blank to apply immediately.</small
-                        >
-                      </div>
-                    </div>
-                    {#each rows as row, index (index)}
-                      <fieldset class="extra-components card">
-                        <legend>Explicit price {index + 1}</legend>
-                        <div class="form-grid">
-                          <div class="form-field">
-                            <label for={`card-kind-${index}`}
-                              >Provider kind</label
-                            ><select
-                              id={`card-kind-${index}`}
-                              bind:value={row.providerKind}
-                              disabled={!canEdit}
-                              >{#each providerKinds.data ?? [] as option (option.kind)}<option
-                                  value={option.kind}>{option.label}</option
-                                >{/each}</select
-                            >
-                          </div>
-                          <div class="form-field">
-                            <label for={`card-vendor-${index}`}
-                              >Vendor scope</label
-                            ><select
-                              id={`card-vendor-${index}`}
-                              bind:value={row.vendorId}
-                              disabled={!canEdit}
-                              ><option value="">All vendors</option
-                              >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === row.providerKind) as vendor (vendor.id)}<option
-                                  value={vendor.id}>{vendor.name}</option
-                                >{/each}</select
-                            >
-                          </div>
-                          <div class="form-field">
-                            <label for={`card-model-${index}`}>Model</label
-                            ><input
-                              id={`card-model-${index}`}
-                              bind:value={row.model}
-                              required
-                              disabled={!canEdit}
-                            />
-                          </div>
-                          <div class="form-field">
-                            <label for={`card-operation-${index}`}
-                              >Operation</label
-                            ><select
-                              id={`card-operation-${index}`}
-                              bind:value={row.operation}
-                              disabled={!canEdit}
-                              >{#each operationKinds as option (option)}<option
-                                  value={option}>{option}</option
-                                >{/each}</select
-                            >
-                          </div>
-                        </div>
-                        <PriceFields
-                          idPrefix={`card-${index}`}
-                          {canEdit}
-                          bind:inputPrice={row.inputPrice}
-                          bind:cachedInputPrice={row.cachedInputPrice}
-                          bind:cacheWritePrice={row.cacheWritePrice}
-                          bind:cacheWrite5mPrice={row.cacheWrite5mPrice}
-                          bind:cacheWrite1hPrice={row.cacheWrite1hPrice}
-                          bind:outputPrice={row.outputPrice}
-                          bind:unitPrice={row.unitPrice}
-                          bind:audioInputPrice={row.audioInputPrice}
-                          bind:cachedAudioInputPrice={row.cachedAudioInputPrice}
-                          bind:audioOutputPrice={row.audioOutputPrice}
-                          bind:imageInputPrice={row.imageInputPrice}
-                          bind:cachedImageInputPrice={row.cachedImageInputPrice}
-                          bind:imageOutputPrice={row.imageOutputPrice}
-                          bind:perRequestPrice={row.perRequestPrice}
-                          bind:trainingPrice={row.trainingPrice}
-                          bind:storagePrice={row.storagePrice}
-                          bind:cacheStoragePrice={row.cacheStoragePrice}
-                          bind:containerFees={row.containerFees}
-                          bind:batchMultiplier={row.batchMultiplier}
-                          bind:toolFees={row.toolFees}
-                          bind:tiers={row.tiers}
-                          bind:windowZone={row.windowZone}
-                          bind:windowPeriods={row.windowPeriods}
-                        />
-                        <button
-                          type="button"
-                          class="text-button"
-                          onclick={() => {
-                            rows = rows.filter((_, i) => i !== index);
-                          }}>Remove price</button
-                        >
-                      </fieldset>
-                    {/each}
-                    <button
-                      type="button"
-                      class="text-button"
-                      onclick={() => {
-                        rows = [...rows, emptyRow()];
-                      }}>Add explicit price</button
-                    >
-                    <button
-                      class="button button-primary"
-                      type="submit"
-                      disabled={!canEdit || publishing}
-                      >{publishing ? 'Publishing…' : 'Publish revision'}</button
-                    >
-                  </form>
+                  <RateCardRevisionForm
+                    cardId={card.id}
+                    bind:rows
+                    bind:markup
+                    bind:effectiveAt
+                    {canEdit}
+                    busy={publish.busy}
+                    kinds={providerKinds.data ?? []}
+                    vendors={providerVendors.data ?? []}
+                    onSubmit={publishRevision}
+                  />
                 </td>
               </tr>
             {/if}

@@ -49,6 +49,25 @@ func (r compiledEntry) legacyInput() bool {
 	return r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block
 }
 
+func (r compiledEntry) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
+	patterns, ok := r.detector.(*patternDetector)
+	if ok && r.legacyInput() && r.definition.Type == "builtin.regex" {
+		for _, text := range evaluation.LegacyInputTexts {
+			for _, pattern := range patterns.patterns {
+				if err := ctx.Err(); err != nil {
+					return Verdict{}, err
+				}
+				if pattern.re.MatchString(text) {
+					return Flag(pattern.category), nil
+				}
+			}
+		}
+	}
+	native := evaluation
+	native.LegacyInputTexts = nil
+	return r.detector.detect(ctx, native)
+}
+
 func (r compiledEntry) bound(external Evaluator) compiledEntry {
 	d, ok := r.detector.(externalDetector)
 	if !ok {
@@ -319,10 +338,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				continue
 			}
 		}
-		if r.legacyInput() && request.LegacyInput != nil {
-			evaluation.Segments = request.LegacyInput
-		}
-		verdict, err := r.detector.detect(bounded, evaluation)
+		verdict, err := r.detect(bounded, evaluation)
 		if err == nil {
 			err = bounded.Err()
 		}
@@ -344,61 +360,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		}
 		ev.Categories = slices.Compact(slices.Sorted(slices.Values(verdict.Categories())))
 		if verdict.Flagged() {
-			switch {
-			case r.entry.Monitor:
-				ev.Outcome = Monitored
-			case r.entry.Action == Annotate:
-				ev.Outcome = Annotated
-			case r.entry.Action == Block:
-				ev.Outcome = Blocked
-			default:
-				if len(verdict.Redactions()) == 0 {
-					ev.Outcome = FailedClosed
-					break
-				}
-				firstRecovery := len(result.Recovery)
-				originals := func() []Segment {
-					if !request.WorkflowRecovery || !r.kind.compresses {
-						return nil
-					}
-					return slices.Collect(func(yield func(Segment) bool) {
-						for _, segment := range result.Segments {
-							if slices.ContainsFunc(verdict.Redactions(), func(redaction Redaction) bool { return redaction.Segment == segment.ID }) && !yield(segment) {
-								return
-							}
-						}
-					})
-				}()
-				if !result.Changed {
-					result.Segments = slices.Clone(result.Segments)
-				}
-				if err = transform(result.Segments, verdict.Redactions(), r.entry.Action, masks); err != nil {
-					ev.Outcome = FailedClosed
-					break
-				}
-				result.Recovery = slices.Concat(result.Recovery, originals)
-				if len(originals) > 0 {
-					result.Segments = slices.Collect(func(yield func(Segment) bool) {
-						for _, segment := range result.Segments {
-							index := slices.IndexFunc(originals, func(original Segment) bool { return original.ID == segment.ID })
-							if index >= 0 {
-								if !yield(segment.withText(fmt.Sprintf("%s\n[recovery id: %d]", segment.Text, firstRecovery+index))) {
-									return
-								}
-								continue
-							}
-							if !yield(segment) {
-								return
-							}
-						}
-					})
-				}
-				result.Changed = true
-				ev.Outcome = Redacted
-				if r.entry.Action == Mask {
-					ev.Outcome = Masked
-				}
-			}
+			result, ev.Outcome = r.applyFlagged(result, request, verdict, masks)
 		}
 		result.Decisions = append(result.Decisions, ev)
 		if blocks(ev.Outcome) {
@@ -469,4 +431,59 @@ func transform(segments []Segment, edits []Redaction, action Action, masks *Mask
 		segments[i].Text = text
 	}
 	return nil
+}
+
+func (r compiledEntry) applyFlagged(result Result, request Evaluation, verdict Verdict, masks *Masking) (Result, Outcome) {
+	switch {
+	case r.entry.Monitor:
+		return result, Monitored
+	case r.entry.Action == Annotate:
+		return result, Annotated
+	case r.entry.Action == Block:
+		return result, Blocked
+	}
+	if len(verdict.Redactions()) == 0 {
+		return result, FailedClosed
+	}
+	firstRecovery := len(result.Recovery)
+	originals := func() []Segment {
+		if !request.WorkflowRecovery || !r.kind.compresses {
+			return nil
+		}
+		return slices.Collect(func(yield func(Segment) bool) {
+			for _, segment := range result.Segments {
+				if slices.ContainsFunc(verdict.Redactions(), func(redaction Redaction) bool { return redaction.Segment == segment.ID }) && !yield(segment) {
+					return
+				}
+			}
+		})
+	}()
+	if !result.Changed {
+		result.Segments = slices.Clone(result.Segments)
+	}
+	if err := transform(result.Segments, verdict.Redactions(), r.entry.Action, masks); err != nil {
+		return result, FailedClosed
+	}
+	result.Recovery = slices.Concat(result.Recovery, originals)
+	if len(originals) > 0 {
+		result.Segments = slices.Collect(func(yield func(Segment) bool) {
+			for _, segment := range result.Segments {
+				index := slices.IndexFunc(originals, func(original Segment) bool { return original.ID == segment.ID })
+				if index >= 0 {
+					if !yield(segment.withText(fmt.Sprintf("%s\n[recovery id: %d]", segment.Text, firstRecovery+index))) {
+						return
+					}
+					continue
+				}
+				if !yield(segment) {
+					return
+				}
+			}
+		})
+	}
+	result.Changed = true
+	if r.entry.Action == Mask {
+		return result, Masked
+	}
+	return result, Redacted
 }

@@ -20,16 +20,28 @@ const member = {
 
 it('changes a member role only after the change is confirmed', async () => {
   const patched = vi.fn<(body: unknown) => void>();
+  const write = Promise.withResolvers<Response>();
   serve(
     async (request) => {
       const path = new URL(request.url).pathname;
       if (request.method === 'PATCH') {
         patched(await request.json());
-        return json({ ...member, role: 'operator', etag: 'saved' });
+        return write.promise;
       }
       if (path === '/api/v1/auth/capabilities')
         return json({ local_login_enabled: true, oidc_login_enabled: false });
-      if (path === '/api/v1/users') return json({ items: [member] });
+      if (path === '/api/v1/users')
+        return json({
+          items: [
+            member,
+            {
+              ...member,
+              id: 'other-member',
+              display_name: 'Other member',
+              active: false
+            }
+          ]
+        });
       return json({ items: [] });
     },
     ['read', 'access']
@@ -76,4 +88,9 @@ it('changes a member role only after the change is confirmed', async () => {
       expect.objectContaining({ role: 'operator' })
     )
   );
+  expect(button('Deactivate')?.disabled).toBe(true);
+  expect(button('Reactivate')?.disabled).toBe(true);
+  write.resolve(json({ ...member, role: 'operator', etag: 'saved' }));
+  await vi.waitFor(() => expect(button('Deactivate')?.disabled).toBe(false));
+  expect(button('Reactivate')?.disabled).toBe(false);
 });

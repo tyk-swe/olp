@@ -225,8 +225,8 @@ func project(source oif.Request, result oif.Result, view oif.View, route string)
 	pages := make([]mappedPage, len(elements))
 	for i, page := range elements {
 		index := i
-		if number, ok := operations.Int(member(page, "pageNumber")); ok && number >= 1 {
-			index = int(number) - 1
+		if number, ok := operations.Position(member(page, "pageNumber")); ok && number >= 1 {
+			index = number - 1
 		}
 		pages[i] = mappedPage{Index: int64(index), Markdown: vertexPageText(text, page)}
 	}
