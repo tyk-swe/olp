@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
@@ -84,43 +85,62 @@ func jsonEqual(left, right json.RawMessage) bool {
 	return reflect.DeepEqual(leftValue, rightValue)
 }
 
-func diffCatalogs(saved, discovered []routing.MCPTool) ([]routing.MCPTool, []routing.MCPTool, []modifiedTool) {
-	savedByName := make(map[string]routing.MCPTool, len(saved))
-	for _, tool := range saved {
-		savedByName[tool.Name] = tool
+func toolsByName(tools []routing.MCPTool) map[string]routing.MCPTool {
+	return maps.Collect(func(yield func(string, routing.MCPTool) bool) {
+		for _, tool := range tools {
+			if !yield(tool.Name, tool) {
+				return
+			}
+		}
+	})
+}
+
+func missingTools(tools []routing.MCPTool, present map[string]routing.MCPTool) []routing.MCPTool {
+	return slices.AppendSeq([]routing.MCPTool{}, func(yield func(routing.MCPTool) bool) {
+		for _, tool := range tools {
+			if _, found := present[tool.Name]; !found && !yield(cloneTool(tool)) {
+				return
+			}
+		}
+	})
+}
+
+func changedFields(saved, discovered routing.MCPTool) []string {
+	description := saved.Description != discovered.Description
+	schema := !jsonEqual(saved.InputSchema, discovered.InputSchema)
+	switch {
+	case description && schema:
+		return []string{"description", "input_schema"}
+	case description:
+		return []string{"description"}
+	case schema:
+		return []string{"input_schema"}
 	}
-	discoveredNames := make(map[string]bool, len(discovered))
-	added := []routing.MCPTool{}
-	modified := []modifiedTool{}
-	for _, tool := range discovered {
-		discoveredNames[tool.Name] = true
-		previous, found := savedByName[tool.Name]
-		if !found {
-			added = append(added, cloneTool(tool))
-			continue
-		}
-		fields := []string{}
-		if previous.Description != tool.Description {
-			fields = append(fields, "description")
-		}
-		if !jsonEqual(previous.InputSchema, tool.InputSchema) {
-			fields = append(fields, "input_schema")
-		}
-		if len(fields) != 0 {
-			modified = append(modified, modifiedTool{
+	return []string{}
+}
+
+func modifiedTools(saved map[string]routing.MCPTool, discovered []routing.MCPTool) []modifiedTool {
+	return slices.AppendSeq([]modifiedTool{}, func(yield func(modifiedTool) bool) {
+		for _, tool := range discovered {
+			previous, found := saved[tool.Name]
+			if !found {
+				continue
+			}
+			fields := changedFields(previous, tool)
+			if len(fields) != 0 && !yield(modifiedTool{
 				Name: tool.Name, ChangedFields: fields,
 				SavedDescription: previous.Description, DiscoveredDescription: tool.Description,
 				SavedInputSchema: slices.Clone(previous.InputSchema), DiscoveredInputSchema: slices.Clone(tool.InputSchema),
-			})
+			}) {
+				return
+			}
 		}
-	}
-	removed := []routing.MCPTool{}
-	for _, tool := range saved {
-		if !discoveredNames[tool.Name] {
-			removed = append(removed, cloneTool(tool))
-		}
-	}
-	return added, removed, modified
+	})
+}
+
+func diffCatalogs(saved, discovered []routing.MCPTool) ([]routing.MCPTool, []routing.MCPTool, []modifiedTool) {
+	savedByName := toolsByName(saved)
+	return missingTools(discovered, savedByName), missingTools(saved, toolsByName(discovered)), modifiedTools(savedByName, discovered)
 }
 
 func (s *Server) storedCredential(ctx context.Context, saved *Definition) ([]byte, error) {
@@ -170,23 +190,27 @@ func (s *Server) referencingToolsets(ctx context.Context, p authz.Principal, sav
 	if err != nil {
 		return nil, err
 	}
-	references := []toolsetReference{}
-	for _, item := range items {
-		if item.definition.Toolset == nil {
-			continue
-		}
-		tools := []string{}
-		for _, tool := range item.definition.Toolset.Tools {
-			if tool.ServerID == saved.ID && !slices.Contains(tools, tool.Name) {
-				tools = append(tools, tool.Name)
+	return slices.AppendSeq([]toolsetReference{}, func(yield func(toolsetReference) bool) {
+		for _, item := range items {
+			tools := pinnedTools(item.definition, saved.ID)
+			if len(tools) != 0 && !yield(toolsetReference{ID: item.id, Name: item.name, RevisionID: item.revision, Tools: tools}) {
+				return
 			}
 		}
-		if len(tools) != 0 {
-			slices.Sort(tools)
-			references = append(references, toolsetReference{ID: item.id, Name: item.name, RevisionID: item.revision, Tools: tools})
-		}
+	}), nil
+}
+
+func pinnedTools(definition agentcontract.Draft, serverID string) []string {
+	if definition.Toolset == nil {
+		return []string{}
 	}
-	return references, nil
+	return slices.Compact(slices.Sorted(func(yield func(string) bool) {
+		for _, tool := range definition.Toolset.Tools {
+			if tool.ServerID == serverID && !yield(tool.Name) {
+				return
+			}
+		}
+	}))
 }
 
 func retired() error {
@@ -202,7 +226,7 @@ func (s *Server) previewCatalog(r *http.Request, p authz.Principal) (httpkit.Rep
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&saved.ProjectID, authz.Change); err != nil {
+	if err := p.Project(&saved.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if saved.RetiredAt != nil {
@@ -226,13 +250,13 @@ func (s *Server) previewCatalog(r *http.Request, p authz.Principal) (httpkit.Rep
 }
 
 func retainedToolPrices(prices map[string]string, catalog *upstream.Catalog) map[string]string {
-	retained := map[string]string{}
-	for _, tool := range catalog.Tools {
-		if price, found := prices[tool.Name]; found {
-			retained[tool.Name] = price
+	return maps.Collect(func(yield func(string, string) bool) {
+		for _, tool := range catalog.Tools {
+			if price, found := prices[tool.Name]; found && !yield(tool.Name, price) {
+				return
+			}
 		}
-	}
-	return retained
+	})
 }
 
 func catalogCandidate(current *Definition, catalog *upstream.Catalog) Definition {
@@ -253,10 +277,10 @@ func (s *Server) approveCatalog(r *http.Request, _ authz.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	var in catalogApproval
-	if err = httpkit.DecodeUnique(r, &in, 64<<10); err != nil {
+	if err := httpkit.DecodeUnique(r, &in, 64<<10); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = in.validate(); err != nil {
+	if err := in.validate(); err != nil {
 		return httpkit.Reply{}, err
 	}
 	previous, replayed, err := access.Preflight(s.access, r, in, func(tx pgx.Tx, principal authz.Principal) (*Definition, error) {
@@ -268,7 +292,7 @@ func (s *Server) approveCatalog(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if replayed != nil {
 		return *replayed, nil
 	}
-	if err = httpkit.Match(r, previous.ETag); err != nil {
+	if err := httpkit.Match(r, previous.ETag); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if previous.RetiredAt != nil {
