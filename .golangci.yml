@@ -3,7 +3,7 @@ run:
   build-tags: [integration, e2e, qualification, qualificationlive]
 linters:
   default: none
-  enable: [depguard, errorlint, funlen, ineffassign, revive, staticcheck, unconvert, unused, wastedassign]
+  enable: [depguard, errorlint, funlen, ineffassign, paralleltest, revive, staticcheck, unconvert, unused, wastedassign]
   settings:
     staticcheck:
       checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1019, ST1023]
@@ -26,6 +26,8 @@ linters:
       lines: 100
       statements: -1
       ignore-comments: true
+    paralleltest:
+      ignore-missing-subtests: true
     revive:
       rules:
         - name: file-length-limit
@@ -81,6 +83,8 @@ linters:
         linters: [funlen, revive]
       - path: _test\.go$
         linters: [errorlint]
+      - path-except: ^tests/(integration|e2e)/
+        linters: [paralleltest]
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
