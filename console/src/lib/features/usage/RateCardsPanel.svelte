@@ -32,7 +32,7 @@
   } from '#lib/features/usage/rateCards.js';
   import { rateCardKeys } from '#lib/features/usage/discountKeys.js';
   import RateCardRevisionForm from './RateCardRevisionForm.svelte';
-  import { cardPriceDraft, type PriceEntryRow } from './priceEntry';
+  import { prepareRateCardRevision, type PriceEntryRow } from './priceEntry';
 
   const create = useMutation();
   const publish = useMutation();
@@ -121,24 +121,13 @@
       publish.error = 'A revision needs a markup.';
       return;
     }
-    const cardId = publishCardId;
-    const input = {
-      effective_at: effectiveAt
-        ? new Date(effectiveAt).toISOString()
-        : undefined,
-      markup: markup.trim(),
-      prices: rows
-        .map(cardPriceDraft)
-        .filter((price): price is NonNullable<typeof price> => price != null)
-    };
+    const prepared = prepareRateCardRevision(markup, effectiveAt, rows);
+    if (!prepared.ok) {
+      publish.error = errorMessage(prepared.error);
+      return;
+    }
     await publish.submit(
-      {
-        cardId,
-        revision: {
-          ...input,
-          prices: input.prices.length ? input.prices : undefined
-        }
-      },
+      { cardId: publishCardId, revision: prepared.value },
       ({ cardId, revision }, requestId) =>
         createRateCardRevision(cardId, revision, requestId),
       async () => {

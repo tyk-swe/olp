@@ -218,6 +218,7 @@
     form.authMode = '';
     form.tenantId = form.clientId = form.clientSecret = '';
     saveMutation.reset();
+    removal.reset();
   }
 
   async function runNow() {

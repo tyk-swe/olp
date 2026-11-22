@@ -1,3 +1,4 @@
+import { captureResult } from '#lib/editing/result.js';
 import type { PriceDraft, PricingRevision } from './pricing';
 import type { CardPriceDraft } from './rateCards';
 import {
@@ -260,7 +261,7 @@ export function emptyPriceRow(providerKind: string): PriceEntryRow {
   };
 }
 
-export function cardPriceDraft(row: PriceEntryRow): CardPriceDraft | null {
+function cardPriceDraft(row: PriceEntryRow): CardPriceDraft | null {
   if (!row.providerKind || !row.model.trim()) return null;
   return {
     provider_kind: row.providerKind as CardPriceDraft['provider_kind'],
@@ -269,4 +270,21 @@ export function cardPriceDraft(row: PriceEntryRow): CardPriceDraft | null {
     operation: row.operation as CardPriceDraft['operation'],
     ...priceEntryFields(row)
   };
+}
+
+export function prepareRateCardRevision(
+  markup: string,
+  effectiveAt: string,
+  rows: readonly PriceEntryRow[]
+) {
+  return captureResult(() => {
+    const prices = rows.map(cardPriceDraft).filter((price) => price !== null);
+    return {
+      effective_at: effectiveAt
+        ? new Date(effectiveAt).toISOString()
+        : undefined,
+      markup: markup.trim(),
+      prices: prices.length ? prices : undefined
+    };
+  });
 }
