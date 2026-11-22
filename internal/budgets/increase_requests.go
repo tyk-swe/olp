@@ -67,30 +67,27 @@ func (a *API) increaseRequestByID(r *http.Request, p authz.Principal) (httpkit.R
 	return httpkit.Detail(data, etag), nil
 }
 
+type increaseRequestInput struct {
+	ProjectID string `json:"project_id"`
+	Window    string `json:"window"`
+	Amount    string `json:"amount"`
+	Reason    string `json:"reason"`
+}
+
 func (a *API) createIncreaseRequest(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	var in struct {
-		ProjectID string `json:"project_id"`
-		Window    string `json:"window"`
-		Amount    string `json:"amount"`
-		Reason    string `json:"reason"`
-	}
-	if err := httpkit.Decode(r, &in); err != nil {
+	var raw increaseRequestInput
+	if err := httpkit.Decode(r, &raw); err != nil {
 		return httpkit.Reply{}, err
 	}
-	project, err := uuid.Parse(strings.TrimSpace(in.ProjectID))
+	project, err := uuid.Parse(strings.TrimSpace(raw.ProjectID))
 	if err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("project_id", "A project UUID is required.")
 	}
-	in.ProjectID = project.String()
-	in.Reason = strings.TrimSpace(in.Reason)
-	in.Amount = strings.TrimSpace(in.Amount)
+	in := increaseRequestInput{ProjectID: project.String(), Window: raw.Window, Amount: strings.TrimSpace(raw.Amount), Reason: strings.TrimSpace(raw.Reason)}
 	if err := validateIncreaseTerms(in.Window, in.Amount, in.Reason); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (*keyauthority.BudgetPolicy, error) {
-		if p.Kind != "user" {
-			return nil, httpkit.Forbidden()
-		}
 		if err := p.Project(&in.ProjectID, authz.View); err != nil {
 			return nil, err
 		}
@@ -102,13 +99,10 @@ func (a *API) createIncreaseRequest(r *http.Request, _ authz.Principal) (httpkit
 		if cap == nil {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
 		}
-		var now, end time.Time
+		var end time.Time
 		var window int64
-		if err := tx.QueryRow(r.Context(), `SELECT now(),window_id,end_at FROM olp.budget_window($1,now())`, in.Window).Scan(&now, &window, &end); err != nil {
+		if err := tx.QueryRow(r.Context(), `SELECT window_id,end_at FROM olp.budget_window($1,now())`, in.Window).Scan(&window, &end); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
-		}
-		if !end.After(now) {
-			return httpkit.Reply{}, access.Event{}, staleIncreaseRequest("The budget window for this request has ended, so a new request is needed.")
 		}
 		id, etag := httpkit.NewID(), httpkit.NewID()
 		owner := limits.AggregateBudgetID("project", in.ProjectID)
@@ -146,23 +140,23 @@ func (a *API) decideIncreaseRequest(r *http.Request, approve bool) (httpkit.Repl
 
 func lockIncreaseRequestDecision(r *http.Request, tx pgx.Tx, p authz.Principal, id string, approve bool) (increaseRequestDecision, error) {
 	ctx := r.Context()
-	var state increaseRequestDecision
-	err := tx.QueryRow(ctx, "SELECT project_id::text,owner_id::text,window_kind,requested_by::text FROM olp.budget_increase_requests WHERE id=$1", id).Scan(&state.request.projectID, &state.request.ownerID, &state.request.windowKind, &state.request.requestedBy)
-	if err != nil {
-		return state, err
+	var scope increaseRequest
+	if err := tx.QueryRow(ctx, "SELECT project_id::text,owner_id::text,window_kind,requested_by::text FROM olp.budget_increase_requests WHERE id=$1", id).Scan(&scope.projectID, &scope.ownerID, &scope.windowKind, &scope.requestedBy); err != nil {
+		return increaseRequestDecision{}, err
 	}
-	if err := authorizeIncreaseRequestReviewer(p, state.request, approve); err != nil {
-		return state, err
+	if err := authorizeIncreaseRequestReviewer(p, scope, approve); err != nil {
+		return increaseRequestDecision{}, err
 	}
-	if err := lockBudgetWindow(ctx, tx, state.request.ownerID, state.request.windowKind); err != nil {
-		return state, err
+	if err := lockBudgetWindow(ctx, tx, scope.ownerID, scope.windowKind); err != nil {
+		return increaseRequestDecision{}, err
 	}
-	err = tx.QueryRow(ctx, "SELECT id::text,project_id::text,owner_id::text,window_kind,window_id,window_ends_at,base_cap::text,amount::text,reason,status,requested_by::text,etag::text FROM olp.budget_increase_requests WHERE id=$1 FOR UPDATE", id).Scan(&state.request.id, &state.request.projectID, &state.request.ownerID, &state.request.windowKind, &state.request.windowID, &state.request.windowEndsAt, &state.request.baseCap, &state.request.amount, &state.request.reason, &state.request.status, &state.request.requestedBy, &state.request.etag)
-	if err != nil {
-		return state, err
+	var policy *keyauthority.BudgetPolicy
+	if err := tx.QueryRow(ctx, "SELECT budget_policy FROM olp.projects WHERE id=$1 FOR UPDATE", scope.projectID).Scan(&policy); err != nil {
+		return increaseRequestDecision{}, err
 	}
-	err = tx.QueryRow(ctx, "SELECT budget_policy FROM olp.projects WHERE id=$1 FOR UPDATE", state.request.projectID).Scan(&state.policy)
-	return state, err
+	var request increaseRequest
+	err := tx.QueryRow(ctx, "SELECT id::text,project_id::text,owner_id::text,window_kind,window_id,window_ends_at,base_cap::text,amount::text,reason,status,requested_by::text,etag::text FROM olp.budget_increase_requests WHERE id=$1 FOR UPDATE", id).Scan(&request.id, &request.projectID, &request.ownerID, &request.windowKind, &request.windowID, &request.windowEndsAt, &request.baseCap, &request.amount, &request.reason, &request.status, &request.requestedBy, &request.etag)
+	return increaseRequestDecision{request: request, policy: policy}, err
 }
 
 func authorizeIncreaseRequestReviewer(p authz.Principal, request increaseRequest, approve bool) error {
@@ -218,20 +212,12 @@ func grantPendingIncreaseRequest(r *http.Request, tx pgx.Tx, p authz.Principal, 
 	if err := checkActiveIncreaseLimit(ctx, tx, request.ownerID, request.windowKind); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	var now time.Time
-	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
-		return httpkit.Reply{}, access.Event{}, err
-	}
-	expires := request.windowEndsAt.Truncate(time.Millisecond)
-	if !expires.After(now) {
-		return httpkit.Reply{}, access.Event{}, staleIncreaseRequest("The budget window for this request has ended, so a new request is needed.")
-	}
 	increaseID, increaseETag, requestETag := httpkit.NewID(), httpkit.NewID(), httpkit.NewID()
 	encoded, _ := json.Marshal(BudgetTarget{Kind: "project", ID: request.projectID})
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.budget_increases(id,owner_id,project_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, increaseID, request.ownerID, request.projectID, encoded, request.windowKind, request.windowID, request.amount, request.reason, now, expires, request.windowEndsAt, p.UserID(), increaseETag); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.budget_increases(id,owner_id,project_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,$10,$11,$12)`, increaseID, request.ownerID, request.projectID, encoded, request.windowKind, request.windowID, request.amount, request.reason, request.windowEndsAt.Truncate(time.Millisecond), request.windowEndsAt, p.UserID(), increaseETag); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE olp.budget_increase_requests SET status='approved',decided_by=$2,decided_at=$3,increase_id=$4,etag=$5 WHERE id=$1 AND status='pending'`, request.id, p.UserID(), now, increaseID, requestETag); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE olp.budget_increase_requests SET status='approved',decided_by=$2,decided_at=now(),increase_id=$3,etag=$4 WHERE id=$1 AND status='pending'`, request.id, p.UserID(), increaseID, requestETag); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
 	if _, err := access.AdvanceAuthority(ctx, tx); err != nil {
@@ -250,23 +236,14 @@ func grantPendingIncreaseRequest(r *http.Request, tx pgx.Tx, p authz.Principal, 
 
 func checkIncreaseRequestCurrent(ctx context.Context, tx pgx.Tx, state increaseRequestDecision) error {
 	request := state.request
-	var now, end time.Time
-	var window int64
-	if err := tx.QueryRow(ctx, `SELECT now(),window_id,end_at FROM olp.budget_window($1,now())`, request.windowKind).Scan(&now, &window, &end); err != nil {
+	var sameWindow, sameCap bool
+	if err := tx.QueryRow(ctx, `SELECT w.window_id=$2 AND w.end_at=$3,COALESCE($4::numeric=$5::numeric,false) FROM olp.budget_window($1,now()) w`, request.windowKind, request.windowID, request.windowEndsAt, request.baseCap, capForWindow(state.policy, request.windowKind)).Scan(&sameWindow, &sameCap); err != nil {
 		return err
 	}
-	if window != request.windowID || !end.Equal(request.windowEndsAt) || !request.windowEndsAt.After(now) {
+	if !sameWindow {
 		return staleIncreaseRequest("The budget window for this request has ended, so a new request is needed.")
 	}
-	cap := capForWindow(state.policy, request.windowKind)
-	if cap == nil {
-		return staleIncreaseRequest("The base cap for this budget changed after the request was made, so a new request is needed.")
-	}
-	var same bool
-	if err := tx.QueryRow(ctx, `SELECT $1::numeric=$2::numeric`, request.baseCap, *cap).Scan(&same); err != nil {
-		return err
-	}
-	if !same {
+	if !sameCap {
 		return staleIncreaseRequest("The base cap for this budget changed after the request was made, so a new request is needed.")
 	}
 	return nil

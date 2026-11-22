@@ -3,14 +3,10 @@
 package integration_test
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
-	"strings"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/budgets"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -32,90 +28,36 @@ type budgetRequestBody struct {
 	IncreaseID  *string `json:"increase_id"`
 }
 
-type budgetRequestServers struct {
-	pool         *pgxpool.Pool
-	auth         *secrets.AuthKey
-	keys         *secrets.KeyRing
-	installation string
-}
-
-func newBudgetRequestServers(t *testing.T, pool *pgxpool.Pool) budgetRequestServers {
-	t.Helper()
-	keys, installation := notificationKeys(t, pool)
-	auth := secrets.NewAuthKey(make([]byte, 32), installation)
-	if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
-		t.Fatal(err)
-	}
-	return budgetRequestServers{pool: pool, auth: auth, keys: keys, installation: installation}
-}
-
-func (s budgetRequestServers) caller(t *testing.T, userID string) notificationCaller {
-	t.Helper()
-	ctx := t.Context()
-	token := uuid.NewString()
-	if _, err := s.pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), userID, s.auth.Digest(secrets.SessionDigest, token)); err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	budgets.NewAPI(access.New(access.Config{Pool: s.pool, Installation: s.installation, Origin: "https://test.example", Auth: s.auth, Keys: s.keys, Log: slog.New(slog.DiscardHandler)})).Register(mux)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	csrf := base64.RawURLEncoding.EncodeToString(s.auth.Digest(secrets.CSRFDigest, token))
-	return func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
-		t.Helper()
-		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		key := uuid.NewString()
-		if len(idempotencyKey) > 0 && idempotencyKey[0] != "" {
-			key = idempotencyKey[0]
-		}
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Origin", "https://test.example")
-		r.Header.Set("Idempotency-Key", key)
-		r.Header.Set("X-CSRF-Token", csrf)
-		if ifMatch != "" {
-			r.Header.Set("If-Match", ifMatch)
-		}
-		r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-		response, err := server.Client().Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		raw, err := io.ReadAll(response.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), body: raw}
-	}
-}
-
 type budgetRequestFixture struct {
 	pool                                                           *pgxpool.Pool
 	ownerID, requesterOneID, requesterTwoID, managerID, outsiderID string
 	owner, requesterOne, requesterTwo, manager, outsider           notificationCaller
 }
 
+func budgetRequestCaller(t *testing.T, pool *pgxpool.Pool, userID string) notificationCaller {
+	t.Helper()
+	return managementHTTPAs(t, pool, userID, func(mux *http.ServeMux, server *access.Server) {
+		budgets.NewAPI(server).Register(mux)
+	})
+}
+
 func newBudgetRequestFixture(t *testing.T) budgetRequestFixture {
 	t.Helper()
 	pool, _ := harness.Database(t)
-	servers := newBudgetRequestServers(t, pool)
-	f := budgetRequestFixture{
-		pool:           pool,
-		ownerID:        insertBudgetRequestUser(t, pool, "owner", "global"),
-		requesterOneID: insertBudgetRequestUser(t, pool, "developer", "assigned"),
-		requesterTwoID: insertBudgetRequestUser(t, pool, "developer", "assigned"),
-		managerID:      insertBudgetRequestUser(t, pool, "operator", "assigned"),
-		outsiderID:     insertBudgetRequestUser(t, pool, "operator", "assigned"),
+	ownerID := insertBudgetRequestUser(t, pool, "owner", "global")
+	requesterOneID := insertBudgetRequestUser(t, pool, "developer", "assigned")
+	requesterTwoID := insertBudgetRequestUser(t, pool, "developer", "assigned")
+	managerID := insertBudgetRequestUser(t, pool, "operator", "assigned")
+	outsiderID := insertBudgetRequestUser(t, pool, "operator", "assigned")
+	return budgetRequestFixture{
+		pool:    pool,
+		ownerID: ownerID, requesterOneID: requesterOneID, requesterTwoID: requesterTwoID, managerID: managerID, outsiderID: outsiderID,
+		owner:        budgetRequestCaller(t, pool, ownerID),
+		requesterOne: budgetRequestCaller(t, pool, requesterOneID),
+		requesterTwo: budgetRequestCaller(t, pool, requesterTwoID),
+		manager:      budgetRequestCaller(t, pool, managerID),
+		outsider:     budgetRequestCaller(t, pool, outsiderID),
 	}
-	f.owner = servers.caller(t, f.ownerID)
-	f.requesterOne = servers.caller(t, f.requesterOneID)
-	f.requesterTwo = servers.caller(t, f.requesterTwoID)
-	f.manager = servers.caller(t, f.managerID)
-	f.outsider = servers.caller(t, f.outsiderID)
-	return f
 }
 
 func (f budgetRequestFixture) project(t *testing.T, dailyCap string) string {
@@ -213,6 +155,37 @@ func activeBudgetIncreaseSumIs(t *testing.T, pool *pgxpool.Pool, project, want s
 	return matches
 }
 
+func expectEnforcedBudgetIncreases(t *testing.T, pool *pgxpool.Pool, project string, wantTotal float64) {
+	t.Helper()
+	loaded, err := ledger.LoadBudgetIncreases(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grants []struct {
+		Window    string `json:"window"`
+		Amount    string `json:"amount"`
+		ExpiresAt int64  `json:"expires_at"`
+	}
+	if err := json.Unmarshal([]byte(loaded[limits.AggregateBudgetID("project", project)]), &grants); err != nil {
+		t.Fatalf("enforced increases for project %s: %v", project, err)
+	}
+	var windowEnd int64
+	if err := pool.QueryRow(t.Context(), `SELECT floor(extract(epoch FROM end_at)*1000)::bigint FROM olp.budget_window('day',now())`).Scan(&windowEnd); err != nil {
+		t.Fatal(err)
+	}
+	total := 0.0
+	for _, grant := range grants {
+		amount, err := strconv.ParseFloat(grant.Amount, 64)
+		if err != nil || grant.Window != "day" || grant.ExpiresAt != windowEnd {
+			t.Fatalf("enforced increase = %+v, want a day increase expiring at the window end %d", grant, windowEnd)
+		}
+		total += amount
+	}
+	if total != wantTotal {
+		t.Fatalf("enforced increases total %v, want %v", total, wantTotal)
+	}
+}
+
 func runBudgetRequestPair(first, second func() apiResult) (apiResult, apiResult) {
 	results := make(chan apiResult, 2)
 	go func() { results <- first() }()
@@ -224,12 +197,15 @@ func TestBudgetIncreaseRequests(t *testing.T) {
 	t.Parallel()
 	f := newBudgetRequestFixture(t)
 	t.Run("concurrent approvals add to the effective cap", func(t *testing.T) {
+		t.Parallel()
 		testBudgetRequestCombinedCap(t, f)
 	})
 	t.Run("stale cap and window approvals are refused", func(t *testing.T) {
+		t.Parallel()
 		testBudgetRequestStale(t, f)
 	})
 	t.Run("approvals share the active limit with direct grants", func(t *testing.T) {
+		t.Parallel()
 		testBudgetRequestLimitSplit(t, f)
 	})
 }
@@ -273,17 +249,13 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 		}
 		approved[body.ID] = body
 	}
-	if approved[twenty.ID].IncreaseID == approved[thirty.ID].IncreaseID {
-		t.Fatalf("both approvals granted the same increase %v", approved[twenty.ID].IncreaseID)
+	if *approved[twenty.ID].IncreaseID == *approved[thirty.ID].IncreaseID {
+		t.Fatalf("both approvals granted the same increase %s", *approved[twenty.ID].IncreaseID)
 	}
 	if count := activeBudgetIncreases(t, pool, project); count != 2 || !activeBudgetIncreaseSumIs(t, pool, project, "50") {
 		t.Fatalf("active increases = %d, want two summing to 50", count)
 	}
-	ownerBudget := limits.AggregateBudgetID("project", project)
-	var effectiveIs150 bool
-	if err := pool.QueryRow(t.Context(), `SELECT 100+olp.active_budget_increase($1::uuid,'day',(SELECT window_id FROM olp.budget_window('day',now())),now())=150`, ownerBudget).Scan(&effectiveIs150); err != nil || !effectiveIs150 {
-		t.Fatalf("effective cap is not 150 (%v)", err)
-	}
+	expectEnforcedBudgetIncreases(t, pool, project, 50)
 
 	for _, replay := range []apiResult{
 		owner("POST", budgetRequestPath(twenty.ID, "approve"), "", "", approvalKey),
