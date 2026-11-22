@@ -115,3 +115,12 @@ export function isManagementSection(
 ): section is CodeManagementKind {
   return management.has(section);
 }
+
+export const emptyFilterForm = {
+  attempt: '',
+  route: '',
+  key: '',
+  account: '',
+  binding: '',
+  endUser: ''
+};

@@ -40,41 +40,10 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		return empty, httpkit.Invalid("aliases", err.Error())
 	}
 	catalog := Catalog(route, offers)
-	var supported []string
-	for _, model := range catalog {
-		for _, client := range model.Clients {
-			if !slices.Contains(supported, client) {
-				supported = append(supported, client)
-			}
-		}
+	client, supported, native, adapters, err := clientModels(route, offers, catalog, in.Client)
+	if err != nil {
+		return empty, err
 	}
-	if len(supported) == 0 {
-		return empty, httpkit.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
-	}
-	client := cmp.Or(in.Client, supported[0])
-	if !slices.Contains(supported, client) {
-		names := make([]string, len(supported))
-		for i, c := range supported {
-			names[i] = clientNames[c]
-		}
-		return empty, httpkit.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
-	}
-	var native []string
-	var adapters []codemode.Adapter
-	for _, model := range catalog {
-		if !slices.Contains(model.Clients, client) {
-			continue
-		}
-		native = append(native, model.ID)
-		for _, adapter := range offers.adapters(route, model.ID) {
-			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, model.ID) {
-				if !slices.Contains(adapters, adapter) {
-					adapters = append(adapters, adapter)
-				}
-			}
-		}
-	}
-	slices.SortFunc(adapters, codeadapter.Compare)
 	model := cmp.Or(in.Model, native[0])
 	if !slices.Contains(native, model) {
 		return empty, httpkit.Invalid("model", nativeModel)
@@ -102,20 +71,10 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			return empty, httpkit.Invalid(companion.field, "These models cannot share a conversation. Choose models from compatible subscriptions or only paid API targets.")
 		}
 	}
-	base, err := url.Parse(in.GatewayURL)
-	if err != nil || base.Host == "" || base.User != nil || base.ForceQuery || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
-		return empty, httpkit.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
+	baseURL, err := clientBaseURL(in.GatewayURL, route.BasePath())
+	if err != nil {
+		return empty, err
 	}
-	local := base.Hostname() == "localhost"
-	if ip := net.ParseIP(base.Hostname()); ip != nil {
-		local = ip.IsLoopback()
-	}
-	if base.Scheme != "https" && !(base.Scheme == "http" && local) {
-		return empty, httpkit.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
-	}
-	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
-	base.RawPath = ""
-	baseURL := base.String()
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
 		case codeadapter.ClientCodex:
@@ -133,30 +92,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		return "", "", "", nil
 	}()
 	file, nativeInstructions := platformInstructions(client, platform)
-	instructions := nativeInstructions + func() string {
-		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
-			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Signed thought state, reasoning controls, media and server tools are refused. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
-		}
-		return ""
-	}() + func() string {
-		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
-			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
-		}
-		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
-			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
-		}
-		return ""
-	}() + func() string {
-		if route.ModelRewriting {
-			return " Outside configured model pools, published aliases rewrite only model identifiers to their exact native targets. Existing conversations retain their pinned targets while authorized."
-		}
-		return ""
-	}() + func() string {
-		if len(route.ModelPools) > 0 {
-			return " Published model pools permit ordered alternate native models only after proven nonexecution and portable state. Exact selection remains the default outside these pools. Model and account availability, current authorization and budgets still apply. Existing conversations retain the recovered exact target while published and authorized."
-		}
-		return ""
-	}()
+	instructions := nativeInstructions + routeInstructions(route, client, adapters)
 	out := codemode.ClientConfiguration{
 		Models: catalog,
 		PaidModels: slices.Collect(func(yield func(string) bool) {
@@ -205,3 +141,86 @@ func conjoin(names []string) string {
 }
 
 var clientNames = map[string]string{codeadapter.ClientCodex: "Codex", codeadapter.ClientClaudeCode: "Claude Code", codeadapter.ClientOpenCode: "OpenCode"}
+
+func routeInstructions(route codemode.Route, client string, adapters []codemode.Adapter) string {
+	return func() string {
+		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
+			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Signed thought state, reasoning controls, media and server tools are refused. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
+		}
+		return ""
+	}() + func() string {
+		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
+			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
+		}
+		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
+			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
+		}
+		return ""
+	}() + func() string {
+		if route.ModelRewriting {
+			return " Outside configured model pools, published aliases rewrite only model identifiers to their exact native targets. Existing conversations retain their pinned targets while authorized."
+		}
+		return ""
+	}() + func() string {
+		if len(route.ModelPools) > 0 {
+			return " Published model pools permit ordered alternate native models only after proven nonexecution and portable state. Exact selection remains the default outside these pools. Model and account availability, current authorization and budgets still apply. Existing conversations retain the recovered exact target while published and authorized."
+		}
+		return ""
+	}()
+}
+
+func clientModels(route codemode.Route, offers Offers, catalog []codemode.Model, requested string) (string, []string, []string, []codemode.Adapter, error) {
+	var supported []string
+	for _, model := range catalog {
+		for _, client := range model.Clients {
+			if !slices.Contains(supported, client) {
+				supported = append(supported, client)
+			}
+		}
+	}
+	if len(supported) == 0 {
+		return "", nil, nil, nil, httpkit.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
+	}
+	client := cmp.Or(requested, supported[0])
+	if !slices.Contains(supported, client) {
+		names := make([]string, len(supported))
+		for i, c := range supported {
+			names[i] = clientNames[c]
+		}
+		return "", nil, nil, nil, httpkit.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
+	}
+	var native []string
+	var adapters []codemode.Adapter
+	for _, model := range catalog {
+		if !slices.Contains(model.Clients, client) {
+			continue
+		}
+		native = append(native, model.ID)
+		for _, adapter := range offers.adapters(route, model.ID) {
+			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, model.ID) {
+				if !slices.Contains(adapters, adapter) {
+					adapters = append(adapters, adapter)
+				}
+			}
+		}
+	}
+	slices.SortFunc(adapters, codeadapter.Compare)
+	return client, supported, native, adapters, nil
+}
+
+func clientBaseURL(raw, path string) (string, error) {
+	base, err := url.Parse(raw)
+	if err != nil || base.Host == "" || base.User != nil || base.ForceQuery || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
+		return "", httpkit.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
+	}
+	local := base.Hostname() == "localhost"
+	if ip := net.ParseIP(base.Hostname()); ip != nil {
+		local = ip.IsLoopback()
+	}
+	if base.Scheme != "https" && !(base.Scheme == "http" && local) {
+		return "", httpkit.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + path
+	base.RawPath = ""
+	return base.String(), nil
+}

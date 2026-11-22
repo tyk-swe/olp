@@ -11,6 +11,8 @@
     errorMessage
   } from '#lib/management/http.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
   import {
     PASSWORD_MAX_LENGTH,
@@ -35,22 +37,24 @@
   });
   let errors = $state<InvitationAcceptanceErrors>({});
   let message = $state('');
-  let busy = $state(false);
+  const accept = useAction(undefined, 'authentication');
   const controller = new AbortController();
 
   async function checkPolicy() {
     view = 'checking';
-    try {
-      const capabilities = await authenticationCapabilities(controller.signal);
-      view = capabilities.local_login_enabled ? 'ready' : 'blocked';
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      message = errorMessage(
-        error,
-        'Invitation availability could not be checked.'
-      );
-      view = 'unavailable';
+    const result = await readResult(() =>
+      authenticationCapabilities(controller.signal)
+    );
+    if (result.ok) {
+      view = result.value.local_login_enabled ? 'ready' : 'blocked';
+      return;
     }
+    if (controller.signal.aborted) return;
+    message = errorMessage(
+      result.error,
+      'Invitation availability could not be checked.'
+    );
+    view = 'unavailable';
   }
 
   const serverFields: Record<string, keyof InvitationAcceptanceValues> = {
@@ -88,46 +92,50 @@
     event.preventDefault();
     message = '';
     errors = validateInvitationAcceptance(values);
-    if (Object.keys(errors).length || !token || view !== 'ready' || busy)
+    if (Object.keys(errors).length || !token || view !== 'ready' || accept.busy)
       return;
-    busy = true;
-    try {
-      await authLifecycle.authenticate((signal) =>
-        acceptInvitation(
-          {
-            token,
-            display_name: values.displayName.trim(),
-            password: values.password
-          },
-          signal
-        )
-      );
-      token = '';
-      values.password = '';
-      values.confirmPassword = '';
-      await goto(resolve(''), { replace: true });
-    } catch (error) {
-      if (error instanceof ApiProblem) {
-        if (error.problem.status === 410) {
-          token = '';
-          view = 'expired';
-        } else if (
-          error.problem.type ===
-          'https://openllmproxy.dev/problems/invitation_local_login_required'
-        ) {
-          view = 'blocked';
-        } else {
-          errors = applyServerFieldErrors(error, serverFields);
-          if (!Object.keys(errors).length)
-            message = error.problem.detail ?? error.problem.title;
+    await accept.run(
+      () =>
+        authLifecycle.authenticate((signal) =>
+          acceptInvitation(
+            {
+              token,
+              display_name: values.displayName.trim(),
+              password: values.password
+            },
+            signal
+          )
+        ),
+      async () => {
+        token = '';
+        values.password = '';
+        values.confirmPassword = '';
+        await goto(resolve(''), { replace: true });
+      },
+      {
+        failure: (cause) => {
+          if (cause instanceof ApiProblem) {
+            if (cause.problem.status === 410) {
+              token = '';
+              view = 'expired';
+              return '';
+            }
+            if (
+              cause.problem.type ===
+              'https://openllmproxy.dev/problems/invitation_local_login_required'
+            ) {
+              view = 'blocked';
+              return '';
+            }
+            errors = applyServerFieldErrors(cause, serverFields);
+            if (!Object.keys(errors).length)
+              return cause.problem.detail ?? cause.problem.title;
+            return '';
+          }
+          return 'The control API could not be reached. Check the installation and try again.';
         }
-      } else {
-        message =
-          'The control API could not be reached. Check the installation and try again.';
       }
-    } finally {
-      busy = false;
-    }
+    );
   }
 </script>
 
@@ -199,7 +207,9 @@
       <p>Your email and fixed role were selected by the installation owner.</p>
     </div>
 
-    {#if message}<div class="form-alert" role="alert">{message}</div>{/if}
+    {#if message || accept.error}<div class="form-alert" role="alert">
+        {message || accept.error}
+      </div>{/if}
 
     <form novalidate onsubmit={submit}>
       <label for="invited-display-name">Display name</label>
@@ -210,7 +220,7 @@
         bind:value={values.displayName}
         aria-invalid={errors.displayName ? 'true' : undefined}
         aria-describedby={errors.displayName ? 'display-name-error' : undefined}
-        disabled={busy}
+        disabled={accept.busy}
       />
       {#if errors.displayName}<small id="display-name-error" class="field-error"
           >{errors.displayName}</small
@@ -228,7 +238,7 @@
         aria-describedby={errors.password
           ? 'password-help password-error'
           : 'password-help'}
-        disabled={busy}
+        disabled={accept.busy}
       />
       <small id="password-help">{PASSWORD_TOO_SHORT}</small>
       {#if errors.password}<small id="password-error" class="field-error"
@@ -245,7 +255,7 @@
         aria-describedby={errors.confirmPassword
           ? 'confirm-password-error'
           : undefined}
-        disabled={busy}
+        disabled={accept.busy}
       />
       {#if errors.confirmPassword}<small
           id="confirm-password-error"
@@ -255,9 +265,9 @@
       <button
         class="button button-primary"
         type="submit"
-        disabled={busy}
-        aria-busy={busy}
-        >{busy ? 'Creating account…' : 'Accept invitation'}</button
+        disabled={accept.busy}
+        aria-busy={accept.busy}
+        >{accept.busy ? 'Creating account…' : 'Accept invitation'}</button
       >
     </form>
   {/if}

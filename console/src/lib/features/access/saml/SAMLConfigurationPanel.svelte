@@ -2,6 +2,9 @@
   import Callout from '#lib/components/Callout.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';
@@ -26,9 +29,8 @@
     url = $state(''),
     etag = $state(''),
     loaded = $state(false),
-    busy = $state(false),
-    error = $state(''),
     notice = $state('');
+  const saml = useAction();
   function load() {
     const c = query.data;
     if (c) {
@@ -48,38 +50,36 @@
   $effect(() => {
     if (query.isSuccess && !loaded) load();
   });
-  async function run(work: () => Promise<void>) {
-    if (busy) return;
-    busy = true;
-    error = '';
-    notice = '';
-    try {
-      await work();
-    } catch (e) {
-      error = errorMessage(e, 'SAML configuration could not be changed.');
-    } finally {
-      busy = false;
-    }
-  }
   async function save(e: SubmitEvent) {
     e.preventDefault();
-    await run(async () => {
-      const body: SAMLWrite = {
-        enabled,
-        metadata_xml: metadata,
-        email_attribute: email,
-        groups_attribute: groups,
-        name_attribute: display,
-        default_role: (defaultRole || null) as SAMLWrite['default_role'],
-        email_role_mappings: JSON.parse(emailMappings),
-        group_role_mappings: JSON.parse(groupMappings),
-        rotate_signing_key: rotate
-      };
-      const data = await saveSAML(body, etag || undefined);
-      client.setQueryData(samlKeys.configuration(), data);
-      load();
-      notice = 'SAML configuration saved. Pending sign-ins were invalidated.';
-    });
+    const parsed = captureResult((): SAMLWrite => ({
+      enabled,
+      metadata_xml: metadata,
+      email_attribute: email,
+      groups_attribute: groups,
+      name_attribute: display,
+      default_role: (defaultRole || null) as SAMLWrite['default_role'],
+      email_role_mappings: JSON.parse(emailMappings),
+      group_role_mappings: JSON.parse(groupMappings),
+      rotate_signing_key: rotate
+    }));
+    notice = '';
+    if (!parsed.ok) {
+      saml.error = errorMessage(
+        parsed.error,
+        'SAML configuration could not be changed.'
+      );
+      return;
+    }
+    await saml.run(
+      () => saveSAML(parsed.value, etag || undefined),
+      (data) => {
+        client.setQueryData(samlKeys.configuration(), data);
+        load();
+        notice = 'SAML configuration saved. Pending sign-ins were invalidated.';
+      },
+      { fallback: 'SAML configuration could not be changed.' }
+    );
   }
 </script>
 
@@ -91,19 +91,16 @@
     browser-initiated sign-in. Unsolicited or encrypted assertions and logout
     protocols are not accepted.
   </p>
-  {#if query.isPending}<p role="status">
-      Loading SAML configuration…
-    </p>{:else if query.isError}<p class="inline-problem" role="alert">
-      {errorMessage(query.error, 'SAML configuration is unavailable.')}
-    </p>
-    <button class="button button-secondary" onclick={() => query.refetch()}
-      >Retry</button
-    >{:else}
-    {#if error}<p class="inline-problem" role="alert">
-        {error}
+  <QueryView
+    {query}
+    loading="Loading SAML configuration…"
+    failure={errorMessage(query.error, 'SAML configuration is unavailable.')}
+  >
+    {#if saml.error}<p class="inline-problem" role="alert">
+        {saml.error}
       </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
     <form onsubmit={save}>
-      <fieldset disabled={busy || !editable}>
+      <fieldset disabled={saml.busy || !editable}>
         <legend>Identity provider</legend><label class="check"
           ><input type="checkbox" bind:checked={enabled} />Enable SAML sign-in</label
         >
@@ -121,11 +118,17 @@
           class="button button-secondary"
           type="button"
           disabled={!url}
-          onclick={() =>
-            run(async () => {
-              metadata = (await importSAML(url)).metadata_xml;
-              notice = 'Metadata imported. Save to publish trust.';
-            })}>Import metadata</button
+          onclick={() => {
+            notice = '';
+            void saml.run(
+              () => importSAML(url),
+              (data) => {
+                metadata = data.metadata_xml;
+                notice = 'Metadata imported. Save to publish trust.';
+              },
+              { fallback: 'SAML configuration could not be changed.' }
+            );
+          }}>Import metadata</button
         >
         <div class="form-field">
           <label for="saml-metadata">Identity provider metadata XML</label
@@ -193,17 +196,22 @@
           >{/if}
       </fieldset>
       <div class="actions">
-        {#if editable}<button class="button button-primary" disabled={busy}
+        {#if editable}<button class="button button-primary" disabled={saml.busy}
             >Save SAML configuration</button
           >{/if}<button
           type="button"
           class="button button-secondary"
-          disabled={busy}
-          onclick={() =>
-            run(async () => {
-              await query.refetch();
-              load();
-            })}>Reload saved configuration</button
+          disabled={saml.busy}
+          onclick={() => {
+            notice = '';
+            void saml.run(
+              () => query.refetch(),
+              () => load(),
+              {
+                fallback: 'SAML configuration could not be changed.'
+              }
+            );
+          }}>Reload saved configuration</button
         >
       </div>
     </form>
@@ -230,7 +238,7 @@
           value={query.data.signing_certificate}
           rows="5"></textarea>
       </div>{/if}
-  {/if}
+  </QueryView>
 </section>
 
 <style>

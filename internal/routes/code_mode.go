@@ -13,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
@@ -277,90 +276,17 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id s
 		return nil, err
 	}
 	route := in
-	var err error
-	if err := route.ValidateAliases(); err != nil {
-		return nil, httpkit.Invalid("aliases", err.Error())
+	if err := validateCodePublicationRoute(ctx, tx, route); err != nil {
+		return nil, err
 	}
-	if err := route.ValidateModelPools(); err != nil {
-		return nil, httpkit.Invalid("model_pools", err.Error())
-	}
-	if err = route.Tools.Validate(); err != nil {
-		return nil, httpkit.Invalid("tools", err.Error())
-	}
-	if route.Tools != nil {
-		if _, err = codesessions.ResearchAccount(ctx, tx, route); err != nil {
-			return nil, err
-		}
-	}
-	if route.Enabled {
-		for _, model := range route.Models {
-			if _, paid := route.AllPaidTargets()[model]; paid {
-				continue
-			}
-			var available bool
-			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id
-				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND `+grants.LiveCondition+` AND c.principal=a.principal)`, route.PoolID, route.ProjectID, model).Scan(&available)
-			if err != nil {
-				return nil, err
-			}
-			if !available {
-				return nil, httpkit.Invalid("models", "Every model needs an enrolled pool account.")
-			}
-		}
-	}
-	paidProviders, paidErr := CodePaidProviders(ctx, tx, route)
-	if paidErr != nil {
-		return nil, paidErr
-	}
-	if frozenPaid != nil {
-		if len(frozenPaid) != len(paidProviders) {
-			return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
-		}
-		for id := range frozenPaid {
-			if _, ok := paidProviders[id]; !ok {
-				return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
-			}
-		}
-		if err := ValidateCodePaidProviders(route, frozenPaid); err != nil {
-			return nil, err
-		}
-	}
-	paidConnections, err := json.Marshal(func() map[string]routing.Provider {
-		if frozenPaid != nil {
-			return frozenPaid
-		}
-		return paidProviders
-	}())
+	paidConnections, err := resolvePublishedPaidConnections(ctx, tx, route, frozenPaid)
 	if err != nil {
 		return nil, err
 	}
-	connections, adapters, err := codePublication(ctx, tx, route.PoolID)
+	connections, adapters, err := resolvePublishedPoolConnections(ctx, tx, route.PoolID, frozen)
 	if err != nil {
 		return nil, err
 	}
-	if frozen != nil {
-		var current map[string]json.RawMessage
-		if err := json.Unmarshal(connections, &current); err != nil {
-			return nil, err
-		}
-		if len(current) != len(frozen) {
-			return nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
-		}
-		for provider, cfg := range frozen {
-			if _, ok := current[provider]; !ok {
-				return nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
-			}
-			if _, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID); !ok {
-				return nil, httpkit.Invalid("connections", "Frozen connections must support a coding adapter.")
-			}
-		}
-		encoded, err := json.Marshal(frozen)
-		if err != nil {
-			return nil, err
-		}
-		connections = encoded
-	}
-
 	route.RevisionID = httpkit.NewID()
 	route.ETag = httpkit.NewID()
 	now := time.Now().UTC().Truncate(time.Microsecond)

@@ -71,58 +71,11 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 			return errors.New("bindings file must be an object of secret strings")
 		}
 	}
-	var saved SavedPlan
-	switch args[0] {
-	case "plan":
-		if opts.one("file") == "" {
-			return errors.New("config plan requires --file DOCUMENT")
-		}
-		data, err := readJSON(opts.one("file"))
-		if err != nil {
-			return err
-		}
-		var envelope struct {
-			Document json.RawMessage `json:"document"`
-		}
-		if err = json.Unmarshal(data, &envelope); err != nil {
-			return errors.New("configuration must be an object")
-		}
-		if len(envelope.Document) != 0 {
-			data = envelope.Document
-		}
-		exported, err := call("export_configuration", nil)
-		if err != nil {
-			return err
-		}
-		var destination contract.ConfigurationExportResponse
-		if err = json.Unmarshal(exported.Body, &destination); err != nil || destination.Digest == "" {
-			return errors.New("destination export has no digest")
-		}
-		saved = SavedPlan{Version: 2, Destination: runner.Getenv("OLP_MANAGEMENT_URL"), DestinationDigest: destination.Digest, Document: data}
-	case "apply":
-		if opts.one("plan-file") == "" {
-			return errors.New("config apply requires --plan-file PLAN")
-		}
-		data, err := readJSON(opts.one("plan-file"))
-		if err != nil {
-			return err
-		}
-		if err = json.Unmarshal(data, &saved); err != nil || saved.Version != 2 || saved.DestinationDigest == "" || saved.Plan.Digest == "" || len(saved.Document) == 0 || saved.IntentDigest == "" {
-			return errors.New("invalid saved configuration plan; compute a new plan")
-		}
-		intentDigest, err := savedIntentDigest(saved)
-		if err != nil || intentDigest != saved.IntentDigest {
-			return errors.New("saved configuration intent changed; compute a new plan")
-		}
-		if saved.Destination != runner.Getenv("OLP_MANAGEMENT_URL") {
-			return errors.New("saved plan was computed for a different destination")
-		}
-		if len(saved.Plan.Blockers) != 0 || len(saved.Plan.Conflicts) != 0 {
-			return errors.New("saved plan has conflicts or blockers")
-		}
-	default:
-		return errors.New("unknown config command; use export, plan or apply")
+	saved, err := runner.loadSavedPlan(args[0], opts, call)
+	if err != nil {
+		return err
 	}
+
 	externalBindings := map[string]any{}
 	if path := opts.one("external-bindings-file"); path != "" {
 		data, err := readJSON(path)
@@ -163,43 +116,7 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	}
 
 	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings, "code_bindings": codeBindings}
-	if args[0] == "apply" {
-		// The server checks current authority, exact replay and destination
-		// preconditions in that order. Replanning here would block recovery of
-		// our own committed mutation after its response was lost.
-		result, err := call("apply_configuration", request)
-		if err != nil {
-			return err
-		}
-		return runner.output(opts.one("output"), append(result.Body, '\n'))
-	}
-	result, err := call("plan_configuration", request)
-	if err != nil {
-		return err
-	}
-	var plan contract.ConfigurationPlanResponse
-	if err = json.Unmarshal(result.Body, &plan); err != nil || plan.Digest == "" {
-		return errors.New("invalid configuration plan response")
-	}
-	if args[0] == "plan" {
-		saved.Plan = plan
-		saved.IntentDigest, err = savedIntentDigest(saved)
-		if err != nil {
-			return err
-		}
-		data, err := json.MarshalIndent(saved, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err = runner.output(opts.one("output"), append(data, '\n')); err != nil {
-			return err
-		}
-		if len(plan.Conflicts) != 0 || len(plan.Blockers) != 0 {
-			return errors.New("configuration plan has conflicts or blockers")
-		}
-		return nil
-	}
-	return errors.New("unknown config command")
+	return runner.sendConfiguration(args[0], opts, saved, request, call)
 }
 
 // savedIntentDigest checks local consistency, not authorization or authenticity.
@@ -235,4 +152,99 @@ func readCodeBindings(path string) (contract.ConfigurationCodeBindings, error) {
 		return contract.ConfigurationCodeBindings{}, errors.New("code bindings must map credentials, users and api_keys to destination UUIDs")
 	}
 	return bindings, nil
+}
+
+func (runner Runner) loadSavedPlan(command string, opts options, call func(string, any) (management.Response, error)) (SavedPlan, error) {
+	var saved SavedPlan
+	switch command {
+	case "plan":
+		if opts.one("file") == "" {
+			return SavedPlan{}, errors.New("config plan requires --file DOCUMENT")
+		}
+		data, err := readJSON(opts.one("file"))
+		if err != nil {
+			return SavedPlan{}, err
+		}
+		var envelope struct {
+			Document json.RawMessage `json:"document"`
+		}
+		if err = json.Unmarshal(data, &envelope); err != nil {
+			return SavedPlan{}, errors.New("configuration must be an object")
+		}
+		if len(envelope.Document) != 0 {
+			data = envelope.Document
+		}
+		exported, err := call("export_configuration", nil)
+		if err != nil {
+			return SavedPlan{}, err
+		}
+		var destination contract.ConfigurationExportResponse
+		if err = json.Unmarshal(exported.Body, &destination); err != nil || destination.Digest == "" {
+			return SavedPlan{}, errors.New("destination export has no digest")
+		}
+		saved = SavedPlan{Version: 2, Destination: runner.Getenv("OLP_MANAGEMENT_URL"), DestinationDigest: destination.Digest, Document: data}
+	case "apply":
+		if opts.one("plan-file") == "" {
+			return SavedPlan{}, errors.New("config apply requires --plan-file PLAN")
+		}
+		data, err := readJSON(opts.one("plan-file"))
+		if err != nil {
+			return SavedPlan{}, err
+		}
+		if err = json.Unmarshal(data, &saved); err != nil || saved.Version != 2 || saved.DestinationDigest == "" || saved.Plan.Digest == "" || len(saved.Document) == 0 || saved.IntentDigest == "" {
+			return SavedPlan{}, errors.New("invalid saved configuration plan; compute a new plan")
+		}
+		intentDigest, err := savedIntentDigest(saved)
+		if err != nil || intentDigest != saved.IntentDigest {
+			return SavedPlan{}, errors.New("saved configuration intent changed; compute a new plan")
+		}
+		if saved.Destination != runner.Getenv("OLP_MANAGEMENT_URL") {
+			return SavedPlan{}, errors.New("saved plan was computed for a different destination")
+		}
+		if len(saved.Plan.Blockers) != 0 || len(saved.Plan.Conflicts) != 0 {
+			return SavedPlan{}, errors.New("saved plan has conflicts or blockers")
+		}
+	default:
+		return SavedPlan{}, errors.New("unknown config command; use export, plan or apply")
+	}
+	return saved, nil
+}
+func (runner Runner) sendConfiguration(command string, opts options, saved SavedPlan, request map[string]any, call func(string, any) (management.Response, error)) error {
+	if command == "apply" {
+		// The server checks current authority, exact replay and destination
+		// preconditions in that order. Replanning here would block recovery of
+		// our own committed mutation after its response was lost.
+		result, err := call("apply_configuration", request)
+		if err != nil {
+			return err
+		}
+		return runner.output(opts.one("output"), append(result.Body, '\n'))
+	}
+	result, err := call("plan_configuration", request)
+	if err != nil {
+		return err
+	}
+	var plan contract.ConfigurationPlanResponse
+	if err = json.Unmarshal(result.Body, &plan); err != nil || plan.Digest == "" {
+		return errors.New("invalid configuration plan response")
+	}
+	if command == "plan" {
+		saved.Plan = plan
+		saved.IntentDigest, err = savedIntentDigest(saved)
+		if err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(saved, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err = runner.output(opts.one("output"), append(data, '\n')); err != nil {
+			return err
+		}
+		if len(plan.Conflicts) != 0 || len(plan.Blockers) != 0 {
+			return errors.New("configuration plan has conflicts or blockers")
+		}
+		return nil
+	}
+	return errors.New("unknown config command")
 }

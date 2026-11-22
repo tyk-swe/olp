@@ -61,46 +61,52 @@ func scimResourceSchema(group bool) string {
 	return scim.UserSchema
 }
 
-func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
-	values := r.URL.Query()
-	if r.Method == "POST" {
-		body, e := scim.Decode(r.Body)
-		if e != nil {
-			return httpkit.Reply{}, e
+func scimListValues(r *http.Request) (url.Values, error) {
+	if r.Method != "POST" {
+		return r.URL.Query(), nil
+	}
+	body, err := scim.Decode(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err = scim.Schema(body, scim.SearchSchema); err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	for _, key := range []string{"filter", "sortBy", "sortOrder", "startIndex", "count", "attributes", "excludedAttributes"} {
+		value, ok := body[key]
+		if !ok {
+			continue
 		}
-		if e = scim.Schema(body, scim.SearchSchema); e != nil {
-			return httpkit.Reply{}, e
-		}
-		values = url.Values{}
-		for _, key := range []string{"filter", "sortBy", "sortOrder", "startIndex", "count", "attributes", "excludedAttributes"} {
-			if value, ok := body[key]; ok {
-				switch v := value.(type) {
-				case string:
-					values.Set(key, v)
-				case json.Number:
-					values.Set(key, v.String())
-				case []any:
-					parts := []string{}
-					for _, x := range v {
-						str, ok := x.(string)
-						if !ok {
-							return httpkit.Reply{}, scim.Invalid("Attribute selection must contain strings.")
-						}
-						parts = append(parts, str)
-					}
-					values.Set(key, strings.Join(parts, ","))
-				default:
-					return httpkit.Reply{}, scim.Invalid("The search parameter has the wrong type.")
+		switch v := value.(type) {
+		case string:
+			values.Set(key, v)
+		case json.Number:
+			values.Set(key, v.String())
+		case []any:
+			parts := make([]string, 0, len(v))
+			for _, x := range v {
+				str, ok := x.(string)
+				if !ok {
+					return nil, scim.Invalid("Attribute selection must contain strings.")
 				}
+				parts = append(parts, str)
 			}
+			values.Set(key, strings.Join(parts, ","))
+		default:
+			return nil, scim.Invalid("The search parameter has the wrong type.")
 		}
 	}
+	return values, nil
+}
+
+func scimListWindow(values url.Values) (int, int, error) {
 	start, count := 1, 100
 	var err error
 	if raw := values.Get("startIndex"); raw != "" {
 		start, err = strconv.Atoi(raw)
 		if err != nil {
-			return httpkit.Reply{}, scim.Invalid("startIndex must be an integer.")
+			return 0, 0, scim.Invalid("startIndex must be an integer.")
 		}
 		if start < 1 {
 			start = 1
@@ -109,17 +115,24 @@ func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpk
 	if raw := values.Get("count"); raw != "" {
 		count, err = strconv.Atoi(raw)
 		if err != nil {
-			return httpkit.Reply{}, scim.Invalid("count must be an integer.")
+			return 0, 0, scim.Invalid("count must be an integer.")
 		}
-		if count < 0 {
-			count = 0
-		}
-		if count > 200 {
-			count = 200
-		}
+		count = max(0, min(count, 200))
 	}
 	if start > 10000000 {
-		return httpkit.Reply{}, scim.Invalid("startIndex exceeds the supported offset.")
+		return 0, 0, scim.Invalid("startIndex exceeds the supported offset.")
+	}
+	return start, count, nil
+}
+
+func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
+	values, err := scimListValues(r)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	start, count, err := scimListWindow(values)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	schema := scimResourceSchema(group)
 	projection, err := scim.ParseProjection(values.Get("attributes"), values.Get("excludedAttributes"), schema)

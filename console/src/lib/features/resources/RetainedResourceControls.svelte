@@ -3,6 +3,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import {
     nativeObject,
     parseNativeJSON,
@@ -25,13 +26,13 @@
   let evidence = $state('');
   let problem = $state('');
   let notice = $state('');
-  let busy = $state(false);
-  const captureOwner = usePrincipalLifetime(() => {
+  const controlAction = useAction();
+  const busy = $derived(controlAction.busy);
+  usePrincipalLifetime(() => {
     evidence = '';
     hint = '';
     problem = '';
     notice = '';
-    busy = false;
   });
 
   function draftEvidence() {
@@ -71,49 +72,53 @@
 
   async function reconcile() {
     if (busy || !canReconcile) return;
-    const currentOwner = captureOwner();
     const selectedId = resource.id;
-    busy = true;
     problem = '';
     notice = '';
-    try {
-      await requestRetainedReconciliation(selectedId, hint);
-      if (!currentOwner() || resource.id !== selectedId) return;
-      notice =
-        'Reconciliation scheduled. Refresh to inspect settlement progress.';
-      changed();
-    } catch (error) {
-      if (currentOwner() && resource.id === selectedId)
-        problem = errorMessage(error, 'Reconciliation could not be scheduled.');
-    } finally {
-      if (currentOwner() && resource.id === selectedId) busy = false;
-    }
+    await controlAction.run(
+      () => requestRetainedReconciliation(selectedId, hint),
+      (_, current) => {
+        if (!current() || resource.id !== selectedId) return;
+        notice =
+          'Reconciliation scheduled. Refresh to inspect settlement progress.';
+        changed();
+      },
+      {
+        key: 'reconcile',
+        failure: (error) =>
+          errorMessage(error, 'Reconciliation could not be scheduled.')
+      }
+    );
+    if (resource.id === selectedId) problem = controlAction.error;
   }
 
   async function submitEvidence(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !canEvidence) return;
-    const currentOwner = captureOwner();
     const selectedId = resource.id;
-    busy = true;
     problem = '';
     notice = '';
-    try {
-      const value = parseNativeJSON(evidence);
-      if (!nativeObject(value))
-        throw new Error('Enter one usage evidence object.');
-      // Keep int64 quantities exact through the management transport.
-      const serialized = stringifyNativeJSON(value);
-      const result = await submitRetainedEvidence(selectedId, serialized);
-      if (!currentOwner() || resource.id !== selectedId) return;
-      notice = `Usage evidence recorded. Settlement ${result.settlement_status ?? 'pending'}.`;
-      changed();
-    } catch (error) {
-      if (currentOwner() && resource.id === selectedId)
-        problem = errorMessage(error, 'Usage evidence could not be recorded.');
-    } finally {
-      if (currentOwner() && resource.id === selectedId) busy = false;
-    }
+    await controlAction.run(
+      () => {
+        const value = parseNativeJSON(evidence);
+        if (!nativeObject(value))
+          throw new Error('Enter one usage evidence object.');
+        // Keep int64 quantities exact through the management transport.
+        const serialized = stringifyNativeJSON(value);
+        return submitRetainedEvidence(selectedId, serialized);
+      },
+      (result, current) => {
+        if (!current() || resource.id !== selectedId) return;
+        notice = `Usage evidence recorded. Settlement ${result.settlement_status ?? 'pending'}.`;
+        changed();
+      },
+      {
+        key: 'evidence',
+        failure: (error) =>
+          errorMessage(error, 'Usage evidence could not be recorded.')
+      }
+    );
+    if (resource.id === selectedId) problem = controlAction.error;
   }
 </script>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { formatDate } from '#lib/format.js';
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
@@ -39,9 +40,9 @@
   let remoteAgentInput = $state('');
   let password = $state('');
   let verifiedKey = $state('');
-  let busy = $state(false);
-  let error = $state('');
+
   let consent = $state<DelegationConsent | null>(null);
+  const action = useAction();
   const owner = usePrincipalLifetime(() => {
     keyID = '';
     agentID = '';
@@ -51,8 +52,7 @@
     password = '';
     verifiedKey = '';
     consent = null;
-    error = '';
-    busy = false;
+    action.reset();
   });
   const manageableKeys = $derived(
     (inventory.data ?? []).filter(
@@ -148,7 +148,7 @@
   });
 
   async function confirm() {
-    if (busy || !ready) return;
+    if (action.busy || !ready) return;
     const current = owner();
     const selected: DelegationConsentRequest = {
       api_key_id: keyID,
@@ -162,48 +162,48 @@
       ...(toolsets.length ? { allowed_toolsets: toolsets } : {}),
       ...(remoteAgents.length ? { allowed_agents: remoteAgents } : {})
     };
-    busy = true;
-    error = '';
     consent = null;
-    try {
-      if (verifiedKey !== selected.api_key_id) {
-        await reauthenticateWithPassword(
-          password,
-          'agent_delegation',
-          selected.api_key_id
-        );
-        if (!current()) return;
-        password = '';
+    action.error = '';
+    await action.run(
+      async () => {
+        if (verifiedKey !== selected.api_key_id) {
+          await reauthenticateWithPassword(
+            password,
+            'agent_delegation',
+            selected.api_key_id
+          );
+          if (!current()) return null;
+          password = '';
+        }
+        return createDelegationConsent(selected);
+      },
+      (result) => {
+        if (result == null) return;
+        verifiedKey = '';
+        consent = result;
+      },
+      {
+        key: 'confirm',
+        failure: (cause) =>
+          errorMessage(cause, 'Could not authorize this agent.')
       }
-      const result = await createDelegationConsent(selected);
-      if (!current()) return;
-      verifiedKey = '';
-      consent = result;
-    } catch (cause) {
-      if (current())
-        error = errorMessage(cause, 'Could not authorize this agent.');
-    } finally {
-      if (current()) busy = false;
-    }
+    );
   }
 
   async function verifyIdentity() {
-    if (busy || !selectedKey) return;
-    const current = owner();
-    busy = true;
-    error = '';
-    try {
-      const url = await beginIdentityReauthentication(
-        'agent_delegation',
-        selectedKey.id
-      );
-      if (current()) window.location.assign(url);
-    } catch (cause) {
-      if (current())
-        error = errorMessage(cause, 'Could not start identity verification.');
-    } finally {
-      if (current()) busy = false;
-    }
+    if (action.busy || !selectedKey) return;
+    action.error = '';
+    await action.run(
+      () => beginIdentityReauthentication('agent_delegation', selectedKey.id),
+      (url) => {
+        window.location.assign(url);
+      },
+      {
+        key: 'verify',
+        failure: (cause) =>
+          errorMessage(cause, 'Could not start identity verification.')
+      }
+    );
   }
 </script>
 
@@ -226,7 +226,7 @@
       <div class="form-field">
         <label class="form-field"
           >Consumer key
-          <select id="delegation-key" bind:value={keyID} disabled={busy}>
+          <select id="delegation-key" bind:value={keyID} disabled={action.busy}>
             <option value="">Choose a key</option>
             {#each manageableKeys as key (key.id)}<option value={key.id}
                 >{key.name} ({key.project_name ?? key.project_id})</option
@@ -240,7 +240,7 @@
           <select
             id="delegation-agent"
             bind:value={agentID}
-            disabled={busy || !selectedKey || options.isPending}
+            disabled={action.busy || !selectedKey || options.isPending}
           >
             <option value="">Choose a workload</option>
             {#each agents as agent (agent.id)}<option value={agent.id}
@@ -254,7 +254,7 @@
           >Allowed inference routes
           <input
             bind:value={routeInput}
-            disabled={busy}
+            disabled={action.busy}
             placeholder="route-one, route-two"
           />
         </label>
@@ -264,7 +264,7 @@
           >Allowed toolsets
           <input
             bind:value={toolsetInput}
-            disabled={busy}
+            disabled={action.busy}
             placeholder="toolset UUIDs separated by commas"
           />
         </label>
@@ -274,7 +274,7 @@
           >Allowed A2A agents
           <input
             bind:value={remoteAgentInput}
-            disabled={busy}
+            disabled={action.busy}
             placeholder="agent UUIDs separated by commas"
           />
         </label>
@@ -350,24 +350,26 @@
               type="password"
               autocomplete="current-password"
               bind:value={password}
-              disabled={busy}
+              disabled={action.busy}
             />
           </label>
         </div>
         <button
           class="button button-secondary"
           type="button"
-          disabled={busy || !selectedKey}
+          disabled={action.busy || !selectedKey}
           onclick={verifyIdentity}>Verify with linked identity</button
         >
       {/if}
       <button
         class="button button-secondary"
         type="button"
-        disabled={busy || !ready}
+        disabled={action.busy || !ready}
         onclick={confirm}>Confirm agent access</button
       >
-      {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+      {#if action.error}<p class="inline-problem" role="alert">
+          {action.error}
+        </p>{/if}
       {#if consent}
         <p class="inline-status" role="status">
           Copy this one-use consent code to the selected agent through your

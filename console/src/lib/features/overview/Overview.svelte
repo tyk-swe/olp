@@ -8,12 +8,12 @@
   import NavIcon from '#lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
+  import OverviewStatusGrid from '#lib/features/overview/OverviewStatusGrid.svelte';
+  import OverviewActivity from '#lib/features/overview/OverviewActivity.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { copyText } from '#lib/clipboard.js';
   import { getOverview } from '#lib/features/overview/api.js';
-  import { errorMessage } from '#lib/management/http.js';
-  import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 
   let endpoint = $state('/v1');
   let copied = $state(false);
@@ -93,67 +93,7 @@
   {/if}
 </div>
 
-<section class="status-grid" aria-label="Gateway readiness">
-  <article class="card status-card">
-    <span
-      class:ready={activeProviders > 0 && !overview.isError}
-      class:neutral={activeProviders === 0 || overview.isError}
-      class="status-icon"
-      aria-hidden="true"><NavIcon name="provider" /></span
-    >
-    <div>
-      <p>Providers</p>
-      <strong
-        >{overview.isError
-          ? 'Unavailable'
-          : overview.isPending
-            ? 'Checking…'
-            : activeProviders
-              ? `${activeProviders} active`
-              : 'Not configured'}</strong
-      >
-      {#if overview.isError}<button
-          class="text-button"
-          type="button"
-          onclick={() => overview.refetch()}>Try again</button
-        >{/if}
-    </div>
-  </article>
-  <article class="card status-card">
-    <span
-      class:ready={readyRoutes > 0 && !overview.isError}
-      class:neutral={readyRoutes === 0 || overview.isError}
-      class="status-icon"
-      aria-hidden="true"><NavIcon name="route" /></span
-    >
-    <div>
-      <p>Active routes</p>
-      <strong
-        >{overview.isError
-          ? 'Unavailable'
-          : overview.isPending
-            ? 'Checking…'
-            : readyRoutes
-              ? `${readyRoutes} active`
-              : 'Awaiting activation'}</strong
-      >
-      {#if overview.isError}<button
-          class="text-button"
-          type="button"
-          onclick={() => overview.refetch()}>Try again</button
-        >{/if}
-    </div>
-  </article>
-  <article class="card status-card">
-    <span class="status-icon ready" aria-hidden="true"
-      ><NavIcon name="health" /></span
-    >
-    <div>
-      <p>Control API</p>
-      <strong>Console connected</strong>
-    </div>
-  </article>
-</section>
+<OverviewStatusGrid {overview} {activeProviders} {readyRoutes} />
 
 <div class="primary-grid" class:complete={progress.complete}>
   <SetupChecklist {progress} onRetry={refreshSetup} />
@@ -204,113 +144,7 @@
   </div>
 </div>
 
-<section class="card activity" aria-labelledby="activity-title">
-  <div class="activity-heading">
-    <div>
-      <p class="eyebrow">Operations</p>
-      <h2 id="activity-title">Recent requests</h2>
-    </div>
-
-    <a href={resolve('requests')}>
-      Explore requests
-      <NavIcon name="arrow" size={17} />
-    </a>
-  </div>
-  {#if services.pending}
-    <div class="loading-state" role="status">
-      Loading recent request metadata…
-    </div>
-  {:else if services.error}
-    <div class="inline-problem" role="alert">
-      Request history capabilities are unavailable.
-      <button class="text-button" type="button" onclick={() => services.retry()}
-        >Try again</button
-      >
-    </div>
-  {:else if !services.retentionEnforced}
-    <div class="empty-state" role="status">
-      <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
-      <strong>Request history is not retained yet</strong>
-      <p>
-        This installation does not store request metadata, so recent requests
-        cannot be listed here.
-      </p>
-    </div>
-  {:else if recentRequests.isPending}
-    <div class="loading-state" role="status">
-      Loading recent request metadata…
-    </div>
-  {:else if recentRequests.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(
-        recentRequests.error,
-        'Recent request metadata is unavailable.'
-      )}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => recentRequests.refetch()}>Try again</button
-      >
-    </div>
-  {:else if !recentRequests.data?.items.length}
-    <div class="empty-state">
-      <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
-      <strong>No request metadata yet</strong>
-      <p>
-        Successful and failed attempts will appear here after a route is active.
-      </p>
-    </div>
-  {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-    <div
-      class="table-shell recent-table"
-      tabindex="0"
-      role="region"
-      aria-label="Five most recent requests"
-    >
-      <table class="data-table">
-        <thead
-          ><tr
-            ><th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th
-              >Latency</th
-            ><th><span class="sr-only">Details</span></th></tr
-          ></thead
-        >
-        <tbody>
-          {#each recentRequests.data.items as request (request.id)}
-            <tr>
-              <td>{formatDate(request.started_at)}</td>
-              <td><code>{request.route}</code></td>
-              <td>{request.operation} · {request.surface}</td>
-
-              <td>
-                <span
-                  class="badge {statusTone(
-                    request.status_code,
-                    request.error_class
-                  )}"
-                  >{statusLabel(request.status_code, request.error_class)}</span
-                >
-              </td>
-
-              <td
-                >{request.total_latency_ms == null
-                  ? '—'
-                  : `${request.total_latency_ms} ms`}</td
-              >
-
-              <td>
-                <a class="row-link" href={resolve(`requests/${request.id}`)}
-                  >View timeline</a
-                >
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  {/if}
-</section>
+<OverviewActivity {services} {recentRequests} />
 
 <style>
   .page-heading {
@@ -323,95 +157,6 @@
   .page-heading .button {
     flex: 0 1 auto;
     max-width: 22rem;
-  }
-
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 2rem;
-  }
-
-  .status-card {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 1rem;
-    padding: 1.25rem;
-  }
-
-  .status-card > div {
-    min-width: 0;
-  }
-
-  .status-icon {
-    position: relative;
-    display: grid;
-    width: 2.25rem;
-    height: 2.25rem;
-    flex: none;
-    place-items: center;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    transition:
-      border-color var(--motion),
-      color var(--motion),
-      background-color var(--motion);
-  }
-
-  .status-icon.neutral {
-    color: var(--foreground-muted);
-  }
-
-  /* A ready subsystem lights its icon and carries a live ping in the corner. */
-  .status-icon.ready {
-    border-color: color-mix(in srgb, var(--signal) 45%, var(--border));
-    background: var(--accent-soft);
-    color: var(--signal);
-  }
-
-  .status-icon.ready::before,
-  .status-icon.ready::after {
-    content: '';
-    position: absolute;
-    top: -3px;
-    right: -3px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--signal);
-  }
-
-  .status-icon.ready::after {
-    animation: ping 2.4s var(--ease-out) infinite;
-  }
-
-  .status-card p {
-    margin: 0 0 0.5rem;
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    text-transform: uppercase;
-  }
-
-  .status-card .text-button {
-    min-height: 2.2rem;
-    padding: 0;
-    font-size: var(--text-caption);
-  }
-
-  .status-card strong {
-    display: block;
-    overflow: hidden;
-    font-size: var(--text-body);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .primary-grid {
@@ -498,10 +243,6 @@
     animation: caret 1.1s steps(1) infinite;
   }
 
-  .recent-table {
-    margin-top: 1rem;
-  }
-
   .endpoint-row button {
     min-width: 4.5rem;
     min-height: 2.75rem;
@@ -535,8 +276,7 @@
     }
   }
 
-  .endpoint-card > a,
-  .activity-heading > a {
+  .endpoint-card > a {
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
@@ -552,8 +292,7 @@
       text-decoration-color var(--motion);
   }
 
-  .endpoint-card > a:hover,
-  .activity-heading > a:hover {
+  .endpoint-card > a:hover {
     color: var(--foreground-hover);
     text-decoration-color: currentColor;
   }
@@ -563,8 +302,7 @@
     gap: 1rem;
   }
 
-  .privacy-mark,
-  .empty-state > span {
+  .privacy-mark {
     background: radial-gradient(
         circle at 1px 1px,
         color-mix(in srgb, var(--foreground) 12%, transparent) 1px,
@@ -582,43 +320,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
     color: var(--signal);
-  }
-
-  .activity {
-    margin-top: 1rem;
-    padding: 1.5rem;
-  }
-
-  .activity-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .activity-heading > a {
-    flex: none;
-    margin-top: 0;
-  }
-
-  .empty-state > span {
-    display: grid;
-    width: 2.75rem;
-    height: 2.75rem;
-    place-items: center;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    color: var(--foreground-muted);
-  }
-
-  .empty-state strong {
-    color: var(--foreground);
-  }
-
-  .empty-state p {
-    max-width: 34rem;
-    margin: 0;
-    font-size: var(--text-body-sm);
   }
 
   @media (max-width: 72rem) {
@@ -645,16 +346,8 @@
       width: 100%;
     }
 
-    .status-grid {
-      grid-template-columns: 1fr;
-    }
-
     .side-stack {
       grid-template-columns: 1fr;
-    }
-
-    .activity-heading {
-      display: block;
     }
   }
 </style>
