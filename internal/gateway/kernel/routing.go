@@ -22,6 +22,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options 
 		Inputs: inputs, Now: s.Now(),
 		CheckSlots: true, CredentialEligibility: s.Deps.Runtime.Eligibility,
 		UnconfinedPlugins: s.Config.UnconfinedPlugins, Context: ctx,
+		CallerCostExempt: x.callerCostExempt(),
 	}
 	if s.Deps.Admission.Ready() {
 		options.Supply = s.Deps.Admission

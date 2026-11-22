@@ -10,7 +10,7 @@ type costTier struct {
 // and preference tier, candidates with a known bound rank first only when at
 // least two of them have one; otherwise the whole tier keeps weighted order.
 // Every candidate left in weighted order names why.
-func applyBoundedCost(rows []rankedCandidate, strategy, operation string) {
+func applyBoundedCost(rows []rankedCandidate, strategy, operation string, callerCostExempt bool) {
 	if strategy != strategyBoundedCost {
 		return
 	}
@@ -22,13 +22,16 @@ func applyBoundedCost(rows []rankedCandidate, strategy, operation string) {
 		}
 	}
 	for _, tier := range tiers {
-		rankTier(rows, tier, tierFallback(rows, tier, operation))
+		rankTier(rows, tier, tierFallback(rows, tier, operation, callerCostExempt))
 	}
 }
 
-func tierFallback(rows []rankedCandidate, tier []int, operation string) string {
+func tierFallback(rows []rankedCandidate, tier []int, operation string, callerCostExempt bool) string {
 	if operation != "generation" {
 		return "operation_not_generation"
+	}
+	if callerCostExempt {
+		return "insufficient_cost_bounds"
 	}
 	bounded := 0
 	for _, i := range tier {

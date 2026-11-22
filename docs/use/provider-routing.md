@@ -587,6 +587,9 @@ rank by it, ties fall back to weighted order, and candidates without one
 follow in weighted order with `bounded_cost_fallback_reason` set to
 `cost_bound_unknown`. When fewer than two have a bound, the whole tier keeps
 the weighted order and each candidate reports `insufficient_cost_bounds`. A
+route with `caller_cost_exempt` bounds no attempt's cost, so it always keeps
+weighted order with `insufficient_cost_bounds`, while route explain still
+reports each target's estimated cost for information. A
 non-generation request keeps weighted order and reports
 `operation_not_generation`. The fallback never restores a target that
 eligibility already excluded.

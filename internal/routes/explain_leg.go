@@ -68,7 +68,7 @@ func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKe
 	return prepare, inspections
 }
 
-func (s *Server) buildLegOptions(m *simulation, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, via usage.LegVia, parsed *wire.Request, mediaRequest *media.Request, counted *simulatedDemand, prepare routing.PrepareCandidate) routing.Options {
+func (s *Server) buildLegOptions(m *simulation, named, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, via usage.LegVia, parsed *wire.Request, mediaRequest *media.Request, counted *simulatedDemand, prepare routing.PrepareCandidate) routing.Options {
 	preferences := input.Preferences
 	if via != "" && preferences != nil {
 		// Like the gateway, a route the request moves to keeps the caller's
@@ -89,6 +89,7 @@ func (s *Server) buildLegOptions(m *simulation, route routing.Route, key inspect
 		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 			return simulatedWorstCost(input.Operation, mediaRequest, counted, provider, target, price, discount, now)
 		},
+		CallerCostExempt: named.CallerCostExempt,
 	}
 	if key.reason != "" {
 		options.Prepare = nil

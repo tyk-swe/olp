@@ -87,6 +87,10 @@ type Options struct {
 	// when an effective maximum-cost ceiling, cost estimation or the
 	// bounded_cost strategy calls for it.
 	WorstCost func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (CostBound, bool)
+	// CallerCostExempt marks a request whose named route waives cost
+	// accounting. The gateway bounds none of its attempts, so bounded_cost
+	// keeps weighted order even where WorstCost prices a target.
+	CallerCostExempt bool
 }
 
 // CostBound is one candidate's upper attempt cost. InputTokens and
@@ -280,7 +284,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
 		plan.Baseline = baseline(rows, operation)
 	}
-	applyBoundedCost(rows, policy.Strategy, operation)
+	applyBoundedCost(rows, policy.Strategy, operation, options.CallerCostExempt)
 	orderCandidates(rows, policy.Strategy, operation)
 	plan.addCandidates(rows, options.CheckSlots)
 	return plan, nil
