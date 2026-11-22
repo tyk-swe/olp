@@ -28245,6 +28245,170 @@
           "blocked"
         ]
       },
+      "GuardrailFixture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "output"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "expected": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block",
+              "redact"
+            ]
+          },
+          "expected_redacted_text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "text",
+          "expected"
+        ]
+      },
+      "GuardrailFixtureRunInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "baseline_policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "candidate_policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "fixtures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailFixture"
+            },
+            "minItems": 1,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "baseline_policy_revision_id",
+          "candidate_policy_revision_id",
+          "synthetic",
+          "fixtures"
+        ]
+      },
+      "GuardrailFixtureOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block",
+              "redact"
+            ]
+          },
+          "matched": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "outcome",
+          "matched"
+        ]
+      },
+      "GuardrailFixtureResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "output"
+            ]
+          },
+          "expected": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block",
+              "redact"
+            ]
+          },
+          "baseline": {
+            "$ref": "#/components/schemas/GuardrailFixtureOutcome"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/GuardrailFixtureOutcome"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "expected",
+          "baseline",
+          "candidate",
+          "passed"
+        ]
+      },
+      "GuardrailFixtureReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "baseline_policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "candidate_policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailFixtureResult"
+            }
+          }
+        },
+        "required": [
+          "baseline_policy_revision_id",
+          "candidate_policy_revision_id",
+          "passed",
+          "results"
+        ]
+      },
       "GuardrailActivation": {
         "type": "object",
         "additionalProperties": false,
@@ -68734,6 +68898,63 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GuardrailApplyInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails/run-fixtures": {
+      "post": {
+        "operationId": "run_guardrail_fixtures",
+        "description": "Run a bounded set of synthetic guardrail fixtures against two pinned revisions of one policy. Only unary input and output entries with deterministic built-in evaluators run, and the report carries no fixture or transformed text.",
+        "x-olp-read-only": true,
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "playground"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fixture run completed, including any failed candidate assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailFixtureReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid, oversized or unsupported fixture run"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailFixtureRunInput"
               }
             }
           }

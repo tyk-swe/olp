@@ -85,6 +85,41 @@ func testGuardrailJourney(t *testing.T, parent *service, owner *harness.Caller) 
 		t.Fatalf("evaluation = %v", evaluation)
 	}
 
+	fixtureRun := map[string]any{
+		"baseline_policy_revision_id": policy["revision_id"], "candidate_policy_revision_id": revised["revision_id"], "synthetic": true,
+		"fixtures": []any{
+			map[string]any{"id": "allow-case", "phase": "input", "text": "a friendly journey note", "expected": "allow"},
+			map[string]any{"id": "block-case", "phase": "input", "text": "this is banned content", "expected": "block"},
+		},
+	}
+	status, raw = s.Do(owner, "POST", "/api/v1/guardrails/run-fixtures", fixtureRun, nil)
+	if status != http.StatusOK || strings.Contains(string(raw), "friendly journey") || strings.Contains(string(raw), "banned content") {
+		t.Fatalf("fixture run: %s", describe(status, raw))
+	}
+	var fixtureReport struct {
+		Passed  bool `json:"passed"`
+		Results []struct {
+			ID     string `json:"id"`
+			Passed bool   `json:"passed"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &fixtureReport); err != nil || !fixtureReport.Passed || len(fixtureReport.Results) != 2 || !fixtureReport.Results[0].Passed || !fixtureReport.Results[1].Passed {
+		t.Fatalf("fixture report = %s, %v", raw, err)
+	}
+
+	s.Want(owner, "POST", "/api/v1/guardrails/"+external["id"].(string)+"/activate", map[string]any{"revision_id": external["revision_id"]}, harness.Idempotent(harness.ETag(external)), http.StatusNoContent)
+	vendorPolicy := s.Want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{
+		"name": "vendor-policy", "project_id": project,
+		"entries": []any{map[string]any{"guardrail_id": external["id"], "revision_id": external["revision_id"], "phase": "input", "action": "block"}},
+	}, harness.Idempotent(), http.StatusCreated)
+	unsupportedRun := map[string]any{
+		"baseline_policy_revision_id": vendorPolicy["revision_id"], "candidate_policy_revision_id": vendorPolicy["revision_id"], "synthetic": true,
+		"fixtures": []any{map[string]any{"id": "allow-case", "phase": "input", "text": "a friendly journey note", "expected": "allow"}},
+	}
+	if problem := s.Want(owner, "POST", "/api/v1/guardrails/run-fixtures", unsupportedRun, nil, http.StatusUnprocessableEntity); !strings.HasSuffix(problem["type"].(string), "/guardrail_fixture_unsupported") {
+		t.Fatalf("unsupported fixture run = %v", problem)
+	}
+
 	detach := harness.Idempotent(harness.ETag(replaced))
 	s.Want(owner, "DELETE", "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, detach, http.StatusNoContent)
 	s.Want(owner, "DELETE", "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, detach, http.StatusNoContent)

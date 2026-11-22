@@ -40252,6 +40252,111 @@
     }
   },
   {
+    "name": "run_guardrail_fixtures",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/guardrails/run-fixtures",
+    "description": "Run a bounded set of synthetic guardrail fixtures against two pinned revisions of one policy. Only unary input and output entries with deterministic built-in evaluators run, and the report carries no fixture or transformed text.",
+    "scopes": [
+      [
+        "playground"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/GuardrailFixtureRunInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ],
+      "$defs": {
+        "GuardrailFixtureRunInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "baseline_policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "candidate_policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "synthetic": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "fixtures": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GuardrailFixture"
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "baseline_policy_revision_id",
+            "candidate_policy_revision_id",
+            "synthetic",
+            "fixtures"
+          ]
+        },
+        "GuardrailFixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "input",
+                "output"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "block",
+                "redact"
+              ]
+            },
+            "expected_redacted_text": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "text",
+            "expected"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "run_provider_billing_import",
     "group": "providers",
     "method": "POST",
