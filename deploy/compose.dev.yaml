@@ -2,7 +2,6 @@ name: olp-dev
 services:
   postgres:
     image: postgres:18@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
-    command: ['postgres', '-c', 'max_connections=${OLP_POSTGRES_MAX_CONNECTIONS:-100}']
     environment:
       POSTGRES_USER: olp
       POSTGRES_PASSWORD: olp-local

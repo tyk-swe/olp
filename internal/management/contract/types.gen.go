@@ -646,6 +646,51 @@ func (e BudgetIncreaseWindowKind) Valid() bool {
 	}
 }
 
+// Defines values for BudgetIncreaseRequestStatus.
+const (
+	BudgetIncreaseRequestStatusApproved BudgetIncreaseRequestStatus = "approved"
+	BudgetIncreaseRequestStatusDeclined BudgetIncreaseRequestStatus = "declined"
+	BudgetIncreaseRequestStatusExpired  BudgetIncreaseRequestStatus = "expired"
+	BudgetIncreaseRequestStatusPending  BudgetIncreaseRequestStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the BudgetIncreaseRequestStatus enum.
+func (e BudgetIncreaseRequestStatus) Valid() bool {
+	switch e {
+	case BudgetIncreaseRequestStatusApproved:
+		return true
+	case BudgetIncreaseRequestStatusDeclined:
+		return true
+	case BudgetIncreaseRequestStatusExpired:
+		return true
+	case BudgetIncreaseRequestStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetIncreaseRequestWindowKind.
+const (
+	BudgetIncreaseRequestWindowKindDay   BudgetIncreaseRequestWindowKind = "day"
+	BudgetIncreaseRequestWindowKindMonth BudgetIncreaseRequestWindowKind = "month"
+	BudgetIncreaseRequestWindowKindWeek  BudgetIncreaseRequestWindowKind = "week"
+)
+
+// Valid indicates whether the value is a known member of the BudgetIncreaseRequestWindowKind enum.
+func (e BudgetIncreaseRequestWindowKind) Valid() bool {
+	switch e {
+	case BudgetIncreaseRequestWindowKindDay:
+		return true
+	case BudgetIncreaseRequestWindowKindMonth:
+		return true
+	case BudgetIncreaseRequestWindowKindWeek:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BudgetIncreaseTargetKind.
 const (
 	BudgetIncreaseTargetKindApiKey         BudgetIncreaseTargetKind = "api_key"
@@ -2590,6 +2635,27 @@ func (e CreateBudgetIncreaseRequestWindow) Valid() bool {
 	}
 }
 
+// Defines values for CreateBudgetIncreaseRequestRequestWindow.
+const (
+	CreateBudgetIncreaseRequestRequestWindowDay   CreateBudgetIncreaseRequestRequestWindow = "day"
+	CreateBudgetIncreaseRequestRequestWindowMonth CreateBudgetIncreaseRequestRequestWindow = "month"
+	CreateBudgetIncreaseRequestRequestWindowWeek  CreateBudgetIncreaseRequestRequestWindow = "week"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetIncreaseRequestRequestWindow enum.
+func (e CreateBudgetIncreaseRequestRequestWindow) Valid() bool {
+	switch e {
+	case CreateBudgetIncreaseRequestRequestWindowDay:
+		return true
+	case CreateBudgetIncreaseRequestRequestWindowMonth:
+		return true
+	case CreateBudgetIncreaseRequestRequestWindowWeek:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateCapturePolicyRequestInclude.
 const (
 	CreateCapturePolicyRequestIncludeInput     CreateCapturePolicyRequestInclude = "input"
@@ -3559,6 +3625,120 @@ func (e GuardrailEvidencePhase) Valid() bool {
 	case GuardrailEvidencePhaseOutput:
 		return true
 	case GuardrailEvidencePhaseOutputStream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureExpected.
+const (
+	GuardrailFixtureExpectedAllow  GuardrailFixtureExpected = "allow"
+	GuardrailFixtureExpectedBlock  GuardrailFixtureExpected = "block"
+	GuardrailFixtureExpectedRedact GuardrailFixtureExpected = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureExpected enum.
+func (e GuardrailFixtureExpected) Valid() bool {
+	switch e {
+	case GuardrailFixtureExpectedAllow:
+		return true
+	case GuardrailFixtureExpectedBlock:
+		return true
+	case GuardrailFixtureExpectedRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixturePhase.
+const (
+	GuardrailFixturePhaseInput  GuardrailFixturePhase = "input"
+	GuardrailFixturePhaseOutput GuardrailFixturePhase = "output"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixturePhase enum.
+func (e GuardrailFixturePhase) Valid() bool {
+	switch e {
+	case GuardrailFixturePhaseInput:
+		return true
+	case GuardrailFixturePhaseOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureOutcomeOutcome.
+const (
+	GuardrailFixtureOutcomeOutcomeAllow  GuardrailFixtureOutcomeOutcome = "allow"
+	GuardrailFixtureOutcomeOutcomeBlock  GuardrailFixtureOutcomeOutcome = "block"
+	GuardrailFixtureOutcomeOutcomeRedact GuardrailFixtureOutcomeOutcome = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureOutcomeOutcome enum.
+func (e GuardrailFixtureOutcomeOutcome) Valid() bool {
+	switch e {
+	case GuardrailFixtureOutcomeOutcomeAllow:
+		return true
+	case GuardrailFixtureOutcomeOutcomeBlock:
+		return true
+	case GuardrailFixtureOutcomeOutcomeRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureResultExpected.
+const (
+	GuardrailFixtureResultExpectedAllow  GuardrailFixtureResultExpected = "allow"
+	GuardrailFixtureResultExpectedBlock  GuardrailFixtureResultExpected = "block"
+	GuardrailFixtureResultExpectedRedact GuardrailFixtureResultExpected = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureResultExpected enum.
+func (e GuardrailFixtureResultExpected) Valid() bool {
+	switch e {
+	case GuardrailFixtureResultExpectedAllow:
+		return true
+	case GuardrailFixtureResultExpectedBlock:
+		return true
+	case GuardrailFixtureResultExpectedRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureResultPhase.
+const (
+	GuardrailFixtureResultPhaseInput  GuardrailFixtureResultPhase = "input"
+	GuardrailFixtureResultPhaseOutput GuardrailFixtureResultPhase = "output"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureResultPhase enum.
+func (e GuardrailFixtureResultPhase) Valid() bool {
+	switch e {
+	case GuardrailFixtureResultPhaseInput:
+		return true
+	case GuardrailFixtureResultPhaseOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailFixtureRunInputSynthetic.
+const (
+	GuardrailFixtureRunInputSyntheticTrue GuardrailFixtureRunInputSynthetic = true
+)
+
+// Valid indicates whether the value is a known member of the GuardrailFixtureRunInputSynthetic enum.
+func (e GuardrailFixtureRunInputSynthetic) Valid() bool {
+	switch e {
+	case GuardrailFixtureRunInputSyntheticTrue:
 		return true
 	default:
 		return false
@@ -6597,13 +6777,13 @@ func (e RouteFidelityMode) Valid() bool {
 
 // Defines values for RouteFixtureFileSynthetic.
 const (
-	True RouteFixtureFileSynthetic = true
+	RouteFixtureFileSyntheticTrue RouteFixtureFileSynthetic = true
 )
 
 // Valid indicates whether the value is a known member of the RouteFixtureFileSynthetic enum.
 func (e RouteFixtureFileSynthetic) Valid() bool {
 	switch e {
-	case True:
+	case RouteFixtureFileSyntheticTrue:
 		return true
 	default:
 		return false
@@ -8880,6 +9060,38 @@ type BudgetIncrease struct {
 // BudgetIncreaseWindowKind defines model for BudgetIncrease.WindowKind.
 type BudgetIncreaseWindowKind string
 
+// BudgetIncreaseRequest A member request for one temporary project budget increase. Pending, declined and expired requests never change serving limits, and a pending request reads as expired once its window has ended. Approval creates one normal budget increase, linked as increase_id, and no one may approve their own request.
+type BudgetIncreaseRequest struct {
+	Amount       string                                `json:"amount"`
+	BaseCap      string                                `json:"base_cap"`
+	CreatedAt    time.Time                             `json:"created_at"`
+	DecidedAt    nullable.Nullable[time.Time]          `json:"decided_at"`
+	DecidedBy    nullable.Nullable[openapi_types.UUID] `json:"decided_by"`
+	Etag         openapi_types.UUID                    `json:"etag"`
+	Id           openapi_types.UUID                    `json:"id"`
+	IncreaseId   nullable.Nullable[openapi_types.UUID] `json:"increase_id"`
+	OwnerId      openapi_types.UUID                    `json:"owner_id"`
+	ProjectId    openapi_types.UUID                    `json:"project_id"`
+	Reason       string                                `json:"reason"`
+	RequestedBy  openapi_types.UUID                    `json:"requested_by"`
+	Status       BudgetIncreaseRequestStatus           `json:"status"`
+	WindowEndsAt time.Time                             `json:"window_ends_at"`
+	WindowId     int                                   `json:"window_id"`
+	WindowKind   BudgetIncreaseRequestWindowKind       `json:"window_kind"`
+}
+
+// BudgetIncreaseRequestStatus defines model for BudgetIncreaseRequest.Status.
+type BudgetIncreaseRequestStatus string
+
+// BudgetIncreaseRequestWindowKind defines model for BudgetIncreaseRequest.WindowKind.
+type BudgetIncreaseRequestWindowKind string
+
+// BudgetIncreaseRequestsResponse defines model for BudgetIncreaseRequestsResponse.
+type BudgetIncreaseRequestsResponse struct {
+	Items      []BudgetIncreaseRequest   `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
 // BudgetIncreaseTarget Identifies one caller/aggregate cost owner. id is the key, group or project UUID; installation has no id. key_route requires route; end-user targets require an existing project-scoped digest; attribution requires label and value. Extra target selectors are rejected. Supply connection/slot/route policies are not caller budget targets.
 type BudgetIncreaseTarget struct {
 	EndUserDigest *string                  `json:"end_user_digest,omitempty"`
@@ -10967,6 +11179,17 @@ type CreateBudgetIncreaseRequest struct {
 // CreateBudgetIncreaseRequestWindow defines model for CreateBudgetIncreaseRequest.Window.
 type CreateBudgetIncreaseRequestWindow string
 
+// CreateBudgetIncreaseRequestRequest Asks a reviewer to add a positive exact USD amount to a project budget cap in its current window. The request binds to that project, window and base cap, so a changed cap or a rolled window needs a new request. A signed-in project member may ask, and asking never changes serving limits.
+type CreateBudgetIncreaseRequestRequest struct {
+	Amount    string                                   `json:"amount"`
+	ProjectId openapi_types.UUID                       `json:"project_id"`
+	Reason    string                                   `json:"reason"`
+	Window    CreateBudgetIncreaseRequestRequestWindow `json:"window"`
+}
+
+// CreateBudgetIncreaseRequestRequestWindow defines model for CreateBudgetIncreaseRequestRequest.Window.
+type CreateBudgetIncreaseRequestRequestWindow string
+
 // CreateCapturePolicyRequest defines model for CreateCapturePolicyRequest.
 type CreateCapturePolicyRequest struct {
 	Enabled        *bool     `json:"enabled,omitempty"`
@@ -11900,6 +12123,65 @@ type GuardrailEvidenceOutcome string
 
 // GuardrailEvidencePhase defines model for GuardrailEvidence.Phase.
 type GuardrailEvidencePhase string
+
+// GuardrailFixture defines model for GuardrailFixture.
+type GuardrailFixture struct {
+	Expected             GuardrailFixtureExpected `json:"expected"`
+	ExpectedRedactedText *string                  `json:"expected_redacted_text,omitempty"`
+	Id                   string                   `json:"id"`
+	Phase                GuardrailFixturePhase    `json:"phase"`
+	Text                 string                   `json:"text"`
+}
+
+// GuardrailFixtureExpected defines model for GuardrailFixture.Expected.
+type GuardrailFixtureExpected string
+
+// GuardrailFixturePhase defines model for GuardrailFixture.Phase.
+type GuardrailFixturePhase string
+
+// GuardrailFixtureOutcome defines model for GuardrailFixtureOutcome.
+type GuardrailFixtureOutcome struct {
+	Matched bool                           `json:"matched"`
+	Outcome GuardrailFixtureOutcomeOutcome `json:"outcome"`
+}
+
+// GuardrailFixtureOutcomeOutcome defines model for GuardrailFixtureOutcome.Outcome.
+type GuardrailFixtureOutcomeOutcome string
+
+// GuardrailFixtureReport defines model for GuardrailFixtureReport.
+type GuardrailFixtureReport struct {
+	BaselinePolicyRevisionId  openapi_types.UUID       `json:"baseline_policy_revision_id"`
+	CandidatePolicyRevisionId openapi_types.UUID       `json:"candidate_policy_revision_id"`
+	Passed                    bool                     `json:"passed"`
+	Results                   []GuardrailFixtureResult `json:"results"`
+}
+
+// GuardrailFixtureResult defines model for GuardrailFixtureResult.
+type GuardrailFixtureResult struct {
+	Baseline  GuardrailFixtureOutcome        `json:"baseline"`
+	Candidate GuardrailFixtureOutcome        `json:"candidate"`
+	Expected  GuardrailFixtureResultExpected `json:"expected"`
+	Id        string                         `json:"id"`
+	Passed    bool                           `json:"passed"`
+	Phase     GuardrailFixtureResultPhase    `json:"phase"`
+}
+
+// GuardrailFixtureResultExpected defines model for GuardrailFixtureResult.Expected.
+type GuardrailFixtureResultExpected string
+
+// GuardrailFixtureResultPhase defines model for GuardrailFixtureResult.Phase.
+type GuardrailFixtureResultPhase string
+
+// GuardrailFixtureRunInput defines model for GuardrailFixtureRunInput.
+type GuardrailFixtureRunInput struct {
+	BaselinePolicyRevisionId  openapi_types.UUID                `json:"baseline_policy_revision_id"`
+	CandidatePolicyRevisionId openapi_types.UUID                `json:"candidate_policy_revision_id"`
+	Fixtures                  []GuardrailFixture                `json:"fixtures"`
+	Synthetic                 GuardrailFixtureRunInputSynthetic `json:"synthetic"`
+}
+
+// GuardrailFixtureRunInputSynthetic defines model for GuardrailFixtureRunInput.Synthetic.
+type GuardrailFixtureRunInputSynthetic bool
 
 // GuardrailListResponse defines model for GuardrailListResponse.
 type GuardrailListResponse struct {
@@ -18412,6 +18694,30 @@ type UpdateBudgetGroupParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListBudgetIncreaseRequestsParams defines parameters for ListBudgetIncreaseRequests.
+type ListBudgetIncreaseRequestsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateBudgetIncreaseRequestParams defines parameters for CreateBudgetIncreaseRequest.
+type CreateBudgetIncreaseRequestParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ApproveBudgetIncreaseRequestParams defines parameters for ApproveBudgetIncreaseRequest.
+type ApproveBudgetIncreaseRequestParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeclineBudgetIncreaseRequestParams defines parameters for DeclineBudgetIncreaseRequest.
+type DeclineBudgetIncreaseRequestParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListBudgetIncreasesParams defines parameters for ListBudgetIncreases.
 type ListBudgetIncreasesParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -20488,6 +20794,9 @@ type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest
 // UpdateBudgetGroupJSONRequestBody defines body for UpdateBudgetGroup for application/json ContentType.
 type UpdateBudgetGroupJSONRequestBody = UpdateBudgetGroupRequest
 
+// CreateBudgetIncreaseRequestJSONRequestBody defines body for CreateBudgetIncreaseRequest for application/json ContentType.
+type CreateBudgetIncreaseRequestJSONRequestBody = CreateBudgetIncreaseRequestRequest
+
 // CreateBudgetIncreaseJSONRequestBody defines body for CreateBudgetIncrease for application/json ContentType.
 type CreateBudgetIncreaseJSONRequestBody = CreateBudgetIncreaseRequest
 
@@ -20556,6 +20865,9 @@ type CreateGuardrailJSONRequestBody = CreateGuardrailRequest
 
 // EvaluateGuardrailsJSONRequestBody defines body for EvaluateGuardrails for application/json ContentType.
 type EvaluateGuardrailsJSONRequestBody = GuardrailApplyInput
+
+// RunGuardrailFixturesJSONRequestBody defines body for RunGuardrailFixtures for application/json ContentType.
+type RunGuardrailFixturesJSONRequestBody = GuardrailFixtureRunInput
 
 // UpdateGuardrailJSONRequestBody defines body for UpdateGuardrail for application/json ContentType.
 type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
