@@ -12,9 +12,11 @@
 
   let {
     current,
+    canApprove,
     onsaved
   }: {
     current: MCPServer;
+    canApprove: () => boolean;
     onsaved: (server: MCPServer) => Promise<void>;
   } = $props();
   let review = $state<MCPCatalogPreview | null>(null);
@@ -35,12 +37,13 @@
     return preview.run(
       () => previewServerCatalog(current.id),
       (value) => {
+        approval.reset();
         review = value;
       }
     );
   }
   function runApproval() {
-    if (!review) return;
+    if (!review || !canApprove()) return;
     return approval.submit(
       review,
       (input, requestId) => approveServerCatalog(input, requestId),
@@ -146,8 +149,8 @@
         >
       </div>
     {/if}
-    {#if approval.error}
-      <p class="inline-problem" role="alert">{approval.error}</p>
-    {/if}
+  {/if}
+  {#if approval.error}
+    <p class="inline-problem" role="alert">{approval.error}</p>
   {/if}
 </section>

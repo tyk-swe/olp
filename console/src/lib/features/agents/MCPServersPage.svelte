@@ -166,8 +166,12 @@
       </details>
     {/if}
     {#if current && !current.retired_at && current.transport !== 'stdio' && access.allows('POST /api/v1/mcp-servers/{server_id}/catalog-preview')}
-      {#key `${current.id}:${current.etag}`}
-        <MCPCatalogReview {current} onsaved={saved} />
+      {#key current.id}
+        <MCPCatalogReview
+          {current}
+          canApprove={() => confirmDiscardChanges(editor?.isDirty() ?? false)}
+          onsaved={saved}
+        />
       {/key}
     {/if}
     {#if !current?.retired_at && access.allows(current ? 'PUT /api/v1/mcp-servers/{server_id}' : 'POST /api/v1/mcp-servers')}
