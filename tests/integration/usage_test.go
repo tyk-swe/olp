@@ -1793,11 +1793,13 @@ func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
 }
 
 func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		pricing, price string
 		expected       int64
 	}{{"unpriced", "NULL", 1}, {"free", "0", 0}} {
 		t.Run(test.pricing, func(t *testing.T) {
+			t.Parallel()
 			pricing, price, expected := test.pricing, test.price, test.expected
 			pool, _ := harness.Database(t)
 			f := newUsageFixture(t, pool)
@@ -2407,6 +2409,7 @@ func TestExportRetryPreservesSettings(t *testing.T) {
 }
 
 func TestStreamExportSuccessClearsFailureEvidence(t *testing.T) {
+	t.Parallel()
 	for _, retry := range []bool{false, true} {
 		t.Run(fmt.Sprintf("retry=%t", retry), func(t *testing.T) {
 			t.Parallel()
@@ -2950,6 +2953,7 @@ func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
 }
 
 func TestNotificationRetryPreservesBudgetSubject(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"subject", "kind", "window", "name"} {
 		t.Run(change, func(t *testing.T) {
 			t.Parallel()
