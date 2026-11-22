@@ -334,7 +334,10 @@ suite or an unsupported evaluator fails the whole run with no partial pass
 and no external evaluator call. Evaluation uses the same engine as the
 console playground, runs in memory, and never changes policies, attachments
 or any stored fixture library. Repeating a suite against the same two
-revisions returns the same outcomes and exit status.
+revisions returns the same outcomes and exit status. An evaluator error, such
+as a fixture with more than 4096 findings, makes the whole run unevaluable
+whatever the entry's `on_error`, so a `failed_closed` result never counts as an
+expected block.
 
 ## Migration and qualification
 

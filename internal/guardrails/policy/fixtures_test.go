@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -118,6 +119,18 @@ func TestRunFixtureSuiteNamesFailingCandidateWithoutContent(t *testing.T) {
 	}
 	if byID["redact-case"].Candidate.Outcome != outcomeAllow {
 		t.Fatalf("redact case = %+v", byID["redact-case"])
+	}
+}
+
+func TestRunFixtureSuiteRefusesFailedClosedEvaluation(t *testing.T) {
+	api := &API{evaluateBatch: directBatchEvaluator}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/guardrails/run-fixtures", nil)
+	pinned := fixturePinned("policy-rev-base", "a", "secret-[0-9]+")
+	overflow := []guardrailFixture{{ID: "overflow-case", Phase: guardrails.Input, Text: new(strings.Repeat("a", guardrails.MaxFindings+1)), Expected: outcomeBlock}}
+	_, err := api.runFixtureSuite(request, authz.Principal{}, pinned, pinned, overflow)
+	var problem *httpkit.Problem
+	if !errors.As(err, &problem) || problem.Code != fixtureUnevaluableCode {
+		t.Fatalf("err = %v", err)
 	}
 }
 

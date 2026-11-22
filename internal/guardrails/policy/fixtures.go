@@ -242,7 +242,7 @@ func fixtureRole(phase guardrails.Phase) guardrails.Role {
 }
 
 func fixtureOutcomeOf(result guardrails.Result, fixture guardrailFixture) (fixtureOutcomeResult, error) {
-	if hasDecision(result, guardrails.FailedOpen) {
+	if hasDecision(result, guardrails.FailedOpen, guardrails.FailedClosed) {
 		return fixtureOutcomeResult{}, fixtureUnevaluable()
 	}
 	index := slices.IndexFunc(result.Segments, func(segment guardrails.Segment) bool { return segment.ID == fixtureSegmentID })
@@ -255,7 +255,7 @@ func fixtureOutcomeOf(result guardrails.Result, fixture guardrailFixture) (fixtu
 }
 
 func observedOutcome(result guardrails.Result) fixtureOutcome {
-	if hasDecision(result, guardrails.Blocked, guardrails.FailedClosed) {
+	if hasDecision(result, guardrails.Blocked) {
 		return outcomeBlock
 	}
 	if result.Changed || hasDecision(result, guardrails.Redacted) {
