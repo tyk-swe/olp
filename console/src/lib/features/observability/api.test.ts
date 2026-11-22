@@ -8,7 +8,6 @@ import {
   deleteExportSink,
   getCaptureConfiguration,
   listCapturePolicies,
-  listCaptureRedactorOptions,
   listCaptureSinkOptions,
   listExportSinkFocusDatasets,
   listExportSinkGaps,
@@ -122,12 +121,6 @@ it.each([
     path: '/api/v1/observability/capture-policies',
     limit: '50',
     load: (signal: AbortSignal) => listCapturePolicies(signal)
-  },
-  {
-    name: 'capture redactors',
-    path: '/api/v1/guardrails',
-    limit: '100',
-    load: (signal: AbortSignal) => listCaptureRedactorOptions(signal)
   }
 ])('loads all pages of $name', async ({ path, limit, load }) => {
   const first = { id: 'first' };

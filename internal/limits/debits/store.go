@@ -25,7 +25,11 @@ func within[T any](ctx context.Context, pool *pgxpool.Pool, run func(pgx.Tx) (T,
 	if err != nil {
 		return zero, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 	value, err := run(tx)
 	if err != nil {
 		return zero, err
@@ -155,6 +159,23 @@ func MarkDispatchedTx(ctx context.Context, tx pgx.Tx, id, claim string) error {
 		return ErrState
 	}
 	return nil
+}
+
+func (s *Store) Currency(ctx context.Context) (string, error) {
+	var currency string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency)
+	return currency, err
+}
+
+func (s *Store) SettleTool(ctx context.Context, result Result) error {
+	return s.inTx(ctx, func(tx pgx.Tx) error { return SettleToolTx(ctx, tx, result) })
+}
+
+func (s *Store) PreviousRecovery(ctx context.Context, runID, keyID string, ids []string) (bool, bool, error) {
+	var settled, pending bool
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(bool_or(state='settled'),false), COALESCE(bool_or(state IN ('prepared','ready','dispatched','outcome_unknown')),false)
+		FROM olp.execution_debits WHERE run_id=$1 AND api_key_id=$2 AND kind='tool' AND id=ANY($3::uuid[])`, runID, keyID, ids).Scan(&settled, &pending)
+	return settled, pending, err
 }
 
 func (s *Store) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDispatch time.Duration) (bool, error) {

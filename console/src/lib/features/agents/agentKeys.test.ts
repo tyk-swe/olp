@@ -28,7 +28,6 @@ it('refreshes shared publication data after a publication update', async () => {
 it('keeps publication types separate when reading and invalidating cached data', async () => {
   const client = new QueryClient();
   const publications = [
-    { kind: 'projects', key: agentKeys.projects },
     { kind: 'servers', key: agentKeys.servers },
     { kind: 'agents', key: agentKeys.agents },
     { kind: 'toolsets', key: agentKeys.toolsets }

@@ -45,7 +45,7 @@ func (s *Server) GetPinnedFile(ctx context.Context, w http.ResponseWriter, x *Ca
 	if e := s.verifyProviderFile(res, adapter, body); e != nil {
 		return e
 	}
-	refreshed, err := RefreshedFileMetadata(res, body, adapter)
+	refreshed, err := refreshedFileMetadata(res, body, adapter)
 	if errors.Is(err, ErrProviderFileMetadata) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed file metadata.")
 	}
@@ -98,7 +98,7 @@ func ProviderFilePath(res *resources.Resource, adapter connectors.BatchAdapter) 
 	if adapter != connectors.BatchGeminiManaged {
 		return "files/" + url.PathEscape(res.UpstreamID), nil
 	}
-	path, err := ManagedGeminiFilePath(res)
+	path, err := managedGeminiFilePath(res)
 	if err != nil {
 		return "", fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
@@ -110,7 +110,7 @@ func (s *Server) verifyProviderFile(res *resources.Resource, adapter connectors.
 		var object struct {
 			Name string `json:"name"`
 		}
-		name, err := GeminiManagedFileName(res)
+		name, err := geminiManagedFileName(res)
 		if err != nil || json.Unmarshal(body, &object) != nil || object.Name != name {
 			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini file name.")
 		}

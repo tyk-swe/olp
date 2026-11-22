@@ -57,6 +57,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -480,7 +481,16 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	g.limiter = limiter
 	workflow := kernel.Dependencies{}
 	if plan.tools != nil {
-		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
+		workflow = kernel.Dependencies{
+			WorkflowTools: plan.tools,
+			WorkflowRuns:  runs.NewWorkflowStore(pool, auth, keys, installation),
+			Debits: &kernel.SessionDebits{
+				Session: debits.NewSession(debitStore, syncer),
+				SettleWorkflow: func(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
+					return ingest.PersistWorkflowAttempt(ctx, pool, event, attempt)
+				},
+			},
+		}
 	}
 	g.fleet = fleet.New(runner)
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}

@@ -1,10 +1,13 @@
 package kernel
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
+	"testing/iotest"
 
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -71,22 +74,28 @@ func passthroughCases() []passthroughCase {
 	}
 }
 
-func runPassthroughCase(t *testing.T, c passthroughCase) passthroughRecord {
-	t.Helper()
-	h := newSurfaceHarness(t, c.limited)
-	strictRelease(t, h.harness, func(s *routing.Snapshot) {
-		route := s.Routes[routeSlug]
-		route.Operations, route.MaxAttempts, route.Targets = []string{routing.PassthroughOperation}, 1, route.Targets[:1]
-		route.Passthrough = &routing.PassthroughConfig{
-			Dialect: "bound-native", Methods: []string{"GET", "POST", "HEAD"},
-			Paths: []string{"/v1/widgets/*", "/v1/status"}, Query: []string{"limit"},
-			Headers: []string{"X-Widget-Mode", "If-None-Match"}, AcknowledgeOpaqueUnmetered: true,
-		}
-		s.Routes[routeSlug] = route
-	})
+func configurePassthrough(s *routing.Snapshot) {
+	route := s.Routes[routeSlug]
+	route.Operations, route.MaxAttempts, route.Targets = []string{routing.PassthroughOperation}, 1, route.Targets[:1]
+	route.Passthrough = &routing.PassthroughConfig{
+		Dialect: "bound-native", Methods: []string{"GET", "POST", "HEAD"},
+		Paths: []string{"/v1/widgets/*", "/v1/status"}, Query: []string{"limit"},
+		Headers: []string{"X-Widget-Mode", "If-None-Match"}, AcknowledgeOpaqueUnmetered: true,
+	}
+	s.Routes[routeSlug] = route
+}
+
+func allowPassthrough(h *harness) {
 	authority := h.rt.keys[fullKey]
 	authority.Policy.AllowedRoutes = []string{routeSlug}
 	h.rt.keys[fullKey] = authority
+}
+
+func runPassthroughCase(t *testing.T, c passthroughCase) passthroughRecord {
+	t.Helper()
+	h := newSurfaceHarness(t, c.limited)
+	strictRelease(t, h.harness, configurePassthrough)
+	allowPassthrough(h.harness)
 	var mu sync.Mutex
 	forwarded := []recordedRequest{}
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
@@ -120,4 +129,52 @@ func TestPassthroughGolden(t *testing.T) {
 		cases = append(cases, goldenCase{c.name, func(t *testing.T) any { return runPassthroughCase(t, c) }})
 	}
 	checkGolden(t, passthroughGolden, cases)
+}
+
+func TestPassthroughClassifiesResponseFailuresAfterCancellation(t *testing.T) {
+	const limit = 32
+	for _, tc := range []struct {
+		name   string
+		status int
+		length int64
+		body   io.ReadCloser
+		class  string
+	}{
+		{name: "redirect", status: http.StatusFound, body: http.NoBody, class: ClassProtocol},
+		{name: "oversized content length", status: http.StatusOK, length: limit + 1, body: http.NoBody, class: ClassProtocol},
+		{name: "interrupted error body", status: http.StatusBadRequest, length: -1, body: io.NopCloser(iotest.ErrReader(context.Canceled)), class: ClassTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := strictHarnessCfg(t, Config{MaxResponseBytes: limit}, configurePassthrough)
+			allowPassthrough(h)
+			pinned := h.rt.release
+			snapshot := pinned.Snapshot()
+			route, _ := snapshot.FindRoute(routeSlug)
+			provider, _ := snapshot.FindProvider(route.Targets[0].ProviderID)
+			client, err := h.gateway.providerClient(t.Context(), pinned, &provider, provider.Slots[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := client.Transport
+			t.Cleanup(func() { client.Transport = transport })
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			client.Transport = messagesTransport(func(r *http.Request) (*http.Response, error) {
+				cancel()
+				return &http.Response{StatusCode: tc.status, ContentLength: tc.length, Body: tc.body, Request: r}, nil
+			})
+			mux := http.NewServeMux()
+			RegisterGateway(h.gateway, mux)
+			request := httptest.NewRequestWithContext(ctx, http.MethodGet, passthroughURL, nil)
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+			if attempts := h.sink.last(t).Attempts; len(attempts) != 1 || attempts[0].Class != tc.class {
+				t.Fatalf("attempts = %+v, want one %s attempt", attempts, tc.class)
+			}
+		})
+	}
 }

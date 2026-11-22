@@ -147,8 +147,8 @@ func (s *Server) FileObject(ctx context.Context, res *resources.Resource) ([]byt
 	return json.Marshal(obj)
 }
 
-func ManagedGeminiFilePath(res *resources.Resource) (string, error) {
-	name, err := GeminiManagedFileName(res)
+func managedGeminiFilePath(res *resources.Resource) (string, error) {
+	name, err := geminiManagedFileName(res)
 	if err != nil {
 		return "", err
 	}
@@ -459,22 +459,22 @@ func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage
 	return ManagedFileMetadata(metadata, nil, adapter, BatchManifest{}, role)
 }
 
-type RefreshedFile struct {
+type refreshedFile struct {
 	Metadata json.RawMessage
 	State    string
 	Expires  *time.Time
 }
 
-func RefreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (RefreshedFile, error) {
+func refreshedFileMetadata(res *resources.Resource, body []byte, adapter connectors.BatchAdapter) (refreshedFile, error) {
 	metadata, state, expires := FileMetadata(body, ResourceModel(res))
 	if res.Kind == resources.KindStrictFile {
-		return RefreshedFile{Metadata: metadata, State: state, Expires: expires}, nil
+		return refreshedFile{Metadata: metadata, State: state, Expires: expires}, nil
 	}
 	refreshed, err := refreshedProviderMetadata(res, body, metadata, adapter)
 	if err != nil {
-		return RefreshedFile{}, err
+		return refreshedFile{}, err
 	}
-	return RefreshedFile{Metadata: refreshed, State: state, Expires: expires}, nil
+	return refreshedFile{Metadata: refreshed, State: state, Expires: expires}, nil
 }
 
 func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata json.RawMessage, adapter connectors.BatchAdapter) (json.RawMessage, error) {

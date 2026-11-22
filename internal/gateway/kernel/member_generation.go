@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -41,7 +41,7 @@ type MemberTrail struct {
 
 func (s *Server) MemberGeneration(r *http.Request, member Member) *MemberGeneration {
 	x := &Call{
-		request:     request{id: httpkit.NewID(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+		request:     request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		preferences: member.Preferences,
 		actor:       "playground",
 		origin:      usage.OriginPlayground,

@@ -12,6 +12,20 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
+type candidateEvaluator struct {
+	source    selectionSource
+	route     Route
+	routeID   uuid.UUID
+	operation string
+	surface   string
+	mode      string
+	affinity  []byte
+	policy    EffectivePolicy
+	chosen    selection
+	options   Options
+	now       time.Time
+}
+
 // evaluateCandidates preserves admission order: published eligibility and
 // source constraints precede preparation, then effective request constraints.
 func evaluateCandidates(s selectionSource, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options) ([]rankedCandidate, error) {
@@ -23,20 +37,24 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 	if e != nil {
 		return nil, &SelectionError{Code: NoEligibleTargets}
 	}
+	eval := candidateEvaluator{
+		source: s, route: route, routeID: routeID, operation: operation, surface: surface,
+		mode: mode, affinity: affinity, policy: policy, chosen: chosen, options: options, now: now,
+	}
 	rows := make([]rankedCandidate, 0, len(route.Targets))
 	for _, target := range route.Targets {
-		rows = append(rows, evaluateCandidate(s, route, routeID, target, operation, surface, mode, affinity, policy, chosen, options, now))
+		rows = append(rows, eval.evaluate(target))
 	}
 	return rows, nil
 }
 
-func evaluateCandidate(s selectionSource, route Route, routeID uuid.UUID, target Target, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options, now time.Time) rankedCandidate {
-	provider, exists := s.lookupProvider(target.ProviderID)
-	row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
-	if chosen.selector != nil && !row.shadow {
-		row.decision.Selector = &chosen.selector.ID
+func (e candidateEvaluator) evaluate(target Target) rankedCandidate {
+	provider, exists := e.source.lookupProvider(target.ProviderID)
+	row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: e.policy.Strategy, Shadow: target.Shadow != nil}, order: len(e.policy.Preferences.Order), shadow: target.Shadow != nil}
+	if e.chosen.selector != nil && !row.shadow {
+		row.decision.Selector = &e.chosen.selector.ID
 	}
-	row.decision.Unhealthy = options.Unhealthy != nil && options.Unhealthy(target.ProviderID)
+	row.decision.Unhealthy = e.options.Unhealthy != nil && e.options.Unhealthy(target.ProviderID)
 	if provider.VendorID != "" {
 		row.decision.VendorID = &provider.VendorID
 	}
@@ -45,31 +63,31 @@ func evaluateCandidate(s selectionSource, route Route, routeID uuid.UUID, target
 	if connectionRegion == "" && metadata.Region != nil {
 		connectionRegion = *metadata.Region
 	}
-	if options.Region != "" && connectionRegion != options.Region {
+	if e.options.Region != "" && connectionRegion != e.options.Region {
 		row.locality = 1
 	}
 	row.decision.MetadataObservedAt = metadata.ObservedAt
 	row.decision.ContextLength = metadata.ContextLength
 	row.decision.MaxOutputTokens = metadata.MaxOutputTokens
-	demand := options.TokenDemand
-	if options.Demand != nil {
-		demand = options.Demand(provider, target)
+	demand := e.options.TokenDemand
+	if e.options.Demand != nil {
+		demand = e.options.Demand(provider, target)
 	}
 	if demand != nil {
 		input := demand.EstimatedInputTokens
 		row.decision.EstimatedInputTokens = &input
 		row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 	}
-	row.decision.Price = options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
-	row.attempt.Discount = options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
-	row.decision.MaxCost = copyPointer(policy.MaxCost)
-	if options.EstimateCost && options.WorstCost != nil {
-		row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+	row.decision.Price = e.options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, e.operation, e.now)
+	row.attempt.Discount = e.options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, e.now)
+	row.decision.MaxCost = copyPointer(e.policy.MaxCost)
+	if e.options.EstimateCost && e.options.WorstCost != nil {
+		row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, e.now, e.options.WorstCost, target)
 	}
-	row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
-	reason := qualifyCandidate(&row, route, provider, exists, target, metadata, demand, operation, surface, mode, affinity, policy, chosen, options, now)
-	targetID, e := uuid.Parse(target.RoutingID)
-	if e != nil {
+	row.decision.Performance = e.options.Inputs.Metrics(provider.ID, target.ProviderModel, e.operation, e.mode, e.now)
+	reason := e.qualify(&row, provider, exists, target, metadata, demand)
+	targetID, err := uuid.Parse(target.RoutingID)
+	if err != nil {
 		reason = "target_unknown"
 	}
 	if reason != "" {
@@ -77,82 +95,82 @@ func evaluateCandidate(s selectionSource, route Route, routeID uuid.UUID, target
 	} else {
 		row.decision.Eligible = true
 	}
-	row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: string(provider.Kind), UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
+	row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: string(provider.Kind), UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(e.routeID, targetID, target.Weight, e.operation, e.surface, e.mode, e.affinity), Strategy: e.policy.Strategy, PolicyDigest: e.policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
 	perf := row.decision.Performance
-	if policy.Strategy == strategyLatency && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
+	if e.policy.Strategy == strategyLatency && e.policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*e.policy.Preferences.PreferredMaxLatencyMS)) {
 		row.preference = 1
 	}
-	if policy.Strategy == strategyThroughput && policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*policy.Preferences.PreferredMinThroughput)) {
+	if e.policy.Strategy == strategyThroughput && e.policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*e.policy.Preferences.PreferredMinThroughput)) {
 		row.preference = 1
 	}
 	return row
 }
 
-func qualifyCandidate(row *rankedCandidate, route Route, provider Provider, exists bool, target Target, metadata ModelMetadata, demand *TokenDemand, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options, now time.Time) string {
+func (e candidateEvaluator) qualify(row *rankedCandidate, provider Provider, exists bool, target Target, metadata ModelMetadata, demand *TokenDemand) string {
 	reason := ""
 	switch {
 	case !exists:
 		reason = "target_unknown"
 	case !provider.Enabled:
 		reason = "provider_not_active"
-	case provider.Plugin != nil && provider.Plugin.Unconfined() && !options.UnconfinedPlugins:
+	case provider.Plugin != nil && provider.Plugin.Unconfined() && !e.options.UnconfinedPlugins:
 		reason = "plugin_unconfined_disabled"
-	case !(route.IsPassthrough() && operation == PassthroughOperation) && !provider.Supports(target.ProviderModel, operation, surface, mode):
+	case !(e.route.IsPassthrough() && e.operation == PassthroughOperation) && !provider.Supports(target.ProviderModel, e.operation, e.surface, e.mode):
 		reason = "capability_not_certified"
-	case row.shadow && (options.Mirror == nil || !Sampled(target.ID, options.Mirror, target.Shadow.SampleRate)):
+	case row.shadow && (e.options.Mirror == nil || !Sampled(target.ID, e.options.Mirror, target.Shadow.SampleRate)):
 		reason = "shadow_not_sampled"
-	case !row.shadow && !chosen.admits(target):
+	case !row.shadow && !e.chosen.admits(target):
 		reason = "selector_excluded"
 	}
 	if reason == "selector_excluded" {
-		row.allowed = capacityReason(metadata, demand) == "" && constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters) == ""
+		row.allowed = capacityReason(metadata, demand) == "" && constraintReason(e.policy, provider, metadata, row.decision.Price, e.options.Parameters) == ""
 	}
 	if reason == "" {
 		reason = capacityReason(metadata, demand)
 	}
 	if reason == "" {
-		reason = constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters)
+		reason = constraintReason(e.policy, provider, metadata, row.decision.Price, e.options.Parameters)
 	}
-	for index, selector := range policy.Preferences.Order {
+	for index, selector := range e.policy.Preferences.Order {
 		if selectorMatches(selector, provider) {
 			row.order = index
 			break
 		}
 	}
-	if reason == "" && policy.Preferences.AllowFallbacks != nil && !*policy.Preferences.AllowFallbacks && len(policy.Preferences.Order) > 0 && row.order == len(policy.Preferences.Order) {
+	if reason == "" && e.policy.Preferences.AllowFallbacks != nil && !*e.policy.Preferences.AllowFallbacks && len(e.policy.Preferences.Order) > 0 && row.order == len(e.policy.Preferences.Order) {
 		reason = "outside_preferred_order"
 	}
-	if reason == "" && options.CheckSlots {
-		if provider.Network != nil && provider.Network.CredentialID != "" && options.CredentialEligibility != nil {
-			if eligibility := options.CredentialEligibility(provider.Network.CredentialID); eligibility != Eligible {
+	if reason == "" && e.options.CheckSlots {
+		if provider.Network != nil && provider.Network.CredentialID != "" && e.options.CredentialEligibility != nil {
+			if eligibility := e.options.CredentialEligibility(provider.Network.CredentialID); eligibility != Eligible {
 				reason = "network_credential_" + string(eligibility)
 			}
 		}
 	}
-	if reason == "" && options.CheckSlots {
-		row.slots, row.skipped = eligibleSlots(SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity), options.CredentialEligibility)
+	if reason == "" && e.options.CheckSlots {
+		row.slots, row.skipped = eligibleSlots(SelectSlots(provider, target.ProviderModel, e.route, e.options.KeyID, e.operation, e.surface, e.mode, e.affinity), e.options.CredentialEligibility)
 		if len(row.slots) == 0 {
 			reason = noSlotReason(row.skipped)
 		}
 	}
-	if reason == "" && options.Prepare != nil {
-		reason = applyPreparedCandidate(row, provider, target, metadata, policy, options, now)
+	if reason == "" && e.options.Prepare != nil {
+		reason = e.applyPrepared(row, provider, target, metadata)
 	}
-	if reason == "" && options.WorstCost != nil && (policy.MaxCost != nil || policy.Strategy == strategyBoundedCost && operation == "generation") {
-		if bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount); ok {
+	if reason == "" && e.options.WorstCost != nil && (e.policy.MaxCost != nil || e.policy.Strategy == strategyBoundedCost && e.operation == "generation") {
+		if bound, ok := e.options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount); ok {
 			row.bound = &bound
 		}
 	}
-	if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
-		if row.bound == nil || !lessOrEqual(strptr(row.bound.Cost.String()), policy.MaxCost) {
+	if reason == "" && e.policy.MaxCost != nil && e.options.WorstCost != nil && provider.CommitmentAt(e.now) == nil {
+		if row.bound == nil || !lessOrEqual(strptr(row.bound.Cost.String()), e.policy.MaxCost) {
 			reason = "cost_limit_exceeded"
 		}
 	}
 	return reason
 }
 
-func applyPreparedCandidate(row *rankedCandidate, provider Provider, target Target, metadata ModelMetadata, policy EffectivePolicy, options Options, now time.Time) string {
-	prepared, err := options.Prepare(provider, target)
+func (e candidateEvaluator) applyPrepared(row *rankedCandidate, provider Provider, target Target, metadata ModelMetadata) string {
+	prepared, err := e.options.Prepare(provider, target)
 	if err != nil {
 		reason := "unsupported_request_semantics"
 		var detail incompatibilityError
@@ -168,14 +186,14 @@ func applyPreparedCandidate(row *rankedCandidate, provider Provider, target Targ
 	}
 	reason := capacityReason(metadata, prepared.Demand)
 	if reason == "" {
-		reason = constraintReason(policy, provider, metadata, row.decision.Price, prepared.Parameters)
+		reason = constraintReason(e.policy, provider, metadata, row.decision.Price, prepared.Parameters)
 	}
 	if prepared.Demand != nil {
 		input := prepared.Demand.EstimatedInputTokens
 		row.decision.EstimatedInputTokens = &input
 		row.decision.RequestedOutputTokens = prepared.Demand.MaxOutputTokens
-		if options.EstimateCost && options.WorstCost != nil {
-			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, options.WorstCost, target)
+		if e.options.EstimateCost && e.options.WorstCost != nil {
+			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, e.now, e.options.WorstCost, target)
 		}
 	}
 	return reason

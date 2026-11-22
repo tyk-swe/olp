@@ -14,6 +14,7 @@
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { listProjects, projectKeys } from '#lib/features/access/index.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listCredentials,
@@ -22,7 +23,6 @@
     listDefinitions,
     listPolicies,
     listAttachments,
-    listProjects,
     type Definition,
     type Policy,
     type Entry,
@@ -40,7 +40,7 @@
   const client = useQueryClient();
   const definitions = createQuery(() => ({
     queryKey: guardrailKeys.definitions(),
-    queryFn: listDefinitions
+    queryFn: ({ signal }) => listDefinitions(signal)
   }));
   const policies = createQuery(() => ({
     queryKey: guardrailKeys.policies(),
@@ -53,9 +53,9 @@
     queryFn: listAttachments
   }));
   const projects = createQuery(() => ({
-    queryKey: guardrailKeys.projects(),
+    queryKey: projectKeys.all,
     notifyOnChangeProps: 'all',
-    queryFn: listProjects
+    queryFn: ({ signal }) => listProjects(signal)
   }));
   const credentials = createQuery(() => ({
     queryKey: guardrailKeys.credentials(),
@@ -202,7 +202,7 @@
   </div>
   <GuardrailDefinitionTable
     pending={definitions.isPending}
-    items={definitions.data?.items ?? []}
+    items={definitions.data ?? []}
     canRetire={access.allows('DELETE /api/v1/guardrails/{guardrail_id}')}
     onEdit={openDefinition}
     onRetire={retireDefinition}
@@ -215,7 +215,7 @@
     <GuardrailDefinitionDialog
       {busy}
       {external}
-      projects={projects.data?.items ?? []}
+      projects={projects.data ?? []}
       credentials={credentials.data ?? []}
       bind:name
       bind:project
@@ -263,8 +263,8 @@
     <GuardrailPolicyDialog
       {busy}
       {phases}
-      definitions={definitions.data?.items ?? []}
-      projects={projects.data?.items ?? []}
+      definitions={definitions.data ?? []}
+      projects={projects.data ?? []}
       bind:policyName
       bind:project
       bind:entries
@@ -297,7 +297,7 @@
     }}
   />
 {:else if tab === 'credentials'}
-  <CredentialsPanel projects={projects.data?.items ?? []} />
+  <CredentialsPanel projects={projects.data ?? []} />
 {:else}
   <GuardrailEvaluation
     policies={policies.data?.items ?? []}

@@ -12,17 +12,16 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type Server struct {
-	Access  *access.Server
-	Runtime *release.Manager
-	Gateway *kernel.Server
-	Origin  string
+	Access          *access.Server
+	Runtime         *release.Manager
+	AuthenticateKey func(*http.Request) (keyauthority.Authority, error)
+	Origin          string
 }
 
 type Publication struct {
@@ -38,10 +37,10 @@ type Exposure struct {
 
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/catalog", s.list, access.InferenceKeyAuth(func(r *http.Request) (keyauthority.Authority, error) {
-		if s.Gateway == nil || s.Runtime == nil {
+		if s.AuthenticateKey == nil || s.Runtime == nil {
 			return keyauthority.Authority{}, httpkit.Fail(503, "authority_unavailable", "Key authority is unavailable.")
 		}
-		return s.Gateway.CatalogAuthority(r)
+		return s.AuthenticateKey(r)
 	}))
 	s.Access.Public(mux, "GET /api/v1/catalog/public/{project_id}", s.public)
 	s.Access.Route(mux, "GET /api/v1/projects/{project_id}/catalog", s.getPublication)

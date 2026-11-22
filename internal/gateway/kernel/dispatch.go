@@ -244,7 +244,7 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *Call, attempt ro
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
 		caps = [3]quota.CappedOwner{}
 	}
-	if err := s.ReserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
+	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
 		s.ReleaseHold(ctx, h)
 		return false, err
 	}

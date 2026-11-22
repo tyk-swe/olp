@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/settings"
 
 	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/surface/playground"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
@@ -75,6 +79,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
@@ -118,12 +123,40 @@ func (m Management) registerGuardrails(mux *http.ServeMux) {
 	credential.NewAPI(m.Access).Register(mux)
 	definition.NewAPI(m.Access, publish).Register(mux)
 	policy.NewAPI(m.Access, publish, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
+		result, err := m.Gateway.EvaluateGuardrails(r, guardrailsMember(p), pinned, in)
+		return result, guardrailsHTTPError(err)
 	}, func(r *http.Request, p authz.Principal, batch []guardrails.PinnedApplication) ([]guardrails.Result, error) {
-		return m.Gateway.EvaluateGuardrailsBatch(r, p, batch)
+		results, err := m.Gateway.EvaluateGuardrailsBatch(r, guardrailsMember(p), batch)
+		return results, guardrailsHTTPError(err)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publish).Register(mux)
 	preview.Register(m.Access, mux, m.Runtime.Release)
+}
+
+func guardrailsMember(p authz.Principal) kernel.Member {
+	return kernel.Member{
+		UserID: p.UserID(),
+		Admit: func(route *routing.Route) *fault.Error {
+			if err := p.Authorize(authz.Playground); err != nil {
+				return fault.PermissionError("guardrail_forbidden", "Playground access is required.")
+			}
+			if err := p.Project(route.ProjectID, authz.View); err != nil {
+				return fault.ModelNotFound(route.Slug)
+			}
+			return nil
+		},
+	}
+}
+
+func guardrailsHTTPError(err error) error {
+	failure, ok := errors.AsType[*fault.Error](err)
+	if !ok {
+		return err
+	}
+	if failure.Code == "guardrails_unavailable" || failure.Code == fault.Overloaded.Code {
+		return httpkit.Fail(failure.Status, failure.Code, failure.Message)
+	}
+	return httpkit.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
 }
 
 // Register mounts the whole management API: the published contract, every
@@ -148,7 +181,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	personal.New(m.Access).Register(mux)
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
-	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
+	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, AuthenticateKey: m.catalogAuthority, Origin: m.Access.Origin}).Register(mux)
 	routeServer := &routes.Server{
 		Access: m.Access, InlineMedia: m.Gateway.InlineMediaLimits(),
 		Workflows: m.Gateway.WorkflowResolver(), WorkflowRelease: m.Runtime.Release,
@@ -213,6 +246,17 @@ func (m Management) Register(mux *http.ServeMux) {
 		Normalizer: pricebook.NewNormalizer(vendors.Kind),
 		Drafts:     providerServer,
 	})
+}
+
+func (m Management) catalogAuthority(r *http.Request) (keyauthority.Authority, error) {
+	if m.Gateway == nil {
+		return keyauthority.Authority{}, httpkit.Fail(503, "authority_unavailable", "Key authority is unavailable.")
+	}
+	authority, failure := m.Gateway.Gate.Authenticate(r, "models_read")
+	if failure != nil {
+		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
+	}
+	return authority, nil
 }
 
 func (m Management) limiter() *admission.Limiter {

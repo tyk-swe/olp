@@ -17,7 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
@@ -52,24 +51,31 @@ type codeAttempt struct {
 	pendingHealth      *codemode.HealthObservation
 }
 
-func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
-	authority, operation, paidAttempt, err := f.resolveCodeIngress(r, release, route, observation, inbound, transport, recovery, body)
+func (f *Forwarder) prepareCode(req codeRequest, recovery *codesessions.Recovery) (*codeAttempt, error) {
+	authority, operation, paidAttempt, err := f.resolveCodeIngress(req, recovery)
 	if err != nil || paidAttempt != nil {
 		return paidAttempt, err
 	}
-	providers := release.Snapshot().CodeModelProviders(route, inbound.path, operation.Model, transport)
-	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, inbound.path, transport)) == 0) {
+	providers := req.release.Snapshot().CodeModelProviders(req.route, req.inbound.path, operation.Model, req.transport)
+	if len(providers) == 0 && len(req.route.PaidFallbackTargets) == 0 && (!req.route.ModelRewriting || len(req.release.Snapshot().CodeProviders(req.route, req.inbound.path, req.transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
-	labels, failure := ingress.ParseAttribution(r, authority)
+	labels, failure := ingress.ParseAttribution(req.r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	lease, failure := f.admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+	lease, failure := f.admission.ReserveCodeRate(req.r.Context(), authority, req.observation.Estimate, codeGenerationTimeout+time.Minute, req.route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, fallbackAttempt, err := f.admitCodePermit(r, release, route, observation, operation, inbound, transport, authority, labels, providers, lease, recovery, body)
+	permit, fallbackAttempt, err := f.admitCodePermit(req, codePermitInput{
+		operation: operation,
+		authority: authority,
+		labels:    labels,
+		providers: providers,
+		lease:     lease,
+		recovery:  recovery,
+	})
 	if err != nil || fallbackAttempt != nil {
 		return fallbackAttempt, err
 	}
@@ -77,17 +83,17 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	if permit.Pin.TargetModel != "" {
 		model = permit.Pin.TargetModel
 	}
-	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: req.observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
-			a.finish(r.Context())
+			a.finish(req.r.Context())
 		}
 	}()
-	if err := f.reconcileCodePermit(r, a, authority, labels, observation, route.Slug); err != nil {
+	if err := f.reconcileCodePermit(req.r, a, authority, labels, req.observation, req.route.Slug); err != nil {
 		return nil, err
 	}
-	if err := f.bindCodeTarget(r, a, release, route, observation, inbound, transport, recovery, model); err != nil {
+	if err := f.bindCodeTarget(req, a, recovery, model); err != nil {
 		return nil, err
 	}
 	ok = true

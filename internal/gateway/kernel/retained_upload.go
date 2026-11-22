@@ -143,7 +143,9 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		return
 	}
 	defer s.SettleFence(r.Context(), lifecycle.Close)
-	status = s.RetainedDispatch(w, r.WithContext(ctx), x, p, e, resource, nil, endpoint, body, contentType, lifecycle, fail)
+	status = s.RetainedDispatch(w, r.WithContext(ctx), RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
+	})
 }
 
 func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {

@@ -21,12 +21,16 @@ type Runtime interface {
 	CredentialRefused(credentialID string, generation int64)
 }
 
+type Services struct {
+	Ledger       Ledger
+	Authorizer   Authorizer
+	Research     ResearchLedger
+	ResearchAuth ResearchAuthorizer
+}
+
 // Dependencies are the collaborators code mode forwards through.
 type Dependencies struct {
-	Ledger        Ledger
-	Authorizer    Authorizer
-	Research      ResearchLedger
-	ResearchAuth  ResearchAuthorizer
+	Services
 	Runtime       Runtime
 	Sink          events.Sink
 	Admission     *quota.Admission
@@ -57,9 +61,27 @@ type Forwarder struct {
 	headerTimeout time.Duration
 }
 
+func resolveServices(services Services) Services {
+	research := services.Research
+	if research == nil {
+		research, _ = services.Ledger.(ResearchLedger)
+	}
+	researchAuth := services.ResearchAuth
+	if researchAuth == nil {
+		researchAuth, _ = services.Authorizer.(ResearchAuthorizer)
+	}
+	return Services{
+		Ledger:       services.Ledger,
+		Authorizer:   services.Authorizer,
+		Research:     research,
+		ResearchAuth: researchAuth,
+	}
+}
+
 func New(deps Dependencies) *Forwarder {
+	services := resolveServices(deps.Services)
 	return &Forwarder{
-		ledger: deps.Ledger, authorizer: deps.Authorizer, research: deps.Research, researchAuth: deps.ResearchAuth,
+		ledger: services.Ledger, authorizer: services.Authorizer, research: services.Research, researchAuth: services.ResearchAuth,
 		runtime: deps.Runtime, sink: deps.Sink, admission: deps.Admission, gate: deps.Gate, egress: deps.Egress, auth: deps.Auth,
 		log: deps.Log, now: deps.Now, maxBody: deps.MaxBodyBytes, headerTimeout: deps.HeaderTimeout,
 	}

@@ -12,61 +12,69 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/release"
 )
 
-func (f *Forwarder) resolveCodeIngress(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (keyauthority.Authority, codemode.Operation, *codeAttempt, error) {
-	authority, failure := f.gate.Authenticate(r, "inference")
+func (f *Forwarder) resolveCodeIngress(req codeRequest, recovery *codesessions.Recovery) (keyauthority.Authority, codemode.Operation, *codeAttempt, error) {
+	authority, failure := f.gate.Authenticate(req.r, "inference")
 	if failure != nil {
 		return keyauthority.Authority{}, codemode.Operation{}, nil, codemode.Refuse(failure.Status, "code_authentication_refused")
 	}
-	if !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
+	if !authority.Allows("inference", req.route.Slug, &req.route.ProjectID, f.now()) {
 		return keyauthority.Authority{}, codemode.Operation{}, nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	resolved, err := route.ResolveModel(observation.Operation)
+	resolved, err := req.route.ResolveModel(req.observation.Operation)
 	if err != nil {
 		return keyauthority.Authority{}, codemode.Operation{}, nil, err
 	}
 	operation := resolved
-	if recovery == nil && len(route.PaidTargets) > 0 && resolved.PublicModel() != resolved.Model {
-		operation, err = f.ledger.ResolvePaidModel(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
+	if recovery == nil && len(req.route.PaidTargets) > 0 && resolved.PublicModel() != resolved.Model {
+		operation, err = f.ledger.ResolvePaidModel(req.r.Context(), codesessions.Admission{Route: req.route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: req.observation.PreviousResponse}, authority)
 		if err != nil {
 			return keyauthority.Authority{}, codemode.Operation{}, nil, err
 		}
 	}
-	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
-		attempt, err := f.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
+	if _, paid := req.route.PaidTargets[operation.Model]; paid && recovery == nil {
+		attempt, err := f.preparePaidCode(req, operation, authority, nil, false)
 		return authority, operation, attempt, err
 	}
-	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
-		selected, err := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
+	if recovery == nil && len(req.route.PaidFallbackTargets) > 0 {
+		selected, err := f.ledger.ResolvePaidFallback(req.r.Context(), codesessions.Admission{Route: req.route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: req.observation.PreviousResponse}, authority)
 		if err != nil {
 			return keyauthority.Authority{}, codemode.Operation{}, nil, err
 		}
 		if selected != nil {
-			attempt, err := f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
+			attempt, err := f.preparePaidCode(req, *selected, authority, nil, true)
 			return authority, operation, attempt, err
 		}
 	}
 	return authority, operation, nil, nil
 }
 
-func (f *Forwarder) admitCodePermit(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, inbound codeIngress, transport codeadapter.Transport, authority keyauthority.Authority, labels map[string]string, providers []string, lease *admission.Lease, recovery *codesessions.Recovery, body []byte) (codesessions.Permit, *codeAttempt, error) {
-	permit, err := f.ledger.Admit(r.Context(), codesessions.Admission{
-		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
+type codePermitInput struct {
+	operation codemode.Operation
+	authority keyauthority.Authority
+	labels    map[string]string
+	providers []string
+	lease     *admission.Lease
+	recovery  *codesessions.Recovery
+}
+
+func (f *Forwarder) admitCodePermit(req codeRequest, in codePermitInput) (codesessions.Permit, *codeAttempt, error) {
+	permit, err := f.ledger.Admit(req.r.Context(), codesessions.Admission{
+		Attribution: in.labels, Route: req.route, APIKeyID: in.authority.ID, EndUserDigest: in.authority.EndUserDigest,
+		InitialRecovery: req.observation.Recoverable, Recovery: in.recovery, Operation: in.operation, Providers: in.providers, ModelSource: req.release.Snapshot(), ModelPath: req.inbound.path, ModelTransport: req.transport, PreviousResponse: req.observation.PreviousResponse,
 	})
 	if err == nil {
 		return permit, nil, nil
 	}
-	quota.SettleKey(r.Context(), lease, false, nil, f.log)
-	if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
-		selected, selectionErr := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
+	quota.SettleKey(req.r.Context(), in.lease, false, nil, f.log)
+	if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (in.recovery == nil || in.recovery.AccountID == "") && req.transport == codeadapter.HTTP && req.observation.Recoverable && len(req.route.PaidFallbackTargets) > 0 {
+		selected, selectionErr := f.ledger.ResolvePaidFallback(req.r.Context(), codesessions.Admission{Route: req.route, APIKeyID: in.authority.ID, Operation: in.operation, InitialRecovery: req.observation.Recoverable, Recovery: in.recovery, PreviousResponse: req.observation.PreviousResponse}, in.authority)
 		if selectionErr != nil {
 			return codesessions.Permit{}, nil, selectionErr
 		}
 		if selected != nil {
-			attempt, paidErr := f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, recovery, true)
+			attempt, paidErr := f.preparePaidCode(req, *selected, in.authority, in.recovery, true)
 			return codesessions.Permit{}, attempt, paidErr
 		}
 	}
@@ -105,24 +113,24 @@ func (f *Forwarder) reconcileCodePermit(r *http.Request, a *codeAttempt, authori
 	return nil
 }
 
-func (f *Forwarder) bindCodeTarget(r *http.Request, a *codeAttempt, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, model string) error {
-	target, err := resolveCodeTarget(release.Snapshot(), route, a.permit.Account.ProviderID, inbound, transport)
+func (f *Forwarder) bindCodeTarget(req codeRequest, a *codeAttempt, recovery *codesessions.Recovery, model string) error {
+	target, err := resolveCodeTarget(req.release.Snapshot(), req.route, a.permit.Account.ProviderID, req.inbound, req.transport)
 	if err != nil {
 		return err
 	}
 	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
 		return codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, observation.ChatChoices)
+	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, req.observation.ChatChoices)
 	a.adapter = target.adapter.Adapter
-	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
+	a.identityOriginator = target.adapter.CompatibilityOriginator(req.route)
 	var failure error
-	providerLease, gateFailure := f.admission.ReserveCodeProvider(r.Context(), a.permit.Account.ProviderID, target.config, codeProviderDemand(observation), codeGenerationTimeout+time.Minute)
+	providerLease, gateFailure := f.admission.ReserveCodeProvider(req.r.Context(), a.permit.Account.ProviderID, target.config, codeProviderDemand(req.observation), codeGenerationTimeout+time.Minute)
 	if gateFailure != nil {
 		return codemode.Refuse(gateFailure.Status, "code_provider_rate_limited")
 	}
 	a.providerLease = providerLease
-	a.auth, failure = f.authorizer.AuthorizeCode(r.Context(), target.config, a.permit.Account, target.dispatchDescriptor())
+	a.auth, failure = f.authorizer.AuthorizeCode(req.r.Context(), target.config, a.permit.Account, target.dispatchDescriptor())
 	if failure != nil {
 		return codemode.Refuse(503, "code_account_unavailable")
 	}

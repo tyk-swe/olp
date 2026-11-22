@@ -308,7 +308,10 @@ func (l *codeWSLoop) handleClient(message codeMessage, open bool) bool {
 	}
 	requestContext, stop := context.WithTimeout(l.ctx, codeGenerationTimeout)
 	l.generation, l.stopGeneration, l.generationDone = requestContext, stop, requestContext.Done()
-	l.active, err = l.f.prepareCode(l.r.WithContext(l.generation), l.release, l.route, observation, l.inbound, codeadapter.WebSocket, nil, message.body)
+	l.active, err = l.f.prepareCode(codeRequest{
+		r: l.r.WithContext(l.generation), release: l.release, route: l.route, observation: observation,
+		inbound: l.inbound, transport: codeadapter.WebSocket, body: message.body,
+	}, nil)
 	if err != nil {
 		l.refuse(err)
 		return false

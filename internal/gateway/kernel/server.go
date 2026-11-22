@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -81,38 +80,22 @@ type Config struct {
 	MaxShadowInFlight int
 }
 
-type ReleaseSource interface {
+// Runtime is the pinned authority, release and credential source.
+// *release.Manager implements it; fixtures and tests supply static releases.
+type Runtime interface {
 	Release() *release.Release
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *routinginputs.Inputs
-}
-
-type KeyAuthenticator interface {
 	Authenticate(secret string) (*keyauthority.Authority, error)
-}
-
-type FidelityChecker interface {
 	// CheckRouteFidelity confirms a strict admission against current publication.
 	CheckRouteFidelity(context.Context, routing.Route) error
-}
-
-type GrantLifecycle interface {
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64
 	// CredentialRefused reports that the upstream refused a credential
 	// version's secret, so that a grant beneath the version is refreshed
 	// early.
 	CredentialRefused(credentialID string, generation int64)
-}
-
-// Runtime is the pinned authority, release and credential source.
-// *release.Manager implements it; fixtures and tests supply static releases.
-type Runtime interface {
-	ReleaseSource
-	KeyAuthenticator
-	FidelityChecker
-	GrantLifecycle
 	release.Credentials
 }
 
@@ -135,10 +118,7 @@ type Dependencies struct {
 	Log                         *slog.Logger
 	Cache                       *cache.Store
 	Guardrails                  func(guardrails.Caller) guardrails.Evaluator
-	CodeLedger                  codeforward.Ledger
-	CodeAuthorizer              codeforward.Authorizer
-	CodeResearch                codeforward.ResearchLedger
-	ResearchAuth                codeforward.ResearchAuthorizer
+	Code                        *codeforward.Services
 	Runtime                     Runtime
 	Digester                    Digester
 	BudgetAuthority             BudgetAuthority
@@ -147,7 +127,7 @@ type Dependencies struct {
 	DelegationReauthenticator   DelegationReauthenticator
 	Sink                        events.Sink
 	Admission                   *quota.Admission
-	Debits                      SessionDebitLedger
+	Debits                      *SessionDebits
 	WorkflowRuns                WorkflowRunStore
 	WorkflowTools               WorkflowToolRunner
 	Traces                      *traceingest.Store
@@ -411,16 +391,6 @@ func (s *Server) GatewayOrigin(r *http.Request) string {
 		}
 	}
 	return scheme + "://" + r.Host
-}
-
-// CatalogAuthority shares the gateway's pinned authority, revocation, scope
-// and client-address checks with the management catalog's consumer-key reads.
-func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
-	authority, failure := s.Gate.Authenticate(r, "models_read")
-	if failure != nil {
-		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
-	}
-	return authority, nil
 }
 
 func (s *Server) LimiterCounts() (failOpen, daily, weekly, monthly int64) {

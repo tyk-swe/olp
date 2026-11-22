@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -616,10 +616,9 @@ func TestModelGuardrailDeduplicationAuthorizationRecursionAndPlayground(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		principal := authz.Principal{User: authz.User{ID: "member-1", Role: authz.RoleOwner}, AllProjects: true}
 		reg := h.rt.release.Snapshot().Clone().Guardrails
 		pinned := guardrails.Pinned{Policy: reg.Policies["eval-pol"], Definitions: reg.Definitions}
-		res, err := h.gateway.EvaluateGuardrails(req, principal, pinned, guardrails.Application{
+		res, err := h.gateway.EvaluateGuardrails(req, Member{UserID: "member-1", Admit: func(*routing.Route) *fault.Error { return nil }}, pinned, guardrails.Application{
 			PolicyRevisionID: "eval-pol", Phase: guardrails.Input, Segments: []guardrails.Segment{{ID: "s0", Text: "safe"}},
 		})
 		if err != nil || len(res.Decisions) != 1 || res.Decisions[0].Outcome != guardrails.Passed {

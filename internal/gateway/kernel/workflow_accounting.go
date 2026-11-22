@@ -7,18 +7,14 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
-
-func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
-	return ingest.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
-}
 
 func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *Call, fact events.AttemptFact) *fault.Error {
 	if x.request.release == nil || x.request.release.Snapshot() == nil {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow release is unavailable"))
+	}
+	if s.Deps.Debits == nil || s.Deps.Debits.SettleWorkflow == nil {
+		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow settlement is unavailable"))
 	}
 	completedAt := s.Now()
 	envelope := events.Envelope{

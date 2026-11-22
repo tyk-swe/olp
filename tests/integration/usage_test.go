@@ -1987,6 +1987,46 @@ func TestFocusLateCommitmentUsageDirtiesLaterObservedDay(t *testing.T) {
 	}
 }
 
+type cancelOnBegin struct{ cancel context.CancelFunc }
+
+func (c cancelOnBegin) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (c cancelOnBegin) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err == nil && data.CommandTag.String() == "BEGIN" {
+		c.cancel()
+	}
+}
+
+func TestCanceledToolSettlementKeepsConnectionReusable(t *testing.T) {
+	t.Parallel()
+	db, _ := harness.EmptyDatabase(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	config := db.Config()
+	config.MinConns, config.MaxConns = 0, 1
+	config.ConnConfig.Tracer = cancelOnBegin{cancel: cancel}
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := pool.Ping(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	connections := pool.Stat().NewConnsCount()
+	if err := limitdebits.NewStore(pool).SettleTool(ctx, limitdebits.Result{}); !errors.Is(err, limitdebits.ErrConflict) || ctx.Err() == nil {
+		t.Fatalf("settlement = %v, context = %v", err, ctx.Err())
+	}
+	if err := pool.Ping(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := pool.Stat().NewConnsCount(); got != connections {
+		t.Fatalf("connections opened = %d, want %d", got, connections)
+	}
+}
+
 func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
 	t.Parallel()
 	for _, status := range []accounting.Status{accounting.StatusSucceeded, accounting.StatusUpstreamError, accounting.StatusGuardrailBlocked} {

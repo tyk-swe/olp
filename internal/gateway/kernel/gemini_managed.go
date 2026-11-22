@@ -156,7 +156,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	return s.Deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, view("output"), view("error"))
 }
 
-func GeminiManagedFileName(resource *resources.Resource) (string, error) {
+func geminiManagedFileName(resource *resources.Resource) (string, error) {
 	record, err := DecodeManagedFileRecord(resource.Metadata)
 	if err != nil {
 		return "", err

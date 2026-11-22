@@ -13,11 +13,14 @@
   } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import {
+    guardrailKeys,
+    listDefinitions
+  } from '#lib/features/guardrails/index.js';
+  import {
     createCapturePolicy,
     deleteCapturePolicy,
     getCaptureConfiguration,
     listCapturePolicies,
-    listCaptureRedactorOptions,
     listCaptureSinkOptions,
     updateCaptureConfiguration,
     updateCapturePolicy,
@@ -55,8 +58,8 @@
   }));
 
   const redactorOptions = createQuery(() => ({
-    queryKey: observabilityKeys.redactorOptions(),
-    queryFn: ({ signal }) => listCaptureRedactorOptions(signal),
+    queryKey: guardrailKeys.definitions(),
+    queryFn: ({ signal }) => listDefinitions(signal),
     enabled: canManageProjects || canManageInstallation
   }));
   const eligibleRedactors = $derived(

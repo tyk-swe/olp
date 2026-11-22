@@ -26,8 +26,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/routing/durablecontract"
-	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // Generation identifies one published runtime configuration.
@@ -217,9 +215,9 @@ type Snapshot struct {
 	interactions         map[string]map[string]*interaction.Template
 	operations           map[string]map[string]*operationplan.Template
 	media                map[string]map[string]*mediacontract.Template
-	durable              map[string]map[string]*durablecontract.Template
-	realtime             map[string]map[string]*realtimecontract.Template
-	webrtc               map[string]map[string]*realtimecontract.Template
+	durable              map[string]map[string]*DurableTemplate
+	realtime             map[string]map[string]*RealtimeTemplate
+	webrtc               map[string]map[string]*RealtimeTemplate
 	duplex               map[string]map[string]*duplexcontract.Template
 	Generation           Generation          `json:"generation"`
 	Providers            map[string]Provider `json:"providers"`
@@ -388,9 +386,9 @@ func (s *Snapshot) Compile() error {
 	next.interactions = make(map[string]map[string]*interaction.Template)
 	next.operations = make(map[string]map[string]*operationplan.Template)
 	next.media = make(map[string]map[string]*mediacontract.Template)
-	next.durable = make(map[string]map[string]*durablecontract.Template)
-	next.realtime = make(map[string]map[string]*realtimecontract.Template)
-	next.webrtc = make(map[string]map[string]*realtimecontract.Template)
+	next.durable = make(map[string]map[string]*DurableTemplate)
+	next.realtime = make(map[string]map[string]*RealtimeTemplate)
+	next.webrtc = make(map[string]map[string]*RealtimeTemplate)
 	next.duplex = make(map[string]map[string]*duplexcontract.Template)
 	for slug, r := range next.Routes {
 		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]

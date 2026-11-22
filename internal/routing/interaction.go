@@ -15,8 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/routing/durablecontract"
-	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // ValidateRouteContracts validates the complete configured links of a route.
@@ -217,11 +215,11 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 	return templates, nil
 }
 
-func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Template, error) {
+func (s *Snapshot) compileRealtime(route Route) (map[string]*RealtimeTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	templates := make(map[string]*RealtimeTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -243,7 +241,7 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
 		}
-		template, err := realtimecontract.Compile(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileRealtimeContract(realtimeContractConfig{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err
 		}
@@ -252,16 +250,16 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 	return templates, nil
 }
 
-func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (s *Snapshot) RealtimeTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := s.realtime[slug][target]
 	return template, ok
 }
 
-func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Template, error) {
+func (s *Snapshot) compileWebRTC(route Route) (map[string]*RealtimeTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	templates := make(map[string]*RealtimeTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -276,7 +274,7 @@ func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Temp
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
 		}
-		template, err := realtimecontract.CompileWebRTC(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileWebRTCContract(realtimeContractConfig{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +283,7 @@ func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Temp
 	return templates, nil
 }
 
-func (s *Snapshot) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (s *Snapshot) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := s.webrtc[slug][target]
 	return template, ok
 }
@@ -352,11 +350,11 @@ func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract
 	return template, ok
 }
 
-func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Template, error) {
+func (s *Snapshot) compileDurable(route Route) (map[string]*DurableTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "batch") {
 		return nil, nil
 	}
-	templates := make(map[string]*durablecontract.Template, len(route.Targets))
+	templates := make(map[string]*DurableTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -375,7 +373,7 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 		}) {
 			continue
 		}
-		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileDurableContract(durableContractConfig{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err
 		}
@@ -384,7 +382,7 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 	return templates, nil
 }
 
-func (s *Snapshot) DurableTemplate(slug, target string) (*durablecontract.Template, bool) {
+func (s *Snapshot) DurableTemplate(slug, target string) (*DurableTemplate, bool) {
 	template, ok := s.durable[slug][target]
 	return template, ok
 }

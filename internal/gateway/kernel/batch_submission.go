@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -265,30 +264,11 @@ func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmis
 	if accepted.Metadata != nil {
 		resource.Metadata = accepted.Metadata
 	}
-	tx, err := s.Deps.Resources.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	stored, err := s.putAcceptedBatch(ctx, tx, &resource, accepted.Contract)
-	if err != nil {
-		return nil, err
-	}
 	expected := submission.expected
 	if expected == nil {
 		expected = accepted.Expected
 	}
-	if err = s.Deps.Batches.ActivateTx(ctx, tx, resource.UUID, accepted.UpstreamID, expected); err != nil {
-		return nil, err
-	}
-	return stored, tx.Commit(ctx)
-}
-
-func (s *Server) putAcceptedBatch(ctx context.Context, tx pgx.Tx, resource *resources.Resource, contract []byte) (*resources.Resource, error) {
-	if contract != nil {
-		return s.Deps.Resources.PutDurableContractTx(ctx, tx, resource, contract)
-	}
-	return s.Deps.Resources.PutTx(ctx, tx, resource)
+	return s.Deps.Batches.ActivateResource(ctx, s.Deps.Resources, &resource, accepted.Contract, expected)
 }
 
 func (s *Server) RequireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *fault.Error {

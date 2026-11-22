@@ -86,14 +86,6 @@ export const getRevision = async (kind: Kind, id: string, revision: string) =>
       params: { path: { publication_id: id, revision_id: revision } }
     })
   );
-export const listProjects = () =>
-  collectCursorPages(async (cursor) =>
-    unwrapPage(
-      await apiClient.GET('/api/v1/projects', {
-        params: { query: { cursor, limit: 200 } }
-      })
-    )
-  );
 export const listServers = () =>
   collectCursorPages(async (cursor) =>
     unwrapPage(

@@ -22,6 +22,10 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 	}
 }
 
+func (s surface) refuse(x *kernel.Call, w http.ResponseWriter, e *fault.Error) {
+	s.kernel.RefuseOn(x, w, e, "openai")
+}
+
 func (s surface) serve(w http.ResponseWriter, r *http.Request) {
 	x, authority, ok := s.kernel.EnterPassthrough(w, r)
 	if !ok {
@@ -30,18 +34,18 @@ func (s surface) serve(w http.ResponseWriter, r *http.Request) {
 	defer s.kernel.Gate.Release(r.Context())
 	route, e := s.route(r, x, authority)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	x.Route = &route
 	if e := s.kernel.ReserveState(r.Context(), x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	defer s.kernel.SettleAdmission(r.Context(), x)
 	path, query, e := upstreamPath(r, &route)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	s.exchange(w, r, x, path, query)

@@ -180,6 +180,27 @@ func (s *Store) MarkUnknown(ctx context.Context, resourceID uuid.UUID, errorClas
 	return nil
 }
 
+func (s *Store) ActivateResource(ctx context.Context, store *resources.Store, resource *resources.Resource, contract []byte, expected *int64) (*resources.Resource, error) {
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var stored *resources.Resource
+	if contract != nil {
+		stored, err = store.PutDurableContractTx(ctx, tx, resource, contract)
+	} else {
+		stored, err = store.PutTx(ctx, tx, resource)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = s.ActivateTx(ctx, tx, resource.UUID, resource.UpstreamID, expected); err != nil {
+		return nil, err
+	}
+	return stored, tx.Commit(ctx)
+}
+
 func (s *Store) ActivateTx(ctx context.Context, tx pgx.Tx, resourceID uuid.UUID, upstreamID string, expected *int64) error {
 	tag, err := tx.Exec(ctx, `UPDATE olp.batch_settlements
 		SET state=$4,upstream_id=$2,expected_results=COALESCE(expected_results,$3),next_attempt_at=now(),

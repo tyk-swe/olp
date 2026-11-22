@@ -100,7 +100,9 @@ func TestCodeAccountBusyReturnsRetryWithoutPaidFallback(t *testing.T) {
 	w := httptest.NewRecorder()
 	inbound, _ := codeIngressFor("responses")
 	observation := codemode.Request{Operation: codemode.Operation{Name: "responses", Model: "gpt-model"}, Recoverable: true}
-	f.forwardCode(w, r, snapshot, route, observation, inbound, nil, nil, nil, func(err error) {
+	f.forwardCode(w, codeRequest{
+		r: r, release: snapshot, route: route, observation: observation, inbound: inbound, transport: codeadapter.HTTP,
+	}, nil, func(err error) {
 		f.codeRefuse(w, r, route, key.authority.ID, "", err)
 	})
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "1" ||

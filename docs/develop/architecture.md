@@ -11,7 +11,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Area | Backend and console owner |
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
-| Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
+| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
 | Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
 | Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |

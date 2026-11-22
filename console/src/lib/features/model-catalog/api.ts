@@ -22,10 +22,6 @@ export async function getPublicCatalog(
   );
 }
 
-export async function listExposureRoutes(signal?: AbortSignal) {
-  return unwrap(await apiClient.GET('/api/v1/routes', { signal })).items;
-}
-
 export async function getPublication(
   id: string,
   signal?: AbortSignal

@@ -236,13 +236,3 @@ export async function deleteCapturePolicy(
   );
   ensureOk(response);
 }
-
-export async function listCaptureRedactorOptions(signal?: AbortSignal) {
-  return collectCursorPages(async (cursor) => {
-    const response = await apiClient.GET('/api/v1/guardrails', {
-      params: { query: { limit: 100, cursor } },
-      signal
-    });
-    return unwrapPage(response);
-  });
-}

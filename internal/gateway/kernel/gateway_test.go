@@ -1488,8 +1488,11 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/v1/resources/"+resource.ID, nil)
 			w := httptest.NewRecorder()
 			endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/resources/resource-native"
-			status := h.gateway.RetainedDispatch(w, r, x, p, retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, resource, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-				h.gateway.Refuse(x, w, e)
+			status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+				Call: x, Pin: p, Endpoint: retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, Resource: resource, Parent: parent, URL: endpoint,
+				Fail: func(e *fault.Error) {
+					h.gateway.Refuse(x, w, e)
+				},
 			})
 			h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
@@ -1538,8 +1541,11 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+resource.ID, nil)
 	w := httptest.NewRecorder()
 	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native"
-	status := h.gateway.RetainedDispatch(w, r, x, p, e, resource, nil, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.Refuse(x, w, e)
+	status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint,
+		Fail: func(e *fault.Error) {
+			h.gateway.Refuse(x, w, e)
+		},
 	})
 	h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)
@@ -1588,8 +1594,11 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+parent.ID+"/files", nil)
 	w := httptest.NewRecorder()
 	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native/files"
-	status := h.gateway.RetainedDispatch(w, r, x, p, e, parent, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.Refuse(x, w, e)
+	status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: parent, Parent: parent, URL: endpoint,
+		Fail: func(e *fault.Error) {
+			h.gateway.Refuse(x, w, e)
+		},
 	})
 	h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)

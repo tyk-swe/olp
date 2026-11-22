@@ -14,8 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
-	"github.com/tyk-swe/olp/internal/routing/durablecontract"
-	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 type View struct{ snapshot *Snapshot }
@@ -196,12 +194,12 @@ func (v *View) InteractionTemplate(slug, target string) (*interaction.Template, 
 	return copyPointer(template), ok
 }
 
-func (v *View) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (v *View) RealtimeTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := v.snapshot.RealtimeTemplate(slug, target)
 	return copyPointer(template), ok
 }
 
-func (v *View) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (v *View) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := v.snapshot.WebRTCTemplate(slug, target)
 	return copyPointer(template), ok
 }
@@ -216,7 +214,7 @@ func (v *View) MediaTemplate(slug, target, operation string) (*mediacontract.Tem
 	return copyPointer(template), ok
 }
 
-func (v *View) DurableTemplate(slug, target string) (*durablecontract.Template, bool) {
+func (v *View) DurableTemplate(slug, target string) (*DurableTemplate, bool) {
 	template, ok := v.snapshot.DurableTemplate(slug, target)
 	return copyPointer(template), ok
 }

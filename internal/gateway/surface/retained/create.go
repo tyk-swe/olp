@@ -73,7 +73,9 @@ func (q retainedRequest) create() {
 		return
 	}
 	defer s.kernel.SettleFence(q.r.Context(), lifecycle.Close)
-	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, e, lifecycle.Resource(), q.parent, endpoint, body, contentType, lifecycle, q.reply.fail)
+	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), kernel.RetainedDispatchRequest{
+		Call: q.x, Pin: pin, Endpoint: e, Resource: lifecycle.Resource(), Parent: q.parent, URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: q.reply.fail,
+	})
 }
 
 func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {

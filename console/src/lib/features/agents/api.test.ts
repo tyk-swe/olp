@@ -152,7 +152,6 @@ describe('publication HTTP contracts', () => {
 
 describe('server and execution HTTP contracts', () => {
   it.each([
-    ['projects', api.listProjects],
     ['mcp-servers', api.listServers],
     ['mcp-user-grants', api.listMCPGrants]
   ] as const)(

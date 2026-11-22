@@ -14,10 +14,13 @@ import (
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	mcpaccounting "github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
@@ -29,8 +32,10 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/delivery"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 // metadataBuffer is how many request metadata events one producer replica may
@@ -191,10 +196,10 @@ func (f foundation) inferenceDependencies(templates kernel.Dependencies) kernel.
 	if pool == nil {
 		return deps
 	}
-	deps.CodeLedger = codesessions.New(pool)
-	deps.CodeAuthorizer = &codeaccounts.Authorizer{Pool: pool, Credentials: core.rt, Plugins: core.pluginHost}
-	deps.CodeResearch = codesessions.New(pool)
-	deps.ResearchAuth = &codeaccounts.Authorizer{Pool: pool, Credentials: core.rt, Plugins: core.pluginHost}
+	deps.Code = &codeforward.Services{
+		Ledger:     codesessions.New(pool),
+		Authorizer: &codeaccounts.Authorizer{Pool: pool, Credentials: core.rt, Plugins: core.pluginHost},
+	}
 	deps.Resources = resources.NewEncrypted(pool, f.stores.installation, core.keys)
 	deps.Resolver = resources.NewResolver(pool)
 	return deps
@@ -238,7 +243,12 @@ func (f foundation) accounted(templates kernel.Dependencies, accounting *deliver
 	}
 	pool, syncer := f.stores.pool, f.stores.shared.Syncer
 	deps := templates
-	deps.Debits = kernel.DurableSessionDebits(pool, f.stores.debitStore, syncer)
+	deps.Debits = &kernel.SessionDebits{
+		Session: debits.NewSession(f.stores.debitStore, syncer),
+		SettleWorkflow: func(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
+			return ingest.PersistWorkflowAttempt(ctx, pool, event, attempt)
+		},
+	}
 	deps.Admission.PendingCostAccountingReady = syncer.CheckOwnerAccounting
 	deps.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 	deps.Admission.CostAccountingReady = accounting.Check

@@ -355,12 +355,12 @@ func inferencePool(cfg Config) *admission.Pool {
 }
 
 func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *connectors.Auth) *codeforward.Forwarder {
-	if deps.CodeLedger == nil || deps.CodeAuthorizer == nil {
+	if deps.Code == nil || deps.Code.Ledger == nil || deps.Code.Authorizer == nil {
 		return nil
 	}
 	return codeforward.New(codeforward.Dependencies{
-		Ledger: deps.CodeLedger, Authorizer: deps.CodeAuthorizer, Research: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
-		Runtime: deps.Runtime, Sink: deps.Sink, Admission: deps.Admission, Gate: gate, Egress: deps.Egress, Auth: auth,
+		Services: *deps.Code,
+		Runtime:  deps.Runtime, Sink: deps.Sink, Admission: deps.Admission, Gate: gate, Egress: deps.Egress, Auth: auth,
 		Log: deps.Log, Now: time.Now, MaxBodyBytes: cfg.MaxBodyBytes, HeaderTimeout: UpstreamHeaderTimeout,
 	})
 }
@@ -368,7 +368,7 @@ func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *conn
 func normalizedDependencies(deps Dependencies) Dependencies {
 	return Dependencies{
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
-		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
+		Code:    deps.Code,
 		Runtime: deps.Runtime, Digester: deps.Digester, BudgetAuthority: deps.BudgetAuthority, TaskAttemptAdmitter: deps.TaskAttemptAdmitter,
 		TaskCapabilityAuthenticator: deps.TaskCapabilityAuthenticator, DelegationReauthenticator: deps.DelegationReauthenticator,
 		ObserveOverlap: deps.ObserveOverlap,
