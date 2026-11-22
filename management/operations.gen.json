@@ -5829,6 +5829,65 @@
     }
   },
   {
+    "name": "approve_budget_increase_request",
+    "group": "budget-groups",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/budget-increase-requests/{request_id}/approve",
+    "description": "Approve a temporary budget increase request",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "cancel_a2a_task_remote",
     "group": "a2a-tasks",
     "method": "POST",
@@ -15195,6 +15254,65 @@
     }
   },
   {
+    "name": "decline_budget_increase_request",
+    "group": "budget-groups",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/budget-increase-requests/{request_id}/decline",
+    "description": "Decline a temporary budget increase request",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_budget_group",
     "group": "budget-groups",
     "method": "DELETE",
@@ -17901,6 +18019,53 @@
           "additionalProperties": false,
           "required": [
             "increase_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_budget_increase_request",
+    "group": "budget-groups",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/budget-increase-requests/{request_id}",
+    "description": "Read a temporary budget increase request",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
           ]
         }
       },
@@ -21595,6 +21760,58 @@
     "read_only": true,
     "path": "/api/v1/budget-groups",
     "description": "list budget groups",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_budget_increase_requests",
+    "group": "budget-groups",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/budget-increase-requests",
+    "description": "List temporary budget increase requests",
     "scopes": [
       [
         "read"

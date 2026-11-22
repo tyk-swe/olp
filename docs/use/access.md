@@ -553,6 +553,33 @@ Reports separate `effective_limit`, `temporary_increase` and
 Rows retain audited target/amount/reason/expiry metadata after revocation.
 Increases are destination-local and excluded from promotion.
 
+### Requesting an increase
+
+A signed-in member who can see a project can ask for one increase against that
+project budget with `POST /api/v1/budget-increase-requests`, giving the project,
+the day, week or month window, an exact amount and a reason. The request binds
+to the project budget, its current window and its base cap at that moment, and
+asking never changes serving limits. Project members do the same from the
+Budget increases page in the console, where requests wait for review.
+
+Approving or declining takes the `keys` operation and project-manager access,
+the same authority as granting the increase directly, through
+`POST /api/v1/budget-increase-requests/{request_id}/approve` and the matching
+`decline` path. Nobody can approve their own request, installation admins
+included, while the direct grant above keeps its existing permission and audit
+trail.
+
+Approval records the decision and creates one normal increase in the same
+audited transaction, serialized per budget and window together with direct
+grants, after rechecking the base cap, the window, the eight active increase
+limit and the request state. Distinct approved requests add together, and a
+repeat approval returns the recorded decision without granting again. A
+changed base cap or a rolled window returns `budget_increase_request_stale`
+and needs a new request, and a full window returns the usual
+`budget_increase_limit` conflict with no grant and the request left pending.
+Pending requests read as expired once their window ends, and pending, declined
+and expired requests never change serving limits.
+
 ## Workload JWT identity
 
 Owners register `/api/v1/workload-issuers` with installation `access` authority.

@@ -23,6 +23,7 @@
   import BudgetIncreaseForm from './BudgetIncreaseForm.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
+  import BudgetIncreaseRequests from './BudgetIncreaseRequests.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
@@ -314,6 +315,8 @@
       >{/if}
   </div>
 </QueryView>
+
+<BudgetIncreaseRequests />
 
 <style>
   .lede {
