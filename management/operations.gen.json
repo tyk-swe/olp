@@ -5829,6 +5829,65 @@
     }
   },
   {
+    "name": "approve_budget_increase_request",
+    "group": "budget-groups",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/budget-increase-requests/{request_id}/approve",
+    "description": "Approve a temporary budget increase request",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "approve_mcp_server_catalog",
     "group": "mcp-servers",
     "method": "POST",
@@ -15297,6 +15356,65 @@
     }
   },
   {
+    "name": "decline_budget_increase_request",
+    "group": "budget-groups",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/budget-increase-requests/{request_id}/decline",
+    "description": "Decline a temporary budget increase request",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_budget_group",
     "group": "budget-groups",
     "method": "DELETE",
@@ -18003,6 +18121,53 @@
           "additionalProperties": false,
           "required": [
             "increase_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_budget_increase_request",
+    "group": "budget-groups",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/budget-increase-requests/{request_id}",
+    "description": "Read a temporary budget increase request",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "request_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "request_id"
           ]
         }
       },
@@ -21697,6 +21862,58 @@
     "read_only": true,
     "path": "/api/v1/budget-groups",
     "description": "list budget groups",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_budget_increase_requests",
+    "group": "budget-groups",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/budget-increase-requests",
+    "description": "List temporary budget increase requests",
     "scopes": [
       [
         "read"
@@ -40288,6 +40505,111 @@
             }
           },
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+        }
+      }
+    }
+  },
+  {
+    "name": "run_guardrail_fixtures",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/guardrails/run-fixtures",
+    "description": "Run a bounded set of synthetic guardrail fixtures against two pinned revisions of one policy. Only unary input and output entries with deterministic built-in evaluators run, and the report carries no fixture or transformed text.",
+    "scopes": [
+      [
+        "playground"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/GuardrailFixtureRunInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ],
+      "$defs": {
+        "GuardrailFixtureRunInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "baseline_policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "candidate_policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "synthetic": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "fixtures": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GuardrailFixture"
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "baseline_policy_revision_id",
+            "candidate_policy_revision_id",
+            "synthetic",
+            "fixtures"
+          ]
+        },
+        "GuardrailFixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "input",
+                "output"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "block",
+                "redact"
+              ]
+            },
+            "expected_redacted_text": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "text",
+            "expected"
+          ]
         }
       }
     }

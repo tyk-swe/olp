@@ -281,6 +281,11 @@ type Pinned struct {
 	Definitions map[string]Revision
 }
 
+type PinnedApplication struct {
+	Pinned      Pinned
+	Application Application
+}
+
 func (p Pinned) Compile() (PolicyRevision, *Engine, error) {
 	engine, err := Compile(p.Policy.Entries, p.Definitions)
 	return p.Policy, engine, err
