@@ -20,6 +20,8 @@
     busy,
     busyKey,
     onRotate,
+    onPause,
+    onResume,
     onRevoke
   }: {
     items: ApiKey[];
@@ -29,6 +31,8 @@
     busy: boolean;
     busyKey: string;
     onRotate: (key: ApiKey) => void;
+    onPause: (key: ApiKey) => void;
+    onResume: (key: ApiKey) => void;
     onRevoke: (key: ApiKey) => void;
   } = $props();
 </script>
@@ -63,14 +67,16 @@
           <td
             ><span
               class:danger={Boolean(key.revoked_at)}
-              class:warning={expired}
-              class:success={usable}
+              class:warning={expired || Boolean(key.paused_at)}
+              class:success={usable && !key.paused_at}
               class="badge"
               >{key.revoked_at
                 ? 'revoked'
                 : expired
                   ? 'expired'
-                  : 'active'}</span
+                  : key.paused_at
+                    ? 'paused'
+                    : 'active'}</span
             ><br /><small
               >{key.expires_at
                 ? `Expires ${formatDate(key.expires_at)}`
@@ -165,7 +171,23 @@
                 >{canManage && usable && !key.workload_issuer_id
                   ? 'Edit'
                   : 'View'}</a
-              >{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
+              >{#if canManage && usable}{#if key.paused_at}<button
+                    class="button button-secondary"
+                    type="button"
+                    onclick={() => onResume(key)}
+                    disabled={busy}
+                    >{busyKey === `resume-${key.id}`
+                      ? 'Resuming…'
+                      : 'Resume'}</button
+                  >{:else}<button
+                    class="button button-secondary"
+                    type="button"
+                    onclick={() => onPause(key)}
+                    disabled={busy}
+                    >{busyKey === `pause-${key.id}`
+                      ? 'Pausing…'
+                      : 'Pause'}</button
+                  >{/if}{/if}{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
                     class="button button-secondary"
                     type="button"
                     onclick={() => onRotate(key)}

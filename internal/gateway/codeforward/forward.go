@@ -23,6 +23,8 @@ import (
 func (f *Forwarder) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /code/{slug}/models", f.codeModels)
 	mux.HandleFunc("GET /code/{slug}/v1/models", f.codeModels)
+	mux.HandleFunc("GET /code/{slug}/status", f.codeThreadStatus)
+	mux.HandleFunc("GET /code/{slug}/v1/status", f.codeThreadStatus)
 	mux.HandleFunc("/code/{slug}/mcp/{service}", f.serveCodeResearch)
 	mux.HandleFunc("/code/{slug}/{operation...}", f.serveCode)
 }

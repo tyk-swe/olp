@@ -272,3 +272,122 @@ func TestPublishedRoutingOwnsConfigurationAndReturnedValues(t *testing.T) {
 		t.Fatalf("borrowed values changed published routing, plan %+v, error %v", after, err)
 	}
 }
+
+func boundedCostOptions(now time.Time, prices map[string][2]string, demand TokenDemand, preferences Preferences) Options {
+	inputs := &routinginputs.Inputs{RefreshedAt: now}
+	for id, rate := range prices {
+		input, output := rate[0], rate[1]
+		inputs.Prices = append(inputs.Prices, *rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "generation", InputPerMillion: &input, OutputPerMillion: &output, Currency: "USD"}, RevisionID: uuid.NewString(), Revision: 1, EffectiveAt: now.Add(-time.Hour)}))
+	}
+	return Options{Inputs: inputs, Now: now, TokenDemand: &demand, EstimateCost: true, Preferences: &preferences, WorstCost: func(_ Provider, _ Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (CostBound, bool) {
+		cost, ok := price.CostBound(demand.EstimatedInputTokens, *demand.MaxOutputTokens, true, now, discount)
+		return CostBound{Cost: cost, InputTokens: &demand.EstimatedInputTokens, OutputTokens: demand.MaxOutputTokens}, ok
+	}}
+}
+
+func attemptProviders(plan Plan) []string {
+	providers := make([]string, 0, len(plan.Attempts))
+	for _, attempt := range plan.Attempts {
+		providers = append(providers, attempt.ProviderID)
+	}
+	return providers
+}
+
+func decisionFor(plan Plan, provider string) Decision {
+	for _, decision := range plan.Decisions {
+		if decision.ProviderID == provider {
+			return decision
+		}
+	}
+	return Decision{}
+}
+
+func TestBoundedCostOrdersByUpperEstimateWithinTier(t *testing.T) {
+	s, slug, ids := planningFixture()
+	now := time.Now()
+	prices := map[string][2]string{ids[0]: {"1", "10"}, ids[1]: {"4", "2"}}
+	for _, mix := range []struct {
+		name          string
+		input, output int64
+		order         []string
+		maximums      [2]string
+	}{
+		{"long prompt", 10000, 1000, []string{ids[0], ids[1], ids[2]}, [2]string{"0.02", "0.042"}},
+		{"long answer", 1000, 10000, []string{ids[1], ids[0], ids[2]}, [2]string{"0.101", "0.024"}},
+	} {
+		plan, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(now, prices, TokenDemand{EstimatedInputTokens: mix.input, MaxOutputTokens: &mix.output}, Preferences{Strategy: ptr("bounded_cost")}))
+		if e != nil || !slices.Equal(attemptProviders(plan), mix.order) {
+			t.Fatalf("%s order: %v %v", mix.name, attemptProviders(plan), e)
+		}
+		for i, maximum := range mix.maximums {
+			got := decisionFor(plan, ids[i])
+			if got.EstimatedCost == nil || got.EstimatedCost.Maximum != maximum || *got.EstimatedCost.PricedInputTokens != mix.input || *got.EstimatedCost.ReservedOutputTokens != mix.output || got.BoundedCostFallbackReason != nil || got.MaxCost != nil {
+				t.Fatalf("%s ranked decision: %+v", mix.name, got)
+			}
+		}
+		if unknown := decisionFor(plan, ids[2]); unknown.BoundedCostFallbackReason == nil || *unknown.BoundedCostFallbackReason != "cost_bound_unknown" {
+			t.Fatalf("%s unpriced decision: %+v", mix.name, unknown)
+		}
+	}
+	price, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(now, prices, TokenDemand{EstimatedInputTokens: 10000, MaxOutputTokens: ptr(int64(1000))}, Preferences{Strategy: ptr("price")}))
+	if e != nil || attemptProviders(price)[0] != ids[1] {
+		t.Fatalf("price strategy order: %v %v", attemptProviders(price), e)
+	}
+	route := s.Routes[slug]
+	route.Targets[1].Priority = -1
+	s.Routes[slug] = route
+	tiered, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(now, prices, TokenDemand{EstimatedInputTokens: 10000, MaxOutputTokens: ptr(int64(1000))}, Preferences{Strategy: ptr("bounded_cost")}))
+	if e != nil || attemptProviders(tiered)[0] != ids[1] {
+		t.Fatalf("bounded cost escaped priority tier: %v %v", attemptProviders(tiered), e)
+	}
+}
+
+func TestBoundedCostReportsCeilingApartFromEstimate(t *testing.T) {
+	s, slug, ids := planningFixture()
+	prices := map[string][2]string{ids[0]: {"1", "10"}, ids[1]: {"4", "2"}}
+	plan, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(time.Now(), prices, TokenDemand{EstimatedInputTokens: 10000, MaxOutputTokens: ptr(int64(1000))}, Preferences{Strategy: ptr("bounded_cost"), MaxCost: ptr("0.025")}))
+	if e != nil || !slices.Equal(attemptProviders(plan), []string{ids[0]}) {
+		t.Fatalf("ceiling attempts: %v %v", attemptProviders(plan), e)
+	}
+	excluded := decisionFor(plan, ids[1])
+	if excluded.Reason == nil || *excluded.Reason != "cost_limit_exceeded" || excluded.EstimatedCost == nil || excluded.EstimatedCost.Maximum != "0.042" {
+		t.Fatalf("excluded decision: %+v", excluded)
+	}
+	for _, decision := range plan.Decisions {
+		if decision.MaxCost == nil || *decision.MaxCost != "0.025" {
+			t.Fatalf("effective ceiling missing: %+v", decision)
+		}
+	}
+}
+
+func TestBoundedCostKeepsWeightedOrderWithoutTwoBounds(t *testing.T) {
+	s, slug, ids := planningFixture()
+	now := time.Now()
+	demand := TokenDemand{EstimatedInputTokens: 10000, MaxOutputTokens: ptr(int64(1000))}
+	for _, prices := range []map[string][2]string{{}, {ids[0]: {"1", "10"}}} {
+		weighted, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(now, prices, demand, Preferences{Strategy: ptr("weighted")}))
+		if e != nil {
+			t.Fatal(e)
+		}
+		plan, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), boundedCostOptions(now, prices, demand, Preferences{Strategy: ptr("bounded_cost")}))
+		if e != nil || !slices.Equal(attemptProviders(plan), attemptProviders(weighted)) {
+			t.Fatalf("%d bounds: bounded %v weighted %v %v", len(prices), attemptProviders(plan), attemptProviders(weighted), e)
+		}
+		for _, decision := range plan.Decisions {
+			if decision.BoundedCostFallbackReason == nil || *decision.BoundedCostFallbackReason != "insufficient_cost_bounds" {
+				t.Fatalf("%d bounds fallback unexplained: %+v", len(prices), decision)
+			}
+		}
+	}
+	tied := map[string][2]string{ids[0]: {"1", "10"}, ids[1]: {"1", "10"}, ids[2]: {"1", "10"}}
+	for _, seed := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		weighted, e := Select(&s, slug, "generation", "openai", "unary", []byte(seed), boundedCostOptions(now, tied, demand, Preferences{Strategy: ptr("weighted")}))
+		if e != nil {
+			t.Fatal(e)
+		}
+		plan, e := Select(&s, slug, "generation", "openai", "unary", []byte(seed), boundedCostOptions(now, tied, demand, Preferences{Strategy: ptr("bounded_cost")}))
+		if e != nil || !slices.Equal(attemptProviders(plan), attemptProviders(weighted)) {
+			t.Fatalf("tie on seed %s: bounded %v weighted %v %v", seed, attemptProviders(plan), attemptProviders(weighted), e)
+		}
+	}
+}

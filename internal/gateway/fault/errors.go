@@ -50,12 +50,16 @@ func WriteSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	if surface == "bedrock" {
 		h.Set("X-Amzn-Errortype", e.Code)
 	}
-	if e.RetryAfter > 0 {
-		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.RetryAfter.Seconds())), 10))
-	}
+	SetRetryAfter(h, e.RetryAfter)
 	setRateLimitHeaders(h, surface, e.Rate)
 	w.WriteHeader(e.Status)
 	w.Write(e.SurfaceBody(surface))
+}
+
+func SetRetryAfter(h http.Header, wait time.Duration) {
+	if wait > 0 {
+		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(wait.Seconds())), 10))
+	}
 }
 
 func InvalidRequest(code, message string, param *string) *Error {

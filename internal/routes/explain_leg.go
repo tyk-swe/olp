@@ -68,7 +68,7 @@ func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKe
 	return prepare, inspections
 }
 
-func (s *Server) buildLegOptions(m *simulation, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, via usage.LegVia, parsed *wire.Request, mediaRequest *media.Request, counted *simulatedDemand, prepare routing.PrepareCandidate) routing.Options {
+func (s *Server) buildLegOptions(m *simulation, named, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, via usage.LegVia, parsed *wire.Request, mediaRequest *media.Request, counted *simulatedDemand, prepare routing.PrepareCandidate) routing.Options {
 	preferences := input.Preferences
 	if via != "" && preferences != nil {
 		// Like the gateway, a route the request moves to keeps the caller's
@@ -86,9 +86,10 @@ func (s *Server) buildLegOptions(m *simulation, route routing.Route, key inspect
 		// A simulation reports what each target could cost and applies the
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
-		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
+		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 			return simulatedWorstCost(input.Operation, mediaRequest, counted, provider, target, price, discount, now)
 		},
+		CallerCostExempt: named.CallerCostExempt,
 	}
 	if key.reason != "" {
 		options.Prepare = nil
@@ -106,22 +107,24 @@ func (s *Server) buildLegOptions(m *simulation, route routing.Route, key inspect
 	return options
 }
 
-func simulatedWorstCost(operation string, mediaRequest *media.Request, counted *simulatedDemand, provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount, now time.Time) (rates.Cost, bool) {
-	if !operationregistry.PolicyFor(operation).BoundedWork {
-		return rates.Cost{}, false
+func simulatedWorstCost(operation string, mediaRequest *media.Request, counted *simulatedDemand, provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount, now time.Time) (routing.CostBound, bool) {
+	if !operationregistry.PolicyFor(operation).BoundedWork || price == nil {
+		return routing.CostBound{}, false
 	}
-	if provider.Commitment != nil {
-		return rates.Cost{}, true
+	if provider.CommitmentAt(now) != nil {
+		return routing.CostBound{}, true
 	}
 	if mediaRequest != nil {
 		seconds, video := mediaRequest.VideoSeconds()
 		if !video {
-			return rates.Cost{}, false
+			return routing.CostBound{}, false
 		}
-		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
+		cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
+		return routing.CostBound{Cost: cost}, ok
 	}
 	if operation == "search" {
-		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
+		cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
+		return routing.CostBound{Cost: cost}, ok
 	}
 	if counted.prompt != nil {
 		from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
@@ -136,15 +139,16 @@ func simulatedWorstCost(operation string, mediaRequest *media.Request, counted *
 		if counted.prompt.Request().Family == wire.Completions && from.Output == nil && to.Output != nil {
 			from.Output = to.Output
 		}
-		output := max(from.Reply(), to.Reply())
-		return price.CostBound(max(from.InputExposure(), to.InputExposure()), output, output > 0, now, discount)
+		input, output := max(from.InputExposure(), to.InputExposure()), max(from.Reply(), to.Reply())
+		cost, priced := price.CostBound(input, output, output > 0, now, discount)
+		return routing.CostBound{Cost: cost, InputTokens: &input, OutputTokens: &output}, priced
 	}
 	d := counted.fixed
 	if demand := counted.sourceDemand(); demand != nil {
 		d = demand(provider, target)
 	}
 	if d == nil {
-		return rates.Cost{}, false
+		return routing.CostBound{}, false
 	}
 	output := int64(0)
 	if d.MaxOutputTokens != nil {
@@ -152,5 +156,7 @@ func simulatedWorstCost(operation string, mediaRequest *media.Request, counted *
 	} else if operation == "generation" {
 		output = estimate.DefaultOutputTokens
 	}
-	return price.CostBound(d.EstimatedInputTokens, output, output > 0, now, discount)
+	input := d.EstimatedInputTokens
+	cost, ok := price.CostBound(input, output, output > 0, now, discount)
+	return routing.CostBound{Cost: cost, InputTokens: &input, OutputTokens: &output}, ok
 }

@@ -26,7 +26,10 @@
   } from '#lib/listing/pagination.js';
 
   import {
+    getApiKeyPauseRollout,
     listApiKeyPage,
+    pauseApiKey,
+    resumeApiKey,
     revokeApiKey,
     rotateApiKey,
     type ApiKey,
@@ -41,6 +44,8 @@
   const write = useAction();
   const rotateIntent = useMutationIntent();
   const revokeIntent = useMutationIntent();
+  const pauseIntent = useMutationIntent();
+  const resumeIntent = useMutationIntent();
 
   let {
     listState = $bindable(),
@@ -59,12 +64,20 @@
   let overlapSeconds = $state('0');
   let rotationError = $state('');
   let rotationAttempted = $state(false);
+  let pauseSavedFor = $state('');
   usePrincipalLifetime(() => {
     rotating = null;
     overlapSeconds = '0';
     rotationAttempted = false;
     rotationError = '';
+    pauseSavedFor = '';
   });
+  const pauseRollout = createQuery(() => ({
+    queryKey: apiKeyKeys.pauseRollout(pauseSavedFor),
+    queryFn: ({ signal }) => getApiKeyPauseRollout(pauseSavedFor, signal),
+    enabled: Boolean(pauseSavedFor),
+    refetchInterval: (query) => (query.state.data?.enforced ? false : 5000)
+  }));
   const createdBy = $derived(
     page.url.searchParams.get('created_by')?.trim().toLowerCase() || undefined
   );
@@ -137,6 +150,43 @@
     );
   }
 
+  async function pause(key: ApiKey) {
+    if (
+      !(await confirmAction({
+        title: `Pause ${key.name}?`,
+        body: 'New requests using this key are refused once serving replicas pick up the change. Already admitted work is not canceled. Rotate or revoke a key you suspect is compromised instead.',
+        confirmLabel: 'Pause key'
+      }))
+    )
+      return;
+    await write.run(
+      () =>
+        pauseIntent.submit({ id: key.id, etag: key.etag }, (input, requestId) =>
+          pauseApiKey(input, requestId)
+        ),
+      async () => {
+        pauseSavedFor = key.id;
+        await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
+      },
+      { key: `pause-${key.id}` }
+    );
+  }
+
+  async function resume(key: ApiKey) {
+    await write.run(
+      () =>
+        resumeIntent.submit(
+          { id: key.id, etag: key.etag },
+          (input, requestId) => resumeApiKey(input, requestId)
+        ),
+      async () => {
+        if (pauseSavedFor === key.id) pauseSavedFor = '';
+        await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
+      },
+      { key: `resume-${key.id}` }
+    );
+  }
+
   async function revoke(key: ApiKey) {
     if (
       !(await confirmAction({
@@ -184,6 +234,11 @@
 {#if submitError || write.error}<div class="inline-problem" role="alert">
     {submitError || write.error}
   </div>{/if}
+{#if pauseSavedFor}<p class="muted" role="status">
+    {pauseRollout.data?.paused && pauseRollout.data.enforced
+      ? 'Pause enforced across serving replicas'
+      : 'Pause saved. Enforcement across replicas is not yet confirmed.'}
+  </p>{/if}
 
 <div class="toolbar issuer-filter">
   <label for="key-issuer"
@@ -235,6 +290,8 @@
     busy={write.busy}
     busyKey={write.key}
     onRotate={openRotation}
+    onPause={pause}
+    onResume={resume}
     onRevoke={revoke}
   />
   <CursorPagination

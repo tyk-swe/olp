@@ -442,6 +442,30 @@ func (e ApiKeyDetailResponseEndUserSource) Valid() bool {
 	}
 }
 
+// Defines values for ApproveMCPServerCatalogRequestProtocolVersion.
+const (
+	ApproveMCPServerCatalogRequestProtocolVersionN20241105 ApproveMCPServerCatalogRequestProtocolVersion = "2024-11-05"
+	ApproveMCPServerCatalogRequestProtocolVersionN20250326 ApproveMCPServerCatalogRequestProtocolVersion = "2025-03-26"
+	ApproveMCPServerCatalogRequestProtocolVersionN20250618 ApproveMCPServerCatalogRequestProtocolVersion = "2025-06-18"
+	ApproveMCPServerCatalogRequestProtocolVersionN20251125 ApproveMCPServerCatalogRequestProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the ApproveMCPServerCatalogRequestProtocolVersion enum.
+func (e ApproveMCPServerCatalogRequestProtocolVersion) Valid() bool {
+	switch e {
+	case ApproveMCPServerCatalogRequestProtocolVersionN20241105:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20250326:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20250618:
+		return true
+	case ApproveMCPServerCatalogRequestProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttemptInteractionMetadataClientState.
 const (
 	AttemptInteractionMetadataClientStateActionable        AttemptInteractionMetadataClientState = "actionable"
@@ -4426,6 +4450,72 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPCatalogModifiedToolChangedFields.
+const (
+	Description MCPCatalogModifiedToolChangedFields = "description"
+	InputSchema MCPCatalogModifiedToolChangedFields = "input_schema"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogModifiedToolChangedFields enum.
+func (e MCPCatalogModifiedToolChangedFields) Valid() bool {
+	switch e {
+	case Description:
+		return true
+	case InputSchema:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPCatalogPreviewResponseDiscoveredProtocolVersion.
+const (
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20241105 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2024-11-05"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250326 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-03-26"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250618 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-06-18"
+	MCPCatalogPreviewResponseDiscoveredProtocolVersionN20251125 MCPCatalogPreviewResponseDiscoveredProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogPreviewResponseDiscoveredProtocolVersion enum.
+func (e MCPCatalogPreviewResponseDiscoveredProtocolVersion) Valid() bool {
+	switch e {
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20241105:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250326:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20250618:
+		return true
+	case MCPCatalogPreviewResponseDiscoveredProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPCatalogPreviewResponseSavedProtocolVersion.
+const (
+	MCPCatalogPreviewResponseSavedProtocolVersionN20241105 MCPCatalogPreviewResponseSavedProtocolVersion = "2024-11-05"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20250326 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-03-26"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20250618 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-06-18"
+	MCPCatalogPreviewResponseSavedProtocolVersionN20251125 MCPCatalogPreviewResponseSavedProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPCatalogPreviewResponseSavedProtocolVersion enum.
+func (e MCPCatalogPreviewResponseSavedProtocolVersion) Valid() bool {
+	switch e {
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20241105:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20250326:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20250618:
+		return true
+	case MCPCatalogPreviewResponseSavedProtocolVersionN20251125:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MCPGrantAuthorizationState.
 const (
 	MCPGrantAuthorizationStateActive  MCPGrantAuthorizationState = "active"
@@ -4551,22 +4641,22 @@ func (e MCPIdentityDecisionOutcome) Valid() bool {
 
 // Defines values for MCPRegisteredCatalogProtocolVersion.
 const (
-	N20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
-	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
-	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
-	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
+	MCPRegisteredCatalogProtocolVersionN20241105 MCPRegisteredCatalogProtocolVersion = "2024-11-05"
+	MCPRegisteredCatalogProtocolVersionN20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
+	MCPRegisteredCatalogProtocolVersionN20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
+	MCPRegisteredCatalogProtocolVersionN20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
 )
 
 // Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
 func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
 	switch e {
-	case N20241105:
+	case MCPRegisteredCatalogProtocolVersionN20241105:
 		return true
-	case N20250326:
+	case MCPRegisteredCatalogProtocolVersionN20250326:
 		return true
-	case N20250618:
+	case MCPRegisteredCatalogProtocolVersionN20250618:
 		return true
-	case N20251125:
+	case MCPRegisteredCatalogProtocolVersionN20251125:
 		return true
 	default:
 		return false
@@ -5068,6 +5158,36 @@ func (e ManagementTokenScope) Valid() bool {
 	case ManagementTokenScopeSettings:
 		return true
 	case ManagementTokenScopeUsage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MeteringDeliveryLookupOutcome.
+const (
+	MeteringDeliveryLookupOutcomeAccepted              MeteringDeliveryLookupOutcome = "accepted"
+	MeteringDeliveryLookupOutcomeDeliveryUnconfirmed   MeteringDeliveryLookupOutcome = "delivery_unconfirmed"
+	MeteringDeliveryLookupOutcomeExpiredBeforeDelivery MeteringDeliveryLookupOutcome = "expired_before_delivery"
+	MeteringDeliveryLookupOutcomeNoRetainedEvidence    MeteringDeliveryLookupOutcome = "no_retained_evidence"
+	MeteringDeliveryLookupOutcomePending               MeteringDeliveryLookupOutcome = "pending"
+	MeteringDeliveryLookupOutcomeRetrying              MeteringDeliveryLookupOutcome = "retrying"
+)
+
+// Valid indicates whether the value is a known member of the MeteringDeliveryLookupOutcome enum.
+func (e MeteringDeliveryLookupOutcome) Valid() bool {
+	switch e {
+	case MeteringDeliveryLookupOutcomeAccepted:
+		return true
+	case MeteringDeliveryLookupOutcomeDeliveryUnconfirmed:
+		return true
+	case MeteringDeliveryLookupOutcomeExpiredBeforeDelivery:
+		return true
+	case MeteringDeliveryLookupOutcomeNoRetainedEvidence:
+		return true
+	case MeteringDeliveryLookupOutcomePending:
+		return true
+	case MeteringDeliveryLookupOutcomeRetrying:
 		return true
 	default:
 		return false
@@ -5944,6 +6064,24 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindVertexAi:
 		return true
 	case ProviderKindWatsonx:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderListingComparisonResponseStatus.
+const (
+	ProviderListingComparisonResponseStatusComplete   ProviderListingComparisonResponseStatus = "complete"
+	ProviderListingComparisonResponseStatusIncomplete ProviderListingComparisonResponseStatus = "incomplete"
+)
+
+// Valid indicates whether the value is a known member of the ProviderListingComparisonResponseStatus enum.
+func (e ProviderListingComparisonResponseStatus) Valid() bool {
+	switch e {
+	case ProviderListingComparisonResponseStatusComplete:
+		return true
+	case ProviderListingComparisonResponseStatusIncomplete:
 		return true
 	default:
 		return false
@@ -6904,18 +7042,45 @@ func (e RouteTemplateResultOutcome) Valid() bool {
 	}
 }
 
+// Defines values for RoutingDecisionBoundedCostFallbackReason.
+const (
+	RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown       RoutingDecisionBoundedCostFallbackReason = "cost_bound_unknown"
+	RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds RoutingDecisionBoundedCostFallbackReason = "insufficient_cost_bounds"
+	RoutingDecisionBoundedCostFallbackReasonLessThannil            RoutingDecisionBoundedCostFallbackReason = "<nil>"
+	RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration RoutingDecisionBoundedCostFallbackReason = "operation_not_generation"
+)
+
+// Valid indicates whether the value is a known member of the RoutingDecisionBoundedCostFallbackReason enum.
+func (e RoutingDecisionBoundedCostFallbackReason) Valid() bool {
+	switch e {
+	case RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonLessThannil:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
-	RoutingStrategyCapacity   RoutingStrategy = "capacity"
-	RoutingStrategyLatency    RoutingStrategy = "latency"
-	RoutingStrategyPrice      RoutingStrategy = "price"
-	RoutingStrategyThroughput RoutingStrategy = "throughput"
-	RoutingStrategyWeighted   RoutingStrategy = "weighted"
+	RoutingStrategyBoundedCost RoutingStrategy = "bounded_cost"
+	RoutingStrategyCapacity    RoutingStrategy = "capacity"
+	RoutingStrategyLatency     RoutingStrategy = "latency"
+	RoutingStrategyPrice       RoutingStrategy = "price"
+	RoutingStrategyThroughput  RoutingStrategy = "throughput"
+	RoutingStrategyWeighted    RoutingStrategy = "weighted"
 )
 
 // Valid indicates whether the value is a known member of the RoutingStrategy enum.
 func (e RoutingStrategy) Valid() bool {
 	switch e {
+	case RoutingStrategyBoundedCost:
+		return true
 	case RoutingStrategyCapacity:
 		return true
 	case RoutingStrategyLatency:
@@ -8608,6 +8773,7 @@ type ApiKeyDetailResponse struct {
 	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
 	MaxPriority nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
 	Name        string                               `json:"name"`
+	PausedAt    nullable.Nullable[time.Time]         `json:"paused_at,omitempty"`
 
 	// Priority Admission class of requests that name none; defaults to normal.
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
@@ -8667,6 +8833,29 @@ type ApiKeyMutationResponse struct {
 	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
 }
 
+// ApiKeyPauseReplica defines model for ApiKeyPauseReplica.
+type ApiKeyPauseReplica struct {
+	AuthoritySequence nullable.Nullable[int64] `json:"authority_sequence"`
+	GatewayInstance   string                   `json:"gateway_instance"`
+}
+
+// ApiKeyPauseResponse defines model for ApiKeyPauseResponse.
+type ApiKeyPauseResponse struct {
+	Etag              openapi_types.UUID           `json:"etag"`
+	Paused            bool                         `json:"paused"`
+	PausedAt          nullable.Nullable[time.Time] `json:"paused_at,omitempty"`
+	RuntimeGeneration RuntimeGenerationResponse    `json:"runtime_generation"`
+}
+
+// ApiKeyPauseRolloutResponse defines model for ApiKeyPauseRolloutResponse.
+type ApiKeyPauseRolloutResponse struct {
+	Enforced                bool                         `json:"enforced"`
+	Paused                  bool                         `json:"paused"`
+	PausedAt                nullable.Nullable[time.Time] `json:"paused_at,omitempty"`
+	PausedAuthoritySequence nullable.Nullable[int64]     `json:"paused_authority_sequence,omitempty"`
+	Replicas                []ApiKeyPauseReplica         `json:"replicas"`
+}
+
 // ApiKeyRouteLimits Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend.
 type ApiKeyRouteLimits map[string]EndUserLimits
 
@@ -8678,6 +8867,18 @@ type AppliedRoutingPolicy struct {
 	Strategy      RoutingStrategy           `json:"strategy"`
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
+
+// ApproveMCPServerCatalogRequest defines model for ApproveMCPServerCatalogRequest.
+type ApproveMCPServerCatalogRequest struct {
+	// Digest Catalog digest discovered by the reviewed catalog preview.
+	Digest string `json:"digest"`
+
+	// ProtocolVersion Protocol version discovered by the reviewed catalog preview.
+	ProtocolVersion ApproveMCPServerCatalogRequestProtocolVersion `json:"protocol_version"`
+}
+
+// ApproveMCPServerCatalogRequestProtocolVersion Protocol version discovered by the reviewed catalog preview.
+type ApproveMCPServerCatalogRequestProtocolVersion string
 
 // AttemptInteractionMetadata Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
 type AttemptInteractionMetadata struct {
@@ -12625,6 +12826,53 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// MCPCatalogModifiedTool defines model for MCPCatalogModifiedTool.
+type MCPCatalogModifiedTool struct {
+	ChangedFields         []MCPCatalogModifiedToolChangedFields `json:"changed_fields"`
+	DiscoveredDescription string                                `json:"discovered_description"`
+	DiscoveredInputSchema map[string]interface{}                `json:"discovered_input_schema"`
+	Name                  string                                `json:"name"`
+	SavedDescription      string                                `json:"saved_description"`
+	SavedInputSchema      map[string]interface{}                `json:"saved_input_schema"`
+}
+
+// MCPCatalogModifiedToolChangedFields defines model for MCPCatalogModifiedTool.ChangedFields.
+type MCPCatalogModifiedToolChangedFields string
+
+// MCPCatalogPreviewResponse defines model for MCPCatalogPreviewResponse.
+type MCPCatalogPreviewResponse struct {
+	Added                     []MCPRegisteredTool                                `json:"added"`
+	DiscoveredDigest          string                                             `json:"discovered_digest"`
+	DiscoveredProtocolVersion MCPCatalogPreviewResponseDiscoveredProtocolVersion `json:"discovered_protocol_version"`
+	Etag                      openapi_types.UUID                                 `json:"etag"`
+	Modified                  []MCPCatalogModifiedTool                           `json:"modified"`
+	Removed                   []MCPRegisteredTool                                `json:"removed"`
+	Revision                  int64                                              `json:"revision"`
+	RevisionId                openapi_types.UUID                                 `json:"revision_id"`
+	SavedDigest               string                                             `json:"saved_digest"`
+	SavedProtocolVersion      MCPCatalogPreviewResponseSavedProtocolVersion      `json:"saved_protocol_version"`
+	ServerId                  openapi_types.UUID                                 `json:"server_id"`
+
+	// Toolsets Visible published toolsets whose current revision pins any tool on this server. Approval creates a new server revision, so each one serves these tools again only after it is republished.
+	Toolsets []MCPCatalogToolsetReference `json:"toolsets"`
+}
+
+// MCPCatalogPreviewResponseDiscoveredProtocolVersion defines model for MCPCatalogPreviewResponse.DiscoveredProtocolVersion.
+type MCPCatalogPreviewResponseDiscoveredProtocolVersion string
+
+// MCPCatalogPreviewResponseSavedProtocolVersion defines model for MCPCatalogPreviewResponse.SavedProtocolVersion.
+type MCPCatalogPreviewResponseSavedProtocolVersion string
+
+// MCPCatalogToolsetReference defines model for MCPCatalogToolsetReference.
+type MCPCatalogToolsetReference struct {
+	Id         openapi_types.UUID `json:"id"`
+	Name       string             `json:"name"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+
+	// Tools Tool names this published toolset pins on this server.
+	Tools []string `json:"tools"`
+}
+
 // MCPDelegationConfiguration defines model for MCPDelegationConfiguration.
 type MCPDelegationConfiguration struct {
 	Audience string `json:"audience"`
@@ -13229,6 +13477,40 @@ type MediaJobListResponse struct {
 	Items      []MediaJobItem            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
+
+// MeteringDeliveryLookup What OLP can prove about one priced attempt's delivery to one CloudEvents metering sink. Accepted means the sink answered 2xx and OLP recorded it. Delivery unconfirmed means retries ended after a send may have occurred without a recorded acknowledgement. No payload or destination is included.
+type MeteringDeliveryLookup struct {
+	// AttemptId Attempt id, which is also the CloudEvents event id
+	AttemptId openapi_types.UUID `json:"attempt_id"`
+
+	// Attempts Delivery claims made for this attempt on this sink, or null when no evidence remains
+	Attempts nullable.Nullable[int32] `json:"attempts"`
+
+	// EventId Durable export record id sent as X-OLP-Event-ID, or null when no evidence remains
+	EventId      nullable.Nullable[openapi_types.UUID] `json:"event_id"`
+	ExportSinkId openapi_types.UUID                    `json:"export_sink_id"`
+
+	// LastAttemptAt When the most recent delivery claim was made, or null
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastErrorCode Safe category of the most recent delivery failure, or null
+	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
+
+	// OccurredAt When the priced attempt was observed, or null when no evidence remains
+	OccurredAt nullable.Nullable[time.Time] `json:"occurred_at"`
+
+	// Outcome pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope
+	Outcome MeteringDeliveryLookupOutcome `json:"outcome"`
+
+	// QueuedAt When the export record was queued, or null when no evidence remains
+	QueuedAt nullable.Nullable[time.Time] `json:"queued_at"`
+
+	// SettledAt When delivery was recorded as accepted or the receipt reached its terminal state, or null while queued
+	SettledAt nullable.Nullable[time.Time] `json:"settled_at"`
+}
+
+// MeteringDeliveryLookupOutcome pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope
+type MeteringDeliveryLookupOutcome string
 
 // ModelCatalogResponse defines model for ModelCatalogResponse.
 type ModelCatalogResponse struct {
@@ -14934,6 +15216,51 @@ type ProviderKindCapabilityResponse struct {
 type ProviderListResponse struct {
 	Items      []ProviderSummaryResponse `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ProviderListingComparisonResponse A comparison of one complete upstream model listing with the published inventory of one active provider revision. An incomplete comparison carries no new, changed or missing-model verdicts. Not listed does not mean retired.
+type ProviderListingComparisonResponse struct {
+	ApiVersion          string                                     `json:"api_version"`
+	ChangedDisplayNames []ProviderListingDisplayNameChangeResponse `json:"changed_display_names"`
+	CheckedAt           time.Time                                  `json:"checked_at"`
+	CredentialVersion   int32                                      `json:"credential_version"`
+	Detail              string                                     `json:"detail"`
+	NewModels           []ProviderListingNewModelResponse          `json:"new_models"`
+	NotListed           []ProviderListingOmissionResponse          `json:"not_listed"`
+	ProviderId          openapi_types.UUID                         `json:"provider_id"`
+	Revision            int32                                      `json:"revision"`
+	RevisionId          openapi_types.UUID                         `json:"revision_id"`
+	Status              ProviderListingComparisonResponseStatus    `json:"status"`
+	Unverified          []ProviderListingOmissionResponse          `json:"unverified"`
+}
+
+// ProviderListingComparisonResponseStatus defines model for ProviderListingComparisonResponse.Status.
+type ProviderListingComparisonResponseStatus string
+
+// ProviderListingDisplayNameChangeResponse defines model for ProviderListingDisplayNameChangeResponse.
+type ProviderListingDisplayNameChangeResponse struct {
+	ListedDisplayName    string `json:"listed_display_name"`
+	PublishedDisplayName string `json:"published_display_name"`
+	UpstreamModel        string `json:"upstream_model"`
+}
+
+// ProviderListingNewModelResponse defines model for ProviderListingNewModelResponse.
+type ProviderListingNewModelResponse struct {
+	DisplayName   string `json:"display_name"`
+	UpstreamModel string `json:"upstream_model"`
+}
+
+// ProviderListingOmissionResponse defines model for ProviderListingOmissionResponse.
+type ProviderListingOmissionResponse struct {
+	DisplayName   string                         `json:"display_name"`
+	Routes        []ProviderListingRouteResponse `json:"routes"`
+	UpstreamModel string                         `json:"upstream_model"`
+}
+
+// ProviderListingRouteResponse defines model for ProviderListingRouteResponse.
+type ProviderListingRouteResponse struct {
+	Id   openapi_types.UUID `json:"id"`
+	Slug string             `json:"slug"`
 }
 
 // ProviderModelInventoryListResponse defines model for ProviderModelInventoryListResponse.
@@ -16854,8 +17181,11 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt       nullable.Nullable[int]   `json:"attempt,omitempty"`
-	ContextLength nullable.Nullable[int64] `json:"context_length,omitempty"`
+	Attempt nullable.Nullable[int] `json:"attempt,omitempty"`
+
+	// BoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+	BoundedCostFallbackReason nullable.Nullable[RoutingDecisionBoundedCostFallbackReason] `json:"bounded_cost_fallback_reason,omitempty"`
+	ContextLength             nullable.Nullable[int64]                                    `json:"context_length,omitempty"`
 
 	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
 	ContextWindow    *RouteContextWindowPreview            `json:"context_window,omitempty"`
@@ -16865,11 +17195,17 @@ type RoutingDecision struct {
 	// EstimateProvenance How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.
 	EstimateProvenance nullable.Nullable[string] `json:"estimate_provenance,omitempty"`
 
-	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.
+	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve, with the priced input estimate and reserved output allowance the maximum covers. Null when the price cannot bound the request or no demand is known.
 	EstimatedCost nullable.Nullable[struct {
 		Currency string `json:"currency"`
 		Maximum  string `json:"maximum"`
 		Minimum  string `json:"minimum"`
+
+		// PricedInputTokens The input tokens the maximum priced. Null when the bound did not price tokens.
+		PricedInputTokens nullable.Nullable[int64] `json:"priced_input_tokens,omitempty"`
+
+		// ReservedOutputTokens The output allowance the maximum reserved: the declared reply bound, or the default allowance when none was declared. Null when the bound did not price tokens.
+		ReservedOutputTokens nullable.Nullable[int64] `json:"reserved_output_tokens,omitempty"`
 	}] `json:"estimated_cost,omitempty"`
 
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
@@ -16885,7 +17221,10 @@ type RoutingDecision struct {
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
 	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification.
-	Interaction        *InteractionInspection       `json:"interaction,omitempty"`
+	Interaction *InteractionInspection `json:"interaction,omitempty"`
+
+	// MaxCost The effective cost ceiling eligibility applied, in the installation currency. Null when no scope set one. The ceiling is the configured rule that admitted the attempt, separate from the attempt's own estimated_cost.
+	MaxCost            nullable.Nullable[string]    `json:"max_cost,omitempty"`
 	MaxOutputTokens    nullable.Nullable[int64]     `json:"max_output_tokens,omitempty"`
 	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
 
@@ -16913,6 +17252,9 @@ type RoutingDecision struct {
 	UpstreamModel string                    `json:"upstream_model"`
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
+
+// RoutingDecisionBoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+type RoutingDecisionBoundedCostFallbackReason string
 
 // RoutingPolicy defines model for RoutingPolicy.
 type RoutingPolicy struct {
@@ -18596,6 +18938,24 @@ type LookupEndUserJSONBody struct {
 	Identifier string `json:"identifier"`
 }
 
+// PauseApiKeyParams defines parameters for PauseApiKey.
+type PauseApiKeyParams struct {
+	// IfMatch Current API-key ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique pause key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ResumeApiKeyParams defines parameters for ResumeApiKey.
+type ResumeApiKeyParams struct {
+	// IfMatch Current API-key ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique resume key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // RevokeApiKeyParams defines parameters for RevokeApiKey.
 type RevokeApiKeyParams struct {
 	// IfMatch Current API-key ETag
@@ -19161,6 +19521,12 @@ type DeleteMcpServerParams struct {
 
 // UpdateMcpServerParams defines parameters for UpdateMcpServer.
 type UpdateMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// ApproveMcpServerCatalogParams defines parameters for ApproveMcpServerCatalog.
+type ApproveMcpServerCatalogParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 	IfMatch        string `json:"If-Match"`
 }
@@ -20892,6 +21258,9 @@ type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
 
 // UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
 type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
+
+// ApproveMcpServerCatalogJSONRequestBody defines body for ApproveMcpServerCatalog for application/json ContentType.
+type ApproveMcpServerCatalogJSONRequestBody = ApproveMCPServerCatalogRequest
 
 // StartMcpGrantEnrollmentJSONRequestBody defines body for StartMcpGrantEnrollment for application/json ContentType.
 type StartMcpGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest

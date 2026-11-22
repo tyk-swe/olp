@@ -18,6 +18,8 @@ export type UpdateApiKeyInput = Schemas['UpdateApiKeyRequest'];
 export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];
 export type ApiKeySecret =
   Schemas['CreateApiKeyResponse'] | Schemas['RotateApiKeyResponse'];
+export type ApiKeyPause = Schemas['ApiKeyPauseResponse'];
+export type ApiKeyPauseRollout = Schemas['ApiKeyPauseRolloutResponse'];
 
 /** Every key, for pickers that must offer the whole inventory at once. */
 export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
@@ -87,6 +89,46 @@ export async function updateApiKey(
     },
     body: input
   });
+  return unwrap(response);
+}
+
+export async function pauseApiKey(
+  key: Pick<ApiKey, 'id' | 'etag'>,
+  requestId: string
+): Promise<ApiKeyPause> {
+  const response = await apiClient.POST('/api/v1/api-keys/{api_key_id}/pause', {
+    params: {
+      path: { api_key_id: key.id },
+      header: mutationHeaders(key.etag, requestId)
+    }
+  });
+  return unwrap(response);
+}
+
+export async function resumeApiKey(
+  key: Pick<ApiKey, 'id' | 'etag'>,
+  requestId: string
+): Promise<ApiKeyPause> {
+  const response = await apiClient.POST(
+    '/api/v1/api-keys/{api_key_id}/resume',
+    {
+      params: {
+        path: { api_key_id: key.id },
+        header: mutationHeaders(key.etag, requestId)
+      }
+    }
+  );
+  return unwrap(response);
+}
+
+export async function getApiKeyPauseRollout(
+  apiKeyId: string,
+  signal?: AbortSignal
+): Promise<ApiKeyPauseRollout> {
+  const response = await apiClient.GET(
+    '/api/v1/api-keys/{api_key_id}/pause-rollout',
+    { params: { path: { api_key_id: apiKeyId } }, signal }
+  );
   return unwrap(response);
 }
 

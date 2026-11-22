@@ -200,7 +200,7 @@ func (x *Call) attemptCostBound(attempt routing.Attempt) rates.Cost {
 		return rates.Cost{}
 	}
 	bound, _ := x.targetCostBound(provider, routing.Target{ID: attempt.TargetID, ProviderID: attempt.ProviderID, ProviderModel: attempt.UpstreamModel}, attempt.Price, attempt.Discount)
-	return bound
+	return bound.Cost
 }
 
 // attemptChargeBound is the most one attempt could charge under the card the
@@ -264,38 +264,42 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 // targetCostBound is attemptCostBound for a planned candidate rather than a
 // dispatched attempt: the same worst case under the same pinned price and
 // discount, or false when the request cannot be bounded.
-func (x *Call) targetCostBound(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
+func (x *Call) targetCostBound(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 	if !operationregistry.PolicyFor(x.OperationName()).BoundedWork {
-		return rates.Cost{}, false
+		return routing.CostBound{}, false
 	}
 	if x.callerCostExempt() || price == nil {
-		return rates.Cost{}, false
+		return routing.CostBound{}, false
 	}
 	if x.committed(provider.ID) {
-		return rates.Cost{}, true
+		return routing.CostBound{}, true
 	}
 	if x.media != nil {
 		u, ok := videoCreateUsage(x.media)
 		if !ok {
-			return rates.Cost{}, false
+			return routing.CostBound{}, false
 		}
-		return price.Cost(u, x.request.startedAt, true, discount)
+		cost, priced := price.Cost(u, x.request.startedAt, true, discount)
+		return routing.CostBound{Cost: cost}, priced
 	}
 	if x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
-		return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)
+		cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)
+		return routing.CostBound{Cost: cost}, ok
 	}
 	if x.generation.parsed == nil && x.unary == nil {
 		input, reply := max(ResourceEstimate, x.estimate), int64(0)
 		if x.OperationName() == "generation" || x.OperationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 		}
-		return price.CostBound(input, reply, reply > 0, x.request.startedAt, discount)
+		cost, ok := price.CostBound(input, reply, reply > 0, x.request.startedAt, discount)
+		return routing.CostBound{Cost: cost, InputTokens: &input, OutputTokens: &reply}, ok
 	}
 	admitted, err := x.attemptEstimate(&provider, target.ID, target.ProviderModel)
 	if err != nil {
-		return rates.Cost{}, false
+		return routing.CostBound{}, false
 	}
-	return price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, discount)
+	cost, ok := price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, discount)
+	return routing.CostBound{Cost: cost, InputTokens: &admitted.input, OutputTokens: &admitted.reply}, ok
 }
 
 func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {

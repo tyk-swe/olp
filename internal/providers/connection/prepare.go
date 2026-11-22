@@ -66,6 +66,8 @@ func Prepare(ctx context.Context, policy Policy, input Configuration) (Prepared,
 	return Prepared{stored, plugin}, nil
 }
 
+func Stored(document Configuration) Prepared { return Prepared{document: document.Normalized()} }
+
 func Load(raw, installed []byte) (Prepared, error) {
 	document, err := Decode(raw)
 	if err != nil {

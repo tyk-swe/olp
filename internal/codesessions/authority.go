@@ -26,6 +26,7 @@ const (
 	codeResearch
 	codeModels
 	codePaidInference
+	codeThreadStatus
 )
 
 func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in Admission, a *keyauthority.Authority, operation codeAuthorityOperation) error {

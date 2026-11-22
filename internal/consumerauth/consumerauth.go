@@ -95,10 +95,14 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 	switch {
 	case errors.Is(err, release.ErrStaleAuthority):
 		return keyauthority.Authority{}, &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "Key authority is unavailable; retry shortly."}
+	case errors.Is(err, release.ErrPausedKey):
+		return keyauthority.Authority{}, &Failure{Status: http.StatusForbidden, Code: "api_key_paused", Message: "This API key is paused."}
 	case err != nil || authority == nil:
 		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Incorrect API key provided."}
 	case authority.RevokedAt != nil:
 		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has been revoked."}
+	case authority.PausedAt != nil:
+		return keyauthority.Authority{}, &Failure{Status: http.StatusForbidden, Code: "api_key_paused", Message: "This API key is paused."}
 	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(now):
 		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has expired."}
 	case !slices.Contains(authority.Policy.Scopes, scope):

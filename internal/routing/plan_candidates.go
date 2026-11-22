@@ -62,6 +62,7 @@ func evaluateCandidate(s selectionSource, route Route, routeID uuid.UUID, target
 	}
 	row.decision.Price = options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 	row.attempt.Discount = options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
+	row.decision.MaxCost = copyPointer(policy.MaxCost)
 	if options.EstimateCost && options.WorstCost != nil {
 		row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
 	}
@@ -137,9 +138,13 @@ func qualifyCandidate(row *rankedCandidate, route Route, provider Provider, exis
 	if reason == "" && options.Prepare != nil {
 		reason = applyPreparedCandidate(row, provider, target, metadata, policy, options, now)
 	}
+	if reason == "" && options.WorstCost != nil && (policy.MaxCost != nil || policy.Strategy == strategyBoundedCost && operation == "generation") {
+		if bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount); ok {
+			row.bound = &bound
+		}
+	}
 	if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
-		bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
-		if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
+		if row.bound == nil || !lessOrEqual(strptr(row.bound.Cost.String()), policy.MaxCost) {
 			reason = "cost_limit_exceeded"
 		}
 	}
@@ -206,6 +211,10 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 		case strategyCapacity:
 			ah, bh := a.decision.Headroom, b.decision.Headroom
 			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
+				return order
+			}
+		case strategyBoundedCost:
+			if order := compareBoundedCost(a, b); order != 0 {
 				return order
 			}
 		case strategyPrice:

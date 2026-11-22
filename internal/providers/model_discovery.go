@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,36 +10,38 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // The project scope is decided first, so a provider outside it answers 404
 // before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, error) {
+func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, *slotRow, error) {
 	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := readProbeProvider(r, p, tx, id)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
-	credential, err := s.credentialFor(r.Context(), tx, current)
+	credential, slot, err := s.credentialSlotFor(r.Context(), tx, current)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
 	models, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, probe.Target{}, err
+		return nil, probe.Target{}, nil, err
 	}
-	return current, current.target(credential, models...), nil
+	return current, current.target(credential, models...), slot, nil
 }
 
 func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, id string) (*record, error) {
@@ -57,7 +60,7 @@ func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	current, target, err := s.prepare(r, p, id)
+	current, target, _, err := s.prepare(r, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -133,14 +136,15 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 			models = append(models, probe.DiscoveredModel{Name: m.UpstreamModel, Display: m.DisplayName})
 		}
 	}
-	current, target, err := s.prepare(r, p, id)
+	current, target, slot, err := s.prepare(r, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	upstream := len(models) == 0
 	at := time.Now().UTC()
+	var listing *routing.RevisionListing
 	if upstream {
-		listed, err := s.prober.ListModelFacts(r.Context(), target)
+		listed, provenance, err := s.listUpstreamModels(r.Context(), current.Connection.Document(), target, slot, at)
 		if err != nil {
 			pe := probe.Classify(err)
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
@@ -148,13 +152,25 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 			}
 			return httpkit.Reply{}, httpkit.Fail(422, "discovery_failed", pe.Detail)
 		}
-		models = append(models, listed...)
+		models, listing = append(models, listed...), provenance
 	}
 	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
-		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
+		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at, listing); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		reply, err := s.detailReply(r.Context(), tx, id)
 		return reply, access.Event{Action: "provider.discover", Resource: "provider", ID: id}, err
 	})
+}
+
+func (s *Server) listUpstreamModels(ctx context.Context, cfg connection.Configuration, target probe.Target, slot *slotRow, at time.Time) ([]probe.DiscoveredModel, *routing.RevisionListing, error) {
+	if cfg.Kind != connectors.KindAnthropic {
+		listed, err := s.prober.ListModelFacts(ctx, target)
+		return listed, nil, err
+	}
+	listing, err := s.prober.ListCompleteModelFacts(ctx, target)
+	if err != nil || !listing.Complete {
+		return listing.Models, nil, err
+	}
+	return listing.Models, completeListingProvenance(cfg, slot, at), nil
 }

@@ -15,6 +15,8 @@ export type Publication = components['schemas']['AgentPublication'];
 export type Draft = components['schemas']['AgentPublicationWrite'];
 export type ToolPin = components['schemas']['AgentToolPin'];
 export type MCPServer = components['schemas']['MCPServerResponse'];
+export type MCPCatalogPreview =
+  components['schemas']['MCPCatalogPreviewResponse'];
 export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
@@ -438,6 +440,32 @@ export const createServer = async (
       params: { header: createHeaders(requestId) }
     })
   );
+export const previewServerCatalog = async (id: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-servers/{server_id}/catalog-preview', {
+      params: { path: { server_id: id } }
+    })
+  );
+export async function approveServerCatalog(
+  review: Pick<
+    MCPCatalogPreview,
+    'server_id' | 'etag' | 'discovered_protocol_version' | 'discovered_digest'
+  >,
+  requestId: string
+) {
+  return unwrap(
+    await apiClient.POST('/api/v1/mcp-servers/{server_id}/catalog-approval', {
+      params: {
+        path: { server_id: review.server_id },
+        header: mutationHeaders(review.etag, requestId)
+      },
+      body: {
+        protocol_version: review.discovered_protocol_version,
+        digest: review.discovered_digest
+      }
+    })
+  );
+}
 export const retireServer = async (
   server: Pick<MCPServer, 'id' | 'etag'>,
   requestId: string

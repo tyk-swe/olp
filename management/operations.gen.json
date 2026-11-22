@@ -883,7 +883,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -5924,6 +5925,108 @@
     }
   },
   {
+    "name": "approve_mcp_server_catalog",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-servers/{server_id}/catalog-approval",
+    "description": "approve mcp server catalog",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/ApproveMCPServerCatalogRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "ApproveMCPServerCatalogRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol_version": {
+              "type": "string",
+              "enum": [
+                "2025-11-25",
+                "2025-06-18",
+                "2025-03-26",
+                "2024-11-05"
+              ],
+              "description": "Protocol version discovered by the reviewed catalog preview."
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Catalog digest discovered by the reviewed catalog preview."
+            }
+          },
+          "required": [
+            "protocol_version",
+            "digest"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "cancel_a2a_task_remote",
     "group": "a2a-tasks",
     "method": "POST",
@@ -6245,6 +6348,53 @@
           ]
         }
       }
+    }
+  },
+  {
+    "name": "compare_provider_listing",
+    "group": "providers",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/providers/{provider_id}/listing-comparison",
+    "description": "Reads every page of the upstream model listing with the published credential version of the active revision and compares it with the published inventory. The comparison changes no draft, revision or certification state. Only the native anthropic adapter with one enabled, stored API-key credential slot is supported.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -14464,7 +14614,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -17653,7 +17804,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -17966,6 +18118,53 @@
     "read_only": true,
     "path": "/api/v1/api-keys/{api_key_id}",
     "description": "get api key",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_api_key_pause_rollout",
+    "group": "api-keys",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/api-keys/{api_key_id}/pause-rollout",
+    "description": "get api key pause rollout",
     "scopes": [
       [
         "read"
@@ -18512,6 +18711,64 @@
           "additionalProperties": false,
           "required": [
             "export_sink_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_export_sink_metering_delivery",
+    "group": "observability",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}",
+    "description": "get export sink metering delivery",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "attempt_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id",
+            "attempt_id"
           ]
         }
       },
@@ -27003,6 +27260,77 @@
     }
   },
   {
+    "name": "pause_api_key",
+    "group": "api-keys",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/api-keys/{api_key_id}/pause",
+    "description": "pause api key",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current API-key ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique pause key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "plan_configuration",
     "group": "configuration",
     "method": "POST",
@@ -27403,7 +27731,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -32719,6 +33048,53 @@
     }
   },
   {
+    "name": "preview_mcp_server_catalog",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-servers/{server_id}/catalog-preview",
+    "description": "preview mcp server catalog",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "pricing_quote",
     "group": "usage",
     "method": "POST",
@@ -36187,7 +36563,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -38852,7 +39229,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -39488,6 +39866,77 @@
       "additionalProperties": false,
       "required": [
         "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "resume_api_key",
+    "group": "api-keys",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/api-keys/{api_key_id}/resume",
+    "description": "resume api key",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current API-key ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique resume key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
         "idempotency_key"
       ]
     }
@@ -43191,7 +43640,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -43595,7 +44045,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },

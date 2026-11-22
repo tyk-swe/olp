@@ -147,7 +147,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
 	prepare, inspections := buildLegPrepare(m, named, route, key, eligibility, input, semantic, inspectionRequest, unary, mediaRequest, counted, workflow, workflowCapability)
-	options := s.buildLegOptions(m, route, key, eligibility, input, via, parsed, mediaRequest, counted, prepare)
+	options := s.buildLegOptions(m, named, route, key, eligibility, input, via, parsed, mediaRequest, counted, prepare)
 	plan, err := routing.Select(m.snapshot, slug, input.Operation, input.Surface, input.Mode, route.Affinity.Seed(input.Attribution, parsed, []byte(input.Seed)), options)
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err

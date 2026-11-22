@@ -479,6 +479,13 @@
                 "type": "null"
               }
             ]
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -535,6 +542,88 @@
         "required": [
           "etag",
           "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime_generation": {
+            "$ref": "#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "etag",
+          "paused",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseReplica": {
+        "properties": {
+          "authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "gateway_instance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_instance",
+          "authority_sequence"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseRolloutResponse": {
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "replicas": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyPauseReplica"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enforced",
+          "paused",
+          "replicas"
         ],
         "type": "object"
       },
@@ -8997,6 +9086,160 @@
         ],
         "type": "object"
       },
+      "ProviderListingRouteResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "ProviderListingNewModelResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "display_name"
+        ],
+        "type": "object"
+      },
+      "ProviderListingDisplayNameChangeResponse": {
+        "properties": {
+          "listed_display_name": {
+            "type": "string"
+          },
+          "published_display_name": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "published_display_name",
+          "listed_display_name"
+        ],
+        "type": "object"
+      },
+      "ProviderListingOmissionResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingRouteResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "display_name",
+          "routes"
+        ],
+        "type": "object"
+      },
+      "ProviderListingComparisonResponse": {
+        "description": "A comparison of one complete upstream model listing with the published inventory of one active provider revision. An incomplete comparison carries no new, changed or missing-model verdicts. Not listed does not mean retired.",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "changed_display_names": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingDisplayNameChangeResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credential_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "new_models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingNewModelResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "not_listed": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingOmissionResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "type": "string"
+          },
+          "unverified": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingOmissionResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider_id",
+          "revision_id",
+          "revision",
+          "status",
+          "detail",
+          "checked_at",
+          "api_version",
+          "credential_version",
+          "new_models",
+          "changed_display_names",
+          "not_listed",
+          "unverified"
+        ],
+        "type": "object"
+      },
       "ProviderModelInventoryListResponse": {
         "properties": {
           "items": {
@@ -12952,13 +13195,33 @@
               "null"
             ]
           },
+          "max_cost": {
+            "description": "The effective cost ceiling eligibility applied, in the installation currency. Null when no scope set one. The ceiling is the configured rule that admitted the attempt, separate from the attempt's own estimated_cost.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bounded_cost_fallback_reason": {
+            "description": "Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "operation_not_generation",
+              "insufficient_cost_bounds",
+              "cost_bound_unknown",
+              null
+            ]
+          },
           "estimated_cost": {
             "type": [
               "object",
               "null"
             ],
             "additionalProperties": false,
-            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.",
+            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve, with the priced input estimate and reserved output allowance the maximum covers. Null when the price cannot bound the request or no demand is known.",
             "properties": {
               "minimum": {
                 "type": "string"
@@ -12968,6 +13231,22 @@
               },
               "currency": {
                 "type": "string"
+              },
+              "priced_input_tokens": {
+                "description": "The input tokens the maximum priced. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reserved_output_tokens": {
+                "description": "The output allowance the maximum reserved: the declared reply bound, or the default allowance when none was declared. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -13398,7 +13677,8 @@
           "price",
           "latency",
           "throughput",
-          "capacity"
+          "capacity",
+          "bounded_cost"
         ],
         "type": "string"
       },
@@ -24922,6 +25202,205 @@
           "digest"
         ]
       },
+      "ApproveMCPServerCatalogRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ],
+            "description": "Protocol version discovered by the reviewed catalog preview."
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Catalog digest discovered by the reviewed catalog preview."
+          }
+        },
+        "required": [
+          "protocol_version",
+          "digest"
+        ]
+      },
+      "MCPCatalogModifiedTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "changed_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "description",
+                "input_schema"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          },
+          "saved_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "discovered_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "saved_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "discovered_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "changed_fields",
+          "saved_description",
+          "discovered_description",
+          "saved_input_schema",
+          "discovered_input_schema"
+        ]
+      },
+      "MCPCatalogToolsetReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "description": "Tool names this published toolset pins on this server."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "revision_id",
+          "tools"
+        ]
+      },
+      "MCPCatalogPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "saved_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "saved_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "discovered_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "discovered_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "added": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "modified": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogModifiedTool"
+            }
+          },
+          "toolsets": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogToolsetReference"
+            },
+            "description": "Visible published toolsets whose current revision pins any tool on this server. Approval creates a new server revision, so each one serves these tools again only after it is republished."
+          }
+        },
+        "required": [
+          "server_id",
+          "etag",
+          "revision_id",
+          "revision",
+          "saved_protocol_version",
+          "saved_digest",
+          "discovered_protocol_version",
+          "discovered_digest",
+          "added",
+          "removed",
+          "modified",
+          "toolsets"
+        ]
+      },
       "CreateMCPServerRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -26569,6 +27048,100 @@
           "items",
           "next_cursor"
         ]
+      },
+      "MeteringDeliveryLookup": {
+        "description": "What OLP can prove about one priced attempt's delivery to one CloudEvents metering sink. Accepted means the sink answered 2xx and OLP recorded it. Delivery unconfirmed means retries ended after a send may have occurred without a recorded acknowledgement. No payload or destination is included.",
+        "properties": {
+          "attempt_id": {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempts": {
+            "description": "Delivery claims made for this attempt on this sink, or null when no evidence remains",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "event_id": {
+            "description": "Durable export record id sent as X-OLP-Event-ID, or null when no evidence remains",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "export_sink_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "description": "When the most recent delivery claim was made, or null",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_code": {
+            "description": "Safe category of the most recent delivery failure, or null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "description": "When the priced attempt was observed, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "description": "pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope",
+            "enum": [
+              "pending",
+              "retrying",
+              "accepted",
+              "delivery_unconfirmed",
+              "expired_before_delivery",
+              "no_retained_evidence"
+            ],
+            "type": "string"
+          },
+          "queued_at": {
+            "description": "When the export record was queued, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settled_at": {
+            "description": "When delivery was recorded as accepted or the receipt reached its terminal state, or null while queued",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "attempt_id",
+          "attempts",
+          "event_id",
+          "export_sink_id",
+          "last_attempt_at",
+          "last_error_code",
+          "occurred_at",
+          "outcome",
+          "queued_at",
+          "settled_at"
+        ],
+        "type": "object"
       },
       "CaptureSinkOption": {
         "type": "object",
@@ -34357,6 +34930,265 @@
           {
             "managementToken": [
               "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause": {
+      "post": {
+        "operationId": "pause_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique pause key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key paused and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/resume": {
+      "post": {
+        "operationId": "resume_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique resume key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key resumed and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause-rollout": {
+      "get": {
+        "operationId": "get_api_key_pause_rollout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseRolloutResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
             ]
           }
         ],
@@ -43519,6 +44351,72 @@
         "tags": [
           "providers"
         ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/listing-comparison": {
+      "post": {
+        "description": "Reads every page of the upstream model listing with the published credential version of the active revision and compares it with the published inventory. The comparison changes no draft, revision or certification state. Only the native anthropic adapter with one enabled, stored API-key credential slot is supported.",
+        "operationId": "compare_provider_listing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderListingComparisonResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider has no active revision, or its published listing configuration is not the supported native anthropic adapter with one enabled, stored API-key credential slot"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-olp-read-only": true
       }
     },
     "/api/v1/providers/{provider_id}/models": {
@@ -65418,6 +66316,178 @@
         }
       }
     },
+    "/api/v1/mcp-servers/{server_id}/catalog-preview": {
+      "post": {
+        "operationId": "preview_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "preview mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Preview rediscovers the live catalog with the saved endpoint, transport and credential, and reports how it differs from the certified catalog. It never invokes a tool and never changes the registration, its certification or any toolset.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live catalog compared with the certified catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPCatalogPreviewResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration"
+          },
+          "422": {
+            "description": "Registration cannot be reviewed or upstream certification failed"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/catalog-approval": {
+      "post": {
+        "operationId": "approve_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "approve mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Approval rediscovers the live catalog with the saved binding and certifies it as a new immutable revision only when the discovered protocol version and digest still match the reviewed preview and the registration still matches If-Match. It never invokes a tool.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration, catalog changed since review, or live catalog already certified"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid approval or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveMCPServerCatalogRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/mcp-tool-calls": {
       "get": {
         "operationId": "list_mcp_tool_calls",
@@ -66740,6 +67810,80 @@
               }
             },
             "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}": {
+      "get": {
+        "operationId": "get_export_sink_metering_delivery",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeteringDeliveryLookup"
+                }
+              }
+            },
+            "description": "Delivery state of one metering attempt on the sink, or no retained evidence when nothing attempt-specific remains in the caller's scope"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found, outside the caller's scope, or not a CloudEvents metering sink"
           }
         },
         "security": [

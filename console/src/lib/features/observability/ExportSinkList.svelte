@@ -3,6 +3,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { formatDate } from '#lib/format.js';
   import ExportSinkHistory from './ExportSinkHistory.svelte';
+  import MeteringDeliveryLookup from './MeteringDeliveryLookup.svelte';
   import type { ExportSink } from './api';
   import {
     lagSeconds,
@@ -44,6 +45,11 @@
     onDatasets: (sink: ExportSink) => void;
     onRemove: (sink: ExportSink) => void;
   } = $props();
+  let deliverySinkId = $state('');
+  function toggleDelivery(sink: ExportSink) {
+    deliverySinkId =
+      deliverySinkId === sink.export_sink_id ? '' : sink.export_sink_id;
+  }
 </script>
 
 {#if canCreate}<div class="toolbar">
@@ -114,7 +120,11 @@
                 class="text-button"
                 type="button"
                 onclick={() => onGaps(sink)}>Gaps</button
-              >{#if sink.format === 'csv_gzip'}<button
+              >{#if sink.format === 'cloudevents'}<button
+                  class="text-button"
+                  type="button"
+                  onclick={() => toggleDelivery(sink)}>Delivery lookup</button
+                >{/if}{#if sink.format === 'csv_gzip'}<button
                   class="text-button"
                   type="button"
                   onclick={() => onDatasets(sink)}>Datasets</button
@@ -144,6 +154,13 @@
                   sinkId={sink.export_sink_id}
                   kind="gaps"
                 /></td
+              ></tr
+            >
+          {/if}
+          {#if deliverySinkId === sink.export_sink_id}
+            <tr class="gap-row"
+              ><td colspan="7"
+                ><MeteringDeliveryLookup sinkId={sink.export_sink_id} /></td
               ></tr
             >
           {/if}

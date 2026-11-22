@@ -37,6 +37,9 @@ export type ProviderPreset = Schemas['ProviderPresetResponse'];
 export type CapabilityCertification =
   Schemas['CapabilityCertificationResponse'];
 
+export type ProviderListingComparison =
+  Schemas['ProviderListingComparisonResponse'];
+
 export type ProviderModelCertificationReceipt = {
   result: CapabilityCertification;
   etag: string;
@@ -125,6 +128,20 @@ export async function discoverProviderModels(
     },
     [['configuration']]
   );
+}
+
+export async function compareProviderListing(
+  providerId: string,
+  signal?: AbortSignal
+): Promise<ProviderListingComparison> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/listing-comparison',
+    {
+      params: { path: { provider_id: providerId } },
+      signal
+    }
+  );
+  return unwrap(response);
 }
 
 export async function declareProviderModels(
