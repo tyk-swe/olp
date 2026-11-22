@@ -68,7 +68,7 @@ type codeWebSocketHandshake struct {
 
 func (f *Forwarder) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
-	identity, err := codeConnectionIdentity(inbound, r.Header)
+	identity, err := codeConnectionIdentity(inbound.identity, r.Header)
 	if err != nil {
 		return handshake, err
 	}
