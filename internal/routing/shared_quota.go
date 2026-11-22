@@ -67,8 +67,8 @@ func (s *Snapshot) validateSharedTokenQuotas() error {
 		}
 		seen := map[string]bool{}
 		for _, quota := range p.SharedTokenQuotas {
-			if err := quota.Validate("shared_token_quotas"); err != nil {
-				return errSharedQuota(id, err.Error())
+			if err := quota.Validate("configuration.options.shared_token_quotas"); err != nil {
+				return err
 			}
 			if seen[quota.Model] {
 				return errSharedQuota(id, "assigns model "+quota.Model+" to more than one shared token quota")
@@ -85,5 +85,5 @@ func (s *Snapshot) validateSharedTokenQuotas() error {
 }
 
 func errSharedQuota(providerID, problem string) error {
-	return fmt.Errorf("provider %q %s", providerID, problem)
+	return invalidValue("configuration.options.shared_token_quotas", fmt.Sprintf("Connection %s %s.", providerID, problem))
 }

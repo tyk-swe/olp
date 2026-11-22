@@ -226,33 +226,32 @@ func (m *Manager) loadReleaseGuardrails(ctx context.Context, tx pgx.Tx, snapshot
 func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidate) (bool, error) {
 	m.grantRefresh.Lock()
 	defer m.grantRefresh.Unlock()
-	m.mu.Lock()
+	// grantRefresh serializes every release replacement, so current stays
+	// installed while shared quota membership syncs outside m.mu.
+	current := m.Release()
 	// Waiting for a poll must not let cancelled or expired installation work
 	// publish afterward. The last-good release remains owned by the manager.
 	if err := ctx.Err(); err != nil {
-		m.mu.Unlock()
 		return false, err
 	}
-	if candidate.release.Sequence <= m.release.Sequence {
-		m.mu.Unlock()
+	if candidate.release.Sequence <= current.Sequence {
 		return false, nil
 	}
 	// An intervening release may have pruned a newer observed generation of
 	// a credential this candidate brings back. Retry preparation against that
 	// release instead of resurrecting an older token or retaining old secrets.
-	if len(candidate.grants) > 0 && candidate.baseSequence != m.release.Sequence {
-		m.mu.Unlock()
+	if len(candidate.grants) > 0 && candidate.baseSequence != current.Sequence {
 		return false, nil
 	}
+	if m.syncSharedQuotas != nil {
+		if err := m.syncSharedQuotas(ctx, current.Snapshot(), candidate.release.Snapshot()); err != nil {
+			return false, err
+		}
+	}
+	m.mu.Lock()
 	for credentialID, previous := range m.grants {
 		if seeded, ok := candidate.grants[credentialID]; ok && previous.generation >= seeded.generation {
 			candidate.grants[credentialID] = previous
-		}
-	}
-	if sync := m.sharedQuotaSync.Load(); sync != nil {
-		if err := (*sync)(ctx, m.release.Snapshot(), candidate.release.Snapshot()); err != nil {
-			m.mu.Unlock()
-			return false, err
 		}
 	}
 	refreshed := advancedGrants(grantProviders(candidate.release.Snapshot()), m.grants, candidate.grants)

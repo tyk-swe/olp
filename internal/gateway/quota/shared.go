@@ -60,8 +60,8 @@ func sharedAssignments(view *routing.View) map[string]sharedAssignment {
 	return assignments
 }
 
-func (a *Admission) SyncSharedQuotas(ctx context.Context, previous, next *routing.View) error {
-	if !a.Ready() || next == nil {
+func SyncSharedQuotas(ctx context.Context, limiter *admission.Limiter, previous, next *routing.View) error {
+	if limiter == nil || next == nil {
 		return nil
 	}
 	before := sharedAssignments(previous)
@@ -83,7 +83,7 @@ func (a *Admission) SyncSharedQuotas(ctx context.Context, previous, next *routin
 	for _, step := range []map[string][]admission.MembershipEntry{departed, joined} {
 		for _, lookup := range slices.Sorted(maps.Keys(step)) {
 			syncCtx, cancel := context.WithTimeout(ctx, ReserveTimeout)
-			err := a.limiter.SyncSharedMembership(syncCtx, lookup, generation, step[lookup])
+			err := limiter.SyncSharedMembership(syncCtx, lookup, generation, step[lookup])
 			cancel()
 			if err != nil {
 				failures = append(failures, err)

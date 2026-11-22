@@ -70,7 +70,6 @@ func gatewayTemplates(in gatewayInputs) gatewayAssembly {
 			}
 			// Control-only processes also execute playground requests.
 			assembly.deps.Admission = quota.NewAdmission(in.limiter, in.shared.Fleet, outagePolicy, log)
-			core.rt.SetSharedQuotaSync(assembly.deps.Admission.SyncSharedQuotas)
 		}
 	}
 	if in.limiter != nil && (c.Mode == Worker || c.Mode == All) {
@@ -87,9 +86,6 @@ func gatewayTemplates(in gatewayInputs) gatewayAssembly {
 		}
 		assembly.probeDeps.Business = core.business
 		assembly.probeDeps.Admission = quota.NewAdmission(in.limiter, in.shared.Fleet, nil, log)
-		if assembly.deps.Admission == nil {
-			core.rt.SetSharedQuotaSync(assembly.probeDeps.Admission.SyncSharedQuotas)
-		}
 	}
 	return assembly
 }

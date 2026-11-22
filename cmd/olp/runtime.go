@@ -13,6 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -21,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type namedCloser struct {
@@ -44,7 +47,7 @@ type runtimeCore struct {
 	closers       []namedCloser
 }
 
-func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.Pool, installation string, vk *coordination.Client, deadline *time.Time, log *slog.Logger) (runtimeCore, error) {
+func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.Pool, installation string, vk *coordination.Client, limiter *limitadmission.Limiter, deadline *time.Time, log *slog.Logger) (runtimeCore, error) {
 	auth, keys, err := loadSecrets(startup, c, installation)
 	if err != nil {
 		return runtimeCore{}, err
@@ -110,6 +113,9 @@ func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.P
 		Auth: auth, Keys: keys, Log: log, Hostname: c.Hostname, Region: c.Region,
 		ExternalSecrets: secretstore.New(*policy, os.Getenv), Mounted: mounted,
 		PrepareGuardrailPlugin: core.pluginHost.PinGuardrail,
+		SyncSharedQuotas: func(ctx context.Context, previous, next *routing.View) error {
+			return quota.SyncSharedQuotas(ctx, limiter, previous, next)
+		},
 	})
 	pluginHost := core.pluginHost
 	core.closers = append(core.closers, namedCloser{name: "plugin host", close: func(ctx context.Context) error { pluginHost.Close(ctx); return nil }})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
@@ -34,33 +33,15 @@ func (a *Admission) Fleet() *fleet.State { return a.fleet }
 
 // TargetReservation holds what one attempt reserved on its provider.
 type TargetReservation struct {
-	connection  *admission.Lease
-	slot        *admission.Lease
-	shared      *admission.Lease
-	sharedGroup string
-	settled     atomic.Bool
-	log         *slog.Logger
+	connection *admission.Lease
+	slot       *admission.Lease
+	shared     *admission.Lease
+	log        *slog.Logger
 }
 
-func (t *TargetReservation) SharedGroup() string {
-	if t == nil {
-		return ""
-	}
-	return t.sharedGroup
-}
-
-func (t *TargetReservation) SharedLease() (lookup, leaseID string, ok bool) {
-	if t == nil {
-		return "", "", false
-	}
-	return t.shared.RateLease()
-}
-
-// Settle reconciles and releases every lease once the attempt has ended. It
-// runs at most once, so a settlement replayed after a move or a retry still
-// lands on the original leases exactly once.
+// Settle reconciles and releases every lease once the attempt has ended.
 func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, usage *admission.TokenUsage) {
-	if t == nil || !t.settled.CompareAndSwap(false, true) {
+	if t == nil {
 		return
 	}
 	SettleLease(ctx, t.shared, dispatched, usage, t.log)
@@ -126,9 +107,6 @@ func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provide
 		return nil, nil, true
 	}
 	reservation = &TargetReservation{log: a.Logger()}
-	if shared {
-		reservation.sharedGroup = assignment.groupID
-	}
 	for _, step := range [...]struct {
 		request admission.Request
 		lease   **admission.Lease

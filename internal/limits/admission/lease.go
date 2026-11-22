@@ -109,13 +109,6 @@ func (le *Lease) GrowCost(ctx context.Context, cost, charge, requestID string, t
 	return nil
 }
 
-func (le *Lease) RateLease() (lookup, leaseID string, ok bool) {
-	if le == nil || le.rate == nil {
-		return "", "", false
-	}
-	return le.rate.hold.Lookup, le.rate.hold.LeaseID, true
-}
-
 func (le *Lease) RateState() limits.RateState {
 	if le == nil || le.rate == nil || le.rate.reported == nil {
 		return limits.RateState{}

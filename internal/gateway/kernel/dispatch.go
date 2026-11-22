@@ -66,13 +66,6 @@ type dispatchHold struct {
 
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
-func generationOrdinal(x *Call) int64 {
-	if x == nil || x.request.release == nil || x.request.release.Snapshot() == nil {
-		return 0
-	}
-	return x.request.release.Snapshot().Generation().Ordinal
-}
-
 func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, demand quota.TokenDemand, deadline time.Time) gateResult {
 	if x.workflow != nil {
 		gate := s.gateSlot(ctx, provider, slot, demand, deadline, x.priority, attempt.UpstreamModel, generationOrdinal(x))
@@ -97,6 +90,17 @@ func (s *Server) gateAttempt(ctx context.Context, x *Call, attempt routing.Attem
 		gate.hold.budgets = caps.owners
 	}
 	return gate
+}
+
+func generationOrdinal(x *Call) int64 {
+	if x.request.release == nil {
+		return 0
+	}
+	snapshot := x.request.release.Snapshot()
+	if snapshot == nil {
+		return 0
+	}
+	return snapshot.Generation().Ordinal
 }
 
 // settle reconciles and releases the quota reservation once the attempt has

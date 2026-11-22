@@ -17,13 +17,19 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-func sharedQuotaReplica(t *testing.T, prefix string) (*quota.Admission, scripts.Runner) {
+type sharedQuotaReplicaState struct {
+	*quota.Admission
+	limiter *admission.Limiter
+}
+
+func sharedQuotaReplica(t *testing.T, prefix string) (sharedQuotaReplicaState, scripts.Runner) {
 	t.Helper()
 	runner, err := scripts.NewRunner(harness.Valkey(t), prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return quota.NewAdmission(admission.NewDurable(runner, nil), nil, nil, slog.New(slog.DiscardHandler)), runner
+	limiter := admission.NewDurable(runner, nil)
+	return sharedQuotaReplicaState{quota.NewAdmission(limiter, nil, nil, slog.New(slog.DiscardHandler)), limiter}, runner
 }
 
 func sharedQuotaProvider(project, model, group string, ceiling int64) routing.Provider {
@@ -74,18 +80,12 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	if refusal != nil || skip || old == nil {
 		t.Fatalf("reserve in group A: refusal=%+v skip=%v", refusal, skip)
 	}
-	if want := routing.SharedTokenQuotaGroupID(project, "group-a"); old.SharedGroup() != want {
-		t.Fatalf("attempt stored group %q, want %q", old.SharedGroup(), want)
-	}
-	if lookup, leaseID, ok := old.SharedLease(); !ok || lookup != limits.SharedQuotaLookup(old.SharedGroup()) || leaseID == "" {
-		t.Fatalf("attempt stored lease %q/%q ok=%v", lookup, leaseID, ok)
-	}
 	if got := groupTokens(t, runner, project, "group-a"); got != 400 {
 		t.Fatalf("group A after first reserve = %d, want 400", got)
 	}
 	t.Logf("reserved 400 in group-a, group-a=%d group-b=%d", groupTokens(t, runner, project, "group-a"), groupTokens(t, runner, project, "group-b"))
 
-	if err := secondReplica.SyncSharedQuotas(t.Context(), sharedQuotaView(1, before), sharedQuotaView(2, after)); err != nil {
+	if err := quota.SyncSharedQuotas(t.Context(), secondReplica.limiter, sharedQuotaView(1, before), sharedQuotaView(2, after)); err != nil {
 		t.Fatal(err)
 	}
 	moved, refusal, skip := secondReplica.ReserveTarget(t.Context(), &after, &slot, demand(200), time.Minute, "", "model-a", 2)
@@ -114,6 +114,34 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 		t.Fatalf("after abort A=%d B=%d, want 250 and 0", a, b)
 	}
 	t.Logf("aborted the new attempt before dispatch, group-a=%d group-b=%d", groupTokens(t, runner, project, "group-a"), groupTokens(t, runner, project, "group-b"))
+}
+
+func TestSharedTokenQuotaLaggingReplicaKeepsReservingAfterUnrelatedRelease(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	prefix := "olp:" + uuid.NewString() + ":"
+	current, runner := sharedQuotaReplica(t, prefix)
+	lagging, _ := sharedQuotaReplica(t, prefix)
+	project := uuid.NewString()
+	provider := sharedQuotaProvider(project, "model-a", "shared", 1000)
+	slot := routing.Slot{ID: uuid.NewString()}
+
+	if err := quota.SyncSharedQuotas(t.Context(), current.limiter, nil, sharedQuotaView(1, provider)); err != nil {
+		t.Fatal(err)
+	}
+	newer, refusal, skip := current.ReserveTarget(t.Context(), &provider, &slot, quota.CombinedDemand(300), time.Minute, "", "model-a", 2)
+	if refusal != nil || skip || newer == nil {
+		t.Fatalf("reserve at the newer release: refusal=%+v skip=%v", refusal, skip)
+	}
+	older, refusal, skip := lagging.ReserveTarget(t.Context(), &provider, &slot, quota.CombinedDemand(200), time.Minute, "", "model-a", 1)
+	if refusal != nil || skip || older == nil {
+		t.Fatalf("lagging replica reserve with unchanged membership: refusal=%+v skip=%v", refusal, skip)
+	}
+	if got := groupTokens(t, runner, project, "shared"); got != 500 {
+		t.Fatalf("shared counter = %d, want 500", got)
+	}
+	newer.Settle(t.Context(), false, nil)
+	older.Settle(t.Context(), false, nil)
 }
 
 func TestSharedTokenQuotaCannotBeOverbookedAcrossConnections(t *testing.T) {

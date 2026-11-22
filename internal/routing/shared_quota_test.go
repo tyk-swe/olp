@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -38,8 +39,8 @@ func TestSnapshotRejectsInconsistentSharedTokenQuotas(t *testing.T) {
 		return sharedQuotaProvider(&project, SharedTokenQuota{Model: model, Group: group, TokensPerMinute: ceiling})
 	}
 	conflicting := snapshotWith(member("m", "g", 1000), member("m", "g", 500))
-	if err := conflicting.validateSharedTokenQuotas(); err == nil {
-		t.Fatal("members declaring different ceilings for one group were accepted")
+	if _, ok := errors.AsType[*ValidationError](conflicting.validateSharedTokenQuotas()); !ok {
+		t.Fatal("members declaring different ceilings for one group were not refused as invalid configuration")
 	}
 	duplicate := snapshotWith(sharedQuotaProvider(&project,
 		SharedTokenQuota{Model: "m", Group: "a", TokensPerMinute: 100},

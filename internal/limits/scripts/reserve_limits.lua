@@ -162,10 +162,7 @@ if member ~= nil then
     if departed and member_generation <= stored_generation then
       return failure("stale_membership", window_id)
     end
-    if not departed and member_generation < stored_generation then
-      return failure("stale_membership", window_id)
-    end
-    if departed or member_generation > stored_generation then
+    if departed then
       redis.call("HSET", KEYS[3], member, member_generation)
     end
   end

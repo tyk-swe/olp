@@ -123,9 +123,6 @@ type SupplyState struct {
 	// Headroom maps a credential slot ID to the smallest remaining fraction of
 	// the request, token and concurrency windows of the slot and its connection.
 	Headroom map[string]float64
-	// GroupHeadroom maps a shared token quota group ID to the remaining
-	// fraction of its tokens per minute ceiling.
-	GroupHeadroom map[string]float64
 	// Spend maps a capped owner ID to whether its caps still allow spending.
 	Spend map[string]Spend
 }
