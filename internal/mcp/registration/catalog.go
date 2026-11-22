@@ -153,15 +153,7 @@ func (s *Server) discoverSaved(ctx context.Context, saved *Definition) (*upstrea
 	return catalog, nil
 }
 
-func (s *Server) referencingToolsets(ctx context.Context, p authz.Principal, saved *Definition, changed []string) ([]toolsetReference, error) {
-	references := []toolsetReference{}
-	if len(changed) == 0 {
-		return references, nil
-	}
-	wanted := make(map[string]bool, len(changed))
-	for _, name := range changed {
-		wanted[name] = true
-	}
+func (s *Server) referencingToolsets(ctx context.Context, p authz.Principal, saved *Definition) ([]toolsetReference, error) {
 	rows, err := s.access.Pool.Query(ctx, "SELECT p.id::text,p.name,p.latest_revision_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.kind='toolset' AND NOT p.retired AND p.project_id=$1 AND ($2 OR p.project_id=ANY($3::uuid[])) ORDER BY p.name,p.id", saved.ProjectID, p.AllProjects, p.ProjectIDs())
 	if err != nil {
 		return nil, err
@@ -178,13 +170,14 @@ func (s *Server) referencingToolsets(ctx context.Context, p authz.Principal, sav
 	if err != nil {
 		return nil, err
 	}
+	references := []toolsetReference{}
 	for _, item := range items {
 		if item.definition.Toolset == nil {
 			continue
 		}
 		tools := []string{}
 		for _, tool := range item.definition.Toolset.Tools {
-			if tool.ServerID == saved.ID && wanted[tool.Name] && !slices.Contains(tools, tool.Name) {
+			if tool.ServerID == saved.ID && !slices.Contains(tools, tool.Name) {
 				tools = append(tools, tool.Name)
 			}
 		}
@@ -220,19 +213,7 @@ func (s *Server) previewCatalog(r *http.Request, p authz.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	added, removed, modified := diffCatalogs(saved.Catalog.Tools, catalog.Tools)
-	changed := slices.Collect(func(yield func(string) bool) {
-		for _, tool := range removed {
-			if !yield(tool.Name) {
-				return
-			}
-		}
-		for _, tool := range modified {
-			if !yield(tool.Name) {
-				return
-			}
-		}
-	})
-	toolsets, err := s.referencingToolsets(r.Context(), p, saved, changed)
+	toolsets, err := s.referencingToolsets(r.Context(), p, saved)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -300,14 +281,14 @@ func (s *Server) approveCatalog(r *http.Request, _ authz.Principal) (httpkit.Rep
 	if catalog.Protocol != in.ProtocolVersion || catalog.Digest != in.Digest {
 		return httpkit.Reply{}, httpkit.Fail(409, "mcp_catalog_changed", "The live MCP catalog changed since it was reviewed. Preview it again before approving.")
 	}
+	if catalog.Protocol == previous.Catalog.Protocol && catalog.Digest == previous.Catalog.Digest {
+		return httpkit.Reply{}, httpkit.Fail(409, "mcp_catalog_current", "The live MCP catalog already matches the certified catalog.")
+	}
 	return access.Mutate(s.access, r, in, func(tx pgx.Tx, principal authz.Principal) (*Definition, error) {
 		return s.loadForWrite(r.Context(), tx, principal, Input{}, id)
 	}, func(tx pgx.Tx, principal authz.Principal, current *Definition) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
-		}
-		if current.ETag != previous.ETag {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The MCP registration changed during catalog review.")
 		}
 		saved, saveErr := Save(r.Context(), tx, principal.UserID(), current, catalogCandidate(current, catalog))
 		if saveErr != nil {

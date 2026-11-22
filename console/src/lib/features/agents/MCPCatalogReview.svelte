@@ -25,10 +25,10 @@
     await client.invalidateQueries({ queryKey: agentKeys.servers() });
   });
   const busy = $derived(preview.busy || approval.busy);
-  const changes = $derived(
-    review
-      ? review.added.length + review.removed.length + review.modified.length
-      : 0
+  const unchanged = $derived(
+    review !== null &&
+      review.discovered_digest === review.saved_digest &&
+      review.discovered_protocol_version === review.saved_protocol_version
   );
 
   function runPreview() {
@@ -82,7 +82,7 @@
       {review.discovered_protocol_version} with digest
       <code>{review.discovered_digest}</code>.
     </p>
-    {#if changes === 0}
+    {#if unchanged}
       <p>The live catalog matches the certified catalog.</p>
     {/if}
     {#if review.added.length}
@@ -125,10 +125,10 @@
       {/each}
     {/if}
     {#if review.toolsets.length}
-      <h4>Published toolsets using changed tools</h4>
+      <h4>Published toolsets pinning this server</h4>
       <p>
-        These toolsets keep using the certified revision until they are
-        republished.
+        Approval creates a new server revision. These toolsets serve this
+        server's tools again only after they are republished.
       </p>
       <ul>
         {#each review.toolsets as toolset (toolset.id)}
@@ -136,14 +136,16 @@
         {/each}
       </ul>
     {/if}
-    <div class="page-actions">
-      <button
-        class="button button-primary"
-        type="button"
-        disabled={busy}
-        onclick={runApproval}>Approve and certify</button
-      >
-    </div>
+    {#if !unchanged}
+      <div class="page-actions">
+        <button
+          class="button button-primary"
+          type="button"
+          disabled={busy}
+          onclick={runApproval}>Approve and certify</button
+        >
+      </div>
+    {/if}
     {#if approval.error}
       <p class="inline-problem" role="alert">{approval.error}</p>
     {/if}

@@ -12469,7 +12469,7 @@ type MCPCatalogPreviewResponse struct {
 	SavedProtocolVersion      MCPCatalogPreviewResponseSavedProtocolVersion      `json:"saved_protocol_version"`
 	ServerId                  openapi_types.UUID                                 `json:"server_id"`
 
-	// Toolsets Visible published toolsets whose current revision references a removed or modified tool on this server.
+	// Toolsets Visible published toolsets whose current revision pins any tool on this server. Approval creates a new server revision, so each one serves these tools again only after it is republished.
 	Toolsets []MCPCatalogToolsetReference `json:"toolsets"`
 }
 
@@ -12485,7 +12485,7 @@ type MCPCatalogToolsetReference struct {
 	Name       string             `json:"name"`
 	RevisionId openapi_types.UUID `json:"revision_id"`
 
-	// Tools Certified tool names referenced by this published toolset that the live catalog removes or modifies.
+	// Tools Tool names this published toolset pins on this server.
 	Tools []string `json:"tools"`
 }
 

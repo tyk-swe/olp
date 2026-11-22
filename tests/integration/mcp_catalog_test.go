@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -163,6 +164,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	fixture.set([]upstream.ListedTool{
 		fixtureTool("lookup", "Look up a record", `{"type":"object","properties":{"id":{"type":"string"}}}`),
 		fixtureTool("legacy", "Legacy lookup", `{"type":"object","properties":{}}`),
+		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
 	upstreamServer := httptest.NewServer(fixture.handler(t))
 	t.Cleanup(upstreamServer.Close)
@@ -193,10 +195,10 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	publicationID, toolsetRevisionID := uuid.NewString(), uuid.NewString()
-	draft := agentcontract.Draft{ProjectID: projectID, Name: "Fixture tools", Toolset: &agentcontract.Toolset{Tools: []agentcontract.Tool{{
-		ServerID: saved.ID, RevisionID: saved.RevisionID, CatalogDigest: certified.Digest,
-		Name: "lookup", Alias: agentcontract.ToolAlias(saved.ID, "lookup"),
-	}}}}
+	pin := func(name string) agentcontract.Tool {
+		return agentcontract.Tool{ServerID: saved.ID, RevisionID: saved.RevisionID, CatalogDigest: certified.Digest, Name: name, Alias: agentcontract.ToolAlias(saved.ID, name)}
+	}
+	draft := agentcontract.Draft{ProjectID: projectID, Name: "Fixture tools", Toolset: &agentcontract.Toolset{Tools: []agentcontract.Tool{pin("status"), pin("lookup")}}}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES($1,$2,'toolset','Fixture tools',$3,$4,$5)`, publicationID, projectID, draft, uuid.NewString(), ownerID); err != nil {
 		t.Fatal(err)
 	}
@@ -229,9 +231,28 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		}
 		return got
 	}
+	problemType := func(step string, got apiResult) string {
+		t.Helper()
+		var problem struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(got.body, &problem); err != nil {
+			t.Fatalf("%s problem = %s", step, got.body)
+		}
+		return problem.Type
+	}
+	currentBody := fmt.Sprintf(`{"protocol_version":%q,"digest":%q}`, certified.Protocol, certified.Digest)
+	unchanged := expect("approve unchanged catalog", call("POST", approvePath, fmt.Sprintf("%q", before.etag), currentBody, "approve-unchanged"), http.StatusConflict)
+	if kind := problemType("approve unchanged catalog", unchanged); !strings.HasSuffix(kind, "/mcp_catalog_current") {
+		t.Fatalf("unchanged approval problem = %s", kind)
+	}
+	if after := state(); after != before {
+		t.Fatalf("unchanged approval changed the registration: before=%+v after=%+v", before, after)
+	}
 	fixture.set([]upstream.ListedTool{
 		fixtureTool("lookup", "Look up a record", `{"type":"object","properties":{"id":{"type":"string"},"verbose":{"type":"boolean"}},"required":["id"]}`),
 		fixtureTool("search", "Search records", `{"type":"object","properties":{"q":{"type":"string"}}}`),
+		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
 	previewed := expect("preview", call("POST", previewPath, "", ""), http.StatusOK)
 	var preview contract.MCPCatalogPreviewResponse
@@ -247,7 +268,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	if len(preview.Modified) != 1 || preview.Modified[0].Name != "lookup" || len(preview.Modified[0].ChangedFields) != 1 || preview.Modified[0].ChangedFields[0] != "input_schema" {
 		t.Fatalf("preview modified = %+v", preview.Modified)
 	}
-	if len(preview.Toolsets) != 1 || preview.Toolsets[0].Id.String() != publicationID || len(preview.Toolsets[0].Tools) != 1 || preview.Toolsets[0].Tools[0] != "lookup" {
+	if len(preview.Toolsets) != 1 || preview.Toolsets[0].Id.String() != publicationID || !slices.Equal(preview.Toolsets[0].Tools, []string{"lookup", "status"}) {
 		t.Fatalf("preview toolsets = %+v", preview.Toolsets)
 	}
 	if after := state(); after != before {
@@ -257,13 +278,11 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	fixture.set([]upstream.ListedTool{
 		fixtureTool("lookup", "Look up a record", `{"type":"object","properties":{"id":{"type":"string"},"verbose":{"type":"boolean"}},"required":["id"]}`),
 		fixtureTool("search", "Search everything", `{"type":"object","properties":{"q":{"type":"string"}}}`),
+		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
 	conflict := expect("approve changed catalog", call("POST", approvePath, previewed.etag, approvalBody, "approve-stale-catalog"), http.StatusConflict)
-	var problem struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(conflict.body, &problem); err != nil || !strings.HasSuffix(problem.Type, "/mcp_catalog_changed") {
-		t.Fatalf("conflict problem = %s", conflict.body)
+	if kind := problemType("approve changed catalog", conflict); !strings.HasSuffix(kind, "/mcp_catalog_changed") {
+		t.Fatalf("conflict problem = %s", kind)
 	}
 	if after := state(); after != before {
 		t.Fatalf("conflicting approval changed the registration: before=%+v after=%+v", before, after)
@@ -271,6 +290,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	fixture.set([]upstream.ListedTool{
 		fixtureTool("lookup", "Look up a record", `{"type":"object","properties":{"id":{"type":"string"},"verbose":{"type":"boolean"}},"required":["id"]}`),
 		fixtureTool("search", "Search records", `{"type":"object","properties":{"q":{"type":"string"}}}`),
+		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
 	if _, err := pool.Exec(ctx, `UPDATE olp.mcp_servers SET etag=gen_random_uuid() WHERE id=$1`, saved.ID); err != nil {
 		t.Fatal(err)
@@ -293,7 +313,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	if server.Revision != 2 || server.Catalog.Digest != fresh.DiscoveredDigest || string(server.Catalog.ProtocolVersion) != string(fresh.DiscoveredProtocolVersion) {
 		t.Fatalf("approved server = %+v", server)
 	}
-	if len(server.Catalog.Tools) != 2 || server.Catalog.Tools[0].Name != "lookup" || server.Catalog.Tools[1].Name != "search" {
+	if len(server.Catalog.Tools) != 3 || server.Catalog.Tools[0].Name != "lookup" || server.Catalog.Tools[1].Name != "search" || server.Catalog.Tools[2].Name != "status" {
 		t.Fatalf("approved tools = %+v", server.Catalog.Tools)
 	}
 	if len(server.ToolPrices) != 1 || server.ToolPrices["lookup"] != "1.5" {
