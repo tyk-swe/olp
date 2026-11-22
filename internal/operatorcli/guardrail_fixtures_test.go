@@ -113,6 +113,28 @@ func TestGuardrailsRunFixturesFailsNamingFixtureWithoutContent(t *testing.T) {
 	}
 }
 
+func TestGuardrailsRunFixturesForwardsFixturesUnchanged(t *testing.T) {
+	var forwarded json.RawMessage
+	runner, _, path := fixtureRunner(t, func(w http.ResponseWriter, r *http.Request) {
+		var run struct {
+			Fixtures json.RawMessage `json:"fixtures"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&run)
+		forwarded = run.Fixtures
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	})
+	fixtures := `[{"id":"missing-text","phase":"input","expected":"allow"}]`
+	if err := os.WriteFile(path, []byte(`{"synthetic":true,"fixtures":`+fixtures+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(t.Context(), fixtureArgs(path)); err == nil {
+		t.Fatal("rejected suite returned no error")
+	}
+	if string(forwarded) != fixtures {
+		t.Fatalf("forwarded fixtures = %s", forwarded)
+	}
+}
+
 func TestGuardrailsRunFixturesServerFailurePrintsNoResults(t *testing.T) {
 	runner, out, path := fixtureRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")

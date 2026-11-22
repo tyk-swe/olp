@@ -322,9 +322,10 @@ and the command exits nonzero when the candidate misses an expectation or the
 run cannot be evaluated, naming the failing fixture IDs. The baseline outcome
 is reported for comparison and does not gate the run.
 
-A suite holds at most 32 uniquely named fixtures in a 256 KiB file, with at
-most 8192 bytes of text per fixture. Only the unary `input` and `output`
-phases run, and only policy entries over the deterministic built-in types
+Every fixture needs an `id`, `phase`, `text` and `expected`, and `text` may be
+an empty string. A suite holds at most 32 uniquely named fixtures in a 256 KiB
+file, with at most 8192 bytes of text per fixture. Only the unary `input` and
+`output` phases run, and only policy entries over the deterministic built-in types
 `builtin.regex`, `builtin.pii`, `builtin.secrets` and `builtin.keywords` are
 supported, apart from `mask` entries whose placeholders are not repeatable.
 Both revisions are loaded, authorized and checked against these bounds

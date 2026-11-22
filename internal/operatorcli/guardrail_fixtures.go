@@ -21,7 +21,13 @@ const maxGuardrailFixtureFileBytes = 256 << 10
 
 type guardrailFixtureFile struct {
 	Synthetic contract.GuardrailFixtureRunInputSynthetic `json:"synthetic"`
-	Fixtures  []contract.GuardrailFixture                `json:"fixtures"`
+	Fixtures  json.RawMessage                            `json:"fixtures"`
+}
+
+type guardrailFixtureRun struct {
+	BaselinePolicyRevisionID  uuid.UUID `json:"baseline_policy_revision_id"`
+	CandidatePolicyRevisionID uuid.UUID `json:"candidate_policy_revision_id"`
+	guardrailFixtureFile
 }
 
 func (runner Runner) guardrailFixtures(ctx context.Context, args []string) error {
@@ -44,10 +50,7 @@ func (runner Runner) guardrailFixtures(ctx context.Context, args []string) error
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(contract.GuardrailFixtureRunInput{
-		BaselinePolicyRevisionId: baseline, CandidatePolicyRevisionId: candidate,
-		Synthetic: suite.Synthetic, Fixtures: suite.Fixtures,
-	})
+	body, err := json.Marshal(guardrailFixtureRun{BaselinePolicyRevisionID: baseline, CandidatePolicyRevisionID: candidate, guardrailFixtureFile: suite})
 	if err != nil {
 		return err
 	}

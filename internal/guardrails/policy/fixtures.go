@@ -38,7 +38,7 @@ const (
 type guardrailFixture struct {
 	ID                   string           `json:"id"`
 	Phase                guardrails.Phase `json:"phase"`
-	Text                 string           `json:"text"`
+	Text                 *string          `json:"text"`
 	Expected             fixtureOutcome   `json:"expected"`
 	ExpectedRedactedText *string          `json:"expected_redacted_text,omitempty"`
 }
@@ -103,8 +103,8 @@ func (f guardrailFixture) validate(field string) error {
 	if f.Phase != guardrails.Input && f.Phase != guardrails.Output {
 		return httpkit.Invalid(field+".phase", "Choose the unary input or output phase.")
 	}
-	if !utf8.ValidString(f.Text) || len(f.Text) > maxFixtureTextBytes {
-		return httpkit.Invalid(field+".text", "Use UTF-8 text of at most 8192 bytes.")
+	if f.Text == nil || !utf8.ValidString(*f.Text) || len(*f.Text) > maxFixtureTextBytes {
+		return httpkit.Invalid(field+".text", "Give the fixture text as UTF-8 of at most 8192 bytes. It may be empty.")
 	}
 	if f.Expected != outcomeAllow && f.Expected != outcomeBlock && f.Expected != outcomeRedact {
 		return httpkit.Invalid(field+".expected", "Choose allow, block or redact.")
@@ -230,7 +230,7 @@ func (a *API) runFixtureSuite(r *http.Request, p authz.Principal, baseline, cand
 func (fixture guardrailFixture) application(pinned guardrails.Pinned) guardrails.PinnedApplication {
 	return guardrails.PinnedApplication{Pinned: pinned, Application: guardrails.Application{
 		PolicyRevisionID: pinned.Policy.ID, Phase: fixture.Phase,
-		Segments: []guardrails.Segment{{ID: fixtureSegmentID, Role: fixtureRole(fixture.Phase), Text: fixture.Text}},
+		Segments: []guardrails.Segment{{ID: fixtureSegmentID, Role: fixtureRole(fixture.Phase), Text: *fixture.Text}},
 	}}
 }
 

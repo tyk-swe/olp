@@ -52,10 +52,10 @@ func directBatchEvaluator(r *http.Request, _ authz.Principal, batch []guardrails
 func fixtureSuite() []guardrailFixture {
 	redacted := "code [hidden] end"
 	return []guardrailFixture{
-		{ID: "allow-case", Phase: guardrails.Input, Text: "a friendly note", Expected: outcomeAllow},
-		{ID: "block-case", Phase: guardrails.Input, Text: "a blocked-word here", Expected: outcomeBlock},
-		{ID: "redact-case", Phase: guardrails.Input, Text: "code secret-123 end", Expected: outcomeRedact, ExpectedRedactedText: &redacted},
-		{ID: "output-block-case", Phase: guardrails.Output, Text: "a blocked-word here", Expected: outcomeBlock},
+		{ID: "allow-case", Phase: guardrails.Input, Text: new("a friendly note"), Expected: outcomeAllow},
+		{ID: "block-case", Phase: guardrails.Input, Text: new("a blocked-word here"), Expected: outcomeBlock},
+		{ID: "redact-case", Phase: guardrails.Input, Text: new("code secret-123 end"), Expected: outcomeRedact, ExpectedRedactedText: &redacted},
+		{ID: "output-block-case", Phase: guardrails.Output, Text: new("a blocked-word here"), Expected: outcomeBlock},
 	}
 }
 
@@ -151,11 +151,18 @@ func TestFixtureRunInputValidate(t *testing.T) {
 			BaselinePolicyRevisionID:  "00000000-0000-0000-0000-000000000001",
 			CandidatePolicyRevisionID: "00000000-0000-0000-0000-000000000002",
 			Synthetic:                 true,
-			Fixtures:                  []guardrailFixture{{ID: "case-1", Phase: guardrails.Input, Text: "text", Expected: outcomeAllow}},
+			Fixtures:                  []guardrailFixture{{ID: "case-1", Phase: guardrails.Input, Text: new(""), Expected: outcomeAllow}},
 		}
 	}
 	if err := valid().validate(); err != nil {
 		t.Fatal(err)
+	}
+	var omitted fixtureRunInput
+	if err := json.Unmarshal([]byte(`{"baseline_policy_revision_id":"00000000-0000-0000-0000-000000000001","candidate_policy_revision_id":"00000000-0000-0000-0000-000000000002","synthetic":true,"fixtures":[{"id":"case-1","phase":"input","expected":"allow"}]}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if err := omitted.validate(); err == nil {
+		t.Error("fixture without text returned no error")
 	}
 	cases := map[string]func(*fixtureRunInput){
 		"not synthetic":     func(in *fixtureRunInput) { in.Synthetic = false },
@@ -163,7 +170,7 @@ func TestFixtureRunInputValidate(t *testing.T) {
 		"streaming phase":   func(in *fixtureRunInput) { in.Fixtures[0].Phase = guardrails.OutputStream },
 		"redacted on allow": func(in *fixtureRunInput) { in.Fixtures[0].ExpectedRedactedText = &redacted },
 		"duplicate id":      func(in *fixtureRunInput) { in.Fixtures = append(in.Fixtures, in.Fixtures[0]) },
-		"oversized text":    func(in *fixtureRunInput) { in.Fixtures[0].Text = strings.Repeat("x", maxFixtureTextBytes+1) },
+		"oversized text":    func(in *fixtureRunInput) { in.Fixtures[0].Text = new(strings.Repeat("x", maxFixtureTextBytes+1)) },
 		"too many fixtures": func(in *fixtureRunInput) {
 			for len(in.Fixtures) <= maxGuardrailFixtures {
 				next := in.Fixtures[0]
