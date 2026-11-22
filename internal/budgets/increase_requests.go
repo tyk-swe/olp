@@ -58,10 +58,10 @@ func (a *API) increaseRequestByID(r *http.Request, p authz.Principal) (httpkit.R
 	}
 	var data json.RawMessage
 	var project, etag string
-	if err = a.server.Pool.QueryRow(r.Context(), "SELECT "+increaseRequestJSON+",q.project_id::text,q.etag::text FROM olp.budget_increase_requests q WHERE q.id=$1", id).Scan(&data, &project, &etag); err != nil {
+	if err := a.server.Pool.QueryRow(r.Context(), "SELECT "+increaseRequestJSON+",q.project_id::text,q.etag::text FROM olp.budget_increase_requests q WHERE q.id=$1", id).Scan(&data, &project, &etag); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = p.Project(&project, authz.View); err != nil {
+	if err := p.Project(&project, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(data, etag), nil
