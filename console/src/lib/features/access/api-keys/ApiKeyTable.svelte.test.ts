@@ -21,7 +21,11 @@ const active: ApiKey = {
   regional_limits: {},
   scopes: ['inference'],
   budget: {
-    daily: { accrued: '0', limit: null, window_ends_at: '2025-01-02T00:00:00Z' },
+    daily: {
+      accrued: '0',
+      limit: null,
+      window_ends_at: '2025-01-02T00:00:00Z'
+    },
     monthly: {
       accrued: '0',
       limit: null,

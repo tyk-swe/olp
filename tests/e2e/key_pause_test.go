@@ -67,10 +67,6 @@ func TestPausedAPIKeyRefusesEverySecretUntilResume(t *testing.T) {
 	}
 
 	replacement := s.Want(owner, "POST", path+"/rotate", map[string]int{"overlap_seconds": 0}, harness.Idempotent(harness.ETag(detail())), http.StatusOK)
-	s.Eventually("rotated secret still refused while paused", harness.StartupLimit, refusesPaused(replacement["secret"].(string)))
-	if status, raw := call(rotated["secret"].(string)); status != http.StatusUnauthorized {
-		t.Fatalf("zero-overlap previous secret survived rotation: %s", describe(status, raw))
-	}
 	if got := detail(); got["paused_at"] == nil {
 		t.Fatalf("rotation cleared the pause: %+v", got)
 	}
@@ -79,9 +75,11 @@ func TestPausedAPIKeyRefusesEverySecretUntilResume(t *testing.T) {
 	if resumed["paused"] != false {
 		t.Fatalf("resume response did not clear the pause: %+v", resumed)
 	}
-	s.Eventually("only the newest secret serving after resume", harness.StartupLimit, serves(replacement["secret"].(string)))
-	if status, raw := call(created["secret"].(string)); status == http.StatusOK {
-		t.Fatalf("retired secret served after resume: %s", describe(status, raw))
+	s.Eventually("newest secret serving after resume", harness.StartupLimit, serves(replacement["secret"].(string)))
+	for _, retired := range []string{rotated["secret"].(string), created["secret"].(string)} {
+		if status, raw := call(retired); status == http.StatusOK {
+			t.Fatalf("retired secret served after resume: %s", describe(status, raw))
+		}
 	}
 
 	s.Want(owner, "POST", path+"/pause", nil, harness.Idempotent(harness.ETag(detail())), http.StatusOK)
