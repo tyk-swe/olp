@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { captureResult } from '#lib/editing/result.js';
   import { parseRealtimeTrace, type RealtimeEventRow } from './realtimeTrace';
 
   let source = $state(
@@ -9,11 +10,14 @@
 
   function inspect() {
     error = '';
-    try {
-      rows = parseRealtimeTrace(source);
-    } catch (reason) {
+    const result = captureResult(() => parseRealtimeTrace(source));
+    if (result.ok) rows = result.value;
+    else {
       rows = [];
-      error = reason instanceof Error ? reason.message : 'Invalid event trace.';
+      error =
+        result.error instanceof Error
+          ? result.error.message
+          : 'Invalid event trace.';
     }
   }
 </script>

@@ -31,7 +31,8 @@ type turn struct {
 func (t turn) refuse(e *fault.Error) { t.kernel.Refuse(t.x, t.w, e) }
 
 func (s surface) serve(w http.ResponseWriter, r *http.Request, family wire.Format, operation, mode, upstreamOp string) {
-	x, authority, ok := s.kernel.EnterBedrock(w, r, family, mode)
+	x := s.kernel.SessionCall(w, r, family, mode)
+	authority, ok := s.kernel.EnterCall(w, r, x, s.kernel.Gate.BedrockAuthenticate)
 	if !ok {
 		return
 	}
@@ -56,7 +57,7 @@ func (s surface) serve(w http.ResponseWriter, r *http.Request, family wire.Forma
 		t.refuse(e)
 		return
 	}
-	defer s.kernel.SettleBedrock(r.Context(), x, pin)
+	defer s.kernel.SettlePinnedRequest(r.Context(), x, pin)
 	ctx, cancel, e := t.reserve(route)
 	if e != nil {
 		t.refuse(e)
@@ -121,14 +122,18 @@ func (t turn) answer(ctx context.Context, pin *kernel.Pin, body []byte) {
 		t.refuse(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}
-	resp, failure := t.kernel.BedrockCall(ctx, t.x, pin, endpoint, body, t.mode == "streaming")
+	accept := "application/json"
+	if t.mode == "streaming" {
+		accept = "application/vnd.amazon.eventstream"
+	}
+	resp, failure := t.kernel.PinnedPost(ctx, t.x, pin, endpoint, body, "application/json", accept, bedrockErrorBody)
 	if failure != nil {
 		t.refuse(kernel.UpstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
 	if t.mode == "streaming" {
-		t.kernel.RelayBedrockStream(ctx, t.w, t.x, resp)
+		t.surface.relayStream(ctx, t.w, t.x, resp)
 		return
 	}
 	result, err := resp.ReadBody(t.kernel.Config.MaxResponseBytes)
@@ -136,7 +141,7 @@ func (t turn) answer(ctx context.Context, pin *kernel.Pin, body []byte) {
 		t.refuse(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
 	}
-	if e := t.kernel.ValidateBedrockResult(resp.Exchange, pin, t.upstream, result); e != nil {
+	if e := validateResult(resp.Exchange, pin, t.upstream, result); e != nil {
 		t.refuse(e)
 		return
 	}

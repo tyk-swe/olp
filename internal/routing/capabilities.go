@@ -37,7 +37,43 @@ type RouteCapabilities struct {
 func EffectiveCapabilities(snapshot selectionSource, route Route) RouteCapabilities {
 	operations := slices.Clone(route.Operations)
 	slices.Sort(operations)
-	capabilities := RouteCapabilities{Operations: operations, OperationSupport: map[string]string{}}
+	enabled, considered := collectRouteTargetCapabilities(snapshot, route)
+	capabilities := RouteCapabilities{
+		Operations:       operations,
+		OperationSupport: summarizeOperationSupport(operations, enabled, route.IsPassthrough()),
+	}
+	unknown := []string{}
+	capabilities.ContextLength = minimumMetadataInt(considered, "context_length", &unknown, func(m ModelMetadata) *int64 { return m.ContextLength })
+	capabilities.MaxOutputTokens = minimumMetadataInt(considered, "max_output_tokens", &unknown, func(m ModelMetadata) *int64 { return m.MaxOutputTokens })
+	if values, ok := intersectMetadataStrings(considered, func(m ModelMetadata) []string { return m.InputModalities }); ok {
+		capabilities.InputModalities = values
+	} else {
+		capabilities.InputModalities = []string{}
+		unknown = append(unknown, "input_modalities")
+	}
+	if values, ok := intersectMetadataStrings(considered, func(m ModelMetadata) []string { return m.OutputModalities }); ok {
+		capabilities.OutputModalities = values
+	} else {
+		capabilities.OutputModalities = []string{}
+		unknown = append(unknown, "output_modalities")
+	}
+	if values, ok := intersectMetadataStrings(considered, func(m ModelMetadata) []string {
+		if m.SupportedParameters == nil {
+			return nil
+		}
+		return *m.SupportedParameters
+	}); ok {
+		capabilities.SupportedParameters = &values
+	}
+	if capabilities.SupportedParameters == nil {
+		unknown = append(unknown, "supported_parameters")
+	}
+	slices.Sort(unknown)
+	capabilities.Unknown = unknown
+	return capabilities
+}
+
+func collectRouteTargetCapabilities(snapshot selectionSource, route Route) ([]map[string]bool, []ModelMetadata) {
 	var enabled []map[string]bool
 	var considered []ModelMetadata
 	for _, target := range route.Targets {
@@ -58,6 +94,11 @@ func EffectiveCapabilities(snapshot selectionSource, route Route) RouteCapabilit
 		metadata, _ := provider.Metadata(target.ProviderModel)
 		considered = append(considered, metadata)
 	}
+	return enabled, considered
+}
+
+func summarizeOperationSupport(operations []string, enabled []map[string]bool, passthrough bool) map[string]string {
+	support := make(map[string]string, len(operations))
 	for _, operation := range operations {
 		status := "unknown"
 		if len(enabled) > 0 {
@@ -75,76 +116,50 @@ func EffectiveCapabilities(snapshot selectionSource, route Route) RouteCapabilit
 				status = "target_dependent"
 			}
 		}
-		capabilities.OperationSupport[operation] = status
+		support[operation] = status
 	}
-	if route.IsPassthrough() {
-		capabilities.OperationSupport[PassthroughOperation] = "uncertified"
+	if passthrough {
+		support[PassthroughOperation] = "uncertified"
 	}
-	unknown := []string{}
-	minimum := func(name string, fact func(ModelMetadata) *int64) *int64 {
-		var result *int64
-		for _, metadata := range considered {
-			value := fact(metadata)
-			if value == nil {
-				unknown = append(unknown, name)
-				return nil
-			}
-			if result == nil || *value < *result {
-				result = value
-			}
-		}
-		if len(considered) == 0 {
-			unknown = append(unknown, name)
-		}
-		return result
-	}
-	intersection := func(fact func(ModelMetadata) []string) ([]string, bool) {
-		var common []string
-		for i, metadata := range considered {
-			values := fact(metadata)
-			if len(values) == 0 {
-				return nil, false
-			}
-			sorted := slices.Clone(values)
-			slices.Sort(sorted)
-			sorted = slices.Compact(sorted)
-			if i == 0 {
-				common = sorted
-				continue
-			}
-			common = slices.DeleteFunc(common, func(value string) bool { return !slices.Contains(sorted, value) })
-		}
-		if len(considered) == 0 {
-			return nil, false
-		}
-		return common, true
-	}
-	capabilities.ContextLength = minimum("context_length", func(m ModelMetadata) *int64 { return m.ContextLength })
-	capabilities.MaxOutputTokens = minimum("max_output_tokens", func(m ModelMetadata) *int64 { return m.MaxOutputTokens })
-	if values, ok := intersection(func(m ModelMetadata) []string { return m.InputModalities }); ok {
-		capabilities.InputModalities = values
-	} else {
-		capabilities.InputModalities = []string{}
-		unknown = append(unknown, "input_modalities")
-	}
-	if values, ok := intersection(func(m ModelMetadata) []string { return m.OutputModalities }); ok {
-		capabilities.OutputModalities = values
-	} else {
-		capabilities.OutputModalities = []string{}
-		unknown = append(unknown, "output_modalities")
-	}
-	if values, ok := intersection(func(m ModelMetadata) []string {
-		if m.SupportedParameters == nil {
+	return support
+}
+
+func minimumMetadataInt(considered []ModelMetadata, name string, unknown *[]string, fact func(ModelMetadata) *int64) *int64 {
+	var result *int64
+	for _, metadata := range considered {
+		value := fact(metadata)
+		if value == nil {
+			*unknown = append(*unknown, name)
 			return nil
 		}
-		return *m.SupportedParameters
-	}); ok {
-		capabilities.SupportedParameters = &values
+		if result == nil || *value < *result {
+			result = value
+		}
 	}
-	if capabilities.SupportedParameters == nil {
-		unknown = append(unknown, "supported_parameters")
+	if len(considered) == 0 {
+		*unknown = append(*unknown, name)
 	}
-	slices.Sort(unknown)
-	capabilities.Unknown = unknown
-	return capabilities
+	return result
+}
+
+func intersectMetadataStrings(considered []ModelMetadata, fact func(ModelMetadata) []string) ([]string, bool) {
+	var common []string
+	for i, metadata := range considered {
+		values := fact(metadata)
+		if len(values) == 0 {
+			return nil, false
+		}
+		sorted := slices.Clone(values)
+		slices.Sort(sorted)
+		sorted = slices.Compact(sorted)
+		if i == 0 {
+			common = sorted
+			continue
+		}
+		common = slices.DeleteFunc(common, func(value string) bool { return !slices.Contains(sorted, value) })
+	}
+	if len(considered) == 0 {
+		return nil, false
+	}
+	return common, true
 }

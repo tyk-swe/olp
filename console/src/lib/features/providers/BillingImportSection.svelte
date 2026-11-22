@@ -7,19 +7,26 @@
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import { formatDate } from '#lib/format.js';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
+  import { parseJsonObject } from '#lib/editing/json.js';
+  import BillingImportFields from './BillingImportFields.svelte';
 
   import {
     deleteBillingImport,
     getBillingImport,
     putBillingImport,
-    runBillingImport,
-    type BillingImport,
-    type PutBillingImportInput
+    runBillingImport
   } from '#lib/features/providers/billing.js';
+  import {
+    clearBillingImportSecrets,
+    errorPhrase,
+    hydrateBillingImport,
+    newBillingImportForm,
+    scopeBody,
+    validateForm
+  } from './billingImportForm.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import type { Provider } from '#lib/features/providers/providers.js';
 
@@ -50,8 +57,9 @@
         : /^wrkspc_[A-Za-z0-9]{1,64}$/
   );
 
-  const intent = useMutationIntent();
-  const runIntent = useMutationIntent();
+  const saveMutation = useMutation();
+  const runMutation = useMutation();
+  const removal = useAction();
   const queryClient = useQueryClient();
   const billing = createQuery(() => ({
     queryKey: providerKeys.billingImport(provider.id),
@@ -59,397 +67,176 @@
     enabled: supported
   }));
 
-  let adminKey = $state('');
-  let payerAccount = $state('');
-  let bucket = $state('');
-  let reportPrefix = $state('');
-  let region = $state('');
-  let linkedAccounts = $state('');
-  let awsAuthMode = $state<'static' | 'workload'>('static');
-  let accessKeyId = $state('');
-  let secretAccessKey = $state('');
-  let sessionToken = $state('');
-  let replaceCredential = $state(false);
-  let scopeText = $state('');
-  let billingScope = $state('');
-  let exportName = $state('');
-  let storageAccount = $state('');
-  let container = $state('');
-  let prefix = $state('');
-  let authMode = $state<'' | 'azure_default' | 'azure_client_secret'>('');
-  let tenantId = $state('');
-  let clientId = $state('');
-  let clientSecret = $state('');
-  let billingAccountID = $state('');
-  let bigQueryProjectID = $state('');
-  let datasetID = $state('');
-  let tableID = $state('');
-  let googleAuthMode = $state<'keep' | 'service_account' | 'adc'>(
-    'service_account'
-  );
-  let enabled = $state(true);
-  let busy = $state(false);
-  let error = $state('');
-  let conflicted = $state(false);
+  const form = $state(newBillingImportForm());
+  let reloading = $state(false);
+  let reloadError = $state('');
   let initialized = $state(false);
 
   const captureOwner = usePrincipalLifetime(() => {
-    adminKey = '';
-    payerAccount = bucket = reportPrefix = region = linkedAccounts = '';
-    accessKeyId = secretAccessKey = sessionToken = '';
-    replaceCredential = false;
-    scopeText = '';
-    billingScope = exportName = storageAccount = container = prefix = '';
-    authMode = '';
-    tenantId = clientId = clientSecret = '';
-    billingAccountID = bigQueryProjectID = datasetID = tableID = '';
-    googleAuthMode = 'service_account';
-    enabled = true;
-    busy = false;
-    error = '';
-    conflicted = false;
+    clearBillingImportSecrets(form);
+    reloading = false;
+    reloadError = '';
     initialized = false;
   });
+
+  const busy = $derived(
+    saveMutation.busy || runMutation.busy || removal.busy || reloading
+  );
+  const error = $derived(
+    saveMutation.error || runMutation.error || removal.error || reloadError
+  );
+  const conflicted = $derived(saveMutation.conflict || removal.conflict);
 
   const detail = $derived(billing.data ?? null);
   const editing = $derived(detail !== null);
 
   $effect(() => {
     const current = detail;
-    if (current && !initialized) hydrate(current);
+    if (current && !initialized) {
+      hydrateBillingImport(current, form);
+      initialized = true;
+    }
   });
-
-  function hydrate(document: BillingImport | null) {
-    const scope = document?.scope;
-    scopeText = document ? scopeLines(document) : '';
-    const aws = scope && 'payer_account_id' in scope ? scope : null;
-    payerAccount = aws?.payer_account_id ?? '';
-    bucket = aws?.bucket ?? '';
-    reportPrefix = aws?.report_prefix ?? '';
-    region = aws?.region ?? '';
-    linkedAccounts = (aws?.linked_account_ids ?? []).join('\n');
-    const azureScope = scope && 'billing_scope' in scope ? scope : null;
-    billingScope = azureScope?.billing_scope ?? '';
-    exportName = azureScope?.export_name ?? '';
-    storageAccount = azureScope?.storage_account ?? '';
-    container = azureScope?.container ?? '';
-    prefix = azureScope?.prefix ?? '';
-    const google = scope && 'billing_account_id' in scope ? scope : null;
-    billingAccountID = google?.billing_account_id ?? '';
-    bigQueryProjectID = google?.bigquery_project_id ?? '';
-    datasetID = google?.dataset_id ?? '';
-    tableID = google?.table_id ?? '';
-    googleAuthMode = google ? 'keep' : 'service_account';
-    enabled = document?.enabled ?? true;
-    initialized = true;
-  }
-
-  function scopeLines(document: BillingImport): string {
-    const scope = document.scope;
-    if ('payer_account_id' in scope) return '';
-    if ('billing_scope' in scope)
-      return (scope.subscription_ids ?? []).join('\n');
-
-    const entries =
-      'project_ids' in scope
-        ? (scope.project_ids ?? [])
-        : 'workspace_ids' in scope
-          ? (scope.workspace_ids ?? [])
-          : [];
-
-    return entries.join('\n');
-  }
-
-  function errorPhrase(code: string): string {
-    switch (code) {
-      case 'credential':
-        return 'the vendor rejected the billing credential';
-      case 'status':
-        return 'the vendor returned an error';
-      case 'network':
-        return 'the vendor endpoint was unreachable';
-      case 'timeout':
-        return 'the vendor did not answer in time';
-      case 'response':
-        return 'the vendor returned an unexpected response';
-      case 'endpoint':
-        return 'egress to the endpoint was refused';
-      default:
-        return code;
-    }
-  }
-
-  function scopeBody(): NonNullable<PutBillingImportInput['scope']> {
-    if (kind === 'bedrock') {
-      const ids = linkedAccounts
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-      return {
-        payer_account_id: payerAccount.trim(),
-        bucket: bucket.trim(),
-        report_prefix: reportPrefix.trim(),
-        region: region.trim(),
-        ...(ids.length ? { linked_account_ids: ids } : {})
-      };
-    }
-    const ids = scopeText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (azure) {
-      return {
-        billing_scope: billingScope.trim(),
-        export_name: exportName.trim(),
-        storage_account: storageAccount.trim(),
-        container: container.trim(),
-        ...(prefix.trim() ? { prefix: prefix.trim() } : {}),
-        ...(ids.length ? { subscription_ids: ids } : {})
-      };
-    }
-    if (kind === 'vertex_ai') {
-      return {
-        billing_account_id: billingAccountID.trim(),
-        bigquery_project_id: bigQueryProjectID.trim(),
-        dataset_id: datasetID.trim(),
-        table_id: tableID.trim(),
-        ...(ids.length ? { project_ids: ids } : {})
-      };
-    }
-    if (!ids.length) return {};
-    return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
-  }
-
-  function validateForm(): string {
-    if (kind === 'bedrock') {
-      if (!/^\d{12}$/.test(payerAccount.trim()))
-        return 'Enter the 12-digit payer account ID';
-      if (!bucket.trim() || !reportPrefix.trim() || !region.trim())
-        return 'Enter the bucket, report prefix, and region';
-
-      const ids = linkedAccounts
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      if (ids.length > 100 || ids.some((id) => !/^\d{12}$/.test(id)))
-        return 'Enter at most 100 12-digit linked account IDs';
-      if (
-        (!editing || replaceCredential) &&
-        awsAuthMode === 'static' &&
-        (!accessKeyId.trim() || !secretAccessKey.trim())
-      )
-        return 'Enter an access key ID and secret access key';
-
-      return '';
-    }
-    const ids = scopeText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (ids.length > 100) return 'At most 100 scope IDs can be listed.';
-    if (azure) {
-      if (
-        !billingScope.trim() ||
-        !exportName.trim() ||
-        !storageAccount.trim() ||
-        !container.trim()
-      )
-        return 'Billing scope, export name, storage account, and container are required.';
-      if (
-        ids.some(
-          (id) =>
-            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-              id
-            )
-        )
-      )
-        return 'Subscription IDs must be UUIDs.';
-      if (!editing && !authMode) return 'Choose an Azure credential mode.';
-      if (
-        authMode === 'azure_client_secret' &&
-        (!tenantId.trim() || !clientId.trim() || !clientSecret)
-      )
-        return 'Tenant ID, client ID, and client secret are required.';
-      return '';
-    }
-    for (const id of ids) {
-      if (kind === 'anthropic' && id === 'default') continue;
-      if (!scopePattern.test(id))
-        return `${id} is not a valid ${kind === 'anthropic' ? 'workspace' : 'project'} ID.`;
-    }
-    if (kind === 'vertex_ai') {
-      if (
-        !billingAccountID.trim() ||
-        !bigQueryProjectID.trim() ||
-        !datasetID.trim() ||
-        !tableID.trim()
-      )
-        return 'A billing account, BigQuery project, dataset and table are required.';
-      if (googleAuthMode === 'service_account' && !adminKey.trim())
-        return 'A service account key is required.';
-      if (googleAuthMode === 'service_account' && !serviceAccountKey())
-        return 'The service account key must be a JSON object.';
-    } else if (!editing && !adminKey.trim())
-      return 'An admin key is required to create the import.';
-    return '';
-  }
-
-  function serviceAccountKey(): Record<string, unknown> | undefined {
-    try {
-      const key: unknown = JSON.parse(adminKey);
-      if (!key || typeof key !== 'object' || Array.isArray(key))
-        return undefined;
-      return Object.fromEntries(Object.entries(key));
-    } catch {
-      return undefined;
-    }
-  }
 
   async function save() {
     if (!canManage || busy) return;
-    const invalid = validateForm();
+    const serviceAccount = parseJsonObject(form.adminKey) ?? undefined;
+    const invalid = validateForm(
+      form,
+      kind,
+      editing,
+      scopePattern,
+      serviceAccount
+    );
     if (invalid) {
-      error = invalid;
+      saveMutation.error = invalid;
       return;
     }
     const etag = detail?.etag ?? provider.etag;
     const googleCredential =
       kind === 'vertex_ai'
-        ? googleAuthMode === 'keep'
+        ? form.googleAuthMode === 'keep'
           ? undefined
-          : googleAuthMode === 'adc'
+          : form.googleAuthMode === 'adc'
             ? { auth_mode: 'adc' as const }
             : {
                 auth_mode: 'service_account' as const,
-                service_account: serviceAccountKey()
+                service_account: serviceAccount
               }
         : undefined;
     const input: Parameters<typeof putBillingImport>[2] = {
-      enabled,
-      scope: scopeBody(),
+      enabled: form.enabled,
+      scope: scopeBody(form, kind),
       ...(kind === 'bedrock'
-        ? !editing || replaceCredential
+        ? !editing || form.replaceCredential
           ? {
               credential:
-                awsAuthMode === 'workload'
+                form.awsAuthMode === 'workload'
                   ? { auth_mode: 'workload' as const }
                   : {
                       auth_mode: 'static' as const,
-                      access_key_id: accessKeyId.trim(),
-                      secret_access_key: secretAccessKey.trim(),
-                      ...(sessionToken.trim()
-                        ? { session_token: sessionToken.trim() }
+                      access_key_id: form.accessKeyId.trim(),
+                      secret_access_key: form.secretAccessKey.trim(),
+                      ...(form.sessionToken.trim()
+                        ? { session_token: form.sessionToken.trim() }
                         : {})
                     }
             }
           : {}
-        : azure && authMode
+        : azure && form.authMode
           ? {
               credential:
-                authMode === 'azure_default'
-                  ? { auth_mode: authMode }
+                form.authMode === 'azure_default'
+                  ? { auth_mode: form.authMode }
                   : {
-                      auth_mode: authMode,
-                      tenant_id: tenantId.trim(),
-                      client_id: clientId.trim(),
-                      client_secret: clientSecret
+                      auth_mode: form.authMode,
+                      tenant_id: form.tenantId.trim(),
+                      client_id: form.clientId.trim(),
+                      client_secret: form.clientSecret
                     }
             }
           : kind === 'vertex_ai'
             ? googleCredential
               ? { credential: googleCredential }
               : {}
-            : adminKey.trim()
-              ? { credential: adminKey.trim() }
+            : form.adminKey.trim()
+              ? { credential: form.adminKey.trim() }
               : {})
     };
-    const isCurrent = captureOwner();
-    busy = true;
-    error = '';
-    conflicted = false;
-    try {
-      await intent.submit(input, (submission, requestId) =>
-        putBillingImport(provider.id, etag, submission, requestId)
-      );
-      if (!isCurrent()) return;
-      adminKey = '';
-      authMode = '';
-      tenantId = clientId = clientSecret = '';
-      if (kind === 'vertex_ai') googleAuthMode = 'keep';
-      accessKeyId = secretAccessKey = sessionToken = '';
-      replaceCredential = false;
-      notify('Billing import saved.');
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.billingImport(provider.id)
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      if (isEtagMismatch(cause)) {
-        conflicted = true;
-        return;
+    await saveMutation.submit(
+      input,
+      (submission, requestId) =>
+        putBillingImport(provider.id, etag, submission, requestId),
+      async () => {
+        form.adminKey = '';
+        form.authMode = '';
+        form.tenantId = form.clientId = form.clientSecret = '';
+        if (kind === 'vertex_ai') form.googleAuthMode = 'keep';
+        form.accessKeyId = form.secretAccessKey = form.sessionToken = '';
+        form.replaceCredential = false;
+        notify('Billing import saved.');
+        await queryClient.invalidateQueries({
+          queryKey: providerKeys.billingImport(provider.id)
+        });
+      },
+      {
+        failure: (cause) =>
+          isEtagMismatch(cause)
+            ? ''
+            : errorMessage(cause, 'The billing import could not be saved.')
       }
-      error = errorMessage(cause, 'The billing import could not be saved.');
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    );
   }
 
   async function reload() {
     if (busy) return;
     const isCurrent = captureOwner();
-    busy = true;
-    error = '';
-    try {
-      const result = await billing.refetch();
-      if (!isCurrent()) return;
-      if (result.error) {
-        error = errorMessage(
-          result.error,
-          'The billing import could not be reloaded.'
-        );
-        return;
-      }
-      hydrate(result.data ?? null);
-      adminKey = '';
-      awsAuthMode = 'static';
-      accessKeyId = secretAccessKey = sessionToken = '';
-      replaceCredential = false;
-      authMode = '';
-      tenantId = clientId = clientSecret = '';
-      conflicted = false;
-      intent.reset();
-    } catch (cause) {
-      if (isCurrent())
-        error = errorMessage(
-          cause,
-          'The billing import could not be reloaded.'
-        );
-    } finally {
-      if (isCurrent()) busy = false;
+    reloading = true;
+    reloadError = '';
+    const result = await readResult(() => billing.refetch());
+    if (!isCurrent()) return;
+    reloading = false;
+    if (!result.ok) {
+      reloadError = errorMessage(
+        result.error,
+        'The billing import could not be reloaded.'
+      );
+      return;
     }
+    if (result.value.error) {
+      reloadError = errorMessage(
+        result.value.error,
+        'The billing import could not be reloaded.'
+      );
+      return;
+    }
+    hydrateBillingImport(result.value.data ?? null, form);
+    form.adminKey = '';
+    form.awsAuthMode = 'static';
+    form.accessKeyId = form.secretAccessKey = form.sessionToken = '';
+    form.replaceCredential = false;
+    form.authMode = '';
+    form.tenantId = form.clientId = form.clientSecret = '';
+    saveMutation.reset();
+    removal.reset();
   }
 
   async function runNow() {
     if (!canManage || busy) return;
-    const isCurrent = captureOwner();
-    busy = true;
-    error = '';
-    try {
-      await runIntent.submit(provider.id, (id, requestId) =>
-        runBillingImport(id, requestId)
-      );
-      if (!isCurrent()) return;
-      notify('Import scheduled.');
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.billingImport(provider.id)
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = errorMessage(cause, 'The import could not be scheduled.');
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    await runMutation.submit(
+      provider.id,
+      (id, requestId) => runBillingImport(id, requestId),
+      async () => {
+        notify('Import scheduled.');
+        await queryClient.invalidateQueries({
+          queryKey: providerKeys.billingImport(provider.id)
+        });
+      },
+      {
+        failure: (cause) =>
+          errorMessage(cause, 'The import could not be scheduled.')
+      }
+    );
   }
 
   async function remove() {
@@ -463,34 +250,39 @@
       }))
     )
       return;
-    const isCurrent = captureOwner();
-    busy = true;
-    error = '';
-    try {
-      await deleteBillingImport(provider.id, detail.etag);
-      if (!isCurrent()) return;
-      adminKey = '';
-      scopeText = '';
-      billingScope = exportName = storageAccount = container = prefix = '';
-      authMode = '';
-      tenantId = clientId = clientSecret = '';
-      billingAccountID = bigQueryProjectID = datasetID = tableID = '';
-      googleAuthMode = 'service_account';
-      enabled = true;
-      notify('Billing import removed.');
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.billingImport(provider.id)
-      });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      if (isEtagMismatch(cause)) {
-        conflicted = true;
-        return;
+    const etag = detail.etag;
+    await removal.run(
+      () => deleteBillingImport(provider.id, etag),
+      async () => {
+        form.adminKey = '';
+        form.scopeText = '';
+        form.billingScope =
+          form.exportName =
+          form.storageAccount =
+          form.container =
+          form.prefix =
+            '';
+        form.authMode = '';
+        form.tenantId = form.clientId = form.clientSecret = '';
+        form.billingAccountID =
+          form.bigQueryProjectID =
+          form.datasetID =
+          form.tableID =
+            '';
+        form.googleAuthMode = 'service_account';
+        form.enabled = true;
+        notify('Billing import removed.');
+        await queryClient.invalidateQueries({
+          queryKey: providerKeys.billingImport(provider.id)
+        });
+      },
+      {
+        failure: (cause) =>
+          isEtagMismatch(cause)
+            ? ''
+            : errorMessage(cause, 'The billing import could not be removed.')
       }
-      error = errorMessage(cause, 'The billing import could not be removed.');
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    );
   }
 </script>
 
@@ -539,297 +331,20 @@
       {/if}
 
       {#if canManage}
-        <form
-          class="create-form"
-          onsubmit={(event) => {
+        <BillingImportFields
+          {form}
+          {kind}
+          {azure}
+          {editing}
+          {scopeLabel}
+          {busy}
+          onSubmit={(event) => {
             event.preventDefault();
             save();
           }}
-        >
-          <fieldset class="submission-fields" disabled={busy}>
-            <div class="form-grid">
-              {#if kind === 'bedrock'}
-                <div class="form-field">
-                  <label for="aws-payer">Payer account ID</label><input
-                    id="aws-payer"
-                    bind:value={payerAccount}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="aws-bucket">S3 bucket</label><input
-                    id="aws-bucket"
-                    bind:value={bucket}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="aws-prefix">CUR report prefix</label><input
-                    id="aws-prefix"
-                    bind:value={reportPrefix}
-                    placeholder="prefix/report-name"
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="aws-region">S3 region</label><input
-                    id="aws-region"
-                    bind:value={region}
-                    placeholder="us-east-1"
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="aws-linked">Linked account IDs</label><textarea
-                    id="aws-linked"
-                    rows="3"
-                    bind:value={linkedAccounts}></textarea><small
-                    >One 12-digit ID per line, leave empty for all linked
-                    accounts</small
-                  >
-                </div>
-                {#if editing}<div class="form-field">
-                    <label class="inline-check"
-                      ><input
-                        type="checkbox"
-                        bind:checked={replaceCredential}
-                      />Replace billing credential</label
-                    >
-                  </div>{/if}
-                {#if !editing || replaceCredential}
-                  <div class="form-field">
-                    <label for="aws-auth">Authentication</label><select
-                      id="aws-auth"
-                      bind:value={awsAuthMode}
-                      ><option value="static">Access keys</option><option
-                        value="workload">Workload identity</option
-                      ></select
-                    >
-                  </div>
-                  {#if awsAuthMode === 'static'}
-                    <div class="form-field">
-                      <label for="aws-access">Access key ID</label><input
-                        id="aws-access"
-                        type="password"
-                        autocomplete="off"
-                        bind:value={accessKeyId}
-                      />
-                    </div>
-                    <div class="form-field">
-                      <label for="aws-secret">Secret access key</label><input
-                        id="aws-secret"
-                        type="password"
-                        autocomplete="off"
-                        bind:value={secretAccessKey}
-                      />
-                    </div>
-                    <div class="form-field">
-                      <label for="aws-token">Session token (optional)</label
-                      ><input
-                        id="aws-token"
-                        type="password"
-                        autocomplete="off"
-                        bind:value={sessionToken}
-                      />
-                    </div>
-                  {/if}
-                {/if}
-                <p class="section-help">
-                  Use a legacy CSV CUR export with create-new-versions enabled
-                  and grant list and read access to this report
-                </p>
-              {:else if azure}
-                <div class="form-field">
-                  <label for="billing-azure-scope"
-                    >Billing scope resource ID</label
-                  ><input id="billing-azure-scope" bind:value={billingScope} />
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-export">Export name</label><input
-                    id="billing-azure-export"
-                    bind:value={exportName}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-account">Storage account</label
-                  ><input
-                    id="billing-azure-account"
-                    bind:value={storageAccount}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-container">Container</label><input
-                    id="billing-azure-container"
-                    bind:value={container}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-prefix"
-                    >Storage directory prefix</label
-                  ><input id="billing-azure-prefix" bind:value={prefix} />
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-subscriptions"
-                    >Subscription IDs</label
-                  ><textarea
-                    id="billing-azure-subscriptions"
-                    rows="3"
-                    bind:value={scopeText}></textarea><small
-                    >One ID per line. Empty includes all subscriptions in the
-                    export.</small
-                  >
-                </div>
-                <div class="form-field">
-                  <label for="billing-azure-auth">Azure credential</label>
-                  <select id="billing-azure-auth" bind:value={authMode}>
-                    <option value=""
-                      >{editing
-                        ? 'Keep stored credential'
-                        : 'Choose a credential'}</option
-                    >
-                    <option value="azure_default">Workload identity</option>
-                    <option value="azure_client_secret">Client secret</option>
-                  </select>
-                </div>
-                {#if authMode === 'azure_client_secret'}
-                  <div class="form-field">
-                    <label for="billing-azure-tenant">Tenant ID</label><input
-                      id="billing-azure-tenant"
-                      bind:value={tenantId}
-                    />
-                  </div>
-                  <div class="form-field">
-                    <label for="billing-azure-client">Client ID</label><input
-                      id="billing-azure-client"
-                      bind:value={clientId}
-                    />
-                  </div>
-                  <div class="form-field">
-                    <label for="billing-azure-secret">Client secret</label
-                    ><input
-                      id="billing-azure-secret"
-                      type="password"
-                      autocomplete="off"
-                      bind:value={clientSecret}
-                    />
-                  </div>
-                {/if}
-              {:else}
-                <div class="form-field">
-                  {#if kind === 'vertex_ai'}
-                    <label for="billing-auth-mode">Billing authentication</label
-                    >
-                    <select
-                      id="billing-auth-mode"
-                      bind:value={googleAuthMode}
-                      onchange={() => {
-                        adminKey = '';
-                      }}
-                    >
-                      {#if editing}<option value="keep"
-                          >Keep existing credential</option
-                        >{/if}
-                      <option value="service_account"
-                        >Service account key</option
-                      >
-                      <option value="adc">Workload identity</option>
-                    </select>
-                  {/if}
-                  {#if kind !== 'vertex_ai' || googleAuthMode === 'service_account'}
-                    <label for="billing-admin-key"
-                      >{kind === 'vertex_ai'
-                        ? 'Service account JSON'
-                        : 'Admin key'}</label
-                    >
-                    <input
-                      id="billing-admin-key"
-                      type="password"
-                      autocomplete="off"
-                      bind:value={adminKey}
-                      placeholder={kind === 'vertex_ai'
-                        ? 'Paste the service account JSON'
-                        : editing
-                          ? 'Blank keeps the stored key'
-                          : 'sk-admin-…'}
-                    />
-                  {/if}
-                </div>
-                {#if kind === 'vertex_ai'}
-                  <div class="form-field">
-                    <label for="billing-account">Billing account ID</label
-                    ><input
-                      id="billing-account"
-                      bind:value={billingAccountID}
-                    />
-                  </div>
-                  <div class="form-field">
-                    <label for="billing-project">BigQuery project ID</label
-                    ><input
-                      id="billing-project"
-                      bind:value={bigQueryProjectID}
-                    />
-                  </div>
-                  <div class="form-field">
-                    <label for="billing-dataset">Dataset ID</label><input
-                      id="billing-dataset"
-                      bind:value={datasetID}
-                    />
-                  </div>
-                  <div class="form-field">
-                    <label for="billing-table">Detailed export table ID</label
-                    ><input id="billing-table" bind:value={tableID} />
-                  </div>
-                {/if}
-                <div class="form-field">
-                  <label for="billing-scope">{scopeLabel}</label>
-                  <textarea
-                    id="billing-scope"
-                    rows="3"
-                    bind:value={scopeText}
-                    placeholder={kind === 'vertex_ai'
-                      ? 'workload-project'
-                      : kind === 'openai'
-                        ? 'proj_…'
-                        : 'wrkspc_… or default'}></textarea>
-                  <small
-                    >One ID per line. Leave empty to include all projects or
-                    workspaces.</small
-                  >
-                </div>
-              {/if}
-              <div class="form-field">
-                <label class="inline-check"
-                  ><input
-                    type="checkbox"
-                    bind:checked={enabled}
-                  />Enabled</label
-                >
-              </div>
-            </div>
-            <div class="form-actions">
-              <button
-                class="button button-primary"
-                type="submit"
-                disabled={busy}
-                >{busy
-                  ? 'Saving…'
-                  : editing
-                    ? 'Save import'
-                    : 'Create import'}</button
-              >
-              {#if editing}
-                <button
-                  class="button button-secondary"
-                  type="button"
-                  disabled={busy}
-                  onclick={runNow}>Run now</button
-                >
-                <button
-                  class="button button-secondary"
-                  type="button"
-                  disabled={busy}
-                  onclick={remove}>Remove</button
-                >
-              {/if}
-            </div>
-          </fieldset>
-        </form>
+          onRunNow={runNow}
+          onRemove={remove}
+        />
       {:else}
         <ReadOnlyNote
           >Billing imports are managed by connection managers.</ReadOnlyNote

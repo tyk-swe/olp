@@ -1,7 +1,8 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeAccounts,
@@ -20,33 +21,18 @@
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import LoadError from './LoadError.svelte';
-  import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
-  import {
-    adapterLabel,
-    allowanceEvidenceLabel,
-    allowanceWindowSummary,
-    cooldownSummary,
-    extraUsageLabel,
-    showsExtraUsage,
-    nextMonthlyReset,
-    servingHealthLabel,
-    mutationError,
-    tokenCount,
-    type CodeEditing
-  } from './presentation';
+  import { mutationError, type CodeEditing } from './presentation';
   import {
     listProviders,
     listCredentialSlots
   } from '#lib/features/providers/index.js';
   import ResourceEditor from './ResourceEditor.svelte';
-  import AccountDrainControl from './AccountDrainControl.svelte';
-  import AccountStatus from './AccountStatus.svelte';
-  import RouteRevisions from './RouteRevisions.svelte';
-  import ClientConfiguration from './ClientConfiguration.svelte';
+  import CodeAccountList from './CodeAccountList.svelte';
+  import CodeBudgetList from './CodeBudgetList.svelte';
+  import CodePoolList from './CodePoolList.svelte';
+  import CodeRouteList from './CodeRouteList.svelte';
   import { managementSections, type CodeManagementKind } from './sections';
-
-  const publishIntent = useMutationIntent();
 
   let {
     projectId,
@@ -64,7 +50,7 @@
   const section = $derived(managementSections[kind]);
   let editing = $state<CodeEditing | null>(null);
   let paging = $state(emptyCursorHistory());
-  let busy = $state(false);
+  const publishMutation = useMutation();
   let error = $state('');
   let notice = $state('');
   let detail = $state('');
@@ -144,18 +130,18 @@
       kind === 'routes'
         ? 'Draft saved. Publish to change serving configuration.'
         : 'Changes saved.';
-    try {
-      await client.invalidateQueries(
+    const refreshed = await readResult(() =>
+      client.invalidateQueries(
         { queryKey: codeKeys.root },
         { throwOnError: true }
-      );
-    } catch (e) {
-      error = `Changes saved, but refreshing failed. Use Refresh to reload. ${errorMessage(e)}`;
-    }
+      )
+    );
+    if (!refreshed.ok)
+      error = `Changes saved, but refreshing failed. Use Refresh to reload. ${errorMessage(refreshed.error)}`;
   }
   async function publish(route: CodeRoute) {
     if (
-      busy ||
+      publishMutation.busy ||
       !allowed ||
       !(await confirmAction({
         title: `Publish ${route.slug}?`,
@@ -164,31 +150,29 @@
       }))
     )
       return;
-    busy = true;
     error = '';
     notice = '';
-    let committed = false;
-    try {
-      const submission = publishIntent.prepare({
-        id: route.id,
-        etag: route.etag
-      });
-      await publishCodeRoute(submission.input, submission.requestId);
-      publishIntent.reset();
-      committed = true;
-      notice =
-        'Route published without synthetic inference. Serving health and qualification remain separate.';
-      await client.invalidateQueries(
-        { queryKey: codeKeys.root },
-        { throwOnError: true }
-      );
-    } catch (e) {
-      error = committed
-        ? `Route published, but refreshing failed. ${errorMessage(e)}`
-        : mutationError(e);
-    } finally {
-      busy = false;
-    }
+    await publishMutation.submit(
+      { id: route.id, etag: route.etag },
+      (submission, requestId) => publishCodeRoute(submission, requestId),
+      async (_, current) => {
+        notice =
+          'Route published without synthetic inference. Serving health and qualification remain separate.';
+        await client.invalidateQueries(
+          { queryKey: codeKeys.root },
+          { throwOnError: true }
+        );
+        if (!current()) return;
+      },
+      {
+        key: route.id,
+        failure: (e, stage) =>
+          stage === 'accept'
+            ? `Route published, but refreshing failed. ${errorMessage(e)}`
+            : mutationError(e)
+      }
+    );
+    error = publishMutation.error;
   }
 </script>
 
@@ -198,13 +182,13 @@
     {#if allowed}<button
         type="button"
         class="button button-primary"
-        disabled={!!editing || busy}
+        disabled={!!editing || publishMutation.busy}
         onclick={() => (editing = { kind })}>Create {section.noun}</button
       >{/if}
     <button
       type="button"
       class="button button-secondary"
-      disabled={busy || selected.isFetching}
+      disabled={publishMutation.busy || selected.isFetching}
       onclick={() => selected.refetch()}>Refresh</button
     >
   </div>
@@ -248,294 +232,36 @@
     </p>
   {:else}
     {#if kind === 'accounts'}
-      <p>
-        Eligibility depends on grant authority, serving cooldowns and observed
-        allowance. Unknown serving health means no qualified observation.
-        Enrollment is not an inference test. A rejected refresh lapses the grant
-        and requires enrollment again. Passing a retry or reset time permits a
-        new attempt without changing the reported allowance. Provider allowance
-        is separate from local budgets and reported usage
-      </p>
-      {#each accounts.data?.items ?? [] as account (account.id)}
-        <article class="card">
-          <div class="actions">
-            <h3>{account.name}</h3>
-            {#if allowed}<button
-                class="button button-secondary"
-                type="button"
-                disabled={!!editing || busy}
-                onclick={() =>
-                  (editing = { kind: 'accounts', current: account })}
-                >Edit account</button
-              ><AccountDrainControl
-                {account}
-                disabled={!!editing || busy}
-              />{/if}
-          </div>
-          <dl>
-            <dt>Subscription</dt>
-            <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
-            {#if showsExtraUsage(account.adapter)}
-              <dt>Extra Usage</dt>
-              <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
-            {/if}
-            <dt>Ordering signal</dt>
-            <dd>
-              No qualified model-to-limit mapping. Legacy eligibility and
-              weighted selection apply.
-            </dd>
-            <dt>Account / principal</dt>
-            <dd>{account.id} / {account.principal}</dd>
-            <dt>Maximum simultaneous generations</dt>
-            <dd>{account.max_concurrency ?? 'Not set'}</dd>
-            <AccountStatus {account} />
-            <dt>Grant state</dt>
-            <dd>
-              {account.grant_state === 'lapsed'
-                ? 'Grant lapsed, enroll again'
-                : account.grant_state}
-            </dd>
-            <dt>Serving health</dt>
-            <dd>
-              {servingHealthLabel(account.health)}
-              {#if account.health_observed_at}
-                · Observed {formatDate(account.health_observed_at)}
-              {/if}
-            </dd>
-            <dt>Serving retry time</dt>
-            <dd>
-              {account.unavailable_until
-                ? formatDate(account.unavailable_until)
-                : 'No serving cooldown reported'}
-              {#if account.cooldowns?.length}
-                {#each account.cooldowns as cooldown (cooldown.class + ':' + (cooldown.model ?? ''))}
-                  <p>
-                    {cooldownSummary(cooldown)} · until {formatDate(
-                      cooldown.retry_at
-                    )}
-                  </p>
-                {/each}
-              {/if}
-            </dd>
-            {#if account.cycle_anchor}
-              <dt>Subscription cycle</dt>
-              <dd>
-                Anchor {account.cycle_anchor} · Monthly reset {nextMonthlyReset(
-                  account.cycle_anchor,
-                  new Date()
-                ) ?? 'Unknown'}
-              </dd>
-            {/if}
-            <dt>Native models</dt>
-            <dd>{account.models.join(', ')}</dd>
-            <dt>Provider / credential</dt>
-            <dd>{account.provider_id} / {account.credential_id}</dd>
-            <dt>Provider-reported allowance</dt>
-            <dd>
-              {#if account.allowance}
-                {#each [{ label: 'Tokens', value: account.allowance.remaining_tokens, observation: account.allowance.token_observation ?? account.allowance }, { label: 'Requests', value: account.allowance.remaining_requests, observation: account.allowance.request_observation ?? account.allowance }] as count (count.label)}
-                  <p>
-                    {count.label}: {tokenCount(count.value)}
-                    {#if count.value != null}
-                      · Observed {formatDate(count.observation.observed_at)}
-                      · Reset {count.observation.resets_at
-                        ? formatDate(count.observation.resets_at)
-                        : 'Unknown'}
-                    {/if}
-                  </p>
-                {/each}
-                {#if account.allowance.windows?.length}
-                  {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
-                    <p>
-                      {window.limit_id} / {window.window}: {allowanceWindowSummary(
-                        window
-                      )}<br />
-                      Window: {window.window_minutes == null
-                        ? 'Unknown'
-                        : window.window_minutes + ' minutes'} · Reset {window.resets_at
-                        ? formatDate(window.resets_at)
-                        : 'Unknown'}<br />
-                      {allowanceEvidenceLabel(window.evidence)} · Observed {formatDate(
-                        window.observed_at
-                      )}
-                    </p>
-                  {/each}
-                {:else}Percent: {account.allowance.remaining_percent == null
-                    ? 'Unknown'
-                    : account.allowance.remaining_percent + '%'}<br />Observed {formatDate(
-                    account.allowance.observed_at
-                  )} · Reset {account.allowance.resets_at
-                    ? formatDate(account.allowance.resets_at)
-                    : 'Unknown'}{/if}
-              {:else}Unknown — no provider observation{/if}
-            </dd>
-            {#if account.allowance?.credits}
-              <dt>Provider-reported credits</dt>
-              <dd>
-                Has credits: {account.allowance.credits.has_credits
-                  ? 'Yes'
-                  : 'No'} · Unlimited: {account.allowance.credits.unlimited
-                  ? 'Yes'
-                  : 'No'} · Balance: {account.allowance.credits.balance ??
-                  'Unknown'}<br />
-                Observed {formatDate(account.allowance.credits.observed_at)}.
-                Credits do not override exhausted subscription windows.
-              </dd>
-            {/if}
-          </dl>
-        </article>
-      {/each}
+      <CodeAccountList
+        items={accounts.data?.items ?? []}
+        {allowed}
+        busy={!!editing || publishMutation.busy}
+        onEdit={(account) => (editing = { kind: 'accounts', current: account })}
+      />
     {:else if kind === 'pools'}
-      {#each pools.data?.items ?? [] as pool (pool.id)}
-        <article class="card">
-          <div class="actions">
-            <h3>{pool.name}</h3>
-            {#if allowed}<button
-                class="button button-secondary"
-                type="button"
-                disabled={!!editing}
-                onclick={() => (editing = { kind: 'pools', current: pool })}
-                >Edit pool</button
-              >{/if}
-          </div>
-          <dl>
-            <dt>Pool</dt>
-            <dd>{pool.id} · {pool.kind}</dd>
-            <dt>Owner</dt>
-            <dd>{pool.owner_user_id ?? 'Shared project pool'}</dd>
-            <dt>Assigned accounts</dt>
-            <dd>{pool.account_ids.join(', ') || 'None'}</dd>
-            <dt>Explicit key permissions</dt>
-            <dd>
-              {pool.api_key_ids.join(', ') || 'None — no key can use this pool'}
-            </dd>
-          </dl>
-        </article>
-      {/each}
+      <CodePoolList
+        items={pools.data?.items ?? []}
+        {allowed}
+        busy={!!editing}
+        onEdit={(pool) => (editing = { kind: 'pools', current: pool })}
+      />
     {:else if kind === 'routes'}
-      <p>
-        Route base paths select policy; the client sends native models
-        unchanged. A pool may mix Codex, OpenCode Go and GLM Coding Plan
-        accounts: each request goes to an account that lists its model and whose
-        subscription serves the client's protocol. Connection edits require
-        route republish. Pool/account/key permissions remain live.
-      </p>
-      {#each routes.data?.items ?? [] as route (route.id)}
-        <article class="card">
-          <div class="actions">
-            <h3>{route.slug}</h3>
-            {#if allowed}<button
-                class="button button-secondary"
-                type="button"
-                disabled={!!editing || busy}
-                onclick={() => (editing = { kind: 'routes', current: route })}
-                >Edit draft</button
-              ><button
-                class="button button-primary"
-                type="button"
-                disabled={!!editing || busy}
-                onclick={() => publish(route)}>Publish route</button
-              >{/if}<button
-              class="button button-secondary"
-              type="button"
-              aria-expanded={detail === route.id}
-              onclick={() => (detail = detail === route.id ? '' : route.id)}
-              >Revisions and client setup</button
-            >
-          </div>
-          <dl>
-            <dt>Base path</dt>
-            <dd><code>/code/{route.slug}</code></dd>
-            <dt>Published subscriptions</dt>
-            <dd class="badges">
-              {#each route.adapters as adapter (adapter)}
-                <span class="badge">{adapterLabel(adapter)}</span>
-              {:else}
-                {route.published_at
-                  ? 'No subscription adapter is published'
-                  : 'Set at publication'}
-              {/each}
-            </dd>
-            <dt>Draft allowance ordering</dt>
-            <dd>
-              {route.allowance_ordering
-                ? 'Configured, requires publication and a qualified model-to-limit mapping'
-                : 'Disabled'}
-            </dd>
-            <dt>Paid native models</dt>
-            <dd>
-              {Object.keys(route.paid_targets ?? {}).join(', ') || 'None'}
-            </dd>
-            <dt>Draft models</dt>
-            <dd>{route.models.join(', ')}</dd>
-            <dt>Draft pool</dt>
-            <dd>{route.pool_id}</dd>
-            <dt>Draft Codex CLI identity compatibility</dt>
-            <dd>
-              {route.codex_cli_identity
-                ? 'Enabled, requires publication'
-                : 'Disabled'}
-            </dd>
-            <dt>Draft enabled</dt>
-            <dd>{route.enabled ? 'Yes' : 'No'}</dd>
-            <dt>Latest publication</dt>
-            <dd>
-              {route.published_at
-                ? `Revision ${route.revision} · ${formatDate(route.published_at)}`
-                : 'Not published'}
-            </dd>
-          </dl>
-          {#if detail === route.id}
-            <RouteRevisions id={route.id} />
-            {#if route.published_at}<ClientConfiguration {route} {gatewayURL} />
-            {:else}<p>
-                Publish this route before generating client configuration.
-              </p>{/if}
-          {/if}
-        </article>
-      {/each}
+      <CodeRouteList
+        items={routes.data?.items ?? []}
+        {allowed}
+        busy={!!editing || publishMutation.busy}
+        bind:detail
+        {gatewayURL}
+        onEdit={(route) => (editing = { kind: 'routes', current: route })}
+        onPublish={publish}
+      />
     {:else}
-      <p>
-        Daily and monthly periods use UTC. These are token caps, never
-        subscription allowance or billed spend. Existing key
-        request/rate/concurrency limits also apply. Paid API targets
-        additionally require known pricing and monetary admission.
-      </p>
-      {#each budgets.data?.items ?? [] as budget (budget.id)}
-        <article class="card">
-          <div class="actions">
-            <h3>Token budget</h3>
-            {#if allowed}<button
-                class="button button-secondary"
-                type="button"
-                disabled={!!editing}
-                onclick={() => (editing = { kind: 'budgets', current: budget })}
-                >Edit budget</button
-              >{/if}
-          </div>
-          <dl>
-            <dt>Budget</dt>
-            <dd>{budget.id} · {budget.enabled ? 'enabled' : 'disabled'}</dd>
-            <dt>Route / key scope</dt>
-            <dd>
-              {budget.route_id ?? 'All project routes'} / {budget.api_key_id ??
-                'All project keys'}
-            </dd>
-            <dt>Daily tokens</dt>
-            <dd>
-              {budget.daily_tokens == null
-                ? 'No cap'
-                : tokenCount(budget.daily_tokens)}
-            </dd>
-            <dt>Monthly tokens</dt>
-            <dd>
-              {budget.monthly_tokens == null
-                ? 'No cap'
-                : tokenCount(budget.monthly_tokens)}
-            </dd>
-          </dl>
-        </article>
-      {/each}
+      <CodeBudgetList
+        items={budgets.data?.items ?? []}
+        {allowed}
+        busy={!!editing}
+        onEdit={(budget) => (editing = { kind: 'budgets', current: budget })}
+      />
     {/if}
   {/if}
   <CursorPagination
@@ -560,41 +286,8 @@
     font-size: 1.25rem;
     font-weight: 600;
   }
-  h3 {
-    flex: 1;
-    font-weight: 600;
-  }
-  article {
-    display: grid;
-    gap: 1rem;
-    padding: 1.25rem;
-  }
-  dl {
-    display: grid;
-    grid-template-columns: minmax(8rem, 1fr) 3fr;
-    gap: 0.6rem 1rem;
-  }
-  dt {
-    font-weight: 500;
-  }
-  dd,
-  p {
-    color: var(--foreground-subtle);
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
-  .badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-  }
   .empty {
     padding: 2rem;
     border: 1px dashed var(--border);
-  }
-  @media (max-width: 40rem) {
-    dl {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

@@ -81,18 +81,29 @@ change that fixes it.
 
 A component runs every write through `useAction` or `useMutation` from
 `src/lib/editing/action.svelte.ts` and never keeps its own busy flag, error
-string or `try` block. Both give the component `busy` and `error` to render.
-They ignore a second submit while one is running, drop a response that arrives
-after the signed-in user changed, and call the optional refresh callback when
-the server answers that the `If-Match` value is stale.
+string or `try` block. Both give the component `busy` and `error` to render,
+plus `key` naming the write in flight (`''` when idle) and `conflict` for a
+stale `If-Match`. They ignore a second submit while one is running and drop a
+response that arrives after the signed-in user changed.
 
-Use `useMutation` when the request creates something or is otherwise sent with
-an `Idempotency-Key`. Its `submit(input, send, accept)` gives `send` a request
-ID that stays the same when the user retries the same input, so a retry cannot
-create a second resource. Use `useAction` and its `run(send, accept)` for a
-write guarded only by `If-Match`. In both, `send` makes the one API call and
-`accept` does everything that follows a success, such as updating the query
-cache, showing a toast and navigating.
+`useAction` runs `run(send, accept?, feedback?)` and returns whether the write
+still belonged to the mounted principal when it settled. `send` makes the one
+API call; `accept` does everything that follows a success, such as updating
+the query cache, showing a toast and navigating. `feedback` supplies an
+optional `key`, a `fallback` message, and a `failure(cause, stage)` mapper for
+`'send'` or `'accept'` failures. Only a send-stage ETag mismatch sets
+`conflict` and invokes the optional refresh callback. `useMutation` adds an
+`Idempotency-Key`: its `submit(input, send, accept?, feedback?)` gives `send`
+a request ID that stays the same when the user retries the same input, so a
+retry cannot create a second resource.
+
+An action is principal-scoped by default: a principal change or unmount
+retires it. Lifecycle-authorized sign-in and sign-out pass `'authentication'`
+to stay alive through their own transition, ending only at unmount.
+`reset()` clears the reported error and conflict; a mutation's `reset()`
+also drops the saved retry intent. Reads that can fail return the problem as
+a value through `captureResult`/`readResult` in `src/lib/editing/result.ts`
+rather than throwing through the component.
 
 `src/lib/features/sinks/SinkEditor.svelte` is the example to copy for a form
 that creates and updates. Other logic that can fail, such as parsing what the
@@ -105,7 +116,10 @@ Pages are built from the shared components in `src/lib/components/` rather than
 hand-rolled markup. A standalone page starts with `PageHeader`. A page with
 several views is a route folder whose `+layout.svelte` renders
 `SectionLayout`, which reads the title, description and tabs from
-`src/lib/shell/navigation.ts`, so each tab is its own URL. Lists open create and
+`src/lib/shell/navigation.ts`, so each tab is its own URL. A query-backed
+region goes through `QueryView`, which renders the loading status, a danger
+`Callout` with the failure message and a retry button, an optional empty
+state, or its children. Lists open create and
 edit forms in a `Dialog` with `placement="side"`. Errors and empty
 states use `Callout` and `EmptyState`. Rarely used fields go in
 `Advanced`. Destructive or hard-to-undo actions await `confirmAction` from

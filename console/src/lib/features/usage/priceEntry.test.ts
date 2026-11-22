@@ -2,9 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   containerFeeRows,
   emptyPriceFields,
+  emptyPriceRow,
+  prepareRateCardRevision,
   priceEntryFields,
   type WindowPeriodRow
 } from './priceEntry';
+
+it('reports an invalid container tier and prepares the revision once corrected', () => {
+  const price = {
+    ...emptyPriceRow('openai'),
+    model: 'fixture-model',
+    containerFees: [{ tier: '4GB', fee: '0.03' }]
+  };
+  const invalid = prepareRateCardRevision('1.25', '', [price]);
+  expect(invalid).toEqual({
+    ok: false,
+    error: new Error('Enter a container memory tier such as 1g, 4g or 16g.')
+  });
+  expect(
+    prepareRateCardRevision('1.25', '', [
+      { ...price, containerFees: [{ tier: '4g', fee: '0.03' }] }
+    ])
+  ).toMatchObject({
+    ok: true,
+    value: {
+      markup: '1.25',
+      prices: [
+        { model: 'fixture-model', container_per_session: { '4g': '0.03' } }
+      ]
+    }
+  });
+});
 
 describe('retained price fields', () => {
   it('preserves exact decimal strings and native container memory tiers', () => {

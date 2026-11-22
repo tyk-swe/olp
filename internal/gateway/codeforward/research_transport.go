@@ -46,35 +46,43 @@ func (f *Forwarder) copyResearchResponse(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if media != "text/event-stream" || response.StatusCode != http.StatusOK {
-		raw, err := io.ReadAll(io.LimitReader(response.Body, coderesearch.MaxResponse+1))
-		if err != nil || len(raw) > coderesearch.MaxResponse {
+		return copyResearchUnaryResponse(w, r, response, media, forwarding, refuse)
+	}
+	return copyResearchStreamResponse(w, r, response, forwarding)
+}
+
+func copyResearchUnaryResponse(w http.ResponseWriter, r *http.Request, response *http.Response, media string, forwarding researchResponse, refuse func()) bool {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, coderesearch.MaxResponse+1))
+	if err != nil || len(raw) > coderesearch.MaxResponse {
+		refuse()
+		return false
+	}
+	if response.StatusCode == http.StatusOK && len(raw) != 0 {
+		if media != "application/json" {
 			refuse()
 			return false
 		}
-		if response.StatusCode == http.StatusOK && len(raw) != 0 {
-			if media != "application/json" {
-				refuse()
-				return false
-			}
-			raw, err = coderesearch.Response(raw, forwarding.method, forwarding.service)
-			if err != nil {
-				refuse()
-				return false
-			}
-		}
-		if media != "" {
-			w.Header().Set("Content-Type", media)
-		}
-		w.WriteHeader(response.StatusCode)
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
-		n, err := w.Write(raw)
-		if err != nil || n != len(raw) || response.StatusCode != http.StatusOK || forwarding.method != "initialize" || !coderesearch.Initialized(raw, forwarding.requestID) || r.Context().Err() != nil {
+		raw, err = coderesearch.Response(raw, forwarding.method, forwarding.service)
+		if err != nil {
+			refuse()
 			return false
 		}
-		// Write may only acknowledge net/http'f local response buffer. Flush the
-		// session ID and result before keeping a tentative initialization alive.
-		return http.NewResponseController(w).Flush() == nil && r.Context().Err() == nil
 	}
+	if media != "" {
+		w.Header().Set("Content-Type", media)
+	}
+	w.WriteHeader(response.StatusCode)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
+	n, err := w.Write(raw)
+	if err != nil || n != len(raw) || response.StatusCode != http.StatusOK || forwarding.method != "initialize" || !coderesearch.Initialized(raw, forwarding.requestID) || r.Context().Err() != nil {
+		return false
+	}
+	// Write may only acknowledge net/http'f local response buffer. Flush the
+	// session ID and result before keeping a tentative initialization alive.
+	return http.NewResponseController(w).Flush() == nil && r.Context().Err() == nil
+}
+
+func copyResearchStreamResponse(w http.ResponseWriter, r *http.Request, response *http.Response, forwarding researchResponse) bool {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(response.StatusCode)

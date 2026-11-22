@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  const runAction = useAction();
   import { errorMessage } from '#lib/management/http.js';
   import { onDestroy } from 'svelte';
   import {
@@ -13,34 +15,34 @@
   let prompt = $state('');
   let temperature = $state('');
   let format = $state<TranslationFormat>('json');
-  let busy = $state(false);
-  let error = $state('');
   let result = $state<string | null>(null);
   let abort: AbortController | null = null;
 
   async function run(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !files?.[0]) return;
-    busy = true;
-    error = '';
+    const file = files?.[0];
+    if (runAction.busy || !file) return;
     result = null;
     abort = new AbortController();
-    try {
-      result = await translateAudio(
-        route,
-        key,
-        files[0],
-        prompt,
-        temperature,
-        format,
-        abort.signal
-      );
-    } catch (reason) {
-      error = errorMessage(reason, 'Audio translation failed.');
-    } finally {
-      busy = false;
-      abort = null;
-    }
+    const controller = abort;
+    await runAction.run(
+      () =>
+        translateAudio(
+          route,
+          key,
+          file,
+          prompt,
+          temperature,
+          format,
+          controller.signal
+        ),
+      (value, current) => {
+        if (!current()) return;
+        result = value;
+      },
+      { failure: (reason) => errorMessage(reason, 'Audio translation failed.') }
+    );
+    if (abort === controller) abort = null;
   }
   onDestroy(() => {
     abort?.abort();
@@ -100,10 +102,10 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={busy || !key || !route || !files?.[0]}
-      >{busy ? 'Translating…' : 'Run billable translation'}</button
+      disabled={runAction.busy || !key || !route || !files?.[0]}
+      >{runAction.busy ? 'Translating…' : 'Run billable translation'}</button
     >
-    {#if busy}<button
+    {#if runAction.busy}<button
         class="button button-secondary"
         type="button"
         onclick={() => abort?.abort()}>Cancel delivery</button
@@ -116,7 +118,9 @@
         }}>Clear result</button
       >{/if}
   </div>
-  {#if error}<p role="alert" class="inline-problem">{error}</p>{/if}
+  {#if runAction.error}<p role="alert" class="inline-problem">
+      {runAction.error}
+    </p>{/if}
   {#if result !== null}<pre
       aria-label="Native audio translation result">{result}</pre>{/if}
 </form>

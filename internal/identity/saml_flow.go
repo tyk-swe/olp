@@ -195,40 +195,52 @@ func (s *Server) samlACS(r *http.Request) (httpkit.Reply, error) {
 	if !c.Enabled || c.ETag != flow.ETag {
 		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 	}
-	sp, m, err := s.samlProvider(r, s.access.Pool, c)
+	assertion, err := s.verifySAMLResponse(r, c, &flow)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	return s.recordSAMLAssertion(r, c, flow, assertion, state)
+}
+
+func (s *Server) verifySAMLResponse(r *http.Request, c samlConfiguration, flow *samlFlow) (*saml.Assertion, error) {
+	sp, m, err := s.samlProvider(r, s.access.Pool, c)
+	if err != nil {
+		return nil, err
+	}
 	raw, err := base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLResponse"))
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
+		return nil, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
 	assertion, err := samlidentity.Verify(sp, m, raw, flow.RequestID, time.Now())
 	clear(raw)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
+		return nil, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
 	if flow.Kind != "login" && (assertion.AuthnStatements[0].AuthnInstant.Before(flow.Expires.Add(-samlFlowTTL-samlidentity.Skew)) || assertion.AuthnStatements[0].AuthnInstant.After(time.Now().Add(samlidentity.Skew))) {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_authentication_not_recent", "Authenticate again at the identity provider.")
+		return nil, httpkit.Fail(403, "saml_authentication_not_recent", "Authenticate again at the identity provider.")
 	}
 	attrs, err := samlidentity.Attributes(assertion)
 	if err != nil || len(attrs[c.EmailAttribute]) != 1 {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_claims_invalid", "The SAML identity lacks the configured email attribute.")
+		return nil, httpkit.Fail(403, "saml_claims_invalid", "The SAML identity lacks the configured email attribute.")
 	}
-	email, err := email(attrs[c.EmailAttribute][0])
+	address, err := email(attrs[c.EmailAttribute][0])
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_claims_invalid", "The SAML email attribute is invalid.")
+		return nil, httpkit.Fail(403, "saml_claims_invalid", "The SAML email attribute is invalid.")
 	}
 	groups := attrs[c.GroupsAttribute]
 	if groups == nil {
 		groups = []string{}
 	}
-	flow.Facts = &samlFacts{Email: email, Groups: groups, EmailAttribute: c.EmailAttribute, GroupsAttribute: c.GroupsAttribute}
+	flow.Facts = &samlFacts{Email: address, Groups: groups, EmailAttribute: c.EmailAttribute, GroupsAttribute: c.GroupsAttribute}
 	flow.Subject = assertion.Subject.NameID.Value
-	flow.Name = email
+	flow.Name = address
 	if names := attrs[c.NameAttribute]; len(names) == 1 && httpkit.ValidText("display_name", names[0], 100) == nil {
 		flow.Name = names[0]
 	}
+	return assertion, nil
+}
+
+func (s *Server) recordSAMLAssertion(r *http.Request, c samlConfiguration, flow samlFlow, assertion *saml.Assertion, state string) (httpkit.Reply, error) {
 	tx, err := s.access.Begin(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -326,67 +338,9 @@ func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
 }
 
 func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (httpkit.Reply, error) {
-	var userID, identityID string
-	err := tx.QueryRow(r.Context(), "SELECT user_id::text,id::text FROM olp.saml_identities WHERE issuer=$1 AND subject=$2", c.EntityID, flow.Subject).Scan(&userID, &identityID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, err
-	}
-	var p authz.Principal
-	if flow.Kind != "login" {
-		p, err = s.access.Authenticate(r, tx)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err = p.Authorize(authz.Self); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if p.ID != flow.UserID || p.SessionID != flow.SessionID {
-			return httpkit.Reply{}, httpkit.Fail(403, "saml_session_changed", "Your browser session changed during sign-in.")
-		}
-		if flow.Kind == "reauthenticate" && p.ID != userID {
-			return httpkit.Reply{}, httpkit.Fail(403, "saml_identity_mismatch", "Use an identity linked to your current account.")
-		}
-	}
-	response := httpkit.Reply{Status: 303, Location: flow.ReturnTo}
-	if flow.Kind == "link" {
-		if identityID != "" {
-			return httpkit.Reply{}, httpkit.Fail(409, "saml_identity_linked", "The SAML identity is already linked.")
-		}
-		userID = p.ID
-	}
-	if userID == "" {
-		var complete, existing bool
-		if err = tx.QueryRow(r.Context(), "SELECT setup_complete,EXISTS(SELECT 1 FROM olp.users WHERE email=$1) FROM olp.installation WHERE singleton", flow.Facts.Email).Scan(&complete, &existing); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if !complete {
-			return httpkit.Reply{}, httpkit.Fail(403, "setup_required", "Complete owner setup before SAML sign-in.")
-		}
-		if existing {
-			return httpkit.Reply{}, httpkit.Fail(409, "saml_link_required", "Sign in to the existing account and explicitly link this identity.")
-		}
-		role := samlMappedRole(c, flow.Facts.Email, flow.Facts.Groups)
-		if role == "" {
-			return httpkit.Reply{}, httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
-		}
-		userID = httpkit.NewID()
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, httpkit.NewID()); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	facts, err := json.Marshal(flow.Facts)
+	userID, identityID, p, err := s.resolveSAMLIdentity(r, tx, c, flow)
 	if err != nil {
 		return httpkit.Reply{}, err
-	}
-	if identityID == "" {
-		identityID = httpkit.NewID()
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.EntityID, flow.Subject, flow.Facts.Email, facts); err != nil {
-			return httpkit.Reply{}, err
-		}
-	} else {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.saml_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, facts); err != nil {
-			return httpkit.Reply{}, err
-		}
 	}
 	changed, allowed, err := syncFederatedAuthority(r, tx, userID, samlMappedRole(c, flow.Facts.Email, flow.Facts.Groups), "saml")
 	if err != nil {
@@ -405,34 +359,106 @@ func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flo
 	if !active {
 		return httpkit.Reply{}, httpkit.Fail(403, "account_disabled", "This account is disabled.")
 	}
+	response, err := s.finishSAMLOutcome(r, tx, flow, p, userID)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, authz.UserActor(userID), "saml."+flow.Kind, "saml_identity", identityID, "success"); err != nil {
+		return httpkit.Reply{}, err
+	}
+	return response, nil
+}
+
+func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (string, string, authz.Principal, error) {
+	var userID, identityID string
+	err := tx.QueryRow(r.Context(), "SELECT user_id::text,id::text FROM olp.saml_identities WHERE issuer=$1 AND subject=$2", c.EntityID, flow.Subject).Scan(&userID, &identityID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", authz.Principal{}, err
+	}
+	var p authz.Principal
+	if flow.Kind != "login" {
+		p, err = s.access.Authenticate(r, tx)
+		if err != nil {
+			return "", "", authz.Principal{}, err
+		}
+		if err = p.Authorize(authz.Self); err != nil {
+			return "", "", authz.Principal{}, err
+		}
+		if p.ID != flow.UserID || p.SessionID != flow.SessionID {
+			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_session_changed", "Your browser session changed during sign-in.")
+		}
+		if flow.Kind == "reauthenticate" && p.ID != userID {
+			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_identity_mismatch", "Use an identity linked to your current account.")
+		}
+	}
+	if flow.Kind == "link" {
+		if identityID != "" {
+			return "", "", authz.Principal{}, httpkit.Fail(409, "saml_identity_linked", "The SAML identity is already linked.")
+		}
+		userID = p.ID
+	}
+	if userID == "" {
+		var complete, existing bool
+		if err = tx.QueryRow(r.Context(), "SELECT setup_complete,EXISTS(SELECT 1 FROM olp.users WHERE email=$1) FROM olp.installation WHERE singleton", flow.Facts.Email).Scan(&complete, &existing); err != nil {
+			return "", "", authz.Principal{}, err
+		}
+		if !complete {
+			return "", "", authz.Principal{}, httpkit.Fail(403, "setup_required", "Complete owner setup before SAML sign-in.")
+		}
+		if existing {
+			return "", "", authz.Principal{}, httpkit.Fail(409, "saml_link_required", "Sign in to the existing account and explicitly link this identity.")
+		}
+		role := samlMappedRole(c, flow.Facts.Email, flow.Facts.Groups)
+		if role == "" {
+			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
+		}
+		userID = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, httpkit.NewID()); err != nil {
+			return "", "", authz.Principal{}, err
+		}
+	}
+	facts, err := json.Marshal(flow.Facts)
+	if err != nil {
+		return "", "", authz.Principal{}, err
+	}
+	if identityID == "" {
+		identityID = httpkit.NewID()
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.EntityID, flow.Subject, flow.Facts.Email, facts); err != nil {
+			return "", "", authz.Principal{}, err
+		}
+	} else if _, err = tx.Exec(r.Context(), "UPDATE olp.saml_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, facts); err != nil {
+		return "", "", authz.Principal{}, err
+	}
+	return userID, identityID, p, nil
+}
+
+func (s *Server) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p authz.Principal, userID string) (httpkit.Reply, error) {
+	response := httpkit.Reply{Status: 303, Location: flow.ReturnTo}
 	if flow.Kind == "reauthenticate" {
-		grant, e := s.grantRecent(r, tx, p, flow.Purpose, flow.Resource, false)
-		if e != nil {
-			return httpkit.Reply{}, e
+		grant, err := s.grantRecent(r, tx, p, flow.Purpose, flow.Resource, false)
+		if err != nil {
+			return httpkit.Reply{}, err
 		}
 		response.Cookies = grant.Cookies
 		response.Location = reauthenticatedAt(flow.Purpose) + "?reauthenticated=" + url.QueryEscape(flow.Purpose)
 		if flow.Resource != "" {
 			response.Location += "&resource_id=" + url.QueryEscape(flow.Resource)
 		}
-	} else {
-		if flow.Kind == "link" {
-			if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, httpkit.NewID()); err != nil {
-				return httpkit.Reply{}, err
-			}
-			if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
-				return httpkit.Reply{}, err
-			}
-		}
-		session, e := s.newSession(r, tx, userID, sessionAuth{Method: "saml"})
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		response.Cookies = session.Cookies
-		response.CSRF = session.CSRF
+		return response, nil
 	}
-	if err = access.Audit(r.Context(), tx, r, authz.UserActor(userID), "saml."+flow.Kind, "saml_identity", identityID, "success"); err != nil {
+	if flow.Kind == "link" {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, httpkit.NewID()); err != nil {
+			return httpkit.Reply{}, err
+		}
+		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
+			return httpkit.Reply{}, err
+		}
+	}
+	session, err := s.newSession(r, tx, userID, sessionAuth{Method: "saml"})
+	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	response.Cookies = session.Cookies
+	response.CSRF = session.CSRF
 	return response, nil
 }

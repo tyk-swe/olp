@@ -41,8 +41,28 @@ export class MutationIntent {
     send: (input: I, requestId: string) => Promise<R>
   ): Promise<R> {
     const submission = this.prepare(input);
-    const result = await send(submission.input, submission.requestId);
-    if (this.pending?.requestId === submission.requestId) this.reset();
+    return this.complete(submission.requestId, () =>
+      send(submission.input, submission.requestId)
+    );
+  }
+
+  async submitBuilt<I, B, R>(
+    input: I,
+    build: () => B,
+    send: (input: B, requestId: string) => Promise<R>
+  ): Promise<R> {
+    const submission = this.prepare(input, build);
+    return this.complete(submission.requestId, () =>
+      send(submission.input, submission.requestId)
+    );
+  }
+
+  private async complete<R>(
+    requestId: string,
+    send: () => Promise<R>
+  ): Promise<R> {
+    const result = await send();
+    if (this.pending?.requestId === requestId) this.reset();
     return result;
   }
 }

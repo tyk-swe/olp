@@ -255,108 +255,13 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 		return result, ErrContract
 	}
 	expectedComponent := retainedComponent(operation)
-	observation.Lines = slices.Clone(observation.Lines)
-	for i, line := range observation.Lines {
-		if line.Component != expectedComponent || line.Component == "container" && line.MemoryTier != pins.MemoryTier {
-			return result, ErrContract
-		}
-		normalized, e := NormalizeRetainedEvidence(line)
-		if e != nil {
-			return result, e
-		}
-		observation.Lines[i] = normalized
-		if templates[line.Model] == nil {
-			return result, ErrContract
-		}
-	}
-	// Stable ordering also makes cross-source normalization deterministic.
-	slices.SortFunc(observation.Lines, func(a, b RetainedEvidenceLine) int {
-		return strings.Compare(a.Component+":"+a.Model+":"+a.MemoryTier+":"+a.Start.Format(time.RFC3339Nano), b.Component+":"+b.Model+":"+b.MemoryTier+":"+b.Start.Format(time.RFC3339Nano))
-	})
-	documentObservation := observation
-	documentObservation.ObservedAt = time.Time{}
-	documentObservation.RemoteTerminated = false
-	document, err := json.Marshal(documentObservation)
+	observation.Lines, err = normalizeRetainedLines(observation.Lines, expectedComponent, pins.MemoryTier, templates)
 	if err != nil {
 		return result, err
 	}
-	var priorDigest string
-	var prior []byte
-	err = tx.QueryRow(ctx, `SELECT digest,document FROM olp.retained_usage_evidence WHERE resource_id=$1 AND idempotency_key=$2`, id, key).Scan(&priorDigest, &prior)
-	if err == nil {
-		if priorDigest != digest || !sameJSON(prior, document) {
-			return result, ErrEvidenceConflict
-		}
-	}
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	result, err = persistRetainedEvidence(ctx, tx, id, key, digest, provenance, actor, previousState, templates, observation)
+	if err != nil {
 		return result, err
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		evidenceID := uuid.Must(uuid.NewV7())
-		if _, err = tx.Exec(ctx, `INSERT INTO olp.retained_usage_evidence(id,resource_id,idempotency_key,digest,provenance,actor,document,remote_termination_verified,verified_terminal_at) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9)`, evidenceID, id, key, digest, provenance, actor, document, observation.RemoteTerminated, verifiedTerminalTime(observation)); err != nil {
-			return result, err
-		}
-		for _, line := range observation.Lines {
-			encoded, _ := json.Marshal(line.Usage)
-			rows, e := tx.Query(ctx, `SELECT starts_at,ends_at,quantities FROM olp.retained_usage_coverage WHERE resource_id=$1 AND component=$2 AND model=$3 AND memory_tier=$4 AND starts_at<$6 AND ends_at>$5`, id, line.Component, line.Model, line.MemoryTier, line.Start, line.End)
-			if e != nil {
-				return result, e
-			}
-			duplicate := false
-			for rows.Next() {
-				var start, end time.Time
-				var quantities []byte
-				if e = rows.Scan(&start, &end, &quantities); e != nil {
-					rows.Close()
-					return result, e
-				}
-				if !start.Equal(line.Start) || !end.Equal(line.End) || !sameJSON(quantities, encoded) {
-					rows.Close()
-					return result, ErrEvidenceConflict
-				}
-				duplicate = true
-			}
-			rows.Close()
-			if e = rows.Err(); e != nil {
-				return result, e
-			}
-			if duplicate {
-				continue
-			}
-			if previousState == "closed" {
-				return result, ErrEvidenceConflict
-			}
-			template, _ := json.Marshal(templates[line.Model])
-			event, e := usage.Decode(template)
-			if e != nil {
-				return result, e
-			}
-			identity := id.String() + ":" + line.Component + ":" + line.Model + ":" + line.MemoryTier + ":" + line.Start.Format(time.RFC3339Nano) + ":" + line.End.Format(time.RFC3339Nano)
-			event.RequestID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity)).String()
-			event.EventID = event.RequestID
-			event.ObservedAt = time.Now().UTC()
-			event.RequestStartedAt = event.ObservedAt
-			event.RequestCompletedAt = event.ObservedAt
-			event.HTTPOutcomePending = false
-			event.Attempts[0].ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity+":attempt")).String()
-			// Keep the accepted pricing timestamp, including time-window tariffs.
-			event.Attempts[0].CompletedAt = event.Attempts[0].StartedAt
-			accepted, e := usage.NewAccountingEvent(event.WithFinalUsage(line.Usage))
-			if e != nil {
-				return result, e
-			}
-			persisted, e := ingest.PersistRetainedEventTx(ctx, tx, accepted)
-			if e != nil {
-				return result, e
-			}
-			if persisted.Outcome == ingest.PersistOutcomeRejectedOutsideReplayWindow {
-				return result, ErrContract
-			}
-			result = persisted
-			if _, e = tx.Exec(ctx, `INSERT INTO olp.retained_usage_coverage(resource_id,evidence_id,component,model,memory_tier,starts_at,ends_at,quantities,event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, evidenceID, line.Component, line.Model, line.MemoryTier, line.Start, line.End, encoded, event.EventID); e != nil {
-				return result, e
-			}
-		}
 	}
 	if observation.RemoteTerminated {
 		terminated = true
@@ -399,117 +304,6 @@ func sameJSON(a, b []byte) bool {
 	xx, _ := json.Marshal(x)
 	yy, _ := json.Marshal(y)
 	return bytes.Equal(xx, yy)
-}
-
-func retainedCoverageComplete(ctx context.Context, tx pgx.Tx, id uuid.UUID, templates map[string]*usage.Event, start, end time.Time) (bool, error) {
-	var operation string
-	if err := tx.QueryRow(ctx, `SELECT operation FROM olp.retained_settlements WHERE resource_id=$1`, id).Scan(&operation); err != nil {
-		return false, err
-	}
-	var nativeMeta struct {
-		CreatedAt  string   `json:"created_at"`
-		CreateTime string   `json:"create_time"`
-		FinishedAt string   `json:"finished_at"`
-		ExpiresAt  string   `json:"expires_at"`
-		Status     string   `json:"native_status"`
-		MemoryTier string   `json:"memory_tier"`
-		Models     []string `json:"authorized_models"`
-	}
-	var metadata []byte
-	if err := tx.QueryRow(ctx, `SELECT metadata FROM olp.provider_resources WHERE id=$1`, id).Scan(&metadata); err != nil {
-		return false, err
-	}
-	if json.Unmarshal(metadata, &nativeMeta) != nil {
-		return false, ErrContract
-	}
-	if len(templates) == 0 {
-		return operation == "eval" && nativeMeta.Models != nil && len(nativeMeta.Models) == 0, nil
-	}
-	for _, raw := range []string{nativeMeta.CreatedAt, nativeMeta.CreateTime} {
-		if raw != "" {
-			at, err := time.Parse(time.RFC3339Nano, raw)
-			if err != nil {
-				return false, ErrContract
-			}
-			start = at.UTC().Truncate(time.Microsecond)
-		}
-	}
-	if operation == "vector_store" && nativeMeta.Status == "expired" && nativeMeta.ExpiresAt != "" {
-		expiry, err := time.Parse(time.RFC3339Nano, nativeMeta.ExpiresAt)
-		if err != nil || !expiry.After(start) {
-			return false, ErrContract
-		}
-		end = expiry.UTC().Truncate(time.Microsecond)
-	}
-	// terminal_at records when termination was first verified. A native finish
-	// time supplied later defines the billing endpoint independently of that
-	// observation, which may have happened well after the job actually ended.
-	if (operation == "fine_tuning" || operation == "eval") && nativeMeta.FinishedAt != "" {
-		finished, err := time.Parse(time.RFC3339Nano, nativeMeta.FinishedAt)
-		if err != nil {
-			return false, ErrContract
-		}
-		if finished.After(start) {
-			end = finished.UTC().Truncate(time.Microsecond)
-		}
-	} else if operation == "fine_tuning" || operation == "eval" {
-		// A final evidence statement can arrive before the remote termination
-		// check. Its authoritative interval ends independently of that later
-		// check; the whole interval must still be covered for every model.
-		var finalEnd *time.Time
-		if err := tx.QueryRow(ctx, `SELECT max((line->>'end')::timestamptz) FROM olp.retained_usage_evidence e
-CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.document->'lines')='array' THEN e.document->'lines' ELSE '[]'::jsonb END) line
-WHERE e.resource_id=$1 AND e.document @> '{"coverage_complete":true}'::jsonb`, id).Scan(&finalEnd); err != nil {
-			return false, err
-		}
-		if finalEnd != nil && finalEnd.After(start) && !finalEnd.After(end) {
-			end = *finalEnd
-		}
-	}
-	var component string
-	switch operation {
-	case "fine_tuning":
-		component = "training"
-	case "eval":
-		component = "generation"
-	case "context_cache":
-		component = "cache_storage"
-	case "vector_store":
-		component = "storage"
-	case "container":
-		component = "container"
-	default:
-		return false, nil
-	}
-	for model := range templates {
-		rows, err := tx.Query(ctx, `SELECT starts_at,ends_at FROM olp.retained_usage_coverage WHERE resource_id=$1 AND component=$2 AND model=$3 AND memory_tier=$4 ORDER BY starts_at,ends_at`, id, component, model, nativeMeta.MemoryTier)
-		if err != nil {
-			return false, err
-		}
-		cursor := start
-		for rows.Next() {
-			var a, b time.Time
-			if err = rows.Scan(&a, &b); err != nil {
-				rows.Close()
-				return false, err
-			}
-			if a.After(cursor) {
-				rows.Close()
-				return false, nil
-			}
-			if b.After(cursor) {
-				cursor = b
-			}
-		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
-			return false, err
-		}
-		if cursor.Before(end) {
-			return false, nil
-		}
-	}
-	return len(templates) > 0, nil
 }
 
 func retainedEvidenceKey(observation RetainedObservation) string {
@@ -600,4 +394,26 @@ func verifiedTerminalTime(o RetainedObservation) *time.Time {
 		at = time.Now().UTC().Truncate(time.Microsecond)
 	}
 	return &at
+}
+
+func normalizeRetainedLines(lines []RetainedEvidenceLine, component, tier string, templates map[string]*usage.Event) ([]RetainedEvidenceLine, error) {
+	lines = slices.Clone(lines)
+	for i, line := range lines {
+		if line.Component != component || line.Component == "container" && line.MemoryTier != tier {
+			return nil, ErrContract
+		}
+		normalized, err := NormalizeRetainedEvidence(line)
+		if err != nil {
+			return nil, err
+		}
+		lines[i] = normalized
+		if templates[line.Model] == nil {
+			return nil, ErrContract
+		}
+	}
+	// Stable ordering also makes cross-source normalization deterministic.
+	slices.SortFunc(lines, func(a, b RetainedEvidenceLine) int {
+		return strings.Compare(a.Component+":"+a.Model+":"+a.MemoryTier+":"+a.Start.Format(time.RFC3339Nano), b.Component+":"+b.Model+":"+b.MemoryTier+":"+b.Start.Format(time.RFC3339Nano))
+	})
+	return lines, nil
 }

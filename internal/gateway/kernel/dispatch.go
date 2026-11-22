@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -125,7 +124,7 @@ func (s *Server) ReleaseHold(ctx context.Context, hold *dispatchHold) {
 }
 
 func (s *Server) SettleSession(ctx context.Context, x *Call, p *Pin) {
-	s.finishSessionDebit(ctx, x, x.Failure != nil)
+	s.FinishSessionDebit(ctx, x, x.Failure != nil)
 	settled := sessionSettlement(x)
 	if p != nil {
 		s.SettleSessionHold(ctx, x, p.Hold, settled)
@@ -135,21 +134,7 @@ func (s *Server) SettleSession(ctx context.Context, x *Call, p *Pin) {
 	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.Log)
 }
 
-func (s *Server) BeginWebRTCSettlement(ctx context.Context, x *Call, rejected bool, failure *fault.Error) {
-	s.finishSessionDebit(ctx, x, failure != nil && !rejected)
-}
-
-func (s *Server) FinishWebRTCSettlement(ctx context.Context, x *Call, p *Pin, observed *wire.Usage, pending, rejected bool, failure *fault.Error) {
-	class := ClassProtocol
-	cancelled := false
-	if failure != nil {
-		switch {
-		case failure.Code == "key_revoked" || strings.HasPrefix(failure.Code, "provider_credential_"):
-			class = ClassCredential
-		case failure.Code == "realtime_session_expired":
-			class = ClassTimeout
-		}
-	}
+func (s *Server) FinishObservedSession(ctx context.Context, x *Call, p *Pin, observed *wire.Usage, pending, rejected bool, failure *fault.Error, failureClass string) {
 	if fact := x.LastAttemptFact(); fact != nil {
 		if fact.Interaction != nil {
 			if observed != nil {
@@ -172,7 +157,7 @@ func (s *Server) FinishWebRTCSettlement(ctx context.Context, x *Call, p *Pin, ob
 			fact.BillingUncertain = true
 		}
 		if failure != nil && fact.Class == "success" {
-			fact.Class = class
+			fact.Class = failureClass
 		}
 	}
 	status := http.StatusOK
@@ -180,7 +165,7 @@ func (s *Server) FinishWebRTCSettlement(ctx context.Context, x *Call, p *Pin, ob
 	if failure != nil {
 		x.Failure = failure
 		status = failure.Status
-		out = &Outcome{Err: failure, Committed: x.dispatched, Cancelled: cancelled}
+		out = &Outcome{Err: failure, Committed: x.dispatched}
 	} else {
 		out = &Outcome{Committed: true}
 	}

@@ -19,6 +19,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+const SessionExposureWindow = time.Hour
+
+const debitCleanupTimeout = 10 * time.Second
+
 type SessionDebitLedger interface {
 	Prepare(context.Context, debits.Intent, []limits.Owner) (debits.State, error)
 	Admit(context.Context, string, string, []debits.Boundary) error
@@ -166,13 +170,13 @@ func newSessionDebitID() (string, error) {
 }
 
 func (s *Server) SessionExposureHeld(ctx context.Context, keyID string) (bool, *fault.Error) {
-	if s.webrtcExposureHeld(keyID) {
+	if s.localExposureHeld(keyID) {
 		return true, nil
 	}
 	if s.Deps.Debits == nil {
 		return false, nil
 	}
-	held, err := s.Deps.Debits.HasUnknownDebit(ctx, keyID, max(webRTCBound, nativeDuplexSession))
+	held, err := s.Deps.Debits.HasUnknownDebit(ctx, keyID, SessionExposureWindow)
 	if err != nil {
 		return false, fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}
@@ -271,7 +275,7 @@ func (s *Server) ReserveSessionDebit(ctx context.Context, x *Call, authority key
 		x.workflow.ordinal++
 	}
 	if err := s.Deps.Debits.Admit(ctx, dispatchID, claimID, admissions); err != nil {
-		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), debitCleanupTimeout)
 		_ = s.Deps.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
@@ -310,7 +314,7 @@ func (s *Server) AbandonSessionDebit(ctx context.Context, x *Call) {
 	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Deps.Debits == nil {
 		return
 	}
-	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), debitCleanupTimeout)
 	if err := s.Deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.Log != nil {
 		s.Log.Warn("session debit release failed", "error", err.Error())
 	}
@@ -325,14 +329,14 @@ func (s *Server) markSessionUnknown(ctx context.Context, x *Call) {
 	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Deps.Debits == nil {
 		return
 	}
-	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), debitCleanupTimeout)
 	if err := s.Deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.Log != nil {
 		s.Log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
 	}
 	cancel()
 }
 
-func (s *Server) finishSessionDebit(ctx context.Context, x *Call, failed bool) {
+func (s *Server) FinishSessionDebit(ctx context.Context, x *Call, failed bool) {
 	if x.sessionDebit == nil {
 		return
 	}
@@ -345,32 +349,38 @@ func (s *Server) finishSessionDebit(ctx context.Context, x *Call, failed bool) {
 	}
 }
 
-func (s *Server) HoldWebRTCExposure(keyID string, until time.Time) {
-	s.webrtcMu.Lock()
-	defer s.webrtcMu.Unlock()
-	if s.webrtcExposures == nil {
-		s.webrtcExposures = map[string]time.Time{}
+func (s *Server) HoldSessionExposure(keyID string, until time.Time) {
+	if s.exposures == nil {
+		return
+	}
+	s.exposures.mu.Lock()
+	defer s.exposures.mu.Unlock()
+	if s.exposures.held == nil {
+		s.exposures.held = map[string]time.Time{}
 	}
 	now := s.Now()
-	for key, expiry := range s.webrtcExposures {
+	for key, expiry := range s.exposures.held {
 		if now.After(expiry) {
-			delete(s.webrtcExposures, key)
+			delete(s.exposures.held, key)
 		}
 	}
-	if current, ok := s.webrtcExposures[keyID]; !ok || until.After(current) {
-		s.webrtcExposures[keyID] = until
+	if current, ok := s.exposures.held[keyID]; !ok || until.After(current) {
+		s.exposures.held[keyID] = until
 	}
 }
 
-func (s *Server) webrtcExposureHeld(keyID string) bool {
-	s.webrtcMu.Lock()
-	defer s.webrtcMu.Unlock()
-	until, ok := s.webrtcExposures[keyID]
+func (s *Server) localExposureHeld(keyID string) bool {
+	if s.exposures == nil {
+		return false
+	}
+	s.exposures.mu.Lock()
+	defer s.exposures.mu.Unlock()
+	until, ok := s.exposures.held[keyID]
 	if !ok {
 		return false
 	}
 	if s.Now().After(until) {
-		delete(s.webrtcExposures, keyID)
+		delete(s.exposures.held, keyID)
 		return false
 	}
 	return true

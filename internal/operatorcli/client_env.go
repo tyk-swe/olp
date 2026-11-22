@@ -96,6 +96,14 @@ func (runner Runner) clientEnv(args []string) error {
 	if framework || opts.one("surface") != "" {
 		return errors.New("--surface requires a code format")
 	}
+	out, err := clientShellEnv(clientName, origin, key, model)
+	if err != nil {
+		return err
+	}
+	return runner.output(opts.one("output"), out)
+}
+
+func clientShellEnv(clientName, origin, key, model string) ([]byte, error) {
 	var out strings.Builder
 	switch clientName {
 	case "openai":
@@ -118,7 +126,7 @@ func (runner Runner) clientEnv(args []string) error {
 		}
 		out.WriteString(" \"$@\"; }\n")
 	default:
-		return errors.New("unsupported client; use openai, anthropic, gemini, claude-code, gemini-cli, codex, openai-agents, vercel, langchain or llamaindex")
+		return nil, errors.New("unsupported client; use openai, anthropic, gemini, claude-code, gemini-cli, codex, openai-agents, vercel, langchain or llamaindex")
 	}
-	return runner.output(opts.one("output"), []byte(out.String()))
+	return []byte(out.String()), nil
 }

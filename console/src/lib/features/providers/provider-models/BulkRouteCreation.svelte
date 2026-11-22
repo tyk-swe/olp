@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useMutationIntents } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
 
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { resolve } from '$app/paths';
@@ -18,6 +19,8 @@
 
   const activateRouteIntent = useMutationIntents();
   const createIntents = useMutationIntents();
+  const createAction = useAction();
+  const publishAction = useAction();
   let {
     models,
     canManage,
@@ -86,58 +89,62 @@
     busy = true;
     cancelled = false;
     errors = [];
-    try {
-      const groups = Map.groupBy(chosen, (item) => item.slug);
-      for (const [slug, items] of groups) {
-        if (!isCurrent()) break;
-        if (created.some((item) => item.slug === slug)) continue;
-        const operations = [
-          ...new Set(
-            items[0].entry.model.capabilities.map(
-              (capability) => capability.operation
-            )
+    const groups = Map.groupBy(chosen, (item) => item.slug);
+    for (const [slug, items] of groups) {
+      if (!isCurrent()) break;
+      if (created.some((item) => item.slug === slug)) continue;
+      const operations = [
+        ...new Set(
+          items[0].entry.model.capabilities.map(
+            (capability) => capability.operation
           )
-        ].filter((operation) =>
-          items.every((item) =>
-            item.entry.model.capabilities.some(
-              (capability) =>
-                capability.operation === operation &&
-                capability.source === 'certified'
-            )
+        )
+      ].filter((operation) =>
+        items.every((item) =>
+          item.entry.model.capabilities.some(
+            (capability) =>
+              capability.operation === operation &&
+              capability.source === 'certified'
           )
-        );
-        if (!operations.length) {
-          errors.push(`${slug}: select models sharing a certified operation.`);
-          continue;
-        }
-        try {
-          const input: Parameters<typeof createRouteDraft>[0] = {
-            slug,
-            operations,
-            overall_timeout_ms: 120000,
-            max_attempts: Math.min(items.length, 32767),
-            fidelity: { mode: fidelity },
-            targets: items.map(({ entry }) => ({
-              provider_id: entry.provider_id,
-              provider_model: entry.model.upstream_model,
-              priority: 0,
-              weight: 1,
-              timeout_ms: 60000
-            }))
-          };
-          const draft = await createIntents.submit(
-            slug,
-            input,
-            (input, requestId) => createRouteDraft(input, requestId)
-          );
-          if (isCurrent()) created = [...created, draft];
-        } catch (e) {
-          if (isCurrent()) errors.push(`${slug}: ${errorMessage(e)}`);
-        }
+        )
+      );
+      if (!operations.length) {
+        errors.push(`${slug}: select models sharing a certified operation.`);
+        continue;
       }
-    } finally {
-      if (epoch === lifetime) busy = false;
+      const input: Parameters<typeof createRouteDraft>[0] = {
+        slug,
+        operations,
+        overall_timeout_ms: 120000,
+        max_attempts: Math.min(items.length, 32767),
+        fidelity: { mode: fidelity },
+        targets: items.map(({ entry }) => ({
+          provider_id: entry.provider_id,
+          provider_model: entry.model.upstream_model,
+          priority: 0,
+          weight: 1,
+          timeout_ms: 60000
+        }))
+      };
+      await createAction.run(
+        () =>
+          createIntents.submit(slug, input, (payload, requestId) =>
+            createRouteDraft(payload, requestId)
+          ),
+        (draft) => {
+          if (isCurrent()) created = [...created, draft];
+        },
+        {
+          key: slug,
+          failure: (e) => {
+            if (!isCurrent()) return '';
+            errors.push(`${slug}: ${errorMessage(e)}`);
+            return errorMessage(e);
+          }
+        }
+      );
     }
+    if (epoch === lifetime) busy = false;
   }
   async function publish() {
     if (busy || !canManage || outdated) return;
@@ -149,23 +156,29 @@
     for (const route of created) {
       if (!isCurrent()) break;
       if (published.includes(route.id)) continue;
-      try {
-        await activateRouteIntent.submit(
-          'activateRoute' + ':' + route.id,
-          { id: route.id, etag: route.etag },
-          (input, requestId) => activateRoute(input, requestId)
-        );
-        if (isCurrent()) published = [...published, route.id];
-      } catch (error) {
-        if (!isCurrent()) break;
-        errors.push(
-          `${route.slug}: ${
-            isEtagMismatch(error)
+      const snap = { id: route.id, etag: route.etag };
+      await publishAction.run(
+        () =>
+          activateRouteIntent.submit(
+            'activateRoute' + ':' + route.id,
+            snap,
+            (input, requestId) => activateRoute(input, requestId)
+          ),
+        () => {
+          if (isCurrent()) published = [...published, route.id];
+        },
+        {
+          key: route.id,
+          failure: (error) => {
+            if (!isCurrent()) return '';
+            const message = isEtagMismatch(error)
               ? 'This draft changed. Open it to review and publish the current version.'
-              : errorMessage(error)
-          }`
-        );
-      }
+              : errorMessage(error);
+            errors.push(`${route.slug}: ${message}`);
+            return errorMessage(error);
+          }
+        }
+      );
     }
     if (epoch === lifetime) busy = false;
   }

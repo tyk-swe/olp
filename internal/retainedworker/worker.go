@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -207,6 +208,9 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 		}
 		return "usage_evidence_missing"
 	}
+	return w.observePollResponse(ctx, c, r, e, upstream, adopt, response)
+}
+func (w *Worker) observePollResponse(ctx context.Context, c resources.RetainedClaim, r *resources.Resource, e retainedapi.Endpoint, upstream string, adopt bool, response *http.Response) string {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "poll_failed"
 	}
