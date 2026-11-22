@@ -232,6 +232,11 @@
         .tokens_this_minute} tokens · {pool.data.connection_usage
         .concurrent_requests} concurrent requests.
     </p>{/if}
+  {#each Object.entries(pool.data?.shared_group_usage ?? {}) as [group, usage] (group)}<p
+    >
+      Shared token quota {group} this minute: {usage.tokens_this_minute} / {usage.tokens_per_minute}
+      tokens across every member connection.
+    </p>{/each}
   <ul>
     {#each pool.data?.items ?? [] as slot (slot.id)}
       {@const lapsed = Boolean(pool.data?.health?.[slot.id]?.lapsed)}

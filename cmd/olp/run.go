@@ -80,7 +80,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	for _, closer := range stores.closers {
 		defer closing(closer)
 	}
-	core, err := newRuntimeCore(startup, c, stores.pool, stores.readPool, stores.installation, stores.vk, &shutdownDeadline, log)
+	core, err := newRuntimeCore(startup, c, stores.pool, stores.readPool, stores.installation, stores.vk, stores.limiter, &shutdownDeadline, log)
 	if err != nil {
 		return err
 	}

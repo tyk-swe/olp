@@ -1786,7 +1786,7 @@ func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
 	}
 	h.gateway.health.ReleaseProbe(unsent.Provider.ID)
 	reserve := func(p *Pin) gateResult {
-		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, quota.CombinedDemand(1), time.Minute, "")
+		return acquireDispatchHold(t.Context(), h.gateway, &p.Provider, &p.Slot, quota.CombinedDemand(1), time.Minute, "", "", 0)
 	}
 	first := reserve(sent)
 	if first.verdict != gateAdmitted {

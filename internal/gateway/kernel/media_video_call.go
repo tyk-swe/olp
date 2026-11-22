@@ -33,7 +33,7 @@ func (s *Server) VideoJobCall(ctx context.Context, x *Call, record *jobs.Record,
 	if refusal != nil {
 		return s.jobRefused(fact, refusal)
 	}
-	reservation, limited, skip := s.Deps.Admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "")
+	reservation, limited, skip := s.Deps.Admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "", "", 0)
 	if skip {
 		return s.jobRefused(fact, &AttemptFailure{class: classLimitsUnavailable})
 	}

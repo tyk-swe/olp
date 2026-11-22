@@ -31,14 +31,17 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 		return len(quotas) - 1
 	}
 	type slotProbes struct {
-		ID               string
-		connection, slot int
+		key                      routing.SlotModel
+		connection, slot, shared int
 	}
 	slots := make([]slotProbes, 0, len(query.Slots))
 	for _, entry := range query.Slots {
-		probes := slotProbes{ID: entry.Slot.ID, connection: -1}
+		probes := slotProbes{key: routing.SlotModel{Slot: entry.Slot.ID, Model: entry.Model}, connection: -1, shared: -1}
 		if quota := entry.Provider.Limits; quota != nil {
 			probes.connection = probe(limits.ConnectionLookup(entry.Provider.ID), quota.RequestsPerMinute, quota.TokensPerMinute, quota.InputTokensPerMinute, quota.OutputTokensPerMinute, quota.MaxConcurrency)
+		}
+		if assignment, ok := sharedQuotaFor(entry.Provider, entry.Model); ok {
+			probes.shared = probe(assignment.lookup, nil, &assignment.tokensPerMinute, nil, nil, nil)
 		}
 		probes.slot = probe(limits.SlotLookup(entry.Slot.ID), entry.Slot.RequestsPerMinute, entry.Slot.TokensPerMinute, entry.Slot.InputTokensPerMinute, entry.Slot.OutputTokensPerMinute, entry.Slot.MaxConcurrency)
 		slots = append(slots, probes)
@@ -47,7 +50,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 	for i, cap := range query.Caps {
 		caps[i] = admission.CapProbe{OwnerID: cap.OwnerID, Daily: cap.Limits.DailyCostLimit, Monthly: cap.Limits.MonthlyCostLimit}
 	}
-	state := &routing.SupplyState{Headroom: map[string]float64{}, Spend: map[string]routing.Spend{}}
+	state := &routing.SupplyState{Headroom: map[routing.SlotModel]float64{}, Spend: map[string]routing.Spend{}}
 	if len(quotas) == 0 && len(caps) == 0 {
 		return state
 	}
@@ -57,7 +60,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 
 	for _, slot := range slots {
 		fraction, known := 1.0, false
-		for _, i := range [...]int{slot.connection, slot.slot} {
+		for _, i := range [...]int{slot.connection, slot.slot, slot.shared} {
 			if i < 0 {
 				continue
 			}
@@ -68,7 +71,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 			fraction, known = min(fraction, headroom[i].Fraction), true
 		}
 		if known {
-			state.Headroom[slot.ID] = fraction
+			state.Headroom[slot.key] = fraction
 		}
 	}
 	for i, cap := range caps {

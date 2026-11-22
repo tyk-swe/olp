@@ -130,7 +130,7 @@ func (s *Server) ReserveRetrieval(ctx context.Context, x *Call, authority keyaut
 func (s *Server) GatePinnedRetrieval(ctx context.Context, x *Call, p *Pin) *fault.Error {
 	x.pinnedSlot = &p.Slot
 	deadline, _ := ctx.Deadline()
-	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(ResourceEstimate), deadline, "")
+	gate := s.gateSlot(ctx, &p.Provider, &p.Slot, quota.CombinedDemand(ResourceEstimate), deadline, "", "", 0)
 	if gate.verdict != gateAdmitted {
 		return gateError(gate)
 	}

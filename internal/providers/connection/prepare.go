@@ -138,7 +138,7 @@ func validate(policy *egress.Policy, p Prepared) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, err
 	}
-	if err := firstViolation(committed, healthProbe, quota); err != nil {
+	if err := firstViolation(committed, healthProbe, quota, sharedQuotas); err != nil {
 		return Prepared{}, err
 	}
 	return committed, nil
@@ -356,6 +356,24 @@ func quota(p Prepared) error {
 		return nil
 	}
 	return ValidLimits("configuration.options.limits", *p.document.Options.Limits)
+}
+
+func sharedQuotas(p Prepared) error {
+	seen := map[string]bool{}
+	for index, quota := range p.document.Options.SharedTokenQuotas {
+		field := fmt.Sprintf("configuration.options.shared_token_quotas[%d]", index)
+		if err := ValidModelName(field+".model", quota.Model); err != nil {
+			return err
+		}
+		if err := quota.Validate(field); err != nil {
+			return err
+		}
+		if seen[quota.Model] {
+			return invalid(field+".model", "Assign each deployment model to at most one shared token quota group.")
+		}
+		seen[quota.Model] = true
+	}
+	return nil
 }
 
 func ValidLimits(field string, q Limits) error {

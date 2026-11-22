@@ -71,6 +71,7 @@ func (s *Server) GateRetainedSlot(ctx context.Context, x *Call, p *Pin, route *r
 	provider, slot := &p.Provider, &p.Slot
 	if x.freeRetainedControl() {
 		copyProvider := p.Provider
+		copyProvider.SharedTokenQuotas = nil
 		copySlot := p.Slot
 		copySlot.TokensPerMinute = nil
 		copySlot.InputTokensPerMinute = nil

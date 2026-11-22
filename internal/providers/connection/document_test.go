@@ -92,6 +92,32 @@ func TestPrepareCarriesSplitTokenLimitsIntoServing(t *testing.T) {
 	}
 }
 
+func TestPrepareCarriesSharedTokenQuotasIntoServing(t *testing.T) {
+	prepared, err := prepare(t, openAI(Options{SharedTokenQuotas: []routing.SharedTokenQuota{
+		{Model: "gpt-example", Group: "upstream-a", TokensPerMinute: 250_000},
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := prepared.Document().Options.SharedTokenQuotas
+	if len(saved) != 1 || saved[0].Group != "upstream-a" || saved[0].TokensPerMinute != 250_000 {
+		t.Fatalf("stored shared token quotas = %+v", saved)
+	}
+	served, err := prepared.Document().Serving()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quotas := served.Options.SharedTokenQuotas; len(quotas) != 1 || quotas[0].Model != "gpt-example" {
+		t.Fatalf("served shared token quotas = %+v", quotas)
+	}
+	if _, err := prepare(t, openAI(Options{SharedTokenQuotas: []routing.SharedTokenQuota{
+		{Model: "gpt-example", Group: "upstream-a", TokensPerMinute: 1},
+		{Model: "gpt-example", Group: "upstream-b", TokensPerMinute: 1},
+	}})); err == nil {
+		t.Fatal("one deployment model assigned to two groups was accepted")
+	}
+}
+
 func TestPrepareRefusesConnectionsThatCannotBeServedSafely(t *testing.T) {
 	shares := &routing.Shares{Critical: 25, High: 25, Normal: 25, Low: 25}
 	cases := map[string]struct {

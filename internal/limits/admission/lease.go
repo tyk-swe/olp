@@ -35,6 +35,7 @@ type rateHold struct {
 	countsOutput     bool
 	countsRequest    bool
 	holdsConcurrency bool
+	creditCombined   bool
 	reported         *rateAnswer
 }
 
@@ -237,7 +238,7 @@ func tokenAdjustment(counts, credit bool, actual, reserved int64) int64 {
 }
 
 func (h *rateHold) adjustments(usage TokenUsage) (combined, input, output int64) {
-	return tokenAdjustment(h.countsTokens, false, usage.Total, h.tokens),
+	return tokenAdjustment(h.countsTokens, usage.Credit && h.creditCombined, usage.Total, h.tokens),
 		tokenAdjustment(h.countsInput, usage.Credit, usage.Input, h.inputTokens),
 		tokenAdjustment(h.countsOutput, usage.Credit, usage.Output, h.outputTokens)
 }

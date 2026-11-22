@@ -148,6 +148,7 @@ type ManagerConfig struct {
 	ExternalSecrets        ExternalSecrets
 	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
+	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View) error
 }
 
 type Manager struct {
@@ -170,6 +171,8 @@ type Manager struct {
 	instanceID             string
 
 	grantRefreshed func(providerID, credentialID string)
+
+	syncSharedQuotas func(ctx context.Context, previous, next *routing.View) error
 
 	mu        sync.RWMutex
 	taskStore taskCapabilityStore
@@ -206,8 +209,8 @@ func NewManager(config ManagerConfig) *Manager {
 		pool:         config.Pool, readPool: config.ReadPool, installation: config.Installation,
 		auth: config.Auth, keys: config.Keys, log: config.Log, region: config.Region,
 		externalSecrets: config.ExternalSecrets, mounted: cloneMounted(config.Mounted),
-		prepareGuardrailPlugin: config.PrepareGuardrailPlugin,
-		release:                emptyRelease(), stop: make(chan struct{}), taskCtx: tasks,
+		prepareGuardrailPlugin: config.PrepareGuardrailPlugin, syncSharedQuotas: config.SyncSharedQuotas,
+		release: emptyRelease(), stop: make(chan struct{}), taskCtx: tasks,
 		cancelTask: cancel, stopped: make(chan struct{}),
 		instanceID:       completeness.GatewayInstance(config.Hostname),
 		refreshRequested: map[string]int64{},

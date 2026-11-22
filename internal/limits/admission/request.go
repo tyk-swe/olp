@@ -11,10 +11,16 @@ import (
 const costGrace = 5 * time.Minute
 
 type Request struct {
-	Lookup   string
-	LeaseTTL time.Duration
-	Rate     RateLimits
-	Cost     *CostBudget
+	Lookup     string
+	LeaseTTL   time.Duration
+	Rate       RateLimits
+	Cost       *CostBudget
+	Membership *Membership
+}
+
+type Membership struct {
+	Member     string
+	Generation int64
 }
 
 type RateLimits struct {
@@ -29,6 +35,7 @@ type RateLimits struct {
 	OutputTokens          int64
 	Report                bool
 	Share                 Share
+	CreditCombined        bool
 }
 
 type Share struct {
@@ -97,6 +104,9 @@ func (r Request) validate() error {
 	}
 	if err := r.Rate.validate(); err != nil {
 		return err
+	}
+	if r.Membership != nil && (r.Membership.Member == "" || len(r.Membership.Member) > 128 || r.Membership.Generation < 0 || r.Membership.Generation > limits.MaxCounter) {
+		return invalid("membership needs a member of at most 128 characters and a non-negative generation")
 	}
 	if r.Cost == nil {
 		return nil

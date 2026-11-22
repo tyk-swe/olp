@@ -114,7 +114,13 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	var queried SupplyQuery
 	options := Options{CheckSlots: true, Preferences: &Preferences{Strategy: ptr("capacity")}, Supply: supplyFunc(func(q SupplyQuery) *SupplyState {
 		queried = q
-		return &SupplyState{Headroom: headroom}
+		state := &SupplyState{Headroom: map[SlotModel]float64{}}
+		for _, entry := range q.Slots {
+			if fraction, ok := headroom[entry.Slot.ID]; ok {
+				state.Headroom[SlotModel{entry.Slot.ID, entry.Model}] = fraction
+			}
+		}
+		return state
 	})}
 	plan, err := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
 	if err != nil {

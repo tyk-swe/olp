@@ -57,7 +57,8 @@ const emptyOptions = {
   limits: null,
   credential_headers: [],
   parameter_defaults: {},
-  models: {}
+  models: {},
+  shared_token_quotas: []
 };
 
 describe('provider editing', () => {

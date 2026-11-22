@@ -192,6 +192,7 @@ func (s *Server) slotList(ctx context.Context, q database.Queryer, current *reco
 		return httpkit.Reply{}, err
 	}
 	live, connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
+	groups := s.sharedGroupUsage(ctx, current)
 	items := make([]slotReply, len(slots))
 	health := make(map[string]slotHealth, len(slots))
 	for i, row := range slots {
@@ -202,14 +203,43 @@ func (s *Server) slotList(ctx context.Context, q database.Queryer, current *reco
 			CoolingDown: quota.coolingDown, ValidatedAt: row.validationTime(current.Connection.Document(), models), Usage: quota.usage,
 		}
 	}
-	return httpkit.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection}, current.SlotsETag), nil
+	return httpkit.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection, SharedGroupUsage: groups}, current.SlotsETag), nil
 }
 
 type slotList struct {
-	Items           []slotReply           `json:"items"`
-	Health          map[string]slotHealth `json:"health"`
-	ETag            string                `json:"etag"`
-	ConnectionUsage *quotaUsage           `json:"connection_usage"`
+	Items            []slotReply                  `json:"items"`
+	Health           map[string]slotHealth        `json:"health"`
+	ETag             string                       `json:"etag"`
+	ConnectionUsage  *quotaUsage                  `json:"connection_usage"`
+	SharedGroupUsage map[string]*sharedGroupUsage `json:"shared_group_usage"`
+}
+
+type sharedGroupUsage struct {
+	TokensThisMinute int64 `json:"tokens_this_minute"`
+	TokensPerMinute  int64 `json:"tokens_per_minute"`
+}
+
+func (s *Server) sharedGroupUsage(ctx context.Context, current *record) map[string]*sharedGroupUsage {
+	groups := map[string]*sharedGroupUsage{}
+	quotas := current.Connection.Document().Options.SharedTokenQuotas
+	if s.quota == nil || current.ProjectID == nil || len(quotas) == 0 {
+		return groups
+	}
+	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
+	defer cancel()
+	for _, quota := range quotas {
+		if _, seen := groups[quota.Group]; seen {
+			continue
+		}
+		lookup := limits.SharedQuotaLookup(routing.SharedTokenQuotaGroupID(*current.ProjectID, quota.Group))
+		usage, err := s.quota.Usage(ctx, lookup)
+		if err != nil {
+			s.quotaUnavailable(err)
+			return groups
+		}
+		groups[quota.Group] = &sharedGroupUsage{TokensThisMinute: usage.TokensThisMinute, TokensPerMinute: quota.TokensPerMinute}
+	}
+	return groups
 }
 
 type slotHealth struct {

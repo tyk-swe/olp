@@ -233,6 +233,21 @@ upstream; keep it near the expected reply size. A request whose output bound alo
 the output limit never dispatches on that target. During a rolling deploy, split limits
 enforce fully only once every replica runs a build that knows them.
 
+A deployment model that several same-project connections serve under one upstream
+ceiling joins a shared token quota group through connection
+`options.shared_token_quotas`, for example
+`[{"model":"gpt-example","group":"upstream-a","tokens_per_minute":250000}]`.
+Connections in the same project naming the same group share one tokens per minute
+counter, independent of the connection and its secrets, and every member declares
+the same ceiling. For ordinary generation an attempt is admitted only when the
+group, connection and slot reservations all succeed, and a partial failure charges
+none of them. Moving a model between groups changes future reservations only,
+once the publishing release installs. Leases already taken keep settling in their
+original group exactly once, and the old group keeps its accounting while they
+can. The credential pool shows each group's live usage beside the connection
+usage, and a request refused by the group names the shared quota rather than the
+connection or credential.
+
 Connection/slot day/month supply caps use exact-decimal PostgreSQL facts/Valkey
 snapshots and per-attempt holds. Unknown windows skip as
 `connection_budget_unavailable`/`slot_budget_unavailable`; exhaustion similarly

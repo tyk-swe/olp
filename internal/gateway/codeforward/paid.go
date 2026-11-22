@@ -184,7 +184,7 @@ func (f *Forwarder) reservePaidCodeAttempt(r *http.Request, a *codeAttempt, veri
 	}
 	a.lease = lease
 	a.paid.demand = quota.DemandOf(priced.demand)
-	targetLease, rejection, skip := f.admission.ReserveTarget(r.Context(), &priced.provider, &priced.slot, a.paid.demand, codeGenerationTimeout+time.Minute, "code")
+	targetLease, rejection, skip := f.admission.ReserveTarget(r.Context(), &priced.provider, &priced.slot, a.paid.demand, codeGenerationTimeout+time.Minute, "code", "", 0)
 	if rejection != nil {
 		return codemode.Refuse(429, "code_paid_target_rate_limited")
 	}

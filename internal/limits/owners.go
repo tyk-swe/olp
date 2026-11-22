@@ -32,8 +32,9 @@ type Owner struct {
 }
 
 var (
-	aggregateNamespace = uuid.MustParse("e7d0305c-722f-5484-99a2-69a019fd74d5")
-	endUserNamespace   = uuid.MustParse("15dc4671-a780-5723-8275-fdb6c9f90eb4")
+	aggregateNamespace   = uuid.MustParse("e7d0305c-722f-5484-99a2-69a019fd74d5")
+	endUserNamespace     = uuid.MustParse("15dc4671-a780-5723-8275-fdb6c9f90eb4")
+	sharedQuotaNamespace = uuid.MustParse("4c2f8a61-b7d3-5e09-a416-9d2b6f83c1a7")
 )
 
 func AggregateBudgetID(level, subject string) string {
@@ -83,3 +84,9 @@ func RouteLookup(routeID string) string { return "rt_" + SimpleUUID(routeID) }
 func AggregateBudgetLookup(owner string) string { return "ab_" + SimpleUUID(owner) }
 
 func EndUserLookup(accountID string) string { return "eu_" + SimpleUUID(accountID) }
+
+func SharedQuotaLookup(groupID string) string { return "sg_" + SimpleUUID(groupID) }
+
+func SharedQuotaMember(providerID, model string) string {
+	return SimpleUUID(uuid.NewSHA1(sharedQuotaNamespace, []byte(providerID+"\x00"+model)).String())
+}

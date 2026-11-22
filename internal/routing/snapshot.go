@@ -152,7 +152,11 @@ type Provider struct {
 	PendingCommitment *Commitment `json:"pending_commitment,omitempty"`
 	// HealthProbe, when set, opts the connection into active probing.
 	HealthProbe *HealthProbe `json:"health_probe,omitempty"`
-	Slots       []Slot       `json:"slots,omitempty"`
+	// SharedTokenQuotas assigns deployment models of this connection to
+	// named groups whose tokens per minute ceiling every member connection
+	// of the same project shares.
+	SharedTokenQuotas []SharedTokenQuota `json:"shared_token_quotas,omitempty"`
+	Slots             []Slot             `json:"slots,omitempty"`
 	// ObservedPrincipal is the upstream principal every slot of a provider
 	// authenticated by a grant observes, which its serving identity carries;
 	// empty for any other provider.
@@ -274,6 +278,9 @@ func (s *Snapshot) validate() error {
 		return err
 	}
 	if err := s.Guardrails.Validate(); err != nil {
+		return err
+	}
+	if err := s.validateSharedTokenQuotas(); err != nil {
 		return err
 	}
 	if err := s.validateCodeMode(); err != nil {

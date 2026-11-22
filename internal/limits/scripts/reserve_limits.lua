@@ -60,7 +60,19 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(raw)
 end
 
-if #KEYS ~= 2 or (#ARGV ~= 11 and #ARGV ~= 12 and #ARGV ~= 14 and #ARGV ~= 15) then
+local member = nil
+local member_generation = nil
+if #KEYS == 3 then
+  member_generation = parse_safe_unsigned_integer(ARGV[#ARGV])
+  member = ARGV[#ARGV - 1]
+  ARGV[#ARGV] = nil
+  ARGV[#ARGV] = nil
+  if member_generation == nil or type(member) ~= "string" or #member < 1 or #member > 128 then
+    return failure("invalid_arguments")
+  end
+end
+
+if (#KEYS ~= 2 and #KEYS ~= 3) or (#ARGV ~= 11 and #ARGV ~= 12 and #ARGV ~= 14 and #ARGV ~= 15) then
   return failure("invalid_arguments")
 end
 
@@ -131,6 +143,29 @@ local elapsed_in_minute_ms = (seconds % 60) * 1000 + math.floor(microseconds / 1
 local window_remaining_ms = MINUTE_MS - elapsed_in_minute_ms
 if window_remaining_ms < 1 or window_remaining_ms > MINUTE_MS then
   return failure("invalid_server_time")
+end
+
+if member ~= nil then
+  local kind = redis.call("TYPE", KEYS[3]).ok
+  if kind ~= "none" and kind ~= "hash" then
+    return failure("malformed_rate_state", window_id)
+  end
+  local stored = redis.call("HGET", KEYS[3], member)
+  if stored == false then
+    redis.call("HSET", KEYS[3], member, member_generation)
+  else
+    local departed = string.sub(stored, 1, 1) == "-"
+    local stored_generation = parse_safe_unsigned_integer(departed and string.sub(stored, 2) or stored)
+    if stored_generation == nil then
+      return failure("malformed_rate_state", window_id)
+    end
+    if departed and member_generation <= stored_generation then
+      return failure("stale_membership", window_id)
+    end
+    if departed then
+      redis.call("HSET", KEYS[3], member, member_generation)
+    end
+  end
 end
 
 local lease_expires_at_ms = 0
