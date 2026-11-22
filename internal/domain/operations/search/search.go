@@ -163,87 +163,12 @@ func parseRequest(source oif.Request, id string) (oif.View, error) {
 			return r, err
 		}
 	case Exa:
-		for _, m := range root.Members() {
-			switch m.Name {
-			case "query", "numResults", "contents", "includeDomains", "excludeDomains":
-			default:
-				return r, invalid(m.Name)
-			}
-		}
-		if err := boundedQuery(root, "numResults"); err != nil {
+		if err := exaRequest(root); err != nil {
 			return r, err
 		}
-		c := member(root, "contents")
-		if c.Kind() != oif.Object {
-			return r, invalid("contents")
-		}
-		for _, m := range c.Members() {
-			if m.Name != "highlights" || m.Value.Raw() != "true" {
-				return r, invalid("contents." + m.Name)
-			}
-		}
-		for _, name := range []string{"includeDomains", "excludeDomains"} {
-			if v := member(root, name); !operations.Optional(v) {
-				if v.Kind() != oif.Array || len(v.Elements()) > 2*maxRows {
-					return r, invalid(name)
-				}
-				for _, e := range v.Elements() {
-					if e.Kind() != oif.String {
-						return r, invalid(name)
-					}
-				}
-			}
-		}
 	case Parallel:
-		for _, m := range root.Members() {
-			if m.Name != "search_queries" && m.Name != "advanced_settings" {
-				return r, invalid(m.Name)
-			}
-		}
-		queries := member(root, "search_queries")
-		if queries.Kind() != oif.Array || len(queries.Elements()) == 0 || len(queries.Elements()) > maxRows {
-			return r, invalid("search_queries")
-		}
-		for _, e := range queries.Elements() {
-			if e.Kind() != oif.String {
-				return r, invalid("search_queries")
-			}
-		}
-		settings := member(root, "advanced_settings")
-		if settings.Kind() != oif.Object {
-			return r, invalid("advanced_settings")
-		}
-		for _, m := range settings.Members() {
-			switch m.Name {
-			case "max_results":
-				if n, ok := operations.Int(m.Value); !ok || n < 1 || n > maxRows {
-					return r, invalid("advanced_settings.max_results")
-				}
-			case "source_policy":
-				if m.Value.Kind() != oif.Object {
-					return r, invalid("advanced_settings.source_policy")
-				}
-				for _, p := range m.Value.Members() {
-					switch p.Name {
-					case "include_domains", "exclude_domains":
-						if p.Value.Kind() != oif.Array || len(p.Value.Elements()) > maxRows {
-							return r, invalid("advanced_settings.source_policy." + p.Name)
-						}
-						for _, e := range p.Value.Elements() {
-							if e.Kind() != oif.String {
-								return r, invalid("advanced_settings.source_policy." + p.Name)
-							}
-						}
-					default:
-						return r, invalid("advanced_settings.source_policy." + p.Name)
-					}
-				}
-			default:
-				return r, invalid("advanced_settings." + m.Name)
-			}
-		}
-		if member(settings, "max_results").Kind() != oif.Number {
-			return r, invalid("advanced_settings.max_results")
+		if err := parallelRequest(root); err != nil {
+			return r, err
 		}
 	case Brave:
 		if err := braveRequest(root); err != nil {
@@ -251,6 +176,95 @@ func parseRequest(source oif.Request, id string) (oif.View, error) {
 		}
 	}
 	return r, nil
+}
+
+func exaRequest(root oif.Value) error {
+	for _, m := range root.Members() {
+		switch m.Name {
+		case "query", "numResults", "contents", "includeDomains", "excludeDomains":
+		default:
+			return invalid(m.Name)
+		}
+	}
+	if err := boundedQuery(root, "numResults"); err != nil {
+		return err
+	}
+	c := member(root, "contents")
+	if c.Kind() != oif.Object {
+		return invalid("contents")
+	}
+	for _, m := range c.Members() {
+		if m.Name != "highlights" || m.Value.Raw() != "true" {
+			return invalid("contents." + m.Name)
+		}
+	}
+	for _, name := range []string{"includeDomains", "excludeDomains"} {
+		if v := member(root, name); !operations.Optional(v) {
+			if v.Kind() != oif.Array || len(v.Elements()) > 2*maxRows {
+				return invalid(name)
+			}
+			for _, e := range v.Elements() {
+				if e.Kind() != oif.String {
+					return invalid(name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func parallelRequest(root oif.Value) error {
+	for _, m := range root.Members() {
+		if m.Name != "search_queries" && m.Name != "advanced_settings" {
+			return invalid(m.Name)
+		}
+	}
+	queries := member(root, "search_queries")
+	if queries.Kind() != oif.Array || len(queries.Elements()) == 0 || len(queries.Elements()) > maxRows {
+		return invalid("search_queries")
+	}
+	for _, e := range queries.Elements() {
+		if e.Kind() != oif.String {
+			return invalid("search_queries")
+		}
+	}
+	settings := member(root, "advanced_settings")
+	if settings.Kind() != oif.Object {
+		return invalid("advanced_settings")
+	}
+	for _, m := range settings.Members() {
+		switch m.Name {
+		case "max_results":
+			if n, ok := operations.Int(m.Value); !ok || n < 1 || n > maxRows {
+				return invalid("advanced_settings.max_results")
+			}
+		case "source_policy":
+			if m.Value.Kind() != oif.Object {
+				return invalid("advanced_settings.source_policy")
+			}
+			for _, p := range m.Value.Members() {
+				switch p.Name {
+				case "include_domains", "exclude_domains":
+					if p.Value.Kind() != oif.Array || len(p.Value.Elements()) > maxRows {
+						return invalid("advanced_settings.source_policy." + p.Name)
+					}
+					for _, e := range p.Value.Elements() {
+						if e.Kind() != oif.String {
+							return invalid("advanced_settings.source_policy." + p.Name)
+						}
+					}
+				default:
+					return invalid("advanced_settings.source_policy." + p.Name)
+				}
+			}
+		default:
+			return invalid("advanced_settings." + m.Name)
+		}
+	}
+	if member(settings, "max_results").Kind() != oif.Number {
+		return invalid("advanced_settings.max_results")
+	}
+	return nil
 }
 
 const maxBraveQueryChars = 600
@@ -479,167 +493,4 @@ func inputText(request oif.Request, id string) ([]operations.Text, error) {
 		return out, nil
 	}
 	return []operations.Text{{Pointer: "/query", Value: text(member(root, "query"))}}, nil
-}
-
-// outputText covers each dialect's result text: title, url, snippet and the
-// content or excerpt fields. Reviewed metadata fields pass without inspection;
-// anything the contract does not name fails closed unless it carries no text.
-func outputText(result oif.Result, id string) ([]operations.Text, error) {
-	if id == Brave {
-		return braveOutputText(result)
-	}
-	out := []operations.Text{}
-	known := map[string]bool{"id": true, "results": true, "server_time": true}
-	switch id {
-	case Tavily:
-		known["query"], known["response_time"], known["request_id"] = true, true, true
-	case Exa:
-		known["requestId"], known["costDollars"], known["searchTime"] = true, true, true
-	case Parallel:
-		known["search_id"], known["session_id"], known["usage"], known["warnings"] = true, true, true, true
-	}
-	root := result.Source().Root()
-	for _, f := range root.Members() {
-		if !known[f.Name] && !inert(f.Value) {
-			return nil, conflict(operations.Pointer("", f.Name))
-		}
-	}
-	inspect := map[string]bool{"title": true, "url": true, "snippet": true, "content": true, "author": true, "text": true, "summary": true}
-	metadata := map[string]bool{"id": true, "score": true, "date": true, "last_updated": true, "publishedDate": true, "publish_date": true, "favicon": true, "image": true, "highlightScores": true}
-	for i, row := range member(root, "results").Elements() {
-		path := "/results/" + strconv.Itoa(i)
-		for _, f := range row.Members() {
-			p := operations.Pointer(path, f.Name)
-			switch {
-			case inspect[f.Name]:
-				if f.Value.Kind() == oif.String {
-					out = append(out, operations.Text{Pointer: p, Value: text(f.Value)})
-				} else if !inert(f.Value) {
-					return nil, conflict(p)
-				}
-			case f.Name == "highlights" || f.Name == "excerpts":
-				if f.Value.Kind() != oif.Array && !inert(f.Value) {
-					return nil, conflict(p)
-				}
-				for j, e := range f.Value.Elements() {
-					if e.Kind() == oif.String {
-						out = append(out, operations.Text{Pointer: p + "/" + strconv.Itoa(j), Value: text(e)})
-					} else if !inert(e) {
-						return nil, conflict(p + "/" + strconv.Itoa(j))
-					}
-				}
-			case metadata[f.Name]:
-			default:
-				if !inert(f.Value) {
-					return nil, conflict(p)
-				}
-			}
-		}
-	}
-	return out, nil
-}
-
-func braveOutputText(result oif.Result) ([]operations.Text, error) {
-	out := []operations.Text{}
-	root := result.Source().Root()
-	for _, f := range root.Members() {
-		switch f.Name {
-		case "type":
-		case "query":
-			collectStrings(f.Value, operations.Pointer("", f.Name), &out)
-		case "web":
-			if err := braveWebText(f.Value, &out); err != nil {
-				return nil, err
-			}
-		default:
-			if !inert(f.Value) {
-				return nil, conflict(operations.Pointer("", f.Name))
-			}
-		}
-	}
-	return out, nil
-}
-
-func braveWebText(web oif.Value, out *[]operations.Text) error {
-	for _, f := range web.Members() {
-		switch f.Name {
-		case "type", "family_friendly":
-		case "results":
-			for i, row := range f.Value.Elements() {
-				if err := braveRowText(row, "/web/results/"+strconv.Itoa(i), out); err != nil {
-					return err
-				}
-			}
-		default:
-			if !inert(f.Value) {
-				return conflict(operations.Pointer("/web", f.Name))
-			}
-		}
-	}
-	return nil
-}
-
-func braveRowText(row oif.Value, path string, out *[]operations.Text) error {
-	inspect := map[string]bool{"title": true, "url": true, "description": true}
-	containers := map[string]bool{"profile": true, "meta_url": true, "thumbnail": true}
-	metadata := map[string]bool{"is_source_local": true, "is_source_both": true, "page_age": true, "page_fetched": true, "fetched_content_timestamp": true, "language": true, "family_friendly": true, "type": true, "subtype": true, "is_live": true, "age": true}
-	for _, f := range row.Members() {
-		p := operations.Pointer(path, f.Name)
-		switch {
-		case inspect[f.Name]:
-			if f.Value.Kind() == oif.String {
-				*out = append(*out, operations.Text{Pointer: p, Value: text(f.Value)})
-			} else if !inert(f.Value) {
-				return conflict(p)
-			}
-		case f.Name == "extra_snippets":
-			if f.Value.Kind() != oif.Array && !inert(f.Value) {
-				return conflict(p)
-			}
-			for j, e := range f.Value.Elements() {
-				if e.Kind() == oif.String {
-					*out = append(*out, operations.Text{Pointer: p + "/" + strconv.Itoa(j), Value: text(e)})
-				} else if !inert(e) {
-					return conflict(p + "/" + strconv.Itoa(j))
-				}
-			}
-		case containers[f.Name]:
-			collectStrings(f.Value, p, out)
-		case metadata[f.Name]:
-		default:
-			if !inert(f.Value) {
-				return conflict(p)
-			}
-		}
-	}
-	return nil
-}
-
-func collectStrings(v oif.Value, pointer string, out *[]operations.Text) {
-	switch v.Kind() {
-	case oif.String:
-		*out = append(*out, operations.Text{Pointer: pointer, Value: text(v)})
-	case oif.Array:
-		for i, e := range v.Elements() {
-			collectStrings(e, pointer+"/"+strconv.Itoa(i), out)
-		}
-	case oif.Object:
-		for _, m := range v.Members() {
-			collectStrings(m.Value, operations.Pointer(pointer, m.Name), out)
-		}
-	}
-}
-
-// inert reports whether a field carries no text the output policy could miss:
-// null, scalar and empty-container values only.
-func inert(v oif.Value) bool {
-	switch v.Kind() {
-	case oif.Absent, oif.Null, oif.Number, oif.Boolean:
-		return true
-	case oif.Array:
-		return len(v.Elements()) == 0
-	case oif.Object:
-		return len(v.Members()) == 0
-	}
-	return false
 }

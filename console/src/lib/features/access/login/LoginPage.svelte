@@ -10,8 +10,10 @@
     beginOidcLogin,
     type AuthenticationCapabilities
   } from '#lib/session/api.js';
-  import { login } from '#lib/session/authentication.js';
+  import { login as passwordLogin } from '#lib/session/authentication.js';
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { errorMessage } from '#lib/management/http.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { relativeReturnTo } from '#lib/session/relativeReturnTo.js';
@@ -19,8 +21,9 @@
 
   let email = $state('');
   let password = $state('');
-  let busy = $state(false);
-  let oidcBusy = $state(false);
+  const login = useAction(undefined, 'authentication');
+  const busy = $derived(login.key === 'password');
+  const ssoBusy = $derived(login.key === 'sso');
   let capabilitiesLoading = $state(true);
   let capabilitiesError = $state('');
   const oidcError = $derived(
@@ -32,7 +35,6 @@
     payload_capture_active: false,
     oidc_login_enabled: false
   });
-  let message = $state('');
   const publicAuthController = new AbortController();
   const sessionExpired = $derived(
     page.url.searchParams.get('reason') === 'expired'
@@ -51,78 +53,67 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || oidcBusy) return;
-    message = '';
+    if (login.busy) return;
+    login.error = '';
     if (!capabilities.local_login_enabled) {
-      message =
+      login.error =
         'Password-based sign-in is not available for this installation.';
       return;
     }
     if (!email.trim() || !password) {
-      message = 'Enter your email and password.';
+      login.error = 'Enter your email and password.';
       return;
     }
-    busy = true;
-    try {
-      await authLifecycle.authenticate((signal) =>
-        login(email.trim(), password, signal)
-      );
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- destination() validates local paths and rejects login loops.
-      await goto(destination(), { replace: true, refreshAll: true });
-    } catch (error) {
-      message = errorMessage(error, 'The control API could not be reached.');
-    } finally {
-      busy = false;
-    }
+    await login.run(
+      () =>
+        authLifecycle.authenticate((signal) =>
+          passwordLogin(email.trim(), password, signal)
+        ),
+      async () => {
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- destination() validates local paths and rejects login loops.
+        await goto(destination(), { replace: true, refreshAll: true });
+      },
+      { key: 'password', fallback: 'The control API could not be reached.' }
+    );
   }
 
   async function beginSso(event: MouseEvent) {
     event.preventDefault();
-    if (oidcBusy || busy || !capabilities.oidc_login_enabled) return;
-    message = '';
-    oidcBusy = true;
-    try {
-      const authorizationUrl = await beginOidcLogin(
-        destination(),
-        publicAuthController.signal
-      );
-      window.location.assign(authorizationUrl);
-    } catch (error) {
-      message = errorMessage(error, 'Single sign-on could not be started.');
-    } finally {
-      oidcBusy = false;
-    }
+    if (login.busy || !capabilities.oidc_login_enabled) return;
+    login.error = '';
+    await login.run(
+      () => beginOidcLogin(destination(), publicAuthController.signal),
+      (authorizationUrl) => {
+        window.location.assign(authorizationUrl);
+      },
+      { key: 'sso', fallback: 'Single sign-on could not be started.' }
+    );
   }
 
   async function samlLogin() {
-    if (busy || oidcBusy) return;
-    oidcBusy = true;
-    message = '';
-    try {
-      window.location.assign(
-        await beginSAMLLogin(destination(), publicAuthController.signal)
-      );
-    } catch (e) {
-      message = errorMessage(e, 'SAML sign-in could not be started.');
-    } finally {
-      oidcBusy = false;
-    }
+    if (login.busy) return;
+    login.error = '';
+    await login.run(
+      () => beginSAMLLogin(destination(), publicAuthController.signal),
+      (authorizationUrl) => {
+        window.location.assign(authorizationUrl);
+      },
+      { key: 'sso', fallback: 'SAML sign-in could not be started.' }
+    );
   }
   async function loadCapabilities() {
     capabilitiesLoading = true;
     capabilitiesError = '';
-    try {
-      capabilities = await authenticationCapabilities(
-        publicAuthController.signal
-      );
-    } catch (error) {
-      if (publicAuthController.signal.aborted) return;
+    const signal = publicAuthController.signal;
+    const result = await readResult(() => authenticationCapabilities(signal));
+    if (signal.aborted) return;
+    capabilitiesLoading = false;
+    if (result.ok) capabilities = result.value;
+    else {
       capabilitiesError = errorMessage(
-        error,
+        result.error,
         'Sign-in options could not be loaded.'
       );
-    } finally {
-      if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
     }
   }
 
@@ -153,7 +144,7 @@
 
   {#if oidcError}<div class="form-alert" role="alert">{oidcError}</div>{/if}
 
-  {#if message}<div class="form-alert" role="alert">{message}</div>{/if}
+  {#if login.error}<div class="form-alert" role="alert">{login.error}</div>{/if}
 
   {#if capabilitiesLoading}
     <p class="capabilities-status" role="status">Loading sign-in options…</p>
@@ -176,7 +167,7 @@
         type="email"
         autocomplete="username"
         bind:value={email}
-        disabled={busy || oidcBusy}
+        disabled={busy || ssoBusy}
       />
       <label for="login-password">Password</label>
       <input
@@ -184,12 +175,12 @@
         type="password"
         autocomplete="current-password"
         bind:value={password}
-        disabled={busy || oidcBusy}
+        disabled={busy || ssoBusy}
       />
       <button
         class="button button-primary"
         type="submit"
-        disabled={busy || oidcBusy}
+        disabled={busy || ssoBusy}
         aria-busy={busy}
       >
         {busy ? 'Signing in…' : 'Sign in'}
@@ -203,13 +194,13 @@
       </div>{/if}
     <a
       class="button button-secondary oidc"
-      class:busy={oidcBusy || busy}
+      class:busy={ssoBusy || busy}
       href={oidcHref()}
       data-sveltekit-reload
-      aria-disabled={oidcBusy || busy}
-      aria-busy={oidcBusy}
+      aria-disabled={ssoBusy || busy}
+      aria-busy={ssoBusy}
       onclick={beginSso}
-      >{oidcBusy
+      >{ssoBusy
         ? 'Starting single sign-on…'
         : 'Continue with single sign-on'}</a
     >
@@ -220,7 +211,7 @@
   {/if}
   {#if !capabilitiesLoading && !capabilitiesError && capabilities.saml_login_enabled}<button
       class="button button-secondary oidc"
-      disabled={busy || oidcBusy}
+      disabled={busy || ssoBusy}
       onclick={samlLogin}>Continue with SAML</button
     >{/if}
 </SetupFrame>

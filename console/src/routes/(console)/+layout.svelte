@@ -10,7 +10,7 @@
     logout,
     type AuthenticationCapabilities
   } from '#lib/session/api.js';
-  import { errorMessage } from '#lib/management/http.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { getSetupStatus } from '#lib/features/access/setup/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { sessionKeys } from '#lib/session/sessionKeys.js';
@@ -24,8 +24,7 @@
   authLifecycle.markProtectedBoundaryChecking();
   let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
   let pendingCapabilities: AuthenticationCapabilities | null = null;
-  let signOutError = $state('');
-  let signingOut = $state(false);
+  const exit = useAction(undefined, 'authentication');
 
   function loginDestination(sessionExpired = false) {
     const returnTo = page.url.pathname + page.url.search + page.url.hash;
@@ -34,19 +33,11 @@
   }
 
   async function signOut() {
-    if (signingOut) return;
-    signingOut = true;
-    signOutError = '';
-    try {
-      await authLifecycle.signOut((signal) => logout(signal), resolve('login'));
-    } catch (error) {
-      signOutError = errorMessage(
-        error,
-        'The sign-out request could not be completed.'
-      );
-    } finally {
-      signingOut = false;
-    }
+    await exit.run(
+      () => authLifecycle.signOut((signal) => logout(signal), resolve('login')),
+      undefined,
+      { fallback: 'The sign-out request could not be completed.' }
+    );
   }
 
   onMount(() => {
@@ -148,8 +139,8 @@
     <BrandingHead />
     <AppShell
       user={authentication.user}
-      {signingOut}
-      signOutError={signOutError || authentication.principalExitError}
+      signingOut={exit.busy}
+      signOutError={exit.error || authentication.principalExitError}
       onSignOut={signOut}
     >
       {#if authentication.error}

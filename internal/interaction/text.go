@@ -41,63 +41,11 @@ func (t *Template) prepareText(request *wire.Request, receipt *oif.Receipt) (oif
 	if stream, present := root.Lookup("stream"); present && stream.Raw() != "false" {
 		return oif.Prepared{}, incompatible("target_capability", "/stream", "delivery_presence", "This mapping requires absent stream or explicit false.")
 	}
-	messages, _ := root.Lookup("messages")
-	if messages.Kind() != oif.Array || len(messages.Elements()) == 0 {
-		return oif.Prepared{}, incompatible("target_capability", "/messages", "ordered_text_history", "The text mapping requires a nonempty ordered history.")
+	mapped, err := mapTextHistory(root)
+	if err != nil {
+		return oif.Prepared{}, err
 	}
-	mapped := []map[string]any{}
-	previous := ""
-	for i, message := range messages.Elements() {
-		path := "/messages/" + strconv.Itoa(i)
-		if message.Kind() != oif.Object {
-			return oif.Prepared{}, incompatible("target_capability", path, "message_shape", "A message has no qualified text representation.")
-		}
-		role := valueText(member(message, "role"))
-		if role == "system" || role == "developer" {
-			return oif.Prepared{}, incompatible("instruction_scope", path+"/role", "instruction_scope", "The target text contract cannot preserve this instruction scope.")
-		}
-		if role != "user" && role != "assistant" {
-			return oif.Prepared{}, incompatible("state_carrier", path+"/role", "text_history_role", "Tool or nontext history requires a qualified continuation contract.")
-		}
-		if role == previous {
-			return oif.Prepared{}, incompatible("instruction_scope", path, "message_boundary", "The target would combine adjacent messages with the same role.")
-		}
-		previous = role
-		for _, field := range message.Members() {
-			if field.Name == "role" || field.Name == "content" {
-				continue
-			}
-			code, requirement := "target_capability", "message_metadata"
-			if field.Name == "tool_calls" || field.Name == "tool_call_id" || field.Name == "function_call" {
-				code, requirement = "state_carrier", "tool_correspondence"
-			}
-			return oif.Prepared{}, incompatible(code, path, requirement, "A message member has no qualified representation in the text contract.")
-		}
-		content := member(message, "content")
-		blocks := []map[string]json.RawMessage{}
-		switch content.Kind() {
-		case oif.String:
-			blocks = append(blocks, map[string]json.RawMessage{"type": json.RawMessage(`"text"`), "text": content.Bytes()})
-		case oif.Array:
-			if len(content.Elements()) == 0 {
-				return oif.Prepared{}, incompatible("target_capability", path+"/content", "content_presence", "An empty content array has no declared text equivalent.")
-			}
-			for _, part := range content.Elements() {
-				if part.Kind() != oif.Object || valueText(member(part, "type")) != "text" || member(part, "text").Kind() != oif.String || len(part.Members()) != 2 {
-					return oif.Prepared{}, incompatible("state_carrier", path+"/content", "ordered_text_nodes", "Nontext or annotated content requires a richer qualified contract.")
-				}
-				blocks = append(blocks, map[string]json.RawMessage{"type": json.RawMessage(`"text"`), "text": member(part, "text").Bytes()})
-			}
-		default:
-			return oif.Prepared{}, incompatible("target_capability", path+"/content", "content_presence", "Native null and nontext content have no declared text equivalent.")
-		}
-		mapped = append(mapped, map[string]any{"role": role, "content": blocks})
-	}
-	// A final assistant prefill constrains generation in Anthropic but is an
-	// ordinary history message in Chat; it is deliberately outside this mapping.
-	if previous != "user" {
-		return oif.Prepared{}, incompatible("instruction_scope", "/messages", "assistant_prefill", "The text contract requires a final user turn to avoid introducing assistant prefill semantics.")
-	}
+
 	fields := map[string]json.RawMessage{}
 	fields["model"], _ = json.Marshal(t.serving.Model)
 	fields["messages"], _ = json.Marshal(mapped)
@@ -138,5 +86,66 @@ func (t *Template) prepareText(request *wire.Request, receipt *oif.Receipt) (oif
 		oif.Disposition{Field: "/result", Disposition: "guarded", Rule: "single_text_result_with_usage_and_finish", Evidence: evidenceText})
 	return prepared, err
 }
+func mapTextHistory(root oif.Value) ([]map[string]any, error) {
+	messages, _ := root.Lookup("messages")
+	if messages.Kind() != oif.Array || len(messages.Elements()) == 0 {
+		return nil, incompatible("target_capability", "/messages", "ordered_text_history", "The text mapping requires a nonempty ordered history.")
+	}
+	mapped := []map[string]any{}
+	previous := ""
+	for i, message := range messages.Elements() {
+		path := "/messages/" + strconv.Itoa(i)
+		if message.Kind() != oif.Object {
+			return nil, incompatible("target_capability", path, "message_shape", "A message has no qualified text representation.")
+		}
+		role := valueText(member(message, "role"))
+		if role == "system" || role == "developer" {
+			return nil, incompatible("instruction_scope", path+"/role", "instruction_scope", "The target text contract cannot preserve this instruction scope.")
+		}
+		if role != "user" && role != "assistant" {
+			return nil, incompatible("state_carrier", path+"/role", "text_history_role", "Tool or nontext history requires a qualified continuation contract.")
+		}
+		if role == previous {
+			return nil, incompatible("instruction_scope", path, "message_boundary", "The target would combine adjacent messages with the same role.")
+		}
+		previous = role
+		for _, field := range message.Members() {
+			if field.Name == "role" || field.Name == "content" {
+				continue
+			}
+			code, requirement := "target_capability", "message_metadata"
+			if field.Name == "tool_calls" || field.Name == "tool_call_id" || field.Name == "function_call" {
+				code, requirement = "state_carrier", "tool_correspondence"
+			}
+			return nil, incompatible(code, path, requirement, "A message member has no qualified representation in the text contract.")
+		}
+		content := member(message, "content")
+		blocks := []map[string]json.RawMessage{}
+		switch content.Kind() {
+		case oif.String:
+			blocks = append(blocks, map[string]json.RawMessage{"type": json.RawMessage(`"text"`), "text": content.Bytes()})
+		case oif.Array:
+			if len(content.Elements()) == 0 {
+				return nil, incompatible("target_capability", path+"/content", "content_presence", "An empty content array has no declared text equivalent.")
+			}
+			for _, part := range content.Elements() {
+				if part.Kind() != oif.Object || valueText(member(part, "type")) != "text" || member(part, "text").Kind() != oif.String || len(part.Members()) != 2 {
+					return nil, incompatible("state_carrier", path+"/content", "ordered_text_nodes", "Nontext or annotated content requires a richer qualified contract.")
+				}
+				blocks = append(blocks, map[string]json.RawMessage{"type": json.RawMessage(`"text"`), "text": member(part, "text").Bytes()})
+			}
+		default:
+			return nil, incompatible("target_capability", path+"/content", "content_presence", "Native null and nontext content have no declared text equivalent.")
+		}
+		mapped = append(mapped, map[string]any{"role": role, "content": blocks})
+	}
+	// A final assistant prefill constrains generation in Anthropic but is an
+	// ordinary history message in Chat; it is deliberately outside this mapping.
+	if previous != "user" {
+		return nil, incompatible("instruction_scope", "/messages", "assistant_prefill", "The text contract requires a final user turn to avoid introducing assistant prefill semantics.")
+	}
+	return mapped, nil
+}
+
 func member(value oif.Value, name string) oif.Value { out, _ := value.Lookup(name); return out }
 func valueText(value oif.Value) string              { text, _ := value.Text(); return text }

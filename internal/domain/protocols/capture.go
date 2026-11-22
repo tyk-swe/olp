@@ -7,171 +7,207 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
+type responseCapturer struct {
+	r      *captureReader
+	output bool
+	tools  bool
+	texts  []string
+	calls  []json.RawMessage
+	err    error
+}
+
+func (c *responseCapturer) add(raw json.RawMessage) {
+	if !c.output || !present(raw) {
+		return
+	}
+	values, e := captureResponseText(raw)
+	if e != nil {
+		c.err = e
+		return
+	}
+	c.texts = append(c.texts, values...)
+}
+
 // CaptureResponse extracts only complete, inspectable selected surfaces. Unlike
 // serving rewrites it is read-only, including on strict native routes.
 func CaptureResponse(family wire.Format, body []byte, output, tools bool) (string, []json.RawMessage, error) {
-	r := &captureReader{}
-	var calls []json.RawMessage
-	f, err := r.object(body)
+	c := &responseCapturer{r: &captureReader{}, output: output, tools: tools}
+	f, err := c.r.object(body)
 	if err != nil || !validCaptureJSON(body) {
 		return "", nil, errCaptureStream
 	}
-	var texts []string
-	add := func(raw json.RawMessage) {
-		if !output || !present(raw) {
-			return
-		}
-		values, e := captureResponseText(raw)
-		if e != nil {
-			err = e
-		} else {
-			texts = append(texts, values...)
+	c.captureFamily(family, f)
+	if c.r.invalid {
+		c.err = errCaptureStream
+	}
+	for _, call := range c.calls {
+		if !validCaptureCall(family, call) {
+			c.err = errCaptureStream
 		}
 	}
+	return strings.Join(c.texts, "\n"), c.calls, c.err
+}
+
+func (c *responseCapturer) captureFamily(family wire.Format, f map[string]json.RawMessage) {
 	switch family {
 	case wire.Completions:
-		choices := r.array(f["choices"])
-		if len(choices) == 0 {
-			err = errCaptureStream
-		}
-		for _, raw := range choices {
-			c, _ := r.object(raw)
-			if !captureCompleteReason(family, r.str(c["finish_reason"])) {
-				err = errCaptureStream
-			}
-			text := r.str(c["text"])
-			if !present(c["text"]) {
-				err = errCaptureStream
-			}
-			if output {
-				texts = append(texts, text)
-			}
-		}
+		c.captureCompletions(family, f)
 	case wire.Chat, wire.MistralFIM:
-		if len(r.array(f["choices"])) == 0 {
-			err = errCaptureStream
-		}
-		for _, raw := range r.array(f["choices"]) {
-			c, _ := r.object(raw)
-			if !captureCompleteReason(family, r.str(c["finish_reason"])) {
-				err = errCaptureStream
-			}
-			m, _ := r.object(c["message"])
-			if m == nil {
-				err = errCaptureStream
-			}
-			if tools {
-				calls = append(calls, r.array(m["tool_calls"])...)
-				if present(m["function_call"]) {
-					calls = append(calls, rawJSONFunction(m["function_call"]))
-				}
-			}
-			add(m["content"])
-			add(m["refusal"])
-			if output && present(m["audio"]) {
-				err = errCaptureStream
-			}
-		}
+		c.captureChat(family, f)
 	case wire.Responses:
-		if !present(f["output"]) || (present(f["status"]) && r.str(f["status"]) != "completed") {
-			err = errCaptureStream
-		}
-		for _, raw := range r.array(f["output"]) {
-			item, _ := r.object(raw)
-			switch r.str(item["type"]) {
-			case "message":
-				add(item["content"])
-			case "function_call":
-				if tools {
-					calls = append(calls, raw)
-				}
-			case "reasoning":
-			default:
-				err = errCaptureStream
-			}
-		}
+		c.captureResponses(f)
 	case wire.Anthropic:
-		if !present(f["content"]) || !captureCompleteReason(family, r.str(f["stop_reason"])) {
-			err = errCaptureStream
-		}
-		add(f["content"])
-		if tools {
-			for _, raw := range r.array(f["content"]) {
-				block, _ := r.object(raw)
-				if r.str(block["type"]) == "tool_use" {
-					calls = append(calls, raw)
-				}
-			}
-		}
+		c.captureAnthropic(family, f)
 	case wire.Gemini, wire.GeminiStream:
-		if len(r.array(f["candidates"])) == 0 {
-			err = errCaptureStream
-		}
-		for _, raw := range r.array(f["candidates"]) {
-			c, _ := r.object(raw)
-			if !captureCompleteReason(family, r.str(c["finishReason"])) {
-				err = errCaptureStream
-			}
-			content, _ := r.object(c["content"])
-			for _, raw := range r.array(content["parts"]) {
-				p, _ := r.object(raw)
-				if tools && present(p["functionCall"]) {
-					calls = append(calls, p["functionCall"])
-				}
-				if string(p["thought"]) == "true" {
-					continue
-				}
-				if present(p["text"]) {
-					add(p["text"])
-				} else if !present(p["functionCall"]) && output {
-					err = errCaptureStream
-				}
-			}
-		}
+		c.captureGemini(family, f)
 	case wire.Bedrock:
-		if !captureCompleteReason(family, r.str(f["stopReason"])) {
-			err = errCaptureStream
+		c.captureBedrock(family, f)
+	case wire.CohereChat:
+		if !captureCompleteReason(family, c.r.str(f["finish_reason"])) {
+			c.err = errCaptureStream
 		}
-		out, _ := r.object(f["output"])
-		m, _ := r.object(out["message"])
+		m, _ := c.r.object(f["message"])
+		if c.tools {
+			c.calls = append(c.calls, c.r.array(m["tool_calls"])...)
+		}
 		if m == nil {
-			err = errCaptureStream
+			c.err = errCaptureStream
 		}
-		for _, raw := range r.array(m["content"]) {
-			p, _ := r.object(raw)
-			if tools && present(p["toolUse"]) {
-				calls = append(calls, p["toolUse"])
+		c.add(m["content"])
+	default:
+		c.err = errCaptureStream
+	}
+}
+
+func (c *responseCapturer) captureCompletions(family wire.Format, f map[string]json.RawMessage) {
+	choices := c.r.array(f["choices"])
+	if len(choices) == 0 {
+		c.err = errCaptureStream
+	}
+	for _, raw := range choices {
+		choice, _ := c.r.object(raw)
+		if !captureCompleteReason(family, c.r.str(choice["finish_reason"])) {
+			c.err = errCaptureStream
+		}
+		text := c.r.str(choice["text"])
+		if !present(choice["text"]) {
+			c.err = errCaptureStream
+		}
+		if c.output {
+			c.texts = append(c.texts, text)
+		}
+	}
+}
+
+func (c *responseCapturer) captureChat(family wire.Format, f map[string]json.RawMessage) {
+	if len(c.r.array(f["choices"])) == 0 {
+		c.err = errCaptureStream
+	}
+	for _, raw := range c.r.array(f["choices"]) {
+		choice, _ := c.r.object(raw)
+		if !captureCompleteReason(family, c.r.str(choice["finish_reason"])) {
+			c.err = errCaptureStream
+		}
+		m, _ := c.r.object(choice["message"])
+		if m == nil {
+			c.err = errCaptureStream
+		}
+		if c.tools {
+			c.calls = append(c.calls, c.r.array(m["tool_calls"])...)
+			if present(m["function_call"]) {
+				c.calls = append(c.calls, rawJSONFunction(m["function_call"]))
+			}
+		}
+		c.add(m["content"])
+		c.add(m["refusal"])
+		if c.output && present(m["audio"]) {
+			c.err = errCaptureStream
+		}
+	}
+}
+
+func (c *responseCapturer) captureResponses(f map[string]json.RawMessage) {
+	if !present(f["output"]) || (present(f["status"]) && c.r.str(f["status"]) != "completed") {
+		c.err = errCaptureStream
+	}
+	for _, raw := range c.r.array(f["output"]) {
+		item, _ := c.r.object(raw)
+		switch c.r.str(item["type"]) {
+		case "message":
+			c.add(item["content"])
+		case "function_call":
+			if c.tools {
+				c.calls = append(c.calls, raw)
+			}
+		case "reasoning":
+		default:
+			c.err = errCaptureStream
+		}
+	}
+}
+
+func (c *responseCapturer) captureAnthropic(family wire.Format, f map[string]json.RawMessage) {
+	if !present(f["content"]) || !captureCompleteReason(family, c.r.str(f["stop_reason"])) {
+		c.err = errCaptureStream
+	}
+	c.add(f["content"])
+	if c.tools {
+		for _, raw := range c.r.array(f["content"]) {
+			block, _ := c.r.object(raw)
+			if c.r.str(block["type"]) == "tool_use" {
+				c.calls = append(c.calls, raw)
+			}
+		}
+	}
+}
+
+func (c *responseCapturer) captureGemini(family wire.Format, f map[string]json.RawMessage) {
+	if len(c.r.array(f["candidates"])) == 0 {
+		c.err = errCaptureStream
+	}
+	for _, raw := range c.r.array(f["candidates"]) {
+		cand, _ := c.r.object(raw)
+		if !captureCompleteReason(family, c.r.str(cand["finishReason"])) {
+			c.err = errCaptureStream
+		}
+		content, _ := c.r.object(cand["content"])
+		for _, raw := range c.r.array(content["parts"]) {
+			p, _ := c.r.object(raw)
+			if c.tools && present(p["functionCall"]) {
+				c.calls = append(c.calls, p["functionCall"])
+			}
+			if string(p["thought"]) == "true" {
+				continue
 			}
 			if present(p["text"]) {
-				add(p["text"])
-			} else if !present(p["toolUse"]) && !present(p["reasoningContent"]) && output {
-				err = errCaptureStream
+				c.add(p["text"])
+			} else if !present(p["functionCall"]) && c.output {
+				c.err = errCaptureStream
 			}
 		}
-	case wire.CohereChat:
-		if !captureCompleteReason(family, r.str(f["finish_reason"])) {
-			err = errCaptureStream
-		}
-		m, _ := r.object(f["message"])
-		if tools {
-			calls = append(calls, r.array(m["tool_calls"])...)
-		}
-		if m == nil {
-			err = errCaptureStream
-		}
-		add(m["content"])
-	default:
-		err = errCaptureStream
 	}
-	if r.invalid {
-		err = errCaptureStream
+}
+
+func (c *responseCapturer) captureBedrock(family wire.Format, f map[string]json.RawMessage) {
+	if !captureCompleteReason(family, c.r.str(f["stopReason"])) {
+		c.err = errCaptureStream
 	}
-	for _, call := range calls {
-		if !validCaptureCall(family, call) {
-			err = errCaptureStream
+	out, _ := c.r.object(f["output"])
+	m, _ := c.r.object(out["message"])
+	if m == nil {
+		c.err = errCaptureStream
+	}
+	for _, raw := range c.r.array(m["content"]) {
+		p, _ := c.r.object(raw)
+		if c.tools && present(p["toolUse"]) {
+			c.calls = append(c.calls, p["toolUse"])
+		}
+		if present(p["text"]) {
+			c.add(p["text"])
+		} else if !present(p["toolUse"]) && !present(p["reasoningContent"]) && c.output {
+			c.err = errCaptureStream
 		}
 	}
-	return strings.Join(texts, "\n"), calls, err
 }
 
 func captureCompleteReason(family wire.Format, reason string) bool {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { goto } from '$app/navigation';
@@ -18,7 +19,6 @@
 
   const initialProject = page.url.searchParams.get('project') ?? '';
   const initialRun = page.url.searchParams.get('run') ?? '';
-  const requestID = crypto.randomUUID();
   let evidence = $state<InvestigationEvidence[]>(
     initialRun ? [{ kind: 'run', id: initialRun }] : []
   );
@@ -26,7 +26,7 @@
   let evidenceID = $state('');
   let evidenceError = $state('');
   let error = $state('');
-  let saving = $state(false);
+  const saveAction = useMutation();
   const projects = createQuery(() => ({
     queryKey: projectKeys.memberships,
     queryFn: ({ signal }) => listProjectMemberships(signal),
@@ -74,16 +74,16 @@
       evidence,
       summary: value('summary')
     };
-    saving = true;
     error = '';
-    try {
-      const saved = await createInvestigation(input, requestID);
-      await goto(resolve(`investigations/${saved.id}`));
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      saving = false;
-    }
+    await saveAction.submit(
+      input,
+      (submission, id) => createInvestigation(submission, id),
+      async (saved) => {
+        await goto(resolve(`investigations/${saved.id}`));
+      },
+      { failure: (cause) => errorMessage(cause) }
+    );
+    error = saveAction.error;
   }
 </script>
 
@@ -208,8 +208,8 @@
   <button
     class="button button-primary"
     type="submit"
-    disabled={saving || projects.isFetching}
-    >{saving ? 'Saving…' : 'Save investigation'}</button
+    disabled={saveAction.busy || projects.isFetching}
+    >{saveAction.busy ? 'Saving…' : 'Save investigation'}</button
   >
 </form>
 

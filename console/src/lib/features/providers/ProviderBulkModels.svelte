@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { stringifyNativeJSON } from '#lib/nativeJson.js';
   import { createQuery } from '@tanstack/svelte-query';
   import { collectCursorPages } from '#lib/management/pagination.js';
@@ -9,17 +11,23 @@
     errorMessage,
     serializeIfMatch
   } from '#lib/management/http.js';
-  import { certificationPrerequisiteReady } from './providerEditor';
   import { providerKeys } from './providerKeys';
-  import { getProvider, probeProvider, type Provider } from './providers';
+  import type { Provider } from './providers';
   import {
     listProviderModelPage,
-    setProviderModel,
-    certifyProviderModel,
     getProviderCapabilityOptions
   } from './models';
+  import {
+    desiredOperations,
+    modelCapabilities,
+    suggestedCapabilities,
+    validateReviewedModel
+  } from './bulkModelValidation.js';
   import { dialectSurface } from './profiles';
   import { listProviderProfiles } from './providerProfiles';
+  import BulkModelInputs from './BulkModelInputs.svelte';
+  import BulkModelStatus from './BulkModelStatus.svelte';
+  const rowAction = useAction();
   let {
     provider,
     canManage,
@@ -137,13 +145,10 @@
       generation === submittedGeneration &&
       scope === submittedScope;
     busy = true;
-    try {
-      await refresh(isCurrent);
-    } catch (error) {
-      if (isCurrent()) failures = [{ id: null, message: errorMessage(error) }];
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    const result = await readResult(() => refresh(isCurrent));
+    if (!result.ok && isCurrent())
+      failures = [{ id: null, message: errorMessage(result.error) }];
+    if (isCurrent()) busy = false;
   }
   async function validateSelected() {
     if (busy || refreshPending || !canManage || !selected.length) return;
@@ -167,10 +172,9 @@
       return;
     }
     const reviewedTarget = providerTarget(snapshot.provider);
-    let expectedETag = snapshot.provider.etag;
     const configuration = { ...snapshot.provider.configuration };
     const submittedOperation = operation;
-    const vendor = configuration.options?.vendor_id;
+    const vendor = configuration.options?.vendor_id ?? undefined;
     const targets = selected.flatMap((id) => {
       const model = snapshot.items.find((candidate) => candidate.id === id);
       return model
@@ -196,10 +200,20 @@
     cancelled = false;
     failures = [];
     let completed = 0;
+    const state = {
+      expectedETag: snapshot.provider.etag,
+      mutationPending: false
+    };
+    const finish = () => {
+      if (!isCurrent()) return;
+      if (cancelled)
+        status = `Stopped after ${completed} models. Review the results before activation.`;
+      busy = false;
+    };
     const matchesReviewedTarget = (current: Provider) => {
       if (
         providerTarget(current) === reviewedTarget &&
-        serializeIfMatch(current.etag) === serializeIfMatch(expectedETag)
+        serializeIfMatch(current.etag) === serializeIfMatch(state.expectedETag)
       )
         return true;
       cancelled = true;
@@ -212,129 +226,111 @@
       });
       return false;
     };
-    try {
-      const options = await getProviderCapabilityOptions(
+    const optionsResult = await readResult(() =>
+      getProviderCapabilityOptions(
         configuration.kind,
         submittedController.signal
-      );
-      if (!canContinue()) return;
-      const desired =
-        submittedOperation === 'configured'
-          ? vendor === 'voyage'
-            ? ['embeddings']
-            : ['generation']
-          : [submittedOperation];
-      const surface = await nativeSurface(configuration);
-      if (!canContinue()) return;
-      const candidates = options.capabilities.filter(
-        (tuple) =>
-          desired.includes(tuple.operation) &&
-          (tuple.mode === 'unary' || tuple.mode === 'streaming')
-      );
-      // Prefer the native surface, but some operations (embeddings on
-      // Gemini, for example) are only certifiable on another surface.
-      const suggested = desired.flatMap((op) => {
-        const forOp = candidates.filter((tuple) => tuple.operation === op);
-        const native = forOp.filter((tuple) => tuple.surface === surface);
-        return native.length ? native : forOp;
-      });
-      for (const model of targets) {
-        if (!canContinue()) break;
-        const id = model.id;
-        status = `Validating ${model.name} (${completed + 1}/${targets.length})…`;
-        let mutationPending = false;
-        try {
-          let current = await getProvider(
+      )
+    );
+    if (!optionsResult.ok) {
+      if (isCurrent())
+        failures.push({ id: null, message: errorMessage(optionsResult.error) });
+      finish();
+      return;
+    }
+    if (!canContinue()) {
+      finish();
+      return;
+    }
+    const desired = desiredOperations(submittedOperation, vendor);
+    const surfaceResult = await readResult(() => nativeSurface(configuration));
+    if (!surfaceResult.ok) {
+      if (isCurrent())
+        failures.push({ id: null, message: errorMessage(surfaceResult.error) });
+      finish();
+      return;
+    }
+    if (!canContinue()) {
+      finish();
+      return;
+    }
+    const suggested = suggestedCapabilities(
+      desired,
+      surfaceResult.value,
+      optionsResult.value
+    );
+    for (const model of targets) {
+      if (!canContinue()) break;
+      state.mutationPending = false;
+      status = `Validating ${model.name} (${completed + 1}/${targets.length})…`;
+      await rowAction.run(
+        () =>
+          validateReviewedModel({
             providerId,
-            submittedController.signal
-          );
-          if (!canContinue()) break;
-          if (!matchesReviewedTarget(current)) break;
-          if (!certificationPrerequisiteReady(current)) {
-            mutationPending = true;
-            const probe = await probeProvider(current);
-            mutationPending = false;
-            expectedETag = probe.etag;
-            if (!canContinue()) break;
-            if (!probe.result.succeeded) throw new Error(probe.result.detail);
-            current = await getProvider(providerId, submittedController.signal);
-            if (!canContinue()) break;
-            if (!matchesReviewedTarget(current)) break;
-          }
-          mutationPending = true;
-          current = await setProviderModel(
-            current,
-            id,
-            true,
-            submittedOperation === 'configured' &&
-              vendor !== 'voyage' &&
-              model.capabilities.length
-              ? // Responses carry source and certification fields the
-                // request schema refuses.
-                model.capabilities
-              : suggested
-          );
-          mutationPending = false;
-          expectedETag = current.etag;
-          if (isCurrent()) refreshPending = true;
-          if (!canContinue()) break;
-          mutationPending = true;
-          const certification = await certifyProviderModel(
-            current,
-            id,
-            submittedController.signal
-          );
-          mutationPending = false;
-          expectedETag = certification.etag;
-          if (!canContinue()) break;
-          const outcome = certification.result;
-          if (
-            !outcome.results.length ||
-            !outcome.results.every((item) => item.succeeded)
-          ) {
+            model,
+            capabilities: modelCapabilities(
+              model,
+              submittedOperation,
+              vendor,
+              suggested
+            ),
+            reviewedMatch: matchesReviewedTarget,
+            state,
+            signal: submittedController.signal,
+            canContinue,
+            isCurrent,
+            onCommitted: () => {
+              refreshPending = true;
+            }
+          }),
+        (outcome) => {
+          if (outcome.status === 'checked' && !outcome.certified)
             failures.push({
-              id,
+              id: model.id,
               message: `${model.name}: one or more capabilities failed validation.`
             });
-          }
-        } catch (e) {
-          if (!canContinue()) break;
-          failures.push({
-            id,
-            message: `${model.name}: ${errorMessage(e)}`
-          });
-          if (
-            mutationPending &&
-            !(
-              e instanceof ApiProblem &&
-              e.problem.status >= 400 &&
-              e.problem.status < 500 &&
-              e.problem.status !== 408 &&
-              e.problem.status !== 429 &&
-              !e.problem.type?.endsWith('/idempotency_conflict')
-            )
-          ) {
-            cancelled = true;
-            submittedController.abort();
-            refreshPending = true;
-            break;
+        },
+        {
+          key: model.id,
+          failure: (e) => {
+            if (!canContinue()) return '';
+            failures.push({
+              id: model.id,
+              message: `${model.name}: ${errorMessage(e)}`
+            });
+            if (
+              state.mutationPending &&
+              !(
+                e instanceof ApiProblem &&
+                e.problem.status >= 400 &&
+                e.problem.status < 500 &&
+                e.problem.status !== 408 &&
+                e.problem.status !== 429 &&
+                !e.problem.type?.endsWith('/idempotency_conflict')
+              )
+            ) {
+              cancelled = true;
+              submittedController.abort();
+              refreshPending = true;
+            }
+            return errorMessage(e);
           }
         }
-        completed += 1;
-      }
-      if (!isCurrent()) return;
-      status = `${cancelled ? 'Stopped after' : 'Checked'} ${completed} models. Review the results before activation.`;
-      if (canContinue()) await refresh(isCurrent);
-    } catch (e) {
-      if (!isCurrent()) return;
-      failures.push({ id: null, message: errorMessage(e) });
-    } finally {
-      if (isCurrent()) {
-        if (cancelled)
-          status = `Stopped after ${completed} models. Review the results before activation.`;
-        busy = false;
-      }
+      );
+      if (!canContinue()) break;
+      completed += 1;
     }
+    if (!isCurrent()) {
+      finish();
+      return;
+    }
+    status = `${cancelled ? 'Stopped after' : 'Checked'} ${completed} models. Review the results before activation.`;
+    if (canContinue()) {
+      const refreshed = await readResult(() => refresh(isCurrent));
+      if (!refreshed.ok && isCurrent())
+        failures.push({ id: null, message: errorMessage(refreshed.error) });
+    }
+    finish();
   }
 </script>
 
@@ -352,67 +348,34 @@
         onclick={() => models.refetch()}>Retry</button
       >
     </div>{/if}
-  <div class="form-field">
-    <label for="bulk-operation">Capabilities to validate</label><select
-      id="bulk-operation"
-      bind:value={operation}
-      disabled={busy || !canManage}
-      ><option value="configured">Keep configured capabilities</option><option
-        value="generation">Generation (unary and streaming)</option
-      ><option value="embeddings">Embeddings</option><option value="token_count"
-        >Token count</option
-      ></select
-    >
-  </div>
-  <div class="model-list">
-    {#each models.data?.items ?? [] as model (model.id)}<label
-        ><input
-          type="checkbox"
-          value={model.id}
-          bind:group={selected}
-          disabled={!canManage || busy}
-        /><span>{model.display_name}<small>{model.upstream_model}</small></span
-        ></label
-      >{/each}
-  </div>
-  <div class="form-actions">
-    {#if canManage}<button
-        class="button button-primary"
-        type="button"
-        disabled={busy || refreshPending || !selected.length}
-        onclick={validateSelected}
-        >Validate {selected.length} selected models</button
-      >{/if}
-    {#if failed.length && !busy && !refreshPending}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => {
-          selected = [...failed];
-          retire();
-          previousScope = scope;
-          void validateSelected();
-        }}>Retry {failed.length} failed models</button
-      >{/if}
-    {#if refreshPending && !busy}<button
-        class="button button-secondary"
-        type="button"
-        onclick={retryRefresh}>Retry refresh</button
-      >{/if}
-    {#if busy}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => {
-          cancelled = true;
-          controller?.abort();
-        }}>Stop validation</button
-      >{/if}
-  </div>
-  {#if status}<p class="status" role="status">{status}</p>{/if}
-  {#if failures.length}<ul class="inline-problem" role="alert">
-      {#each failures as failure (failure.message)}<li>
-          {failure.message}
-        </li>{/each}
-    </ul>{/if}
+  <BulkModelInputs
+    items={models.data?.items ?? []}
+    bind:operation
+    bind:selected
+    {busy}
+    {canManage}
+  />
+  <BulkModelStatus
+    {canManage}
+    {busy}
+    {refreshPending}
+    selectedCount={selected.length}
+    failedCount={failed.length}
+    {status}
+    failures={failures.map((failure) => failure.message)}
+    onValidate={validateSelected}
+    onRetryFailed={() => {
+      selected = [...failed];
+      retire();
+      previousScope = scope;
+      void validateSelected();
+    }}
+    onRetryRefresh={retryRefresh}
+    onStop={() => {
+      cancelled = true;
+      controller?.abort();
+    }}
+  />
 </section>
 
 <style>
@@ -425,33 +388,10 @@
     font-weight: 500;
     letter-spacing: -0.02em;
   }
-  .description,
-  .status,
-  small {
+  .description {
     color: var(--foreground-muted);
   }
   .description {
     margin-bottom: 1rem;
-  }
-  .status {
-    margin-top: 1rem;
-  }
-  .model-list {
-    max-height: 20rem;
-    overflow: auto;
-    margin: 1rem 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-    gap: 0.5rem;
-  }
-  .model-list label {
-    display: flex;
-    align-items: start;
-    gap: 0.5rem;
-    padding: 0.6rem;
-  }
-  small {
-    display: block;
-    overflow-wrap: anywhere;
   }
 </style>

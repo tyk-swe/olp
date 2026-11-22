@@ -1,5 +1,6 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
@@ -15,7 +16,6 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import { beginOidcLink } from '#lib/features/access/oidc/api.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
@@ -34,10 +34,11 @@
     enrollPassword,
     getProfile,
     listOidcIdentities,
-    unlinkOidcIdentity,
     updateProfile
   } from '#lib/features/access/profile/api.js';
-  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import { captureResult } from '#lib/editing/result.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { useProfileIdentity } from './profileIdentity.svelte.js';
   import ActiveSessionsPanel from '#lib/features/access/profile/ActiveSessionsPanel.svelte';
   import LocalPasswordPanel from '#lib/features/access/profile/LocalPasswordPanel.svelte';
   import OidcIdentitiesPanel from '#lib/features/access/profile/OidcIdentitiesPanel.svelte';
@@ -46,8 +47,7 @@
   import {
     ENROLLMENT_VERIFIED_MESSAGE,
     ENROLLMENT_VERIFICATION_TTL_MS,
-    parseRecentAuthenticationCallback,
-    type PendingIdentityAction
+    parseRecentAuthenticationCallback
   } from '#lib/features/access/profile/recentAuthentication.js';
 
   import {
@@ -56,32 +56,14 @@
     validatePassword
   } from '#lib/features/access/profile/validation.js';
 
-  const SECURITY_OPERATION_FAILED =
-    'The security operation could not be completed.';
-  const IDENTITY_UNLINKED =
-    'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
-  const UNLINK_TARGET_MISSING =
-    'The identity selected for unlinking is missing.';
+  const profileSave = useAction();
+  const passwords = useAction();
   let displayName = $state('');
   let displayNameError = $state('');
   let currentPassword = $state('');
   let newPassword = $state('');
   let confirmPassword = $state('');
-  let profileError = $state('');
-  let passwordError = $state('');
   let message = $state('');
-  let savingProfile = $state(false);
-  let savingPassword = $state(false);
-  let identityBusy = $state('');
-  let identityError = $state('');
-  let pendingIdentityAction = $state<PendingIdentityAction | undefined>();
-  type ReauthenticationRequest = {
-    purpose: 'oidc_link' | 'oidc_unlink';
-    resourceId?: string;
-  };
-  let reauthenticationRequest = $state<ReauthenticationRequest | null>(null);
-  let reauthenticationBusy = $state(false);
-  let reauthenticationError = $state('');
   let enrollmentVerified = $state(false);
   let enrollmentVerificationExpiry: ReturnType<typeof setTimeout> | undefined;
   let profileEditVersion = 0;
@@ -104,6 +86,18 @@
   let passwordEnrollmentNeeded = $derived(
     identities.data ? !identities.data.has_local_password : false
   );
+  const identity = useProfileIdentity({
+    identities: () => identities.data,
+    refreshSecurityData,
+    markEnrollmentVerified,
+    clearMessages: () => {
+      passwords.error = '';
+      message = '';
+    },
+    setMessage: (value) => {
+      message = value;
+    }
+  });
 
   $effect(() => {
     const value = profile.data;
@@ -116,7 +110,7 @@
   });
 
   onMount(() => {
-    identityError = oidcFailureMessage(
+    identity.identity.error = oidcFailureMessage(
       new URLSearchParams(window.location.search).get('oidc_error')
     );
     const callback = parseRecentAuthenticationCallback(window.location.search);
@@ -125,7 +119,7 @@
       // Callback query parameters are only a display hint. They must never
       // directly begin a link or unlink request, because another site can
       // navigate a signed-in browser to this URL.
-      void resumeSecurityOperation(callback.purpose, callback.resourceId);
+      identity.resumeSecurityOperation(callback.purpose, callback.resourceId);
     }
     return cancelEnrollmentVerificationExpiry;
   });
@@ -148,263 +142,120 @@
       enrollmentVerificationExpiry = undefined;
       enrollmentVerified = false;
       if (message === ENROLLMENT_VERIFIED_MESSAGE) message = '';
-      passwordError =
+      passwords.error =
         'Identity verification expired. Verify your linked identity again.';
     }, ENROLLMENT_VERIFICATION_TTL_MS);
-  }
-
-  async function resumeSecurityOperation(
-    purpose: 'password_enrollment' | 'oidc_link' | 'oidc_unlink',
-    resourceId?: string
-  ) {
-    identityError = passwordError = message = '';
-    try {
-      if (purpose === 'password_enrollment') {
-        pendingIdentityAction = undefined;
-        markEnrollmentVerified();
-        message = ENROLLMENT_VERIFIED_MESSAGE;
-        return;
-      }
-      if (purpose === 'oidc_link') {
-        pendingIdentityAction = { purpose };
-        message =
-          'Identity verified. Confirm before linking your OIDC identity.';
-        return;
-      }
-      if (!resourceId) throw new Error(UNLINK_TARGET_MISSING);
-      pendingIdentityAction = { purpose, resourceId };
-      message =
-        'Identity verified. Confirm before unlinking this OIDC identity.';
-    } catch (cause) {
-      identityError = errorMessage(cause, SECURITY_OPERATION_FAILED);
-    } finally {
-      identityBusy = '';
-    }
-  }
-
-  async function completePendingIdentityAction() {
-    const action = pendingIdentityAction;
-    if (!action) return;
-    identityBusy = action.purpose === 'oidc_link' ? 'link' : action.resourceId;
-    identityError = message = '';
-    try {
-      if (action.purpose === 'oidc_link') {
-        window.location.assign(await beginOidcLink());
-        return;
-      }
-      await unlinkOidcIdentity(action.resourceId);
-      pendingIdentityAction = undefined;
-      message = IDENTITY_UNLINKED;
-      await refreshSecurityData();
-    } catch (cause) {
-      identityError = errorMessage(cause, SECURITY_OPERATION_FAILED);
-    } finally {
-      identityBusy = '';
-    }
-  }
-
-  async function acquireRecentAuthentication(
-    purpose: 'oidc_link' | 'oidc_unlink',
-    resourceId?: string
-  ): Promise<void> {
-    if (identities.data?.has_local_password) {
-      reauthenticationError = '';
-      reauthenticationRequest = { purpose, resourceId };
-      return;
-    }
-    window.location.assign(
-      await beginIdentityReauthentication(purpose, resourceId)
-    );
-  }
-
-  async function confirmWithOidc() {
-    const request = reauthenticationRequest;
-    if (!request) return;
-    reauthenticationBusy = true;
-    reauthenticationError = '';
-    try {
-      window.location.assign(
-        await beginIdentityReauthentication(request.purpose, request.resourceId)
-      );
-    } catch (cause) {
-      reauthenticationError = errorMessage(cause, SECURITY_OPERATION_FAILED);
-    } finally {
-      reauthenticationBusy = false;
-    }
-  }
-
-  function cancelReauthentication() {
-    reauthenticationRequest = null;
-    reauthenticationError = '';
-  }
-
-  async function confirmReauthentication(password: string) {
-    const request = reauthenticationRequest;
-    if (!request) return;
-    reauthenticationBusy = true;
-    reauthenticationError = '';
-    try {
-      await reauthenticateWithPassword(
-        password,
-        request.purpose,
-        request.resourceId
-      );
-      reauthenticationRequest = null;
-      identityBusy =
-        request.purpose === 'oidc_link' ? 'link' : (request.resourceId ?? '');
-
-      if (request.purpose === 'oidc_link') {
-        window.location.assign(await beginOidcLink());
-        return;
-      }
-      if (!request.resourceId) throw new Error(UNLINK_TARGET_MISSING);
-      await unlinkOidcIdentity(request.resourceId);
-      message = IDENTITY_UNLINKED;
-      await refreshSecurityData();
-    } catch (cause) {
-      const detail = errorMessage(cause, SECURITY_OPERATION_FAILED);
-      if (reauthenticationRequest) reauthenticationError = detail;
-      else identityError = detail;
-    } finally {
-      reauthenticationBusy = false;
-      identityBusy = '';
-    }
-  }
-
-  async function verifyPasswordEnrollment() {
-    passwordError = message = '';
-    savingPassword = true;
-    try {
-      window.location.assign(
-        await beginIdentityReauthentication('password_enrollment')
-      );
-    } catch (cause) {
-      passwordError = errorMessage(
-        cause,
-        'Identity verification could not start.'
-      );
-      savingPassword = false;
-    }
   }
 
   function changeDisplayName(value: string) {
     displayName = value;
     profileEditVersion += 1;
     profileSync = markDirty(profileSync);
-    try {
-      validateDisplayName(value);
-      displayNameError = '';
-    } catch (cause) {
-      displayNameError = errorMessage(cause, 'Enter a valid display name.');
-    }
+    const checked = captureResult(() => validateDisplayName(value));
+    displayNameError = checked.ok
+      ? ''
+      : errorMessage(checked.error, 'Enter a valid display name.');
   }
 
   async function saveProfile(event: SubmitEvent) {
     event.preventDefault();
-    if (!profile.data || savingProfile) return;
-    let normalizedDisplayName: string;
-    try {
-      normalizedDisplayName = validateDisplayName(displayName);
-      displayNameError = '';
-    } catch (cause) {
-      displayNameError = errorMessage(cause, 'Enter a valid display name.');
+    if (!profile.data || profileSave.busy) return;
+    const checked = captureResult(() => validateDisplayName(displayName));
+    if (!checked.ok) {
+      displayNameError = errorMessage(
+        checked.error,
+        'Enter a valid display name.'
+      );
       return;
     }
-    profileError = message = '';
-    savingProfile = true;
-    try {
-      if (!profileSync.snapshotEtag)
-        throw new Error('Reload your profile before saving.');
-      const submittedVersion = profileEditVersion;
-      const updated = await updateProfile(
-        { ...profile.data, etag: profileSync.snapshotEtag },
-        { display_name: normalizedDisplayName }
-      );
-      const hasInterveningEdits = profileEditVersion !== submittedVersion;
-      profileSync = markSaved(updated.etag, hasInterveningEdits);
-      if (!hasInterveningEdits) displayName = updated.display_name;
-      queryClient.setQueryData(profileKeys.current(), updated);
-      await queryClient.invalidateQueries({ queryKey: userKeys.root });
-      message = hasInterveningEdits
-        ? 'Profile updated. You have additional unsaved changes.'
-        : 'Profile updated.';
-      await authLifecycle.validateSession();
-    } catch (cause) {
-      if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
-      else
-        profileError = errorMessage(cause, 'The profile could not be updated.');
-    } finally {
-      savingProfile = false;
-    }
+    displayNameError = '';
+    message = '';
+    const submittedVersion = profileEditVersion;
+    await profileSave.run(
+      () => {
+        if (!profileSync.snapshotEtag)
+          throw new Error('Reload your profile before saving.');
+        return updateProfile(
+          { ...profile.data, etag: profileSync.snapshotEtag },
+          { display_name: checked.value }
+        );
+      },
+      async (updated) => {
+        const hasInterveningEdits = profileEditVersion !== submittedVersion;
+        profileSync = markSaved(updated.etag, hasInterveningEdits);
+        if (!hasInterveningEdits) displayName = updated.display_name;
+        queryClient.setQueryData(profileKeys.current(), updated);
+        await queryClient.invalidateQueries({ queryKey: userKeys.root });
+        message = hasInterveningEdits
+          ? 'Profile updated. You have additional unsaved changes.'
+          : 'Profile updated.';
+        await authLifecycle.validateSession();
+      },
+      {
+        failure: (cause) => {
+          if (isEtagMismatch(cause)) {
+            profileSync = markConflict(profileSync);
+            return '';
+          }
+          return errorMessage(cause, 'The profile could not be updated.');
+        }
+      }
+    );
   }
 
   async function savePassword(event: SubmitEvent) {
     event.preventDefault();
     if (!profile.data) return;
-    passwordError = message = '';
-    savingPassword = true;
+    message = '';
     if (passwordEnrollmentNeeded && !enrollmentVerified) {
-      passwordError =
+      passwords.error =
         'Verify your linked identity before adding a local password.';
-      savingPassword = false;
       return;
     }
     let enrollmentSubmitted = false;
-    try {
-      if (!profileSync.snapshotEtag)
-        throw new Error('Reload your profile before saving.');
-      const snapshot = { ...profile.data, etag: profileSync.snapshotEtag };
-      const next = passwordEnrollmentNeeded
-        ? validateNewPassword(newPassword, confirmPassword)
-        : validatePassword(currentPassword, newPassword, confirmPassword);
-      let updated;
-      if (passwordEnrollmentNeeded) {
-        enrollmentSubmitted = true;
-        updated = await enrollPassword(snapshot, { new_password: next });
-      } else {
-        updated = await changePassword(snapshot, {
+    await passwords.run(
+      () => {
+        if (!profileSync.snapshotEtag)
+          throw new Error('Reload your profile before saving.');
+        const snapshot = { ...profile.data, etag: profileSync.snapshotEtag };
+        const next = passwordEnrollmentNeeded
+          ? validateNewPassword(newPassword, confirmPassword)
+          : validatePassword(currentPassword, newPassword, confirmPassword);
+        if (passwordEnrollmentNeeded) {
+          enrollmentSubmitted = true;
+          return enrollPassword(snapshot, { new_password: next });
+        }
+        return changePassword(snapshot, {
           current_password: currentPassword,
           new_password: next
         });
+      },
+      async (updated) => {
+        profileSync = acceptRemote(profileSync, updated.etag);
+        queryClient.setQueryData(profileKeys.current(), updated);
+        currentPassword = newPassword = confirmPassword = '';
+        clearEnrollmentVerification();
+        message = passwordEnrollmentNeeded
+          ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
+          : 'Password changed. All previous sessions were revoked and this browser was rotated.';
+        await refreshSecurityData();
+      },
+      {
+        failure: (cause) => {
+          if (enrollmentSubmitted) clearEnrollmentVerification();
+          if (isEtagMismatch(cause)) {
+            profileSync = markConflict(profileSync);
+            return '';
+          }
+          return errorMessage(
+            cause,
+            passwordEnrollmentNeeded
+              ? 'The local password could not be added.'
+              : 'The password could not be changed.'
+          );
+        }
       }
-      profileSync = acceptRemote(profileSync, updated.etag);
-      queryClient.setQueryData(profileKeys.current(), updated);
-      currentPassword = newPassword = confirmPassword = '';
-      clearEnrollmentVerification();
-      message = passwordEnrollmentNeeded
-        ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
-        : 'Password changed. All previous sessions were revoked and this browser was rotated.';
-      await refreshSecurityData();
-    } catch (cause) {
-      if (enrollmentSubmitted) clearEnrollmentVerification();
-      if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
-      else {
-        passwordError = errorMessage(
-          cause,
-          passwordEnrollmentNeeded
-            ? 'The local password could not be added.'
-            : 'The password could not be changed.'
-        );
-      }
-    } finally {
-      savingPassword = false;
-    }
-  }
-
-  async function linkIdentity() {
-    pendingIdentityAction = undefined;
-    identityBusy = 'link';
-    identityError = '';
-    try {
-      await acquireRecentAuthentication('oidc_link');
-    } catch (cause) {
-      identityError = errorMessage(
-        cause,
-        'The OIDC link flow could not start.'
-      );
-    } finally {
-      identityBusy = '';
-    }
+    );
   }
 
   async function unlinkIdentity(id: string, issuer: string) {
@@ -417,19 +268,19 @@
       }))
     )
       return;
-    pendingIdentityAction = undefined;
-    identityBusy = id;
-    identityError = '';
-    try {
-      await acquireRecentAuthentication('oidc_unlink', id);
-    } catch (cause) {
-      identityError = errorMessage(
-        cause,
-        'The OIDC identity could not be unlinked.'
-      );
-    } finally {
-      identityBusy = '';
-    }
+    await identity.unlinkIdentity(id);
+  }
+
+  async function verifyPasswordEnrollment() {
+    message = '';
+    await passwords.run(
+      () => beginIdentityReauthentication('password_enrollment'),
+      (url) => window.location.assign(url),
+      {
+        failure: (cause) =>
+          errorMessage(cause, 'Identity verification could not start.')
+      }
+    );
   }
 
   async function refetchProfile() {
@@ -460,22 +311,22 @@
   title="Your profile"
   description="Your name, password, linked sign-ins, and where you’re signed in."
 />
-{#if reauthenticationRequest}
+{#if identity.reauthenticationRequest}
   <ReauthenticateDialog
-    title={reauthenticationRequest.purpose === 'oidc_link'
+    title={identity.reauthenticationRequest.purpose === 'oidc_link'
       ? 'Confirm the OIDC link'
       : 'Confirm the OIDC unlink'}
-    description={reauthenticationRequest.purpose === 'oidc_link'
+    description={identity.reauthenticationRequest.purpose === 'oidc_link'
       ? 'Linking an OIDC identity changes how you sign in, so verify with your password or a usable linked identity.'
       : 'Unlinking an OIDC identity revokes every other session, so verify with your password or a usable linked identity.'}
-    busy={reauthenticationBusy}
-    error={reauthenticationError}
+    busy={identity.reauth.busy}
+    error={identity.reauth.error}
     onOidc={identities.data?.oidc_reauthentication_available ||
     samlIdentities.data?.reauthentication_available
-      ? confirmWithOidc
+      ? identity.confirmWithOidc
       : undefined}
-    onConfirm={confirmReauthentication}
-    onCancel={cancelReauthentication}
+    onConfirm={identity.confirmReauthentication}
+    onCancel={identity.cancelReauthentication}
   />
 {/if}
 
@@ -483,66 +334,64 @@
 <ConflictNotice
   notice={profileConcurrentNotice}
   onReload={reloadProfile}
-  disabled={savingProfile}
+  disabled={profileSave.busy}
 />
 
-{#if profile.isPending}<div class="loading-state" role="status">
-    Loading your profile…
-  </div>
-{:else if profile.isError}<div class="inline-problem" role="alert">
-    {errorMessage(profile.error, 'Your profile is unavailable.')}
-    <button class="text-button" onclick={() => profile.refetch()}
-      >Try again</button
-    >
-  </div>
-{:else if profile.data}
-  <div class="profile-grid">
-    <ProfileDetailsPanel
-      profile={profile.data}
-      {displayName}
-      {displayNameError}
-      {profileError}
-      saving={savingProfile}
-      onDisplayName={changeDisplayName}
-      onSave={saveProfile}
-    />
-    <SAMLIdentitiesPanel
-      hasLocalPassword={identities.data?.has_local_password ?? false}
-    />
-    <MFAPanel
-      hasLocalPassword={identities.data?.has_local_password ?? false}
-      hasLinkedIdentity={(identities.data?.items.length ?? 0) > 0 ||
-        Boolean(samlIdentities.data?.reauthentication_available)}
-    />
-    <LocalPasswordPanel
-      identitiesPending={identities.isPending}
-      identitiesError={identities.isError}
-      enrollmentNeeded={passwordEnrollmentNeeded}
-      {enrollmentVerified}
-      bind:currentPassword
-      bind:newPassword
-      bind:confirmPassword
-      {passwordError}
-      saving={savingPassword}
-      onRetryIdentities={() => identities.refetch()}
-      onVerifyEnrollment={verifyPasswordEnrollment}
-      onSave={savePassword}
-    />
-    <OidcIdentitiesPanel
-      identities={identities.data}
-      pending={identities.isPending}
-      failed={identities.isError}
-      pendingAction={pendingIdentityAction}
-      busy={identityBusy}
-      error={identityError}
-      onRetry={() => identities.refetch()}
-      onCompletePending={completePendingIdentityAction}
-      onLink={linkIdentity}
-      onUnlink={unlinkIdentity}
-    />
-  </div>
-  <ActiveSessionsPanel />
-{/if}
+<QueryView
+  query={profile}
+  loading="Loading your profile…"
+  failure={errorMessage(profile.error, 'Your profile is unavailable.')}
+  retryLabel="Try again"
+  emptyWhen={!profile.data}
+>
+  {#snippet empty()}{/snippet}
+  {#if profile.data}<div class="profile-grid">
+      <ProfileDetailsPanel
+        profile={profile.data}
+        {displayName}
+        {displayNameError}
+        profileError={profileSave.error}
+        saving={profileSave.busy}
+        onDisplayName={changeDisplayName}
+        onSave={saveProfile}
+      />
+      <SAMLIdentitiesPanel
+        hasLocalPassword={identities.data?.has_local_password ?? false}
+      />
+      <MFAPanel
+        hasLocalPassword={identities.data?.has_local_password ?? false}
+        hasLinkedIdentity={(identities.data?.items.length ?? 0) > 0 ||
+          Boolean(samlIdentities.data?.reauthentication_available)}
+      />
+      <LocalPasswordPanel
+        identitiesPending={identities.isPending}
+        identitiesError={identities.isError}
+        enrollmentNeeded={passwordEnrollmentNeeded}
+        {enrollmentVerified}
+        bind:currentPassword
+        bind:newPassword
+        bind:confirmPassword
+        passwordError={passwords.error}
+        saving={passwords.busy}
+        onRetryIdentities={() => identities.refetch()}
+        onVerifyEnrollment={verifyPasswordEnrollment}
+        onSave={savePassword}
+      />
+      <OidcIdentitiesPanel
+        identities={identities.data}
+        pending={identities.isPending}
+        failed={identities.isError}
+        pendingAction={identity.pendingIdentityAction}
+        busy={identity.identity.key}
+        error={identity.identity.error}
+        onRetry={() => identities.refetch()}
+        onCompletePending={identity.completePendingIdentityAction}
+        onLink={identity.linkIdentity}
+        onUnlink={unlinkIdentity}
+      />
+    </div>
+    <ActiveSessionsPanel />{/if}
+</QueryView>
 
 <style>
   .profile-grid {

@@ -1,3 +1,6 @@
+import { captureResult } from '#lib/editing/result.js';
+import type { PriceDraft, PricingRevision } from './pricing';
+import type { CardPriceDraft } from './rateCards';
 import {
   optionalDecimal,
   tierRows,
@@ -162,4 +165,126 @@ export function containerFeeRows(
   if (Object.keys(fees).length > 16)
     throw new Error('At most 16 container memory tiers per price.');
   return Object.keys(fees).length ? fees : null;
+}
+
+export type PricingRevisionFormValues = PriceFieldValues & {
+  providerKind: string | null;
+  vendorId: string;
+  providerId: string;
+  model: string;
+  operation: string;
+  currency: string;
+  effectiveAt: string;
+};
+
+export function priceRevisionDraft(
+  values: PricingRevisionFormValues
+): PriceDraft {
+  return {
+    provider_kind: values.providerKind as PriceDraft['provider_kind'],
+    vendor_id: values.vendorId || null,
+    provider_id: values.providerId || null,
+    model: values.model.trim(),
+    operation: values.operation as PriceDraft['operation'],
+    ...priceEntryFields(values),
+    currency: values.currency.trim().toUpperCase()
+  };
+}
+
+export function hasAnyPrice(price: PriceDraft): boolean {
+  return Boolean(
+    price.input_per_million ||
+    price.output_per_million ||
+    price.unit_price ||
+    price.per_request ||
+    price.training_per_million ||
+    price.storage_per_gib_day ||
+    price.cache_storage_per_million_token_hour ||
+    price.container_per_session ||
+    price.audio_input_per_million ||
+    price.audio_output_per_million ||
+    price.image_input_per_million ||
+    price.image_output_per_million ||
+    price.tool_calls
+  );
+}
+
+// One compact line for the components beyond the per-million table columns.
+export function extraComponents(
+  price: PricingRevision['prices'][number]
+): string {
+  const parts: string[] = [];
+  for (const [key, label] of [
+    ['audio_input_per_million', 'audio in'],
+    ['cached_audio_input_per_million', 'cached audio'],
+    ['audio_output_per_million', 'audio out'],
+    ['image_input_per_million', 'image in'],
+    ['cached_image_input_per_million', 'cached image'],
+    ['image_output_per_million', 'image out'],
+    ['training_per_million', 'training / million'],
+    ['storage_per_gib_day', 'storage / GiB-day'],
+    [
+      'cache_storage_per_million_token_hour',
+      'cache storage / million token-hours'
+    ],
+    ['per_request', 'per request'],
+    ['batch_multiplier', 'batch']
+  ] as const) {
+    if ((price as Record<string, unknown>)[key] != null)
+      parts.push(`${label} ${(price as Record<string, unknown>)[key]}`);
+  }
+  if (price.tool_calls && Object.keys(price.tool_calls).length)
+    parts.push(`tools ${Object.keys(price.tool_calls).join(', ')}`);
+  if (price.container_per_session)
+    for (const [tier, fee] of Object.entries(price.container_per_session))
+      parts.push(`container ${tier} / session ${fee}`);
+  if (price.tiers?.length) parts.push(`${price.tiers.length} tiers`);
+  if (price.windows?.time_zone)
+    parts.push(`windows ${price.windows.time_zone}`);
+  return parts.join(' · ');
+}
+
+export type PriceEntryRow = PriceFieldValues & {
+  providerKind: string;
+  vendorId: string;
+  model: string;
+  operation: string;
+};
+
+export function emptyPriceRow(providerKind: string): PriceEntryRow {
+  return {
+    providerKind,
+    vendorId: '',
+    model: '',
+    operation: 'generation',
+    ...emptyPriceFields()
+  };
+}
+
+function cardPriceDraft(row: PriceEntryRow): CardPriceDraft | null {
+  if (!row.providerKind || !row.model.trim()) return null;
+  return {
+    provider_kind: row.providerKind as CardPriceDraft['provider_kind'],
+    vendor_id: row.vendorId || null,
+    model: row.model.trim(),
+    operation: row.operation as CardPriceDraft['operation'],
+    ...priceEntryFields(row)
+  };
+}
+
+export function prepareRateCardRevision(
+  markup: string,
+  effectiveAt: string,
+  rows: readonly PriceEntryRow[]
+) {
+  return captureResult(() => {
+    const prices = rows.map(cardPriceDraft).filter((price) => price !== null);
+    return {
+      effective_at: effectiveAt
+        ? new Date(effectiveAt).toISOString()
+        : undefined,
+      markup: markup.trim(),
+      prices: prices.length ? prices : undefined
+    };
+  });
 }

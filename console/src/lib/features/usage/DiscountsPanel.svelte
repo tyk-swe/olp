@@ -15,7 +15,7 @@
   import { formatDate } from '#lib/format.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import {
     listProviderKinds,
     listProviderVendors,
@@ -28,7 +28,7 @@
   } from '#lib/features/usage/discounts.js';
   import { discountKeys } from '#lib/features/usage/discountKeys.js';
 
-  const createIntent = useMutationIntent();
+  const create = useMutation();
   const queryClient = useQueryClient();
   const services = useServiceCapabilities();
   const access = useRole();
@@ -39,8 +39,6 @@
   let providerId = $state('');
   let multiplier = $state('');
   let effectiveAt = $state('');
-  let saving = $state(false);
-  let error = $state('');
   let notice = $state('');
   const pagination = $state(emptyCursorHistory());
 
@@ -81,36 +79,33 @@
 
   async function addDiscount(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEdit || saving) return;
-    error = notice = '';
+    if (!canEdit || create.busy) return;
+    notice = '';
     if (!providerKind || !multiplier.trim()) {
-      error = 'Provider kind and multiplier are required.';
+      create.error = 'Provider kind and multiplier are required.';
       return;
     }
-    const submission = createIntent.prepare({
-      provider_kind: providerKind as DiscountDraft['provider_kind'],
-      vendor_id: vendorId || null,
-      provider_id: providerId || null,
-      multiplier: multiplier.trim(),
-      effective_at: effectiveAt
-        ? new Date(effectiveAt).toISOString()
-        : undefined
-    });
-    saving = true;
-    try {
-      await createDiscount(submission.input, submission.requestId);
-      createIntent.reset();
-      notice = 'Discount published. New usage will price under it.';
-      multiplier = '';
-      providerId = '';
-      await queryClient.invalidateQueries({
-        queryKey: discountKeys.all
-      });
-    } catch (problem) {
-      error = errorMessage(problem);
-    } finally {
-      saving = false;
-    }
+    await create.submit(
+      {
+        provider_kind: providerKind as DiscountDraft['provider_kind'],
+        vendor_id: vendorId || null,
+        provider_id: providerId || null,
+        multiplier: multiplier.trim(),
+        effective_at: effectiveAt
+          ? new Date(effectiveAt).toISOString()
+          : undefined
+      },
+      (input, requestId) => createDiscount(input, requestId),
+      async () => {
+        notice = 'Discount published. New usage will price under it.';
+        multiplier = '';
+        providerId = '';
+        await queryClient.invalidateQueries({
+          queryKey: discountKeys.all
+        });
+      },
+      { failure: (problem) => errorMessage(problem) }
+    );
   }
 </script>
 
@@ -127,7 +122,9 @@
   {#if !canEdit}<ReadOnlyNote
       >Your role can view discounts but not publish them.</ReadOnlyNote
     >{/if}
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if create.error}<p class="inline-problem" role="alert">
+      {create.error}
+    </p>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card discount-form" onsubmit={addDiscount}>
     <div class="form-grid">
@@ -188,8 +185,8 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={!canEdit || saving || !providerKind}
-      >{saving ? 'Publishing…' : 'Publish discount'}</button
+      disabled={!canEdit || create.busy || !providerKind}
+      >{create.busy ? 'Publishing…' : 'Publish discount'}</button
     >
   </form>
   {#if discounts.isPending}<div class="loading-state" role="status">

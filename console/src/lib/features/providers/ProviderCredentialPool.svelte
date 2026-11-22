@@ -1,13 +1,12 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
 
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
+  import CredentialSlotForm from './CredentialSlotForm.svelte';
   import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -24,7 +23,8 @@
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from './providerKeys';
 
-  const putCredentialSlotIntent = useMutationIntent();
+  const saveMutation = useMutation();
+  const validateAction = useAction();
   let {
     provider,
     canManage,
@@ -39,7 +39,7 @@
     onChanged: () => void | Promise<void>;
   } = $props();
   const queryClient = useQueryClient();
-  let operationBusy = $state('');
+
   let error = $state('');
   let notice = $state('');
   /** The grant enrollment an operator is signing in through, and the slot
@@ -63,7 +63,13 @@
     }
   });
   const enrollment = $derived(grantState.enrollment);
-  const busy = $derived(operationBusy || grantState.busy);
+  const busy = $derived(
+    saveMutation.busy
+      ? 'save'
+      : validateAction.busy
+        ? validateAction.key
+        : grantState.busy
+  );
   let enrollmentSlot = $state('');
   let editing = $state<Slot | null>(null);
   let editingEtag = $state('');
@@ -73,16 +79,16 @@
   let models = $state('');
   let routes = $state('');
   let keys = $state('');
-  const captureOwner = usePrincipalLifetime(() => {
+  usePrincipalLifetime(() => {
     clearDraft();
-    operationBusy = error = notice = '';
+    error = notice = '';
   });
   const pool = createQuery(() => ({
     queryKey: providerKeys.slots(provider.id, provider.etag),
     queryFn: ({ signal }) => listCredentialSlots(provider.id, signal)
   }));
   function clearDraft() {
-    putCredentialSlotIntent.reset();
+    saveMutation.reset();
     secret = externalValue = editingEtag = '';
     models = routes = keys = '';
     useExternal = false;
@@ -123,47 +129,51 @@
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (!canManage || busy || !editing || !editingEtag) return;
-    const isCurrent = captureOwner();
-    operationBusy = 'save';
-    error = '';
     notice = '';
-    try {
-      await putCredentialSlotIntent.submit(
-        [
-          provider.id,
-          editingEtag,
-          {
-            slot: {
-              ...editing,
-              // A write that names no credential version keeps the slot's.
-              // Naming it would bind it again, which OLP refuses once it is
-              // revoked or its grant lapsed.
-              credential_version_id: null,
-              allowed_models: parseManualModelNames(models),
-              allowed_routes: parseManualModelNames(routes),
-              allowed_api_keys: parseManualModelNames(keys)
-            },
-            credential: useExternal ? null : secret || null,
-            ...(useExternal
-              ? { credential_reference: parseExternalReference(externalValue) }
-              : {})
-          }
-        ] as const,
-        (input, requestId) => putCredentialSlot(...input, requestId)
-      );
-      if (!isCurrent()) return;
-      clearDraft();
-      notice =
-        'Credential staged. Validate its model access, then test and activate the completed provider draft.';
-      await onChanged();
-      if (!isCurrent()) return;
-      await pool.refetch({ throwOnError: true });
-    } catch (e) {
-      if (isCurrent())
-        error = `${notice ? 'Credential staged, but refreshing failed. ' : ''}${errorMessage(e)}`;
-    } finally {
-      if (isCurrent()) operationBusy = '';
+    const external = useExternal
+      ? captureResult(() => parseExternalReference(externalValue))
+      : null;
+    if (external && !external.ok) {
+      saveMutation.error = errorMessage(external.error);
+      return;
     }
+    const input = [
+      provider.id,
+      editingEtag,
+      {
+        slot: {
+          ...editing,
+          // A write that names no credential version keeps the slot's.
+          // Naming it would bind it again, which OLP refuses once it is
+          // revoked or its grant lapsed.
+          credential_version_id: null,
+          allowed_models: parseManualModelNames(models),
+          allowed_routes: parseManualModelNames(routes),
+          allowed_api_keys: parseManualModelNames(keys)
+        },
+        credential: useExternal ? null : secret || null,
+        ...(external?.ok ? { credential_reference: external.value } : {})
+      }
+    ] as const;
+    await saveMutation.submit(
+      input,
+      (payload, requestId) => putCredentialSlot(...payload, requestId),
+      async (_value, current) => {
+        clearDraft();
+        notice =
+          'Credential staged. Validate its model access, then test and activate the completed provider draft.';
+        await onChanged();
+        if (!current()) return;
+        await pool.refetch({ throwOnError: true });
+      },
+      {
+        key: 'save',
+        failure: (e, stage) =>
+          stage === 'accept'
+            ? `Credential staged, but refreshing failed. ${errorMessage(e)}`
+            : errorMessage(e)
+      }
+    );
   }
   async function enroll(slot: Slot) {
     if (!canManage || busy || slot.id == null) return;
@@ -175,20 +185,16 @@
   async function validate(slot: Slot) {
     if (!canManage || busy || !pool.data || slot.id == null) return;
     const slotId = slot.id;
-    const isCurrent = captureOwner();
-    operationBusy = slotId;
-    error = '';
+    const etag = pool.data.etag;
     notice = '';
-    try {
-      await validateCredentialSlot(provider.id, slotId, pool.data.etag);
-      if (!isCurrent()) return;
-      notice = `${slot.name}: model access validated.`;
-      await pool.refetch({ throwOnError: true });
-    } catch (e) {
-      if (isCurrent()) error = errorMessage(e);
-    } finally {
-      if (isCurrent()) operationBusy = '';
-    }
+    await validateAction.run(
+      () => validateCredentialSlot(provider.id, slotId, etag),
+      async () => {
+        notice = `${slot.name}: model access validated.`;
+        await pool.refetch({ throwOnError: true });
+      },
+      { key: slotId, failure: (e) => errorMessage(e) }
+    );
   }
 </script>
 
@@ -204,7 +210,12 @@
       Use multiple accounts or keys on this connection. Lower priorities are
       tried first; weights distribute requests within a priority.
     </p>{/if}
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if saveMutation.error || validateAction.error || error}<p
+      class="inline-problem"
+      role="alert"
+    >
+      {saveMutation.error || validateAction.error || error}
+    </p>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if pool.isError}<p class="inline-problem" role="alert">
       Credentials could not be loaded. <button
@@ -330,118 +341,24 @@
       onclick={() => edit()}>Add credential</button
     >{/if}
   {#if editing}
-    <form onsubmit={save}>
-      <fieldset disabled={!canManage || Boolean(busy)}>
-        <legend class="sr-only">Credential settings</legend>
-        <div class="form-grid">
-          <label>Name<input required bind:value={editing.name} /></label>
-          <label
-            >Priority<input
-              type="number"
-              min="0"
-              max="65535"
-              bind:value={editing.priority}
-            /></label
-          >
-          <label
-            >Weight<input
-              type="number"
-              min="1"
-              bind:value={editing.weight}
-            /></label
-          >
-          {#if !grant}
-            <label
-              ><input type="checkbox" bind:checked={useExternal} />Use an
-              external credential version</label
-            >
-            {#if useExternal}<ExternalReferenceEditor
-                bind:value={externalValue}
-              />{:else}<label
-                >Credential<input
-                  type="password"
-                  autocomplete="new-password"
-                  bind:value={secret}
-                  placeholder="Leave blank to retain the stored secret"
-                /></label
-              >{/if}{/if}
-          <label
-            >Allowed models<input
-              bind:value={models}
-              placeholder="All models, or comma-separated upstream IDs"
-            /></label
-          >
-          <label
-            >Allowed routes<input
-              bind:value={routes}
-              placeholder="All routes, or comma-separated route names"
-            /></label
-          >
-          <label
-            >Allowed gateway keys<input
-              bind:value={keys}
-              placeholder="All keys, or comma-separated key IDs"
-            /></label
-          >
-          <label
-            >Requests / minute<input
-              type="number"
-              min="1"
-              bind:value={editing.requests_per_minute}
-            /></label
-          >
-          <label
-            >Tokens / minute<input
-              type="number"
-              min="1"
-              bind:value={editing.tokens_per_minute}
-            /></label
-          >
-          <label
-            >Input tokens / minute<input
-              type="number"
-              min="1"
-              bind:value={editing.input_tokens_per_minute}
-            /></label
-          >
-          <label
-            >Output tokens / minute<input
-              type="number"
-              min="1"
-              bind:value={editing.output_tokens_per_minute}
-            /></label
-          >
-          <label
-            >Concurrent requests<input
-              type="number"
-              min="1"
-              bind:value={editing.max_concurrency}
-            /></label
-          >
-          <label
-            ><input type="checkbox" bind:checked={editing.enabled} /> Enabled</label
-          >
-        </div>
-        <button class="button button-primary" disabled={Boolean(busy)}
-          >Save credential</button
-        >
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={cancelEdit}>Cancel</button
-        >
-      </fieldset>
-    </form>
+    <CredentialSlotForm
+      {canManage}
+      slot={editing}
+      {grant}
+      bind:secret
+      bind:useExternal
+      bind:externalValue
+      bind:models
+      bind:routes
+      bind:keys
+      busy={Boolean(busy)}
+      onSubmit={save}
+      onCancel={cancelEdit}
+    />
   {/if}
 </section>
 
 <style>
-  fieldset {
-    border: 0;
-    padding: 0;
-    margin: 0;
-    min-width: 0;
-  }
   .pool {
     padding: 1.5rem;
     margin-top: 1.5rem;
@@ -471,12 +388,5 @@
     gap: 0.2rem;
     flex: 1;
     min-width: 12rem;
-  }
-  label {
-    display: grid;
-    gap: 0.35rem;
-  }
-  fieldset > button {
-    margin-top: 1rem;
   }
 </style>
