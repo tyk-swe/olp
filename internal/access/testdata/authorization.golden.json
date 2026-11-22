@@ -310,6 +310,8 @@
     "POST /api/v1/management-tokens/{management_token_id}/revoke": "Y-----------",
     "POST /api/v1/mcp": "--------YYYY",
     "POST /api/v1/mcp-servers": "YYYY----YYYY",
+    "POST /api/v1/mcp-servers/{server_id}/catalog-approval": "YYYY----YYYY",
+    "POST /api/v1/mcp-servers/{server_id}/catalog-preview": "YYYY----YYYY",
     "POST /api/v1/mcp-tool-calls/{call_id}/resolve": "YYYY----YYYY",
     "POST /api/v1/media-jobs/{job_id}/refresh": "YYYY----YYYY",
     "POST /api/v1/notifications/destinations": "YYYYYY--YYY-",

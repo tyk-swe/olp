@@ -5889,6 +5889,108 @@
     }
   },
   {
+    "name": "approve_mcp_server_catalog",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-servers/{server_id}/catalog-approval",
+    "description": "approve mcp server catalog",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/ApproveMCPServerCatalogRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "ApproveMCPServerCatalogRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol_version": {
+              "type": "string",
+              "enum": [
+                "2025-11-25",
+                "2025-06-18",
+                "2025-03-26",
+                "2024-11-05"
+              ],
+              "description": "Protocol version discovered by the reviewed catalog preview."
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Catalog digest discovered by the reviewed catalog preview."
+            }
+          },
+          "required": [
+            "protocol_version",
+            "digest"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "cancel_a2a_task_remote",
     "group": "a2a-tasks",
     "method": "POST",
@@ -32834,6 +32936,53 @@
       "additionalProperties": false,
       "required": [
         "query"
+      ]
+    }
+  },
+  {
+    "name": "preview_mcp_server_catalog",
+    "group": "mcp-servers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/mcp-servers/{server_id}/catalog-preview",
+    "description": "preview mcp server catalog",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
       ]
     }
   },
