@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"errors"
+	"iter"
 	"maps"
 	"slices"
 	"time"
@@ -46,49 +47,82 @@ func sharedRequest(assignment sharedAssignment, generation int64, demand TokenDe
 }
 
 func sharedAssignments(view *routing.View) map[string]sharedAssignment {
-	assignments := map[string]sharedAssignment{}
 	if view == nil {
-		return assignments
+		return map[string]sharedAssignment{}
 	}
-	for _, provider := range view.Providers() {
-		for _, quota := range provider.SharedTokenQuotas {
-			if assignment, ok := sharedQuotaFor(&provider, quota.Model); ok {
-				assignments[assignment.member] = assignment
+	return maps.Collect(func(yield func(string, sharedAssignment) bool) {
+		for _, provider := range view.Providers() {
+			for _, quota := range provider.SharedTokenQuotas {
+				assignment, ok := sharedQuotaFor(&provider, quota.Model)
+				if ok && !yield(assignment.member, assignment) {
+					return
+				}
+			}
+		}
+	})
+}
+
+type membershipChange struct {
+	lookup string
+	entry  admission.MembershipEntry
+}
+
+func membershipChanges(from, to map[string]sharedAssignment, active bool) []membershipChange {
+	return slices.Collect(func(yield func(membershipChange) bool) {
+		for member, assignment := range from {
+			other, kept := to[member]
+			changed := !kept || other.lookup != assignment.lookup || active && other.tokensPerMinute != assignment.tokensPerMinute
+			if changed && !yield(membershipChange{lookup: assignment.lookup, entry: admission.MembershipEntry{Member: member, Active: active}}) {
+				return
+			}
+		}
+	})
+}
+
+func membershipByLookup(changes []membershipChange) iter.Seq2[string, []admission.MembershipEntry] {
+	lookups := slices.Compact(slices.Sorted(func(yield func(string) bool) {
+		for _, change := range changes {
+			if !yield(change.lookup) {
+				return
+			}
+		}
+	}))
+	return func(yield func(string, []admission.MembershipEntry) bool) {
+		for _, lookup := range lookups {
+			entries := slices.Collect(func(yield func(admission.MembershipEntry) bool) {
+				for _, change := range changes {
+					if change.lookup == lookup && !yield(change.entry) {
+						return
+					}
+				}
+			})
+			if !yield(lookup, entries) {
+				return
 			}
 		}
 	}
-	return assignments
+}
+
+func syncLookup(ctx context.Context, limiter *admission.Limiter, lookup string, generation int64, entries []admission.MembershipEntry) error {
+	syncCtx, cancel := context.WithTimeout(ctx, ReserveTimeout)
+	defer cancel()
+	return limiter.SyncSharedMembership(syncCtx, lookup, generation, entries)
 }
 
 func SyncSharedQuotas(ctx context.Context, limiter *admission.Limiter, previous, next *routing.View) error {
 	if limiter == nil || next == nil {
 		return nil
 	}
-	before := sharedAssignments(previous)
-	after := sharedAssignments(next)
-	departed := map[string][]admission.MembershipEntry{}
-	joined := map[string][]admission.MembershipEntry{}
-	for member, assignment := range before {
-		if current, ok := after[member]; !ok || current.lookup != assignment.lookup {
-			departed[assignment.lookup] = append(departed[assignment.lookup], admission.MembershipEntry{Member: member})
-		}
-	}
-	for member, assignment := range after {
-		if prior, ok := before[member]; !ok || prior.lookup != assignment.lookup || prior.tokensPerMinute != assignment.tokensPerMinute {
-			joined[assignment.lookup] = append(joined[assignment.lookup], admission.MembershipEntry{Member: member, Active: true})
-		}
-	}
+	before, after := sharedAssignments(previous), sharedAssignments(next)
 	generation := next.Generation().Ordinal
-	var failures []error
-	for _, step := range []map[string][]admission.MembershipEntry{departed, joined} {
-		for _, lookup := range slices.Sorted(maps.Keys(step)) {
-			syncCtx, cancel := context.WithTimeout(ctx, ReserveTimeout)
-			err := limiter.SyncSharedMembership(syncCtx, lookup, generation, step[lookup])
-			cancel()
-			if err != nil {
-				failures = append(failures, err)
+	steps := [][]membershipChange{membershipChanges(before, after, false), membershipChanges(after, before, true)}
+	return errors.Join(slices.Collect(func(yield func(error) bool) {
+		for _, step := range steps {
+			for lookup, entries := range membershipByLookup(step) {
+				if !yield(syncLookup(ctx, limiter, lookup, generation, entries)) {
+					return
+				}
 			}
 		}
-	}
-	return errors.Join(failures...)
+	})...)
 }
