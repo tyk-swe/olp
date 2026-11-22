@@ -6,15 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
-// SimulationRequest accepts the management API's shared operation document or
-// a native request. It uses the serving codecs for semantic feasibility, so a
-// dry run cannot approve parameters that execution would refuse.
-func SimulationRequest(data []byte, operation, surface, mode, route string) (*wire.Request, error) {
-	f, err := object(data)
-	if err != nil {
-		return nil, err
-	}
-	canonical := present(f["route"]) || present(f["parameters"])
+func simulationFamily(operation, surface, mode string, f Object, canonical bool) wire.Format {
 	family := wire.Chat
 	switch operation {
 	case "token_count":
@@ -26,24 +18,61 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*wi
 	case "rerank":
 		family = wire.Rerank
 	}
+	if canonical {
+		return family
+	}
+	if operation == "generation" && present(f["prompt"]) {
+		family = wire.Completions
+	}
+	if surface == "anthropic" {
+		if operation == "token_count" {
+			return wire.AnthropicCount
+		}
+		return wire.Anthropic
+	}
+	if surface == "gemini" {
+		if operation == "token_count" {
+			return wire.GeminiCount
+		}
+		if mode == "streaming" {
+			return wire.GeminiStream
+		}
+		return wire.Gemini
+	}
+	return family
+}
+
+func normalizeSimulationTools(rawTools []json.RawMessage) ([]Object, error) {
+	converted := make([]Object, 0, len(rawTools))
+	for _, v := range rawTools {
+		tool, err := object(v)
+		if err != nil {
+			return nil, err
+		}
+		if present(tool["function"]) {
+			converted = append(converted, tool)
+			continue
+		}
+		if schema, ok := tool["input_schema"]; ok {
+			tool["parameters"] = schema
+			delete(tool, "input_schema")
+		}
+		converted = append(converted, Object{"type": raw("function"), "function": raw(tool)})
+	}
+	return converted, nil
+}
+
+// SimulationRequest accepts the management API's shared operation document or
+// a native request. It uses the serving codecs for semantic feasibility, so a
+// dry run cannot approve parameters that execution would refuse.
+func SimulationRequest(data []byte, operation, surface, mode, route string) (*wire.Request, error) {
+	f, err := object(data)
+	if err != nil {
+		return nil, err
+	}
+	canonical := present(f["route"]) || present(f["parameters"])
+	family := simulationFamily(operation, surface, mode, f, canonical)
 	if !canonical {
-		if operation == "generation" && present(f["prompt"]) {
-			family = wire.Completions
-		}
-		if surface == "anthropic" {
-			family = wire.Anthropic
-			if operation == "token_count" {
-				family = wire.AnthropicCount
-			}
-		}
-		if surface == "gemini" {
-			family = wire.Gemini
-			if operation == "token_count" {
-				family = wire.GeminiCount
-			} else if mode == "streaming" {
-				family = wire.GeminiStream
-			}
-		}
 		return Parse(family, data, route)
 	}
 	delete(f, "route")
@@ -65,36 +94,8 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*wi
 	f["model"] = raw(route)
 	f["stream"] = raw(mode == "streaming")
 	if operation == "generation" || operation == "token_count" {
-		if !present(f["messages"]) {
-			f["messages"] = raw([]any{map[string]any{"role": "user", "content": "Hello"}})
-		}
-		if tools := arr(f["tools"]); len(tools) > 0 {
-			converted := []Object{}
-			for _, v := range tools {
-				tool, err := object(v)
-				if err != nil {
-					return nil, err
-				}
-				if present(tool["function"]) {
-					converted = append(converted, tool)
-					continue
-				}
-				if schema, ok := tool["input_schema"]; ok {
-					tool["parameters"] = schema
-					delete(tool, "input_schema")
-				}
-				converted = append(converted, Object{"type": raw("function"), "function": raw(tool)})
-			}
-			f["tools"] = raw(converted)
-		}
-		if format, err := optionalObject(f["response_format"]); err != nil {
+		if err := prepareSimulationGeneration(f, operation, surface, route); err != nil {
 			return nil, err
-		} else if str(format["type"]) == "json_schema" && !present(format["json_schema"]) {
-			delete(format, "type")
-			f["response_format"] = raw(Object{"type": raw("json_schema"), "json_schema": raw(format)})
-		}
-		if surface == "anthropic" && operation == "generation" && !present(f["max_completion_tokens"]) && !present(f["max_tokens"]) {
-			f["max_completion_tokens"] = raw(4096)
 		}
 		if operation == "token_count" {
 			g, err := decodeCanonical(wire.Chat, f)
@@ -110,12 +111,33 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*wi
 			}
 		}
 	}
-	if operation == "embeddings" || operation == "moderation" {
-		if !present(f["input"]) {
-			return nil, requestError("input", "input is required")
-		}
+	if (operation == "embeddings" || operation == "moderation") && !present(f["input"]) {
+		return nil, requestError("input", "input is required")
 	}
 	return Parse(family, raw(f), route)
+}
+
+func prepareSimulationGeneration(f Object, operation, surface, route string) error {
+	if !present(f["messages"]) {
+		f["messages"] = raw([]any{map[string]any{"role": "user", "content": "Hello"}})
+	}
+	if tools := arr(f["tools"]); len(tools) > 0 {
+		converted, err := normalizeSimulationTools(tools)
+		if err != nil {
+			return err
+		}
+		f["tools"] = raw(converted)
+	}
+	if format, err := optionalObject(f["response_format"]); err != nil {
+		return err
+	} else if str(format["type"]) == "json_schema" && !present(format["json_schema"]) {
+		delete(format, "type")
+		f["response_format"] = raw(Object{"type": raw("json_schema"), "json_schema": raw(format)})
+	}
+	if surface == "anthropic" && operation == "generation" && !present(f["max_completion_tokens"]) && !present(f["max_tokens"]) {
+		f["max_completion_tokens"] = raw(4096)
+	}
+	return nil
 }
 
 // Validate native scalar controls while retaining unmodeled extension fields.

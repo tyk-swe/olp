@@ -93,7 +93,7 @@ func (s surface) duplex(w http.ResponseWriter, r *http.Request) {
 		t.fail(e)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), nativeDuplexSession)
+	ctx, cancel := context.WithTimeout(r.Context(), kernel.SessionExposureWindow)
 	defer cancel()
 	client, e := t.acceptClient()
 	if e != nil {
@@ -111,7 +111,7 @@ func (s surface) duplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.SessionEstimate()
-	if e := s.kernel.ReserveState(ctx, x, authority, nativeDuplexSession); e != nil {
+	if e := s.kernel.ReserveState(ctx, x, authority, kernel.SessionExposureWindow); e != nil {
 		t.failClose(client, policyClose(e, "admission refused"))
 		return
 	}
@@ -231,7 +231,7 @@ func (t turn) pinAndDebit(ctx context.Context, route *routing.Route) (*kernel.Pi
 	if e := t.kernel.ReservePinSessionDebit(ctx, t.x, t.x.Authority(), p, nil); e != nil {
 		return p, nil, policyClose(e, "admission refused")
 	}
-	if e := t.kernel.ReserveSessionCost(ctx, t.x, t.x.Authority(), p, nativeDuplexSession); e != nil {
+	if e := t.kernel.ReserveSessionCost(ctx, t.x, t.x.Authority(), p, kernel.SessionExposureWindow); e != nil {
 		return p, nil, policyClose(e, "admission refused")
 	}
 	if e := t.kernel.MarkSessionDispatched(ctx, t.x); e != nil {

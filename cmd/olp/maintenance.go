@@ -155,49 +155,56 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 	}
 	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": coordination.Namespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
 	if command == "doctor" {
-		referenceCatalog, err := catalog.Embedded()
-		if err != nil {
+		if err := inspectDoctor(ctx, c, report); err != nil {
 			return err
 		}
-		report["reference_catalog"] = map[string]any{"sha256": referenceCatalog.SHA256, "key_id": referenceCatalog.KeyID, "published_at": referenceCatalog.Catalog.PublishedAt, "channel": signing.Channel}
-		pluginIndex, err := pluginindex.Embedded()
-		if err != nil {
-			return err
-		}
-		report["plugin_index"] = map[string]any{"sha256": pluginIndex.SHA256, "key_id": pluginIndex.KeyID, "published_at": pluginIndex.Index.PublishedAt}
-		if c.ValkeyURL != "" {
-			vc, err := coordination.Configuration(c.ValkeyURL, c.ValkeyCAFile, c.RequestTimeout)
-			if err != nil {
-				return err
-			}
-			client, err := coordination.Open(ctx, vc)
-			if err != nil {
-				return err
-			}
-			defer client.Close()
-			if err = client.Ping(ctx); err != nil {
-				return err
-			}
-		}
-		if _, err := os.Stat(filepath.Join(c.ConsoleDir, "index.html")); err != nil {
-			return errors.New("console index.html is unavailable")
-		}
-		_, closeAssets, err := console.Handler(c.ConsoleDir)
-		if err != nil {
-			return err
-		}
-		closeAssets()
-		if c.ConnectorConfigFile != "" {
-			policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
-			if _, err = providers.LoadMounted(c.ConnectorConfigFile, &policy); err != nil {
-				return err
-			}
-		}
-		spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, slog.New(slog.NewJSONHandler(io.Discard, nil)))
-		if err != nil {
-			return err
-		}
-		spool.Close()
 	}
 	return json.NewEncoder(output).Encode(report)
+}
+
+func inspectDoctor(ctx context.Context, c Config, report map[string]any) error {
+	referenceCatalog, err := catalog.Embedded()
+	if err != nil {
+		return err
+	}
+	report["reference_catalog"] = map[string]any{"sha256": referenceCatalog.SHA256, "key_id": referenceCatalog.KeyID, "published_at": referenceCatalog.Catalog.PublishedAt, "channel": signing.Channel}
+	pluginIndex, err := pluginindex.Embedded()
+	if err != nil {
+		return err
+	}
+	report["plugin_index"] = map[string]any{"sha256": pluginIndex.SHA256, "key_id": pluginIndex.KeyID, "published_at": pluginIndex.Index.PublishedAt}
+	if c.ValkeyURL != "" {
+		vc, err := coordination.Configuration(c.ValkeyURL, c.ValkeyCAFile, c.RequestTimeout)
+		if err != nil {
+			return err
+		}
+		client, err := coordination.Open(ctx, vc)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		if err = client.Ping(ctx); err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(c.ConsoleDir, "index.html")); err != nil {
+		return errors.New("console index.html is unavailable")
+	}
+	_, closeAssets, err := console.Handler(c.ConsoleDir)
+	if err != nil {
+		return err
+	}
+	closeAssets()
+	if c.ConnectorConfigFile != "" {
+		policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
+		if _, err = providers.LoadMounted(c.ConnectorConfigFile, &policy); err != nil {
+			return err
+		}
+	}
+	spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		return err
+	}
+	spool.Close()
+	return nil
 }

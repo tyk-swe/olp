@@ -25,6 +25,13 @@ func Int(value oif.Value) (int64, bool) {
 	n, err := strconv.ParseInt(value.Raw(), 10, 64)
 	return n, err == nil
 }
+func Position(value oif.Value) (int, bool) {
+	if value.Kind() != oif.Number {
+		return 0, false
+	}
+	n, err := strconv.Atoi(value.Raw())
+	return n, err == nil && n >= 0
+}
 func Uint(value oif.Value) (uint64, bool) {
 	if value.Kind() != oif.Number {
 		return 0, false

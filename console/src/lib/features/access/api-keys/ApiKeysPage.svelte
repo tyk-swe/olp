@@ -10,6 +10,7 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { readResult } from '#lib/editing/result.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createApiKey,
@@ -27,12 +28,10 @@
   import type { ApiKeyPolicyCommand } from '#lib/features/access/api-keys/apiKeyPolicy.js';
   import { isApiKeyUsable } from './apiKeyLifecycle';
 
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
-  const createIntent = useMutationIntent();
+  const write = useMutation();
 
   let {
     isNew = false,
@@ -48,10 +47,8 @@
   const access = useRole();
   const canManage = $derived(access.can('api_keys.manage'));
   let editing = $state<ApiKey | null>(null);
-  let busy = $state('');
   let policyDirty = $state(false);
   let policyBusy = $state(false);
-  let submitError = $state('');
   let secret = $state<ApiKeySecret | null>(null);
   let secretContext = $state<'created' | 'rotated'>('created');
   let preferredRoute = $state<string | undefined>();
@@ -68,84 +65,78 @@
     canManage && (!editing || isApiKeyUsable(editing))
   );
 
-  const captureOwner = usePrincipalLifetime(() => {
+  usePrincipalLifetime(() => {
     secret = null;
     preferredRoute = undefined;
     editing = null;
     policyDirty = policyBusy = false;
-    submitError = busy = '';
   });
 
   function edit(key: ApiKey) {
     policyDirty = policyBusy = false;
     editing = key;
-    submitError = '';
+    write.error = '';
   }
 
   function cancelEdit() {
-    if (busy || policyBusy) return;
+    if (write.busy || policyBusy) return;
     void goto(resolve('keys'));
   }
 
-  async function submit(command: ApiKeyPolicyCommand, route?: string) {
-    if (!canManage || busy || policyDirty || policyBusy) return false;
-    const isCurrent = captureOwner();
-    busy = command.kind;
-    submitError = '';
-    try {
-      if (command.kind === 'update') {
-        const keyName = command.key.name;
-        const result = await updateApiKey(command.key, command.input);
-        if (!isCurrent()) return false;
-        if (editing?.id === command.key.id)
-          editing = {
-            ...editing,
-            etag: result.etag,
-            ...(command.input.expires_at !== undefined
-              ? { expires_at: command.input.expires_at }
-              : {})
-          };
-        notify(
-          services.gatewayAvailable
-            ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`
-            : `Saved ${keyName}`
-        );
-      } else {
-        const submission = createIntent.prepare<
-          Parameters<typeof createApiKey>[0]
-        >(command.input);
-        const result = await createApiKey(
-          submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return false;
+  async function refreshSaved(current: () => boolean) {
+    const refreshed = await readResult(() =>
+      Promise.all([
+        queryClient.invalidateQueries(
+          { queryKey: apiKeyKeys.root },
+          { throwOnError: true }
+        ),
+        queryClient.invalidateQueries(
+          { queryKey: overviewKeys.root },
+          { throwOnError: true }
+        )
+      ])
+    );
+    if (!refreshed.ok && current())
+      write.error = `API key saved, but refreshing failed. ${errorMessage(refreshed.error)}`;
+  }
+
+  function submit(command: ApiKeyPolicyCommand, route?: string) {
+    if (!canManage || write.busy || policyDirty || policyBusy)
+      return Promise.resolve(false);
+    if (command.kind === 'update') {
+      const keyName = command.key.name;
+      return write.run(
+        () => updateApiKey(command.key, command.input),
+        async (result, current) => {
+          if (editing?.id === command.key.id)
+            editing = {
+              ...editing,
+              etag: result.etag,
+              ...(command.input.expires_at !== undefined
+                ? { expires_at: command.input.expires_at }
+                : {})
+            };
+          notify(
+            services.gatewayAvailable
+              ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`
+              : `Saved ${keyName}`
+          );
+          await refreshSaved(current);
+        },
+        { key: 'update' }
+      );
+    }
+    return write.submit(
+      command.input,
+      (input, requestId) => createApiKey(input, requestId),
+      async (result, current) => {
         secret = result;
-        createIntent.reset();
         secretContext = 'created';
         preferredRoute = route;
-      }
-      try {
-        await Promise.all([
-          queryClient.invalidateQueries(
-            { queryKey: apiKeyKeys.root },
-            { throwOnError: true }
-          ),
-          queryClient.invalidateQueries(
-            { queryKey: overviewKeys.root },
-            { throwOnError: true }
-          )
-        ]);
-      } catch (cause) {
-        if (isCurrent())
-          submitError = `API key saved, but refreshing failed. ${errorMessage(cause)}`;
-      }
-      return isCurrent();
-    } catch (error) {
-      if (isCurrent()) submitError = errorMessage(error);
-      return false;
-    } finally {
-      if (isCurrent()) busy = '';
-    }
+        await refreshSaved(current);
+      },
+      { key: 'create' }
+    );
   }
 
   function showRotatedSecret(value: ApiKeySecret, route?: string) {
@@ -186,21 +177,21 @@
   <ApiKeyPolicyForm
     {editing}
     overlaps={loaded.data?.active_overlaps}
-    busy={busy || (policyBusy ? 'routing' : '')}
+    busy={write.key || (policyBusy ? 'routing' : '')}
     publicationBlocked={policyDirty || policyBusy}
-    {submitError}
+    submitError={write.error}
     canManage={canChangeForm}
     onSubmit={submit}
     onSaved={() => {
-      if (keyId && !submitError) void goto(resolve('keys'));
+      if (keyId && !write.error) void goto(resolve('keys'));
     }}
     onCancel={cancelEdit}
-    onClearError={() => (submitError = '')}
+    onClearError={() => (write.error = '')}
   />
 {:else}
   <ApiKeyInventory
     bind:listState
-    {submitError}
+    submitError={write.error}
     {canManage}
     onSecret={showRotatedSecret}
   />
@@ -210,7 +201,7 @@
     scope="api-key"
     id={editing.id}
     resourceEtag={editing.etag}
-    canManage={canManage && !busy}
+    canManage={canManage && !write.busy}
     bind:dirty={policyDirty}
     bind:busy={policyBusy}
     onSaved={(etag, previousEtag) => {

@@ -88,32 +88,8 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	}
 	defer tx.Rollback(r.Context())
 	f := mfaFlow{ID: httpkit.NewID(), Purpose: "enroll_" + input.Kind, Data: mfaFlowData{Name: input.Name}}
-	if bootstrap {
-		parent, e := s.loadMFAFlow(r, tx, input.Challenge)
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		enabled, e := mfaConfigured(r.Context(), tx, parent.UserID)
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		if parent.Purpose != "bootstrap" || enabled {
-			return httpkit.Reply{}, httpkit.Fail(401, "mfa_challenge_invalid", "Start sign-in again.")
-		}
-		f.UserID = parent.UserID
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", parent.ID); err != nil {
-			return httpkit.Reply{}, err
-		}
-	} else {
-		p, e := s.access.Reauthorize(r, tx)
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
-			return httpkit.Reply{}, err
-		}
-		f.UserID = p.ID
-		f.SessionID = &p.SessionID
+	if err := s.resolveMFAEnrollmentSubject(r, tx, bootstrap, input.Challenge, &f); err != nil {
+		return httpkit.Reply{}, err
 	}
 	var count int
 	var hasTOTP bool
@@ -127,45 +103,9 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	response := map[string]any{"kind": input.Kind}
-	if input.Kind == "totp" {
-		key, e := totp.Generate(totp.GenerateOpts{Issuer: "OpenLLMProxy", AccountName: u.Email, SecretSize: 32})
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		id := httpkit.NewID()
-		f.SecretID = &id
-		expires := time.Now().Add(mfaTTL)
-		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {
-			return httpkit.Reply{}, err
-		}
-		picture, e := key.Image(256, 256)
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		var image bytes.Buffer
-		if e = png.Encode(&image, picture); e != nil {
-			return httpkit.Reply{}, e
-		}
-		response["secret"] = key.Secret()
-		response["otpauth_url"] = key.URL()
-		response["qr_code"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(image.Bytes())
-	} else {
-		w, e := s.webAuthn()
-		if e != nil {
-			return httpkit.Reply{}, httpkit.Invalid("kind", "Security keys require an HTTPS DNS public origin, or localhost for development.")
-		}
-		exclude := make([]protocol.CredentialDescriptor, 0, len(u.Credentials))
-		for _, credential := range u.Credentials {
-			exclude = append(exclude, credential.Descriptor())
-		}
-		options, session, e := w.BeginRegistration(u, webauthn.WithExclusions(exclude))
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		session.Expires = time.Now().Add(mfaTTL)
-		f.Data.WebAuthn = session
-		response["public_key"] = options
+	response, err := s.buildMFAEnrollmentChallenge(r, tx, input.Kind, u, &f)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	token, until, err := s.storeMFAFlow(r, tx, f)
 	if err != nil {
@@ -174,6 +114,79 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	response["challenge"] = token
 	response["expires_at"] = until
 	return httpkit.OK(response), tx.Commit(r.Context())
+}
+
+func (s *Server) resolveMFAEnrollmentSubject(r *http.Request, tx pgx.Tx, bootstrap bool, challenge string, f *mfaFlow) error {
+	if !bootstrap {
+		p, err := s.access.Reauthorize(r, tx)
+		if err != nil {
+			return err
+		}
+		if err = s.access.ConsumeRecent(r, tx, p, "mfa_manage", ""); err != nil {
+			return err
+		}
+		f.UserID = p.ID
+		f.SessionID = &p.SessionID
+		return nil
+	}
+	parent, err := s.loadMFAFlow(r, tx, challenge)
+	if err != nil {
+		return err
+	}
+	enabled, err := mfaConfigured(r.Context(), tx, parent.UserID)
+	if err != nil {
+		return err
+	}
+	if parent.Purpose != "bootstrap" || enabled {
+		return httpkit.Fail(401, "mfa_challenge_invalid", "Start sign-in again.")
+	}
+	f.UserID = parent.UserID
+	_, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", parent.ID)
+	return err
+}
+
+func (s *Server) buildMFAEnrollmentChallenge(r *http.Request, tx pgx.Tx, kind string, u mfaUser, f *mfaFlow) (map[string]any, error) {
+	response := map[string]any{"kind": kind}
+	if kind == "totp" {
+		key, err := totp.Generate(totp.GenerateOpts{Issuer: "OpenLLMProxy", AccountName: u.Email, SecretSize: 32})
+		if err != nil {
+			return nil, err
+		}
+		id := httpkit.NewID()
+		f.SecretID = &id
+		expires := time.Now().Add(mfaTTL)
+		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {
+			return nil, err
+		}
+		picture, err := key.Image(256, 256)
+		if err != nil {
+			return nil, err
+		}
+		var image bytes.Buffer
+		if err = png.Encode(&image, picture); err != nil {
+			return nil, err
+		}
+		response["secret"] = key.Secret()
+		response["otpauth_url"] = key.URL()
+		response["qr_code"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(image.Bytes())
+		return response, nil
+	}
+	w, err := s.webAuthn()
+	if err != nil {
+		return nil, httpkit.Invalid("kind", "Security keys require an HTTPS DNS public origin, or localhost for development.")
+	}
+	exclude := make([]protocol.CredentialDescriptor, 0, len(u.Credentials))
+	for _, credential := range u.Credentials {
+		exclude = append(exclude, credential.Descriptor())
+	}
+	options, session, err := w.BeginRegistration(u, webauthn.WithExclusions(exclude))
+	if err != nil {
+		return nil, err
+	}
+	session.Expires = time.Now().Add(mfaTTL)
+	f.Data.WebAuthn = session
+	response["public_key"] = options
+	return response, nil
 }
 
 func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
