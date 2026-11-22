@@ -633,7 +633,9 @@ it('clears a billing import delete conflict after loading the new version', asyn
       (item) => item.textContent?.trim() === label
     );
 
-  await vi.waitFor(() => expect(button(target, 'Remove')).toBeDefined());
+  await vi.waitFor(() =>
+    expect(button(target, 'Run now')).toHaveProperty('disabled', false)
+  );
   button(target, 'Remove')?.click();
   await vi.waitFor(() => expect(button(document, 'Delete')).toBeDefined());
   button(document, 'Delete')?.click();
@@ -642,5 +644,12 @@ it('clears a billing import delete conflict after loading the new version', asyn
   await vi.waitFor(() => {
     expect(target.querySelector('dd')?.textContent).toBe('No');
     expect(target.querySelector('[role="alert"]')).toBeNull();
+    expect(button(target, 'Run now')).toHaveProperty('disabled', true);
   });
+  const enabled = target.querySelector<HTMLInputElement>(
+    'input[type="checkbox"]'
+  );
+  enabled?.click();
+  flushSync();
+  expect(button(target, 'Run now')).toHaveProperty('disabled', true);
 });

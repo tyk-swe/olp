@@ -148,7 +148,7 @@ type ManagerConfig struct {
 	ExternalSecrets        ExternalSecrets
 	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
-	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View) error
+	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
 }
 
 type Manager struct {
@@ -172,7 +172,7 @@ type Manager struct {
 
 	grantRefreshed func(providerID, credentialID string)
 
-	syncSharedQuotas func(ctx context.Context, previous, next *routing.View) error
+	syncSharedQuotas func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
 
 	mu        sync.RWMutex
 	taskStore taskCapabilityStore

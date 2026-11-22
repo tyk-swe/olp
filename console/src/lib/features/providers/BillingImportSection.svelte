@@ -222,7 +222,7 @@
   }
 
   async function runNow() {
-    if (!canManage || busy) return;
+    if (!canManage || busy || !detail?.enabled) return;
     await runMutation.submit(
       provider.id,
       (id, requestId) => runBillingImport(id, requestId),
@@ -336,6 +336,7 @@
           {kind}
           {azure}
           {editing}
+          savedEnabled={detail?.enabled ?? false}
           {scopeLabel}
           {busy}
           onSubmit={(event) => {

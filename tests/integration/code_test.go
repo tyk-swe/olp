@@ -1891,6 +1891,29 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 	if available.Status != codemode.ThreadAvailable || available.RetryAt != nil {
 		t.Fatalf("recovered status = %+v, want available", available)
 	}
+	revised := route
+	revised.Models = []string{"other-model"}
+	revised.RevisionID, revised.Revision = uuid.NewString(), 2
+	revisedDocument, err := json.Marshal(revised)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by)
+		VALUES($1,$2,2,$3,$4,$5)`, revised.RevisionID, routeID, revisedDocument, connections, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, routeID, revised.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	for _, installed := range []codemode.Route{route, revised} {
+		removed, err := status(base.Add(8*time.Minute), installed, key, identity)
+		if err != nil || removed.Status != codemode.ThreadUnavailable || removed.RetryAt != nil {
+			t.Fatalf("revision %d without its published pinned model returned %+v, %v, want unavailable", installed.Revision, removed, err)
+		}
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, routeID, revisionID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections='{}' WHERE id=$1`, revisionID); err != nil {
 		t.Fatal(err)
 	}

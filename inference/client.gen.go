@@ -443,7 +443,7 @@ type A2ARequest struct {
 type A2ARequestId0 = string
 
 // A2ARequestId1 defines model for A2ARequest.Id.1.
-type A2ARequestId1 = float32
+type A2ARequestId1 = A2ANumericID
 
 // A2ARequest_Id defines model for A2ARequest.Id.
 type A2ARequest_Id struct {
@@ -473,7 +473,7 @@ type A2AResponse struct {
 type A2AResponseId0 = string
 
 // A2AResponseId1 defines model for A2AResponse.Id.1.
-type A2AResponseId1 = float32
+type A2AResponseId1 = A2ANumericID
 
 // A2AResponse_Id defines model for A2AResponse.Id.
 type A2AResponse_Id struct {

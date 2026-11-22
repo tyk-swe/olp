@@ -158,7 +158,7 @@ func (stream attemptStream) deliver(provided []byte, seen attemptStreamed) (atte
 	}
 	stream.heard(seen.committed)
 	if len(frame) > int(s.Config.MaxEventBytes) {
-		return attemptStreamed{fact: fact, committed: true, actionable: seen.actionable, incomplete: seen.incomplete}, wire.ErrEventTooLarge
+		return seen.with(fact), wire.ErrEventTooLarge
 	}
 	err = x.generation.emit(frame)
 	if err == nil && x.capture != nil {

@@ -7,10 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/management"
 )
+
+const maxSavedPlanBytes = 32 << 20
+
+var errLargeSavedPlan = fmt.Errorf("saved configuration plan exceeds %d MiB or cannot be read", maxSavedPlanBytes>>20)
 
 // SavedPlan contains portable, non-secret desired state and the destination
 // digest observed at planning. Bindings are supplied separately at each stage.
@@ -187,7 +192,7 @@ func (runner Runner) loadSavedPlan(command string, opts options, call func(strin
 		if opts.one("plan-file") == "" {
 			return SavedPlan{}, errors.New("config apply requires --plan-file PLAN")
 		}
-		data, err := readJSON(opts.one("plan-file"))
+		data, err := readBoundedJSON(opts.one("plan-file"), maxSavedPlanBytes, errLargeSavedPlan)
 		if err != nil {
 			return SavedPlan{}, err
 		}
@@ -237,6 +242,9 @@ func (runner Runner) sendConfiguration(command string, opts options, saved Saved
 		data, err := json.MarshalIndent(saved, "", "  ")
 		if err != nil {
 			return err
+		}
+		if len(data)+1 > maxSavedPlanBytes {
+			return errLargeSavedPlan
 		}
 		if err = runner.output(opts.one("output"), append(data, '\n')); err != nil {
 			return err

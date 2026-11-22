@@ -23,13 +23,6 @@ type ProviderDaySpend struct {
 // ReconciliationSpend groups attributed spend per provider and UTC day for
 // the reconciliation report. It shares the report_rows machinery so
 // commitment allocation matches every other report.
-//
-// Facts rows are excluded when the caller paid (caller_credential) or a
-// budget exemption covers them. Rolled-up hourly rows carry no caller flag,
-// so caller-paid usage surviving only as an hourly aggregate still
-// contributes; the report's excluded_caller_attempts then undercounts the
-// same way. Hourly rows also keep only request-grain priced and incomplete
-// counts, which the response documents as an approximation.
 func ReconciliationSpend(ctx context.Context, q database.Queryer, start, end time.Time, providers []string) ([]ProviderDaySpend, error) {
 	if len(providers) == 0 {
 		return nil, nil

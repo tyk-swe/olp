@@ -117,6 +117,10 @@ func mutable(parts []string, group bool) error {
 	switch parts[0] {
 	case "id", "meta", "password":
 		return Fail(400, "mutability", "This attribute is not writable.")
+	case "roles":
+		if !group {
+			return Fail(400, "mutability", "This attribute is not writable.")
+		}
 	case "groups":
 		if !group {
 			return Fail(400, "mutability", "User groups are managed through Group membership.")
@@ -219,6 +223,10 @@ func change(d map[string]any, parts []string, kind string, value any, group bool
 				}
 				return nil
 			}
+		}
+		if email, ok := value.(map[string]any); key == "emails" && ok {
+			parent[key] = []any{email}
+			return nil
 		}
 	}
 	parent[key] = value

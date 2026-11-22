@@ -1,11 +1,54 @@
 package telemetry
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+type closingExporter struct {
+	err error
+}
+
+func (closingExporter) ExportSpans(context.Context, []sdktrace.ReadOnlySpan) error { return nil }
+func (e closingExporter) Shutdown(context.Context) error                           { return e.err }
+
+type delayedShutdownContext struct {
+	context.Context
+	workerDone <-chan struct{}
+	firstCheck bool
+}
+
+func (ctx *delayedShutdownContext) Done() <-chan struct{} {
+	if ctx.firstCheck {
+		select {
+		case <-ctx.workerDone:
+		case <-ctx.Context.Done():
+		}
+	}
+	ctx.firstCheck = true
+	return ctx.Context.Done()
+}
+
+func TestTraceShutdownReturnsExporterResultAfterWorkerExit(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), exportTimeout)
+	defer cancel()
+	exporterError := errors.New("collector shutdown failed")
+	for _, want := range []error{nil, exporterError} {
+		for range 16 {
+			processor := newBoundedSpanProcessor(closingExporter{err: want}, nil)
+			delayed := &delayedShutdownContext{Context: ctx, workerDone: processor.done}
+			if got := processor.Shutdown(delayed); !errors.Is(got, want) {
+				t.Fatalf("trace shutdown returned %v, want %v", got, want)
+			}
+		}
+	}
+}
 
 func TestBusinessMetricsExposeLintCleanFamilies(t *testing.T) {
 	tenants, err := ParseMetricsTenantLabels("end_user,project,key")

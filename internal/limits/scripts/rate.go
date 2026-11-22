@@ -80,24 +80,8 @@ func (r Runner) reservationKeys(q RateReservation) []string {
 	return keys
 }
 
-type MembershipEntry struct {
-	Member string
-	Active bool
-}
-
-func (r Runner) SyncMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	args := make([]string, 0, 1+2*len(entries))
-	args = append(args, strconv.FormatInt(generation, 10))
-	for _, entry := range entries {
-		state := "0"
-		if entry.Active {
-			state = "1"
-		}
-		args = append(args, entry.Member, state)
-	}
+func (r Runner) SyncMembership(ctx context.Context, lookup string, generation, ceiling int64, members []string) error {
+	args := append([]string{strconv.FormatInt(generation, 10), strconv.FormatInt(ceiling, 10)}, members...)
 	_, err := r.run(ctx, call{script: syncMembership, keys: []string{r.Key("{" + lookup + "}:members")}, args: args})
 	return err
 }
@@ -194,7 +178,7 @@ func decodeAllowance(items []any, q RateReservation, h head, rejected limits.Dim
 	inWindow := reset >= 1 && reset <= fixedWindowMS
 	if requestRemaining > requestLimit || tokenRemaining > tokenLimit ||
 		limited && (!inWindow || window >= maxWindowID) || !limited && reset != 0 ||
-		requestLimit != q.RequestsPerMinute || tokenLimit != q.TokensPerMinute {
+		requestLimit != q.RequestsPerMinute || (q.Member == "" && tokenLimit != q.TokensPerMinute) || (q.Member != "" && tokenLimit == 0) {
 		return limits.RateState{}, false
 	}
 	switch rejected {

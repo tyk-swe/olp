@@ -20,10 +20,12 @@ import (
 
 const (
 	cancelSupersededSQL = `UPDATE olp.notification_deliveries SET status='cancelled',last_error_code='superseded' WHERE id=$1`
-	claimAttemptSQL     = `UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now()
+	claimAttemptSQL     = `UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now(),
+ status=CASE WHEN attempts+1=$3 THEN 'failed' ELSE status END,
+ last_error_code=CASE WHEN attempts+1=$3 THEN $4 ELSE last_error_code END
  WHERE id=$1 AND attempts=$2 AND attempts<$3 AND status IN ('pending','failed')`
 	recordAttemptSQL = `UPDATE olp.notification_deliveries
- SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $4 THEN now() ELSE delivered_at END WHERE id=$1`
+ SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $4 THEN now() ELSE delivered_at END WHERE id=$1 AND attempts=$5`
 	connectionCloseTimeout = 5 * time.Second
 )
 
@@ -283,7 +285,7 @@ func (w *deliveryWorker) attempt(ctx context.Context, db deliveryDB, d delivery)
 		}
 		return false
 	}
-	claimed, err := tx.Exec(ctx, claimAttemptSQL, d.id, d.attempts, maxDeliveryAttempts)
+	claimed, err := tx.Exec(ctx, claimAttemptSQL, d.id, d.attempts, maxDeliveryAttempts, outcomeUnknownCode)
 	if err != nil {
 		w.Log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
 		return false
@@ -305,7 +307,9 @@ func (w *deliveryWorker) attempt(ctx context.Context, db deliveryDB, d delivery)
 	}
 	code := w.send(ctx, d, target, secret)
 	status, lastError := attemptOutcome(code)
-	if _, err := db.Exec(ctx, recordAttemptSQL, d.id, status, lastError, code == ""); err != nil {
+	recording, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCloseTimeout)
+	defer cancel()
+	if _, err := db.Exec(recording, recordAttemptSQL, d.id, status, lastError, code == "", d.attempts+1); err != nil {
 		w.Log.Warn("notification delivery update failed", "delivery", d.id, "error", err)
 	}
 	return true
@@ -323,7 +327,11 @@ func (w *deliveryWorker) send(ctx context.Context, d delivery, target destinatio
 	if err != nil {
 		return invalidDestinationCode
 	}
-	return sendErrorCode(w.Sender.send(ctx, target, secret, m))
+	code := sendErrorCode(w.Sender.send(ctx, target, secret, m))
+	if ctx.Err() != nil && (code == networkCode || code == timeoutCode) {
+		return outcomeUnknownCode
+	}
+	return code
 }
 
 func cancelSuperseded(ctx context.Context, tx pgx.Tx, id string) error {

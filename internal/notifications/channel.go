@@ -29,6 +29,7 @@ const (
 	smtp5xxCode            Failure = "smtp_5xx"
 	credentialCode         Failure = "credential"
 	redirectCode           Failure = "redirect"
+	outcomeUnknownCode     Failure = "outcome_unknown"
 )
 
 type destination struct {

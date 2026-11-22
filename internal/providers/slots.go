@@ -164,15 +164,21 @@ func (s *Server) slotList(ctx context.Context, q database.Queryer, current *reco
 		return httpkit.Reply{}, err
 	}
 	activeCredentials := map[string]*string{}
+	var activeQuotas []routing.SharedTokenQuota
 	if current.ActiveRevisionID != nil {
-		var encoded []byte
-		if err = q.QueryRow(ctx, "SELECT slots FROM olp.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded); err != nil {
+		var encoded, configuration []byte
+		if err := q.QueryRow(ctx, "SELECT slots,configuration FROM olp.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded, &configuration); err != nil {
 			return httpkit.Reply{}, err
 		}
 		var published []routing.RevisionSlot
-		if err = json.Unmarshal(encoded, &published); err != nil {
+		if err := json.Unmarshal(encoded, &published); err != nil {
 			return httpkit.Reply{}, err
 		}
+		active, err := connection.Decode(configuration)
+		if err != nil {
+			return httpkit.Reply{}, err
+		}
+		activeQuotas = active.Options.SharedTokenQuotas
 		for _, slot := range published {
 			activeCredentials[slot.ID] = slot.CredentialID
 		}
@@ -192,7 +198,7 @@ func (s *Server) slotList(ctx context.Context, q database.Queryer, current *reco
 		return httpkit.Reply{}, err
 	}
 	live, connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
-	groups := s.sharedGroupUsage(ctx, current)
+	groups := s.sharedGroupUsage(ctx, current.ProjectID, activeQuotas)
 	items := make([]slotReply, len(slots))
 	health := make(map[string]slotHealth, len(slots))
 	for i, row := range slots {
@@ -219,10 +225,9 @@ type sharedGroupUsage struct {
 	TokensPerMinute  int64 `json:"tokens_per_minute"`
 }
 
-func (s *Server) sharedGroupUsage(ctx context.Context, current *record) map[string]*sharedGroupUsage {
+func (s *Server) sharedGroupUsage(ctx context.Context, projectID *string, quotas []routing.SharedTokenQuota) map[string]*sharedGroupUsage {
 	groups := map[string]*sharedGroupUsage{}
-	quotas := current.Connection.Document().Options.SharedTokenQuotas
-	if s.quota == nil || current.ProjectID == nil || len(quotas) == 0 {
+	if s.quota == nil || projectID == nil || len(quotas) == 0 {
 		return groups
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
@@ -231,7 +236,7 @@ func (s *Server) sharedGroupUsage(ctx context.Context, current *record) map[stri
 		if _, seen := groups[quota.Group]; seen {
 			continue
 		}
-		lookup := limits.SharedQuotaLookup(routing.SharedTokenQuotaGroupID(*current.ProjectID, quota.Group))
+		lookup := limits.SharedQuotaLookup(routing.SharedTokenQuotaGroupID(*projectID, quota.Group))
 		usage, err := s.quota.Usage(ctx, lookup)
 		if err != nil {
 			s.quotaUnavailable(err)

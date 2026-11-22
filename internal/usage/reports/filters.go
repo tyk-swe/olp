@@ -220,16 +220,14 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
 		" commitment_amount, commitment_period," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, bucket AT TIME ZONE 'UTC')" +
-		" END, budget_exempt, false," +
+		" END, budget_exempt, caller_credential," +
 		// Hourly rows keep only request-grain counts beyond unpriced attempts:
 		// the priced and incomplete attempt counts reconciliation reports for
 		// rolled-up hours approximate them with provider-scope request counts.
 		" GREATEST(0::bigint, provider_request_count - provider_cache_hit_count - provider_unpriced_count - provider_incomplete_count)," +
 		" unpriced_attempt_count, provider_incomplete_count," +
-		// An hourly row cannot tell caller-paid from budget-exempt, so the
-		// excluded count for rolled-up hours is the exempt request count.
-		" CASE WHEN budget_exempt THEN provider_request_count - provider_cache_hit_count ELSE 0 END::bigint," +
-		" olp.commitment_hourly_allocation(attempt_usage_hourly)" +
+		" COALESCE(reconcil_caller_attempts, CASE WHEN budget_exempt THEN provider_request_count - provider_cache_hit_count ELSE 0 END)," +
+		" CASE WHEN caller_credential THEN 0 ELSE olp.commitment_hourly_allocation(attempt_usage_hourly) END" +
 		" FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)

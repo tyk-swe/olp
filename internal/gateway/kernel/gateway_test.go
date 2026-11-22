@@ -2429,6 +2429,24 @@ func TestEachKindOfProviderFailureIsClassifiedAndFallsBackOnlyWhileTheReplyIsUnc
 
 type providerCalls struct{ a, b atomic.Int64 }
 
+func TestOversizedProjectedFirstFrameDoesNotCommitStream(t *testing.T) {
+	t.Parallel()
+	const frame = `{"model":"x","choices":[{"index":0,"delta":{"content":"first frame"}}]}`
+	h := newHarness(t, Config{MaxEventBytes: int64(len("data: "+frame+"\n\n") + 1)})
+	h.mock.set("a", providerStream(frame))
+	body := strings.TrimSuffix(entryChat, "}") + `,"stream":true}`
+	resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(body), nil)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusBadGateway || strings.Contains(string(raw), "first frame") {
+		t.Fatalf("opening frame rejection = %d %s, read error = %v", resp.StatusCode, raw, err)
+	}
+	env := h.sink.last(t)
+	if env.Committed || len(env.Attempts) != 1 || env.Attempts[0].Committed {
+		t.Fatalf("rejected frame recorded a committed stream: request=%t attempts=%+v", env.Committed, env.Attempts)
+	}
+}
+
 func refusing(calls *atomic.Int64, refusals int64, status int, retryAfter string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)

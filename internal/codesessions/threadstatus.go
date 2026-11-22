@@ -28,7 +28,8 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 	defer tx.Rollback(ctx)
 	in := Admission{Route: route, APIKeyID: key}
 	var authority keyauthority.Authority
-	if err := codeAuthorityFor(ctx, tx, in, &authority, codeThreadStatus); err != nil {
+	current, err := codeAuthorityDocument(ctx, tx, in, &authority, codeThreadStatus)
+	if err != nil {
 		if _, refusal := errors.AsType[*codemode.Refusal](err); refusal {
 			return none, threadNotFound()
 		}
@@ -51,6 +52,12 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 	pins, err := codePins(ctx, tx, binding.RootID)
 	if err != nil {
 		return none, err
+	}
+	if slices.ContainsFunc(pins, func(pin codemode.Pin) bool {
+		_, err := current.ResolvePinnedModel(codemode.Operation{Model: pin.Model}, []codemode.Pin{pin})
+		return err != nil || !slices.Contains(route.Models, pin.TargetModel)
+	}) {
+		return codemode.ThreadStatus{Status: codemode.ThreadUnavailable, CheckedAt: now.UTC()}, nil
 	}
 	tree, principals := codeTree(binding, pins)
 	evidence := make([]codemode.ThreadAccountEvidence, 0, len(tree))

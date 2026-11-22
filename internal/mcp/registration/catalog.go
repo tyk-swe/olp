@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -72,17 +73,12 @@ func cloneTool(tool routing.MCPTool) routing.MCPTool {
 }
 
 func jsonEqual(left, right json.RawMessage) bool {
-	decode := func(raw json.RawMessage) (any, error) {
-		var value any
-		err := json.Unmarshal(raw, &value)
-		return value, err
-	}
-	leftValue, leftErr := decode(left)
-	rightValue, rightErr := decode(right)
+	leftValue, leftErr := jsonschema.UnmarshalJSON(bytes.NewReader(left))
+	rightValue, rightErr := jsonschema.UnmarshalJSON(bytes.NewReader(right))
 	if leftErr != nil || rightErr != nil {
 		return bytes.Equal(left, right)
 	}
-	return reflect.DeepEqual(leftValue, rightValue)
+	return reflect.DeepEqual(leftValue, rightValue) || (&jsonschema.Schema{Const: &leftValue}).Validate(rightValue) == nil
 }
 
 func toolsByName(tools []routing.MCPTool) map[string]routing.MCPTool {

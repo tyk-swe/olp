@@ -23,6 +23,7 @@ import (
 var (
 	errProviderMissing = httpkit.Fail(http.StatusNotFound, "not_found", "The provider does not exist.")
 	errImportMissing   = httpkit.Fail(http.StatusNotFound, "not_found", "The provider has no billing import.")
+	errImportDisabled  = httpkit.Fail(http.StatusConflict, "billing_import_disabled", "Enable the billing import before scheduling a run.")
 )
 
 type API struct {
@@ -181,12 +182,8 @@ func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	}
 	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, access.Event, error) {
 		etag := httpkit.NewID()
-		found, err := scheduleNow(r.Context(), tx, id, etag)
-		if err != nil {
+		if err := scheduleNow(r.Context(), tx, id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
-		}
-		if !found {
-			return httpkit.Reply{}, access.Event{}, errImportMissing
 		}
 		return a.reply(r, tx, id, "provider.billing_import.run", http.StatusAccepted, etag)
 	})

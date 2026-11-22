@@ -105,6 +105,37 @@ func TestPatchAppliesOperationsToACopy(t *testing.T) {
 	}
 }
 
+func TestPatchAddsFirstEmailFromOneObject(t *testing.T) {
+	current := decode(t, `{"schemas":["`+UserSchema+`"],"userName":"ada@example.com"}`)
+	body := decode(t, patch(`{"op":"add","path":"emails","value":{"value":"ada@example.com","primary":true}}`))
+	patched, err := Patch(current, body, false, unfiltered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := canonical(t, patched["emails"]), `[{"primary":true,"value":"ada@example.com"}]`; got != want {
+		t.Fatalf("emails = %s, want %s", got, want)
+	}
+}
+
+func TestPatchRejectsRoleChangesAtomically(t *testing.T) {
+	current := decode(t, `{"schemas":["`+UserSchema+`"],"userName":"ada@example.com","displayName":"Ada","roles":[{"value":"viewer"}]}`)
+	before := canonical(t, current)
+	for _, operation := range []string{
+		`{"op":"remove","path":"roles"}`,
+		`{"op":"remove","path":"Roles[value eq \"viewer\"]"}`,
+		`{"op":"add","value":{"Roles":[{"value":"viewer"}]}}`,
+	} {
+		body := decode(t, patch(`{"op":"replace","path":"displayName","value":"Countess"},`+operation))
+		patched, err := Patch(current, body, false, unfiltered)
+		if problem(err) != "mutability" || patched != nil {
+			t.Errorf("%s: patched = %v, error = %v", operation, patched, err)
+		}
+		if canonical(t, current) != before {
+			t.Fatalf("the stored document changed: %s", canonical(t, current))
+		}
+	}
+}
+
 func TestPatchRefusesOperationsItCannotApply(t *testing.T) {
 	for operation, want := range map[string]string{
 		`{"op":"replace","path":"id","value":"other"}`:                "mutability",

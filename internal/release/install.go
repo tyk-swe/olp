@@ -244,7 +244,11 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 		return false, nil
 	}
 	if m.syncSharedQuotas != nil {
-		if err := m.syncSharedQuotas(ctx, current.Snapshot(), candidate.release.Snapshot()); err != nil {
+		skippedGroupIDs, err := m.skippedSharedQuotaGroups(ctx, current.Sequence, candidate.release.Sequence)
+		if err != nil {
+			return false, err
+		}
+		if err := m.syncSharedQuotas(ctx, current.Snapshot(), candidate.release.Snapshot(), skippedGroupIDs...); err != nil {
 			return false, err
 		}
 	}
@@ -260,4 +264,26 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 	m.mu.Unlock()
 	m.grantsRefreshed(refreshed)
 	return true, nil
+}
+
+func (m *Manager) skippedSharedQuotaGroups(ctx context.Context, current, next int64) ([]string, error) {
+	if next-current <= 1 {
+		return nil, nil
+	}
+	rows, err := m.runtimeReadPool().Query(ctx, `
+		SELECT DISTINCT p.value->>'project_id', q.value->>'group'
+		FROM olp.runtime_releases r
+		CROSS JOIN LATERAL json_each(CASE WHEN json_typeof(r.snapshot->'providers') = 'object' THEN r.snapshot->'providers' ELSE '{}'::json END) p
+		CROSS JOIN LATERAL json_array_elements(p.value->'shared_token_quotas') q
+		WHERE r.sequence > $1 AND r.sequence < $2 AND p.value->>'project_id' IS NOT NULL`, current, next)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (string, error) {
+		var project, group string
+		if err := row.Scan(&project, &group); err != nil {
+			return "", err
+		}
+		return routing.SharedTokenQuotaGroupID(project, group), nil
+	})
 }

@@ -8,7 +8,8 @@
   } from '#lib/format.js';
   import {
     budgetStateNote,
-    budgetWindowState
+    budgetWindowState,
+    currentBudgetLimit
   } from '#lib/features/access/index.js';
   import { presentUsageCompleteness } from './completenessPresentation.js';
   import type { getApiKey } from '#lib/features/access/index.js';
@@ -22,10 +23,15 @@
     completeness,
     summary
   }: {
-    apiKey: Awaited<ReturnType<typeof getApiKey>> | null;
+    apiKey: Pick<
+      Awaited<ReturnType<typeof getApiKey>>,
+      'id' | 'name' | 'budget'
+    > | null;
     completeness: UsageCompleteness;
     summary: Pick<Awaited<ReturnType<typeof usageSummary>>, 'currency'>;
   } = $props();
+
+  const budgetWindows = ['daily', 'weekly', 'monthly'] as const;
 
   function titleCase(value: string) {
     return value.charAt(0).toUpperCase() + value.slice(1);
@@ -35,42 +41,31 @@
 {#if apiKey}
   {@const budget = apiKey.budget}
   {@const currency = summary.currency}
-  {@const daily = budgetWindowState(budget, 'daily')}
-  {@const monthly = budgetWindowState(budget, 'monthly')}
-  {@const dailyNote = budgetStateNote(daily)}
-  {@const monthlyNote = budgetStateNote(monthly)}
   <section class="card budget-line" aria-label="Filtered API key budget">
     <div class="budget-key">
       <p>API key budget</p>
       <strong>{apiKey.name}</strong>
       <span class="mono">{apiKey.id}</span>
     </div>
-    <div>
-      <p>Daily accrued / limit</p>
-      <strong class:danger-text={daily === 'exhausted'}
-        >{formatBudget(budget.daily.accrued, currency)} / {budget.daily
-          .limit === null
-          ? 'No limit'
-          : formatBudget(budget.daily.limit, currency)}</strong
-      >
-      <span>Window ends {formatDate(budget.daily.window_ends_at)}</span>
-      {#if dailyNote}<span class:danger-text={daily === 'exhausted'}
-          >{dailyNote}</span
-        >{/if}
-    </div>
-    <div>
-      <p>Monthly accrued / limit</p>
-      <strong class:danger-text={monthly === 'exhausted'}
-        >{formatBudget(budget.monthly.accrued, currency)} / {budget.monthly
-          .limit === null
-          ? 'No limit'
-          : formatBudget(budget.monthly.limit, currency)}</strong
-      >
-      <span>Window ends {formatDate(budget.monthly.window_ends_at)}</span>
-      {#if monthlyNote}<span class:danger-text={monthly === 'exhausted'}
-          >{monthlyNote}</span
-        >{/if}
-    </div>
+    {#each budgetWindows as name (name)}
+      {@const window = budget[name]}
+      {#if window}
+        {@const limit = currentBudgetLimit(window)}
+        {@const state = budgetWindowState(budget, name)}
+        {@const note = budgetStateNote(state)}
+        <div>
+          <p>{titleCase(name)} accrued / limit</p>
+          <strong class:danger-text={state === 'exhausted'}
+            >{formatBudget(window.accrued, currency)} / {limit === null
+              ? 'No limit'
+              : formatBudget(limit, currency)}</strong
+          >
+          <span>Window ends {formatDate(window.window_ends_at)}</span>
+          {#if note}<span class:danger-text={state === 'exhausted'}>{note}</span
+            >{/if}
+        </div>
+      {/if}
+    {/each}
     <div>
       <p>Unpriced attempts this UTC month</p>
       <strong class:unpriced={budget.unpriced_attempts > 0}
@@ -171,7 +166,7 @@
   }
   .budget-line {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
     gap: 1rem;
     margin-top: 1rem;
     padding: 1.5rem;

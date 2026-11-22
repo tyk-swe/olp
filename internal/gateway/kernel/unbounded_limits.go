@@ -27,32 +27,53 @@ func UnboundedWorkLimits(authority keyauthority.Authority, provider *routing.Pro
 	}
 	costExempt := route != nil && route.CallerCostExempt && (provider == nil || provider.CredentialSource == "caller")
 	if authority.UnboundedWorkBudgeted(slug, costExempt) || routing.UnboundedWorkBudgeted(provider, slot, route, costExempt) {
-		return fault.InvalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
+		return unboundedWorkBudget()
 	}
 	return nil
+}
+
+func unboundedWorkBudget() *fault.Error {
+	return fault.InvalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
 }
 
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
 func (s *Server) UnboundedPinLimits(authority keyauthority.Authority, p *Pin, route *routing.Route) *fault.Error {
+	return s.unboundedPinLimits(authority, p, route, "")
+}
+
+func (s *Server) unboundedPinLimits(authority keyauthority.Authority, p *Pin, route *routing.Route, model string) *fault.Error {
+	if _, _, limited := p.Provider.SharedTokenQuotaFor(model); limited {
+		return unboundedWorkBudget()
+	}
 	if e := UnboundedWorkLimits(authority, &p.Provider, &p.Slot, route); e != nil {
 		return e
 	}
-	if release := s.Deps.Runtime.Release(); release != nil {
-		if route != nil {
-			if current, ok := release.Snapshot().FindRoute(route.Slug); ok {
-				route = &current
-			}
-		}
-		if provider, ok := release.Snapshot().FindProvider(p.Provider.ID); ok {
-			for _, slot := range provider.Slots {
-				if slot.ID == p.Slot.ID {
-					return UnboundedWorkLimits(authority, &provider, &slot, route)
-				}
-			}
-			return UnboundedWorkLimits(authority, &provider, nil, route)
-		}
-		return UnboundedWorkLimits(authority, nil, nil, route)
+	if s.Deps.Runtime == nil {
+		return nil
 	}
-	return nil
+	release := s.Deps.Runtime.Release()
+	if release == nil {
+		return nil
+	}
+	snapshot := release.Snapshot()
+	currentRoute := route
+	if route != nil {
+		if current, ok := snapshot.FindRoute(route.Slug); ok {
+			currentRoute = &current
+		}
+	}
+	provider, ok := snapshot.FindProvider(p.Provider.ID)
+	if !ok {
+		return UnboundedWorkLimits(authority, nil, nil, currentRoute)
+	}
+	if _, _, limited := provider.SharedTokenQuotaFor(model); limited {
+		return unboundedWorkBudget()
+	}
+	for _, slot := range provider.Slots {
+		if slot.ID == p.Slot.ID {
+			return UnboundedWorkLimits(authority, &provider, &slot, currentRoute)
+		}
+	}
+	return UnboundedWorkLimits(authority, &provider, nil, currentRoute)
 }

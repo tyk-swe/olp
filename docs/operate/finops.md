@@ -592,11 +592,11 @@ Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`
 uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. The invoice total
 is null when the range has no coverage or includes a currency other than the
-report currency. Caller-paid and
-budget-exempt attempts are excluded from attributed cost; hourly rollup rows
-only approximate priced/incomplete counts and cannot distinguish caller-paid
-usage, so their `budget_exempt` request count is counted as excluded. That
-limitation is documented in the code.
+report currency. Caller-paid and budget-exempt attempts are excluded from
+attributed cost. Hourly rollups keep the excluded attempt count and
+approximate priced and incomplete attempt counts. Rollups created before
+caller-paid status was recorded still use the budget-exempt request count
+and can include caller-paid spend.
 
 Metrics: `olp_billing_imports_total{provider,outcome}` (process-local) and
 `olp_billing_capture_rate{provider}` (last 7 closed covered days).

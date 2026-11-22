@@ -2,8 +2,8 @@
 {{- $root := . -}}
 {{- $gatewayService := include "olp.observabilityServiceFullname" (dict "root" . "component" "gateway") -}}
 {{- $controlService := include "olp.observabilityServiceFullname" (dict "root" . "component" "control") -}}
-{{- $gatewayMonitored := and .Values.gateway.enabled .Values.gateway.service.enabled (gt (int .Values.gateway.replicas) 0) -}}
-{{- $controlMonitored := and .Values.control.enabled .Values.control.service.enabled (gt (int .Values.control.replicas) 0) -}}
+{{- $gatewayMonitored := and .Values.gateway.enabled (gt (int .Values.gateway.replicas) 0) -}}
+{{- $controlMonitored := and .Values.control.enabled (gt (int .Values.control.replicas) 0) -}}
 {{- $observabilityServiceNames := list -}}
 {{- if $gatewayMonitored -}}
 {{- $observabilityServiceNames = append $observabilityServiceNames $gatewayService -}}
@@ -24,7 +24,7 @@
 {{- $workerAlertsEnabled := and .Values.worker.enabled (gt (int .Values.worker.replicas) 0) (gt (len $observabilityServiceNames) 0) -}}
 {{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
-{{- if and $component.enabled (or (eq $componentName "worker") $component.service.enabled) }}
+{{- if $component.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

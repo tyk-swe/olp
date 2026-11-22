@@ -103,6 +103,35 @@ if ! helm template olp deploy/helm --set monitoring.enabled=true |
   echo "Expected a worker readiness-absence alert by default" >&2
   exit 1
 fi
+helm template olp deploy/helm \
+  --set monitoring.enabled=true,monitoring.rules.enabled=true,gateway.service.enabled=false,control.service.enabled=false |
+  awk '
+    /^kind: / { kind = $2 }
+    /^  name: olp-openllmproxy-(gateway|control)-observability$/ && kind == "Service" { services++ }
+    /^  name: olp-openllmproxy-(gateway|control)$/ && kind == "ServiceMonitor" { monitors++ }
+    /absent_over_time\(olp_ready\{[^}]*service="olp-openllmproxy-gateway-observability"/ { gateway_alert = 1 }
+    /absent_over_time\(olp_ready\{[^}]*service="olp-openllmproxy-control-observability"/ { control_alert = 1 }
+    END {
+      if (services != 2 || monitors != 2 || !gateway_alert || !control_alert) {
+        print "Expected gateway and control monitoring with their traffic Services disabled" > "/dev/stderr"
+        exit 1
+      }
+    }'
+helm template olp deploy/helm --show-only templates/workloads.yaml \
+  --set tracing.endpoint=https://collector.invalid/v1/traces,tracing.headersSecretName=collector-headers |
+  awk '
+    /^  name: olp-openllmproxy-(gateway|control|worker)$/ { component = $2 }
+    /name: OLP_(OTLP|TRACE)_|name: otlp-headers|secretName: "collector-headers"/ {
+      if (component == "olp-openllmproxy-worker") worker_tracing = 1
+      if (/name: OLP_OTLP_TRACES_ENDPOINT/) endpoints++
+      if (/secretName: "collector-headers"/) secrets++
+    }
+    END {
+      if (worker_tracing || endpoints != 2 || secrets != 2) {
+        print "Expected tracing configuration and collector credentials on gateway and control only" > "/dev/stderr"
+        exit 1
+      }
+    }'
 metrics=$(grep -ohE 'olp_[a-z0-9_]+' deploy/helm/templates/monitoring.yaml deploy/monitoring/grafana-dashboard.json |
   sed -E 's/_(bucket|sum|count)$//' | sort -u)
 for metric in $metrics; do
