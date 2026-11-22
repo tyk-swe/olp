@@ -228,18 +228,7 @@ func (w *Worker) finish(ctx context.Context, p pair, c claim, sendErr error) err
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		if success && c.receipt {
-			if err := recordAccepted(finish, tx, p, c); err != nil {
-				return err
-			}
-			return tx.Commit(finish)
-		}
-		return errors.New("export pending row already resolved")
-	}
-	if success && c.receipt {
-		if err := recordAccepted(finish, tx, p, c); err != nil {
-			return err
-		}
+		return acceptAfterExpiry(finish, tx, p, c, success)
 	}
 	cursor, delivered, failed := any(nil), 0, 1
 	if success {
@@ -251,9 +240,14 @@ func (w *Worker) finish(ctx context.Context, p pair, c claim, sendErr error) err
 	return tx.Commit(finish)
 }
 
-func recordAccepted(ctx context.Context, tx pgx.Tx, p pair, c claim) error {
-	_, err := tx.Exec(ctx, acceptedReceiptSQL, p.sink, *c.sourceID, c.record.ID, c.projectID, c.attempts+1, c.record.At, c.queuedAt)
-	return err
+func acceptAfterExpiry(ctx context.Context, tx pgx.Tx, p pair, c claim, success bool) error {
+	if !success || !c.receipt {
+		return errors.New("export pending row already resolved")
+	}
+	if _, err := tx.Exec(ctx, acceptedReceiptSQL, p.sink, *c.sourceID, c.record.ID, c.projectID, c.attempts+1, c.record.At, c.queuedAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func backoffSeconds(attempts int) int {

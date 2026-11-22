@@ -1,6 +1,7 @@
 package destination
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -123,19 +124,18 @@ func liveDelivery(ctx context.Context, q database.Queryer, sinkID, attemptID str
 
 func (r liveRow) delivery(sinkID, attemptID string) MeteringDelivery {
 	outcome := PendingOutcome(r.attempts, r.deliveredAt, r.rejectedAt, r.sendMay)
-	settled := r.deliveredAt
-	if settled == nil {
-		settled = r.rejectedAt
-	}
-	code := r.lastErrorCode
-	if outcome == MeteringAccepted {
-		code = nil
-	}
 	return MeteringDelivery{
 		SinkID: sinkID, AttemptID: attemptID, Outcome: outcome, EventID: &r.eventID,
-		LastErrorCode: code, Attempts: &r.attempts, OccurredAt: &r.occurredAt,
-		QueuedAt: &r.queuedAt, LastAttemptAt: r.lastAttemptAt, SettledAt: settled,
+		LastErrorCode: unlessAccepted(outcome, r.lastErrorCode), Attempts: &r.attempts, OccurredAt: &r.occurredAt,
+		QueuedAt: &r.queuedAt, LastAttemptAt: r.lastAttemptAt, SettledAt: cmp.Or(r.deliveredAt, r.rejectedAt),
 	}
+}
+
+func unlessAccepted(outcome MeteringDeliveryOutcome, code *string) *string {
+	if outcome == MeteringAccepted {
+		return nil
+	}
+	return code
 }
 
 type receiptRow struct {
