@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -143,18 +144,7 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	at := time.Now().UTC()
 	var listing *routing.RevisionListing
 	if upstream {
-		cfg := current.Connection.Document()
-		var listed []probe.DiscoveredModel
-		if cfg.Kind == connectors.KindAnthropic {
-			var complete probe.Listing
-			complete, err = s.prober.ListCompleteModelFacts(r.Context(), target)
-			listed = complete.Models
-			if err == nil && complete.Complete {
-				listing = completeListingProvenance(cfg, slot, at)
-			}
-		} else {
-			listed, err = s.prober.ListModelFacts(r.Context(), target)
-		}
+		listed, provenance, err := s.listUpstreamModels(r.Context(), current.Connection.Document(), target, slot, at)
 		if err != nil {
 			pe := probe.Classify(err)
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
@@ -162,7 +152,7 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 			}
 			return httpkit.Reply{}, httpkit.Fail(422, "discovery_failed", pe.Detail)
 		}
-		models = append(models, listed...)
+		models, listing = append(models, listed...), provenance
 	}
 	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at, listing); err != nil {
@@ -171,4 +161,16 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		reply, err := s.detailReply(r.Context(), tx, id)
 		return reply, access.Event{Action: "provider.discover", Resource: "provider", ID: id}, err
 	})
+}
+
+func (s *Server) listUpstreamModels(ctx context.Context, cfg connection.Configuration, target probe.Target, slot *slotRow, at time.Time) ([]probe.DiscoveredModel, *routing.RevisionListing, error) {
+	if cfg.Kind != connectors.KindAnthropic {
+		listed, err := s.prober.ListModelFacts(ctx, target)
+		return listed, nil, err
+	}
+	listing, err := s.prober.ListCompleteModelFacts(ctx, target)
+	if err != nil || !listing.Complete {
+		return listing.Models, nil, err
+	}
+	return listing.Models, completeListingProvenance(cfg, slot, at), nil
 }

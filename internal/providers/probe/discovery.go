@@ -124,28 +124,28 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 	for {
 		status, body, err := p.call(ctx, t, http.MethodGet, path, nil)
 		if err != nil {
-			return Listing{Models: out}, err
+			return Listing{}, err
 		}
 		if status != http.StatusOK {
-			return Listing{Models: out}, statusError(t, status, body)
+			return Listing{}, statusError(t, status, body)
 		}
 		var page map[string]json.RawMessage
 		if json.Unmarshal(body, &page) != nil {
-			return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid model discovery response."}
+			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid model discovery response."}
 		}
 		var items []map[string]json.RawMessage
 		if json.Unmarshal(page[listing.models], &items) != nil || items == nil {
-			return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response is missing its model array."}
+			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response is missing its model array."}
 		}
 		for _, item := range items {
 			var id, display string
 			if strict {
 				rawID, hasID := item[listing.id]
 				if !hasID || json.Unmarshal(rawID, &id) != nil {
-					return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
+					return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
 				}
 				if rawDisplay, hasDisplay := item[listing.display]; hasDisplay && json.Unmarshal(rawDisplay, &display) != nil {
-					return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid display name."}
+					return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid display name."}
 				}
 			} else {
 				_ = json.Unmarshal(item[listing.id], &id)
@@ -153,7 +153,7 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 			}
 			name := strings.TrimPrefix(id, listing.trimIDPrefix)
 			if strict && connection.ValidModelName("model", name) != nil {
-				return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
+				return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
 			}
 			if connection.ValidModelName("model", name) != nil || seen[name] {
 				continue
@@ -184,13 +184,13 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 		if strict {
 			cursor, final, incomplete, err := listing.strictNext(page)
 			if err != nil {
-				return Listing{Models: out}, err
+				return Listing{}, err
 			}
 			if final {
 				return Listing{Models: out, Complete: incomplete == "", Detail: incomplete}, nil
 			}
 			if len(cursor) > 2048 || cursors[cursor] {
-				return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
+				return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
 			}
 			cursors[cursor] = true
 			path = listing.path + "?" + url.Values{listing.parameter: []string{cursor}}.Encode()
@@ -201,7 +201,7 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 			return Listing{Models: out}, err
 		}
 		if len(cursor) > 2048 || cursors[cursor] {
-			return Listing{Models: out}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
+			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
 		}
 		cursors[cursor] = true
 		path = listing.path + "?" + url.Values{listing.parameter: []string{cursor}}.Encode()

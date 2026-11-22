@@ -20,7 +20,7 @@
   }
 </script>
 
-{#if current.state === 'active' && current.active_revision != null}
+{#if current.configuration.kind === 'anthropic' && current.state === 'active' && current.active_revision != null}
   <div class="listing-comparison">
     <div class="listing-heading">
       <div>

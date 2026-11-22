@@ -1,12 +1,15 @@
 package providers
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/authz"
@@ -46,11 +49,11 @@ func completeListingProvenance(cfg connection.Configuration, slot *slotRow, at t
 	}
 }
 
-func listingValues(listing *routing.RevisionListing) (endpoint, apiVersion, credentialID, credentialVersion, listedAt any) {
+func listingValues(listing *routing.RevisionListing) (endpoint, apiVersion, credentialID *string, credentialVersion *int, listedAt *time.Time) {
 	if listing == nil {
 		return nil, nil, nil, nil, nil
 	}
-	return listing.Endpoint, listing.APIVersion, listing.CredentialID, listing.CredentialVersion, listing.ListedAt
+	return &listing.Endpoint, &listing.APIVersion, &listing.CredentialID, &listing.CredentialVersion, &listing.ListedAt
 }
 
 type listingNewModel struct {
@@ -75,76 +78,63 @@ type listingOmission struct {
 	Routes        []listingRoute `json:"routes"`
 }
 
-type listingComparison struct {
-	ProviderID          string                 `json:"provider_id"`
-	RevisionID          string                 `json:"revision_id"`
-	Revision            int                    `json:"revision"`
-	Status              string                 `json:"status"`
-	Detail              string                 `json:"detail"`
-	CheckedAt           time.Time              `json:"checked_at"`
-	APIVersion          string                 `json:"api_version"`
-	CredentialVersion   int                    `json:"credential_version"`
+type listingDifferences struct {
 	NewModels           []listingNewModel      `json:"new_models"`
 	ChangedDisplayNames []listingDisplayChange `json:"changed_display_names"`
 	NotListed           []listingOmission      `json:"not_listed"`
 	Unverified          []listingOmission      `json:"unverified"`
 }
 
-func compareListingModels(published []routing.RevisionModel, listed []probe.DiscoveredModel, scope listingScope, routes map[string][]listingRoute) ([]listingNewModel, []listingDisplayChange, []listingOmission, []listingOmission) {
-	newModels := []listingNewModel{}
-	changed := []listingDisplayChange{}
-	notListed := []listingOmission{}
-	unverified := []listingOmission{}
+type listingOutcome struct {
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	listingDifferences
+}
+
+type listingComparison struct {
+	ProviderID        string    `json:"provider_id"`
+	RevisionID        string    `json:"revision_id"`
+	Revision          int       `json:"revision"`
+	CheckedAt         time.Time `json:"checked_at"`
+	APIVersion        string    `json:"api_version"`
+	CredentialVersion int       `json:"credential_version"`
+	listingOutcome
+}
+
+func compareListingModels(published []routing.RevisionModel, listed []probe.DiscoveredModel, scope listingScope, routes map[string][]listingRoute) listingDifferences {
+	differences := noListingDifferences()
 	publishedByModel := map[string]routing.RevisionModel{}
 	for _, model := range published {
 		publishedByModel[model.UpstreamModel] = model
 	}
-	listedByModel := map[string]probe.DiscoveredModel{}
+	listedModels := map[string]bool{}
 	for _, model := range listed {
-		if _, seen := listedByModel[model.Name]; !seen {
-			listedByModel[model.Name] = model
-		}
-	}
-	for _, model := range listed {
+		listedModels[model.Name] = true
 		before, known := publishedByModel[model.Name]
 		if !known {
-			newModels = append(newModels, listingNewModel{UpstreamModel: model.Name, DisplayName: model.Display})
+			differences.NewModels = append(differences.NewModels, listingNewModel{UpstreamModel: model.Name, DisplayName: model.Display})
 			continue
 		}
 		if model.HasDisplay && model.Display != before.DisplayName {
-			changed = append(changed, listingDisplayChange{UpstreamModel: model.Name, PublishedDisplayName: before.DisplayName, ListedDisplayName: model.Display})
+			differences.ChangedDisplayNames = append(differences.ChangedDisplayNames, listingDisplayChange{UpstreamModel: model.Name, PublishedDisplayName: before.DisplayName, ListedDisplayName: model.Display})
 		}
 	}
 	for _, model := range published {
-		if _, listed := listedByModel[model.UpstreamModel]; listed {
+		if listedModels[model.UpstreamModel] {
 			continue
 		}
-		modelRoutes := routes[model.UpstreamModel]
-		if modelRoutes == nil {
-			modelRoutes = []listingRoute{}
-		}
-		omission := listingOmission{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Routes: modelRoutes}
+		omission := listingOmission{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Routes: append([]listingRoute{}, routes[model.UpstreamModel]...)}
 		if scope.matches(model.Listing) {
-			notListed = append(notListed, omission)
+			differences.NotListed = append(differences.NotListed, omission)
 		} else {
-			unverified = append(unverified, omission)
+			differences.Unverified = append(differences.Unverified, omission)
 		}
 	}
-	slices.SortFunc(newModels, func(a, b listingNewModel) int { return compareStrings(a.UpstreamModel, b.UpstreamModel) })
-	slices.SortFunc(changed, func(a, b listingDisplayChange) int { return compareStrings(a.UpstreamModel, b.UpstreamModel) })
-	slices.SortFunc(notListed, func(a, b listingOmission) int { return compareStrings(a.UpstreamModel, b.UpstreamModel) })
-	slices.SortFunc(unverified, func(a, b listingOmission) int { return compareStrings(a.UpstreamModel, b.UpstreamModel) })
-	return newModels, changed, notListed, unverified
-}
-
-func compareStrings(a, b string) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
+	slices.SortFunc(differences.NewModels, func(a, b listingNewModel) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
+	slices.SortFunc(differences.ChangedDisplayNames, func(a, b listingDisplayChange) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
+	slices.SortFunc(differences.NotListed, func(a, b listingOmission) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
+	slices.SortFunc(differences.Unverified, func(a, b listingOmission) int { return strings.Compare(a.UpstreamModel, b.UpstreamModel) })
+	return differences
 }
 
 type listingRouteRow struct {
@@ -170,13 +160,14 @@ func visibleListingRoutes(p authz.Principal, rows []listingRouteRow) map[string]
 	}
 	for model := range routes {
 		slices.SortFunc(routes[model], func(a, b listingRoute) int {
-			if a.Slug != b.Slug {
-				return compareStrings(a.Slug, b.Slug)
-			}
-			return compareStrings(a.ID, b.ID)
+			return cmp.Or(strings.Compare(a.Slug, b.Slug), strings.Compare(a.ID, b.ID))
 		})
 	}
 	return routes
+}
+
+func errListingUnsupported() error {
+	return httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
 }
 
 func (s *Server) publishedListingTarget(ctx context.Context, current *record) (probe.Target, *revisionRow, listingScope, error) {
@@ -188,11 +179,9 @@ func (s *Server) publishedListingTarget(ctx context.Context, current *record) (p
 		return probe.Target{}, nil, listingScope{}, err
 	}
 	cfg := revision.Configuration
-	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID)); ok && !contract.Discovery {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
-	}
-	if cfg.Kind != connectors.KindAnthropic || cfg.AuthMode != connectors.AuthAPIKey || cfg.CredentialSource == "caller" {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
+	contract, known := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID))
+	if (known && !contract.Discovery) || cfg.Kind != connectors.KindAnthropic || cfg.AuthMode != connectors.AuthAPIKey || cfg.CredentialSource == "caller" {
+		return probe.Target{}, nil, listingScope{}, errListingUnsupported()
 	}
 	var enabled []routing.RevisionSlot
 	for _, slot := range revision.Slots {
@@ -201,7 +190,7 @@ func (s *Server) publishedListingTarget(ctx context.Context, current *record) (p
 		}
 	}
 	if len(enabled) != 1 || enabled[0].CredentialID == nil || enabled[0].CredentialVersion == nil {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
+		return probe.Target{}, nil, listingScope{}, errListingUnsupported()
 	}
 	slot := enabled[0]
 	var version int
@@ -219,23 +208,13 @@ func (s *Server) publishedListingTarget(ctx context.Context, current *record) (p
 	if err != nil {
 		return probe.Target{}, nil, listingScope{}, err
 	}
-	encoded, err := json.Marshal(cfg)
-	if err != nil {
-		clear(credential)
-		return probe.Target{}, nil, listingScope{}, err
-	}
-	prepared, err := connection.Load(encoded, nil)
-	if err != nil {
-		clear(credential)
-		return probe.Target{}, nil, listingScope{}, err
-	}
 	scope := listingScope{
 		endpoint:          providerconfig.Value(cfg.Endpoint),
 		apiVersion:        providerconfig.Value(cfg.APIVersion),
 		credentialID:      *slot.CredentialID,
 		credentialVersion: *slot.CredentialVersion,
 	}
-	return probe.Target{ProviderID: current.ID, Connection: prepared, Credential: credential}, revision, scope, nil
+	return probe.Target{ProviderID: current.ID, Connection: connection.Stored(cfg), Credential: credential}, revision, scope, nil
 }
 
 func (s *Server) publishedRoutesByModel(ctx context.Context, providerID string, p authz.Principal) (map[string][]listingRoute, error) {
@@ -246,16 +225,8 @@ func (s *Server) publishedRoutesByModel(ctx context.Context, providerID string, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var found []listingRouteRow
-	for rows.Next() {
-		var row listingRouteRow
-		if err := rows.Scan(&row.ID, &row.Slug, &row.ProjectID, &row.Model); err != nil {
-			return nil, err
-		}
-		found = append(found, row)
-	}
-	if err := rows.Err(); err != nil {
+	found, err := pgx.CollectRows(rows, pgx.RowToStructByPos[listingRouteRow])
+	if err != nil {
 		return nil, err
 	}
 	return visibleListingRoutes(p, found), nil
@@ -279,34 +250,48 @@ func (s *Server) compareListing(r *http.Request, p authz.Principal) (httpkit.Rep
 	}
 	defer clear(target.Credential)
 	at := time.Now().UTC()
-	result := listingComparison{
-		ProviderID:          id,
-		RevisionID:          revision.ID,
-		Revision:            revision.Revision,
-		Status:              "incomplete",
-		CheckedAt:           at,
-		APIVersion:          scope.apiVersion,
-		CredentialVersion:   scope.credentialVersion,
-		NewModels:           []listingNewModel{},
-		ChangedDisplayNames: []listingDisplayChange{},
-		NotListed:           []listingOmission{},
-		Unverified:          []listingOmission{},
-	}
-	listing, err := s.prober.ListCompleteModelFacts(r.Context(), target)
-	if err != nil {
-		result.Detail = probe.Classify(err).Detail
-		return httpkit.OK(result), nil
-	}
-	if !listing.Complete {
-		result.Detail = listing.Detail
-		return httpkit.OK(result), nil
-	}
-	routes, err := s.publishedRoutesByModel(r.Context(), id, p)
+	outcome, err := s.compareWithListing(r.Context(), p, target, revision.Models, scope)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	result.Status = "complete"
-	result.Detail = fmt.Sprintf("Compared %d listed models with %d published models.", len(listing.Models), len(revision.Models))
-	result.NewModels, result.ChangedDisplayNames, result.NotListed, result.Unverified = compareListingModels(revision.Models, listing.Models, scope, routes)
-	return httpkit.OK(result), nil
+	return httpkit.OK(listingComparison{
+		ProviderID:        id,
+		RevisionID:        revision.ID,
+		Revision:          revision.Revision,
+		CheckedAt:         at,
+		APIVersion:        scope.apiVersion,
+		CredentialVersion: scope.credentialVersion,
+		listingOutcome:    outcome,
+	}), nil
+}
+
+func (s *Server) compareWithListing(ctx context.Context, p authz.Principal, target probe.Target, published []routing.RevisionModel, scope listingScope) (listingOutcome, error) {
+	listing, err := s.prober.ListCompleteModelFacts(ctx, target)
+	if err != nil {
+		return incompleteListing(probe.Classify(err).Detail), nil
+	}
+	if !listing.Complete {
+		return incompleteListing(listing.Detail), nil
+	}
+	routes, err := s.publishedRoutesByModel(ctx, target.ProviderID, p)
+	if err != nil {
+		return listingOutcome{}, err
+	}
+	return listingOutcome{
+		Status:             "complete",
+		Detail:             fmt.Sprintf("Compared %d listed models with %d published models.", len(listing.Models), len(published)),
+		listingDifferences: compareListingModels(published, listing.Models, scope, routes),
+	}, nil
+}
+
+func incompleteListing(detail string) listingOutcome {
+	return listingOutcome{
+		Status:             "incomplete",
+		Detail:             detail,
+		listingDifferences: noListingDifferences(),
+	}
+}
+
+func noListingDifferences() listingDifferences {
+	return listingDifferences{NewModels: []listingNewModel{}, ChangedDisplayNames: []listingDisplayChange{}, NotListed: []listingOmission{}, Unverified: []listingOmission{}}
 }

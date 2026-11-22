@@ -40,19 +40,19 @@ func TestCompareListingModelsClassifiesAgainstThePublishedScope(t *testing.T) {
 		"model-manual":  {{ID: "route-manual", Slug: "support"}},
 		"model-rotated": {{ID: "route-rotated", Slug: "internal"}},
 	}
-	newModels, changed, notListed, unverified := compareListingModels(published, listed, scope, routes)
-	if want := []listingNewModel{{UpstreamModel: "model-brand-new", DisplayName: "Brand New"}}; !reflect.DeepEqual(newModels, want) {
-		t.Fatalf("new models %+v, want %+v", newModels, want)
+	differences := compareListingModels(published, listed, scope, routes)
+	if want := []listingNewModel{{UpstreamModel: "model-brand-new", DisplayName: "Brand New"}}; !reflect.DeepEqual(differences.NewModels, want) {
+		t.Fatalf("new models %+v, want %+v", differences.NewModels, want)
 	}
-	if want := []listingDisplayChange{{UpstreamModel: "model-renamed", PublishedDisplayName: "Old name", ListedDisplayName: "New name"}}; !reflect.DeepEqual(changed, want) {
-		t.Fatalf("display changes %+v, want %+v", changed, want)
+	if want := []listingDisplayChange{{UpstreamModel: "model-renamed", PublishedDisplayName: "Old name", ListedDisplayName: "New name"}}; !reflect.DeepEqual(differences.ChangedDisplayNames, want) {
+		t.Fatalf("display changes %+v, want %+v", differences.ChangedDisplayNames, want)
 	}
-	if want := []listingOmission{{UpstreamModel: "model-gone", DisplayName: "Gone", Routes: routes["model-gone"]}}; !reflect.DeepEqual(notListed, want) {
-		t.Fatalf("not listed %+v, want %+v", notListed, want)
+	if want := []listingOmission{{UpstreamModel: "model-gone", DisplayName: "Gone", Routes: routes["model-gone"]}}; !reflect.DeepEqual(differences.NotListed, want) {
+		t.Fatalf("not listed %+v, want %+v", differences.NotListed, want)
 	}
 	wantUnverified := []string{"model-elsewhere", "model-manual", "model-rotated"}
-	gotUnverified := make([]string, len(unverified))
-	for i, omission := range unverified {
+	gotUnverified := make([]string, len(differences.Unverified))
+	for i, omission := range differences.Unverified {
 		gotUnverified[i] = omission.UpstreamModel
 	}
 	if !reflect.DeepEqual(gotUnverified, wantUnverified) {
