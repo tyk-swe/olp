@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -265,5 +266,44 @@ func TestSharedTokenQuotaPartialFailureLeavesNoCharge(t *testing.T) {
 	}
 	if usage.TokensThisMinute != 0 {
 		t.Fatalf("connection counter after partial failure = %d, want 0", usage.TokensThisMinute)
+	}
+}
+
+func TestSharedTokenQuotaRefusalMovesOnToTheNextTarget(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, grouped, open = "shared-quota-fallback", "grouped-model", "open-model"
+	fixture := newUsageFixture(t, pool)
+	upstream := &retainedUpstream{replies: func(string, int) map[string]string {
+		return map[string]string{"POST /chat/completions": `{"id":"chatcmpl-1","object":"chat.completion","created":1700000000,"model":"` + open + `","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`}
+	}}
+	g := newStoredGateway(t, fixture, storedPlan{slug: slug, model: grouped, operations: []string{"generation"}, upstream: upstream})
+	g.key(t, "owner")
+
+	before := g.runtime.release.Load().Snapshot()
+	provider := g.snapshot.Providers[fixture.providerID]
+	provider.ProjectID = &fixture.projectID
+	provider.SharedTokenQuotas = []routing.SharedTokenQuota{{Model: grouped, Group: "fallback", TokensPerMinute: 1}}
+	sibling, another := provider.Slots[0], provider.Slots[0]
+	sibling.ID, another.ID = uuid.NewString(), uuid.NewString()
+	provider.Slots = append(provider.Slots, sibling, another)
+	openCapability := provider.Capabilities[0]
+	openCapability.Model = open
+	provider.Capabilities = append(provider.Capabilities, openCapability)
+	g.snapshot.Providers[fixture.providerID] = provider
+	g.republish(t, func(route *routing.Route) {
+		fallback := route.Targets[0]
+		fallback.ID, fallback.ProviderModel, fallback.Priority = uuid.NewString(), open, route.Targets[0].Priority+1
+		route.Targets = append(route.Targets, fallback)
+	})
+	if err := quota.SyncSharedQuotas(t.Context(), g.limiter, before, g.runtime.release.Load().Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+
+	g.send(t, "POST", "/v1/chat/completions", map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"},
+		`{"model":"`+slug+`","messages":[{"role":"user","content":"hi"}]}`, 200)
+	sent := upstream.sent("POST /chat/completions")
+	if len(sent) != 1 || !strings.Contains(sent[0].body, `"model":"`+open+`"`) {
+		t.Fatalf("upstream chat calls = %+v, want one call to the %s fallback target", sent, open)
 	}
 }

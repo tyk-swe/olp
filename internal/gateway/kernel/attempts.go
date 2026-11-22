@@ -202,7 +202,7 @@ func afterQuota(scope string) routeFlow {
 	switch scope {
 	case quota.Route:
 		return leaveRoute
-	case quota.Connection:
+	case quota.Connection, quota.SharedGroup:
 		return tryNextTarget
 	}
 	return tryNextSlot
