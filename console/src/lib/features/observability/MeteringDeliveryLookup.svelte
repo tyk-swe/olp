@@ -14,7 +14,12 @@
   }));
   function submit(event: SubmitEvent) {
     event.preventDefault();
-    submitted = attemptInput.trim();
+    const attempt = attemptInput.trim();
+    if (attempt === submitted) {
+      void lookup.refetch();
+      return;
+    }
+    submitted = attempt;
   }
 </script>
 

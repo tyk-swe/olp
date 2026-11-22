@@ -22,21 +22,7 @@ const sink: ExportSink = {
   status: []
 };
 
-it('deletes a sink only after the deletion is confirmed', async () => {
-  const deleted = vi.fn();
-  const deletion = Promise.withResolvers<Response>();
-  serve(
-    (request) => {
-      if (request.method === 'DELETE') {
-        deleted(new URL(request.url).pathname);
-        return deletion.promise;
-      }
-      if (new URL(request.url).pathname === '/api/v1/observability/sinks')
-        return json({ items: [sink] });
-      return json({ items: [] });
-    },
-    ['read', 'settings']
-  );
+function renderPanel() {
   const target = document.createElement('div');
   document.body.append(target);
   const setup = vi.fn(() =>
@@ -57,10 +43,30 @@ it('deletes a sink only after the deletion is confirmed', async () => {
     await unmount(harness);
     target.remove();
   });
-  const button = (root: ParentNode, label: string) =>
-    [...root.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  return target;
+}
+
+const button = (root: ParentNode, label: string) =>
+  [...root.querySelectorAll('button')].find(
+    (item) => item.textContent?.trim() === label
+  );
+
+it('deletes a sink only after the deletion is confirmed', async () => {
+  const deleted = vi.fn();
+  const deletion = Promise.withResolvers<Response>();
+  serve(
+    (request) => {
+      if (request.method === 'DELETE') {
+        deleted(new URL(request.url).pathname);
+        return deletion.promise;
+      }
+      if (new URL(request.url).pathname === '/api/v1/observability/sinks')
+        return json({ items: [sink] });
+      return json({ items: [] });
+    },
+    ['read', 'settings']
+  );
+  const target = renderPanel();
 
   await vi.waitFor(() => expect(button(target, 'Delete')).toBeDefined());
   button(target, 'Delete')?.click();
@@ -84,4 +90,47 @@ it('deletes a sink only after the deletion is confirmed', async () => {
   await vi.waitFor(() =>
     expect(button(target, 'Disable')?.disabled).toBe(false)
   );
+});
+
+it('refreshes a delivery lookup when the same attempt is submitted again', async () => {
+  const attempt = '00000000-0000-4000-8000-000000000020';
+  const lookupPath = `/api/v1/observability/sinks/${sink.export_sink_id}/metering-deliveries/${attempt}`;
+  const outcome = vi
+    .fn<() => string>()
+    .mockReturnValueOnce('pending')
+    .mockReturnValue('accepted');
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/observability/sinks')
+        return json({
+          items: [{ ...sink, streams: ['metering'], format: 'cloudevents' }]
+        });
+      if (path === lookupPath)
+        return json({
+          export_sink_id: sink.export_sink_id,
+          attempt_id: attempt,
+          outcome: outcome()
+        });
+      return json({ items: [] });
+    },
+    ['read', 'settings']
+  );
+  const target = renderPanel();
+
+  await vi.waitFor(() =>
+    expect(button(target, 'Delivery lookup')).toBeDefined()
+  );
+  button(target, 'Delivery lookup')?.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>('#metering-attempt')!;
+  input.value = attempt;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  button(target, 'Look up')?.click();
+  const result = () => target.querySelector('.delivery-lookup')?.textContent;
+  await vi.waitFor(() => expect(result()).toContain('Pending'));
+
+  button(target, 'Look up')?.click();
+  await vi.waitFor(() => expect(result()).toContain('Accepted by sink'));
 });
