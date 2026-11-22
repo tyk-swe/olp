@@ -1907,8 +1907,9 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 	}
 	for _, installed := range []codemode.Route{route, revised} {
 		removed, err := status(base.Add(8*time.Minute), installed, key, identity)
-		if err != nil || removed.Status != codemode.ThreadUnavailable || removed.RetryAt != nil {
-			t.Fatalf("revision %d without its published pinned model returned %+v, %v, want unavailable", installed.Revision, removed, err)
+		if err != nil || removed.Status != codemode.ThreadUnavailable || removed.RetryAt != nil ||
+			removed.LastObservedAt == nil || !removed.LastObservedAt.Equal(recovered) {
+			t.Fatalf("revision %d without its published pinned model returned %+v, %v, want unavailable with last observation %v", installed.Revision, removed, err, recovered)
 		}
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, routeID, revisionID); err != nil {

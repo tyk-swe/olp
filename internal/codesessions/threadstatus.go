@@ -53,12 +53,10 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 	if err != nil {
 		return none, err
 	}
-	if slices.ContainsFunc(pins, func(pin codemode.Pin) bool {
+	pinUnavailable := slices.ContainsFunc(pins, func(pin codemode.Pin) bool {
 		_, err := current.ResolvePinnedModel(codemode.Operation{Model: pin.Model}, []codemode.Pin{pin})
 		return err != nil || !slices.Contains(route.Models, pin.TargetModel)
-	}) {
-		return codemode.ThreadStatus{Status: codemode.ThreadUnavailable, CheckedAt: now.UTC()}, nil
-	}
+	})
 	tree, principals := codeTree(binding, pins)
 	evidence := make([]codemode.ThreadAccountEvidence, 0, len(tree))
 	for _, accountID := range tree {
@@ -75,7 +73,7 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 		}
 		evidence = append(evidence, account)
 	}
-	return codemode.AssessThreadStatus(now.UTC(), retired, evidence), nil
+	return codemode.AssessThreadStatus(now.UTC(), retired || pinUnavailable, evidence), nil
 }
 
 func threadLineage(ctx context.Context, tx pgx.Tx, table string, parentID *string, identity codemode.Identity) error {

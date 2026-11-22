@@ -227,7 +227,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" GREATEST(0::bigint, provider_request_count - provider_cache_hit_count - provider_unpriced_count - provider_incomplete_count)," +
 		" unpriced_attempt_count, provider_incomplete_count," +
 		" COALESCE(reconcil_caller_attempts, CASE WHEN budget_exempt THEN provider_request_count - provider_cache_hit_count ELSE 0 END)," +
-		" CASE WHEN caller_credential THEN 0 ELSE olp.commitment_hourly_allocation(attempt_usage_hourly) END" +
+		" olp.commitment_hourly_allocation(attempt_usage_hourly)" +
 		" FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)

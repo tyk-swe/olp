@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,6 +70,25 @@ func groupTokens(t *testing.T, runner scripts.Runner, project, group string) int
 	return usage.TokensThisMinute
 }
 
+type roundTripBudget struct {
+	scripts.Commander
+	remaining atomic.Int64
+}
+
+func (b *roundTripBudget) Do(ctx context.Context, args ...string) (any, error) {
+	if b.remaining.Add(-1) < 0 {
+		return nil, context.DeadlineExceeded
+	}
+	return b.Commander.Do(ctx, args...)
+}
+
+func (b *roundTripBudget) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+	if b.remaining.Add(-1) < 0 {
+		return nil, context.DeadlineExceeded
+	}
+	return b.Commander.Pipeline(ctx, commands...)
+}
+
 func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -110,7 +130,11 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	before := sharedQuotaProvider(project, "model-a", "group-a", 1000)
 	before.Kind, before.Name, before.RevisionID = connectors.KindOpenAICompatible, "shared quota", uuid.NewString()
 	after := before
-	after.SharedTokenQuotas = []routing.SharedTokenQuota{{Model: "model-a", Group: "group-b", TokensPerMinute: 1000}}
+	after.SharedTokenQuotas = []routing.SharedTokenQuota{
+		{Model: "model-a", Group: "group-b", TokensPerMinute: 1000},
+		{Model: "model-c", Group: "group-c", TokensPerMinute: 1000},
+		{Model: "model-d", Group: "group-d", TokensPerMinute: 1000},
+	}
 	slot := routing.Slot{ID: uuid.NewString()}
 	demand := func(tokens int64) quota.TokenDemand { return quota.CombinedDemand(tokens) }
 	publish(2, before)
@@ -129,9 +153,15 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	t.Logf("reserved 400 in group-a, group-a=%d group-b=%d", groupTokens(t, runner, project, "group-a"), groupTokens(t, runner, project, "group-b"))
 
 	publish(3, after)
-	second := manager(secondReplica.limiter)
-	if err := second.Refresh(t.Context()); err != nil {
+	bounded := &roundTripBudget{Commander: harness.Valkey(t)}
+	bounded.remaining.Store(2)
+	boundedRunner, err := scripts.NewRunner(bounded, prefix)
+	if err != nil {
 		t.Fatal(err)
+	}
+	second := manager(admission.NewDurable(boundedRunner, nil))
+	if err := second.Refresh(t.Context()); err != nil {
+		t.Fatalf("refresh with a limited Valkey round-trip budget: %v", err)
 	}
 	moved, refusal, skip := secondReplica.ReserveTarget(t.Context(), &after, &slot, demand(200), time.Minute, "", "model-a", second.Release().Sequence)
 	if refusal != nil || skip || moved == nil {

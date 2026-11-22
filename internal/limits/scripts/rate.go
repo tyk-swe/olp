@@ -2,10 +2,12 @@ package scripts
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 type Share struct {
@@ -80,10 +82,23 @@ func (r Runner) reservationKeys(q RateReservation) []string {
 	return keys
 }
 
-func (r Runner) SyncMembership(ctx context.Context, lookup string, generation, ceiling int64, members []string) error {
-	args := append([]string{strconv.FormatInt(generation, 10), strconv.FormatInt(ceiling, 10)}, members...)
-	_, err := r.run(ctx, call{script: syncMembership, keys: []string{r.Key("{" + lookup + "}:members")}, args: args})
-	return err
+func (r Runner) SyncMemberships(ctx context.Context, generation int64, updates []limits.SharedMembership) error {
+	ordinal := strconv.FormatInt(generation, 10)
+	calls := make([]call, len(updates))
+	for index, update := range updates {
+		args := append([]string{ordinal, strconv.FormatInt(update.Ceiling, 10)}, update.Members...)
+		calls[index] = call{script: syncMembership, keys: []string{r.Key("{" + update.Lookup + "}:members")}, args: args}
+	}
+	for _, answer := range r.runAll(ctx, calls) {
+		if answer.err == nil {
+			continue
+		}
+		if _, ok := errors.AsType[*limits.ServiceError](answer.err); ok {
+			return answer.err
+		}
+		return &limits.ServiceError{Err: &coordination.CommandError{Cause: answer.err}}
+	}
+	return nil
 }
 
 func (r Runner) ReserveRate(ctx context.Context, q RateReservation) (RateGrant, error) {

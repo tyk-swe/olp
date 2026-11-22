@@ -2,7 +2,6 @@ package quota
 
 import (
 	"context"
-	"errors"
 	"iter"
 	"maps"
 	"slices"
@@ -99,28 +98,19 @@ func retiredSharedLookups(previous *routing.View, current map[string]sharedPolic
 	}))
 }
 
-func syncLookup(ctx context.Context, limiter *admission.Limiter, lookup string, generation int64, policy sharedPolicy) error {
-	syncCtx, cancel := context.WithTimeout(ctx, ReserveTimeout)
-	defer cancel()
-	return limiter.SyncSharedMembership(syncCtx, lookup, generation, policy.ceiling, policy.members)
-}
-
 func SyncSharedQuotas(ctx context.Context, limiter *admission.Limiter, previous, next *routing.View, skippedGroupIDs ...string) error {
 	if limiter == nil || next == nil {
 		return nil
 	}
 	current := sharedPolicies(next)
-	generation := next.Generation().Ordinal
-	return errors.Join(slices.Collect(func(yield func(error) bool) {
-		for _, lookup := range retiredSharedLookups(previous, current, skippedGroupIDs) {
-			if !yield(syncLookup(ctx, limiter, lookup, generation, sharedPolicy{})) {
-				return
-			}
-		}
-		for _, lookup := range slices.Sorted(maps.Keys(current)) {
-			if !yield(syncLookup(ctx, limiter, lookup, generation, current[lookup])) {
-				return
-			}
-		}
-	})...)
+	retired := retiredSharedLookups(previous, current, skippedGroupIDs)
+	updates := make([]limits.SharedMembership, len(retired)+len(current))
+	for index, lookup := range retired {
+		updates[index] = limits.SharedMembership{Lookup: lookup}
+	}
+	for index, lookup := range slices.Sorted(maps.Keys(current)) {
+		policy := current[lookup]
+		updates[len(retired)+index] = limits.SharedMembership{Lookup: lookup, Ceiling: policy.ceiling, Members: policy.members}
+	}
+	return limiter.SyncSharedMemberships(ctx, next.Generation().Ordinal, updates)
 }

@@ -1409,6 +1409,20 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 
 func TestReconciliationContinuesExcludingCallerPaidSpendAfterRollup(t *testing.T) {
 	t.Parallel()
+	for _, scenario := range []struct {
+		name          string
+		legacy        bool
+		operatorSpend string
+	}{{"durable", false, "8.25"}, {"legacy", true, "5.75"}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			checkCallerPaidSpendAfterRollup(t, scenario.legacy, scenario.operatorSpend)
+		})
+	}
+}
+
+func checkCallerPaidSpendAfterRollup(t *testing.T, legacy bool, operatorSpend string) {
+	t.Helper()
 	ctx := t.Context()
 	pool, _ := harness.Database(t)
 	f := newUsageFixture(t, pool)
@@ -1439,6 +1453,12 @@ func TestReconciliationContinuesExcludingCallerPaidSpendAfterRollup(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	if legacy {
+		result, err := pool.Exec(ctx, `UPDATE olp.commitment_periods SET legacy=true WHERE provider_id=$1 AND bucket_start=$2`, f.providerID, day)
+		if err != nil || result.RowsAffected() != 1 {
+			t.Fatalf("mark fixture period legacy: %v, %v", result, err)
+		}
+	}
 	check := func() {
 		t.Helper()
 		rows, err := reports.ReconciliationSpend(ctx, pool, day, day.Add(24*time.Hour), []string{f.providerID})
@@ -1446,8 +1466,8 @@ func TestReconciliationContinuesExcludingCallerPaidSpendAfterRollup(t *testing.T
 			t.Fatalf("reconciliation returned %+v, %v", rows, err)
 		}
 		row := rows[0]
-		if strings.TrimRight(row.AttributedCost, "0") != "8.25" || row.PricedAttempts != 2 || row.ExcludedCallerAttempts != 2 {
-			t.Fatalf("reconciliation returned %+v, want only gateway cost and two excluded caller attempts", row)
+		if strings.TrimRight(row.AttributedCost, "0") != operatorSpend || row.PricedAttempts != 2 || row.ExcludedCallerAttempts != 2 {
+			t.Fatalf("reconciliation returned %+v, want gateway spend %s and two excluded caller attempts", row, operatorSpend)
 		}
 		totals, err := reports.ReadSummary(ctx, pool, reports.Filters{Start: day, End: day.Add(24 * time.Hour),
 			ProviderID: &f.providerID, Projects: reports.AllProjects()}, day.Add(24*time.Hour))
