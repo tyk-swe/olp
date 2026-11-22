@@ -376,6 +376,7 @@ type storedGateway struct {
 	server  *httptest.Server
 	kernel  *kernel.Server
 	fleet   *fleet.State
+	limiter *admission.Limiter
 
 	snapshot *routing.Snapshot
 	secrets  map[string][]byte
@@ -476,6 +477,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	debitStore := debits.NewStore(pool)
 	syncer := debits.NewSyncer(debitStore, runner)
 	limiter := admission.NewDurable(runner, syncer)
+	g.limiter = limiter
 	workflow := kernel.Dependencies{}
 	if plan.tools != nil {
 		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
@@ -2183,6 +2185,41 @@ func TestNewGeminiInteractionsHoldTheirReplyBoundAgainstOutputTokenLimits(t *tes
 		t.Fatalf("an Interaction allowed 500 output tokens reached the provider under a 100 token output limit: %+v", sent)
 	}
 	g.send(t, "POST", interactions, headers, create("50"), 200)
+}
+
+func TestFreeFileControlsPassAnExhaustedSharedTokenQuota(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "shared-quota-files", "files-model"
+	fixture := newUsageFixture(t, pool)
+	g := newStoredGateway(t, fixture, storedPlan{
+		slug: slug, model: model, kind: "azure_openai", operations: []string{"generation", "vector_store"},
+		upstream: &retainedUpstream{replies: openAIReplies},
+	})
+	g.key(t, "owner")
+	upload := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n"
+	_, raw := g.send(t, "POST", "/v1/files", map[string]string{"Authorization": "Bearer owner", "Content-Type": "multipart/form-data; boundary=b", "Idempotency-Key": uuid.NewString()}, upload, 200)
+	var file retainedObject
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+
+	shared := []routing.SharedTokenQuota{{Model: model, Group: "files", TokensPerMinute: 1}}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_revisions SET configuration=jsonb_set(configuration::jsonb,'{options,shared_token_quotas}',$2::jsonb)::json WHERE id=$1`, g.providerRevisionID, encoded(t, shared)); err != nil {
+		t.Fatal(err)
+	}
+	before := g.runtime.release.Load().Snapshot()
+	provider := g.snapshot.Providers[fixture.providerID]
+	provider.ProjectID, provider.SharedTokenQuotas = &fixture.projectID, shared
+	g.snapshot.Providers[fixture.providerID] = provider
+	g.republish(t, func(*routing.Route) {})
+	if err := quota.SyncSharedQuotas(t.Context(), g.limiter, before, g.runtime.release.Load().Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	g.send(t, "POST", "/v1/chat/completions", map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"},
+		`{"model":"`+slug+`","messages":[{"role":"user","content":"hi"}]}`, 429)
+	g.call(t, "owner", "GET", "/v1/files/"+file.ID, "", "", 200)
+	g.call(t, "owner", "DELETE", "/v1/files/"+file.ID, "", "", 200)
 }
 
 type streamedInteraction struct {
