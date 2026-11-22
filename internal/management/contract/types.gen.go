@@ -8635,6 +8635,7 @@ type ApiKeyDetailResponse struct {
 	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
 	MaxPriority nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
 	Name        string                               `json:"name"`
+	PausedAt    nullable.Nullable[time.Time]         `json:"paused_at,omitempty"`
 
 	// Priority Admission class of requests that name none; defaults to normal.
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
@@ -8692,6 +8693,29 @@ type ApiKeyListResponse struct {
 type ApiKeyMutationResponse struct {
 	Etag              openapi_types.UUID        `json:"etag"`
 	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
+}
+
+// ApiKeyPauseReplica defines model for ApiKeyPauseReplica.
+type ApiKeyPauseReplica struct {
+	AuthoritySequence nullable.Nullable[int64] `json:"authority_sequence"`
+	GatewayInstance   string                   `json:"gateway_instance"`
+}
+
+// ApiKeyPauseResponse defines model for ApiKeyPauseResponse.
+type ApiKeyPauseResponse struct {
+	Etag              openapi_types.UUID           `json:"etag"`
+	Paused            bool                         `json:"paused"`
+	PausedAt          nullable.Nullable[time.Time] `json:"paused_at,omitempty"`
+	RuntimeGeneration RuntimeGenerationResponse    `json:"runtime_generation"`
+}
+
+// ApiKeyPauseRolloutResponse defines model for ApiKeyPauseRolloutResponse.
+type ApiKeyPauseRolloutResponse struct {
+	Enforced                bool                         `json:"enforced"`
+	Paused                  bool                         `json:"paused"`
+	PausedAt                nullable.Nullable[time.Time] `json:"paused_at,omitempty"`
+	PausedAuthoritySequence nullable.Nullable[int64]     `json:"paused_authority_sequence,omitempty"`
+	Replicas                []ApiKeyPauseReplica         `json:"replicas"`
 }
 
 // ApiKeyRouteLimits Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend.
@@ -18609,6 +18633,24 @@ type UpdateApiKeyParams struct {
 // LookupEndUserJSONBody defines parameters for LookupEndUser.
 type LookupEndUserJSONBody struct {
 	Identifier string `json:"identifier"`
+}
+
+// PauseApiKeyParams defines parameters for PauseApiKey.
+type PauseApiKeyParams struct {
+	// IfMatch Current API-key ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique pause key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ResumeApiKeyParams defines parameters for ResumeApiKey.
+type ResumeApiKeyParams struct {
+	// IfMatch Current API-key ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique resume key
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // RevokeApiKeyParams defines parameters for RevokeApiKey.

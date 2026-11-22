@@ -36,6 +36,7 @@ const (
 var (
 	ErrStaleAuthority = errors.New("key authority is stale")
 	ErrInvalidKey     = errors.New("invalid API key")
+	ErrPausedKey      = errors.New("api key is paused")
 )
 
 // Release is one installed snapshot pinned for the lifetime of a request.

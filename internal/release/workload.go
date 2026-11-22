@@ -173,6 +173,7 @@ func (m *Manager) authenticateWorkload(raw string) (*keyauthority.Authority, err
 	base.LookupID = principal.LookupID
 	base.LimitLookupID = principal.LimitLookupID
 	base.RevokedAt = principal.RevokedAt
+	base.PausedAt = principal.PausedAt
 	base.WorkloadIssuerID = principal.WorkloadIssuerID
 	base.WorkloadDigest = digest
 	base.WorkloadMapping = identity.Mapping.Name
@@ -221,7 +222,7 @@ func (m *Manager) registerWorkload(ctx context.Context, state *authorityState, i
 		return keyauthority.Authority{}, ErrStaleAuthority
 	}
 	var a keyauthority.Authority
-	e = tx.QueryRow(ctx, "SELECT id::text,lookup_id,project_id::text,workload_issuer_id::text,workload_digest,workload_mapping,revoked_at FROM olp.api_keys WHERE workload_digest=$1", digest).Scan(&a.ID, &a.LookupID, &a.ProjectID, &a.WorkloadIssuerID, &a.WorkloadDigest, &a.WorkloadMapping, &a.RevokedAt)
+	e = tx.QueryRow(ctx, "SELECT id::text,lookup_id,project_id::text,workload_issuer_id::text,workload_digest,workload_mapping,revoked_at,paused_at FROM olp.api_keys WHERE workload_digest=$1", digest).Scan(&a.ID, &a.LookupID, &a.ProjectID, &a.WorkloadIssuerID, &a.WorkloadDigest, &a.WorkloadMapping, &a.RevokedAt, &a.PausedAt)
 	if e != nil {
 		return keyauthority.Authority{}, ErrStaleAuthority
 	}

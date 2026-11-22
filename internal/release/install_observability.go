@@ -7,16 +7,16 @@ import (
 )
 
 func (m *Manager) recordInstallStatus(ctx context.Context) error {
-	desired, installed, failed := m.installStatus()
-	_, err := m.pool.Exec(ctx, recordInstallStatusSQL, m.instanceID, desired, installed, failed)
+	desired, installed, failed, authoritySequence := m.installStatus()
+	_, err := m.pool.Exec(ctx, recordInstallStatusSQL, m.instanceID, desired, installed, failed, authoritySequence)
 	return err
 }
 
-func (m *Manager) installStatus() (int64, int64, bool) {
+func (m *Manager) installStatus() (int64, int64, bool, int64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	desired, installed := m.desired.Load(), m.release.Sequence
-	return desired, installed, desired > installed && m.failed == desired
+	return desired, installed, desired > installed && m.failed == desired, m.authority.sequence
 }
 
 func ExpireInstallStatus(ctx context.Context, pool *pgxpool.Pool) error {

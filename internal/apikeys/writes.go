@@ -26,6 +26,8 @@ type storedKey struct {
 	id, etag, name   string
 	policy, document []byte
 	revoked          *time.Time
+	paused           *time.Time
+	expires          *time.Time
 	project, group   *string
 	managed          bool
 }
@@ -34,8 +36,8 @@ type storedKey struct {
 // patch field preserves it even when the policy JSON has a stale value.
 func lockKey(r *http.Request, tx pgx.Tx, p authz.Principal, id string) (storedKey, error) {
 	key := storedKey{id: id}
-	err := tx.QueryRow(r.Context(), `SELECT etag::text,name,policy,policy||jsonb_build_object('name',name,'expires_at',expires_at),revoked_at,project_id::text,budget_group_id::text,workload_issuer_id IS NOT NULL
- FROM olp.api_keys WHERE id=$1 FOR UPDATE`, id).Scan(&key.etag, &key.name, &key.policy, &key.document, &key.revoked, &key.project, &key.group, &key.managed)
+	err := tx.QueryRow(r.Context(), `SELECT etag::text,name,policy,policy||jsonb_build_object('name',name,'expires_at',expires_at),revoked_at,project_id::text,budget_group_id::text,workload_issuer_id IS NOT NULL,paused_at,expires_at
+ FROM olp.api_keys WHERE id=$1 FOR UPDATE`, id).Scan(&key.etag, &key.name, &key.policy, &key.document, &key.revoked, &key.project, &key.group, &key.managed, &key.paused, &key.expires)
 	if err != nil {
 		return storedKey{}, err
 	}

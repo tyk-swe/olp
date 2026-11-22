@@ -4,5 +4,6 @@ export const apiKeyKeys = {
   root,
   list: () => [...root, 'list'] as const,
   page: (cursor?: string, createdBy?: string) =>
-    [...root, 'page', createdBy ?? 'all', cursor ?? 'first'] as const
+    [...root, 'page', createdBy ?? 'all', cursor ?? 'first'] as const,
+  pauseRollout: (id: string) => [...root, 'pause-rollout', id] as const
 };

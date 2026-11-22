@@ -122,3 +122,27 @@ func TestMemberConsentRejectsInvalidAgent(t *testing.T) {
 		})
 	}
 }
+
+func TestDelegatingAgentPauseRefusesUnlessRevoked(t *testing.T) {
+	project, issuer := "project", "issuer"
+	now := time.Now()
+	active := now.Add(time.Minute)
+	agent := func(revoked, paused *time.Time) *keyauthority.Authority {
+		return &keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, ExpiresAt: &active, RevokedAt: revoked, PausedAt: paused}
+	}
+	for _, test := range []struct {
+		name  string
+		agent *keyauthority.Authority
+		want  error
+	}{
+		{name: "active", agent: agent(nil, nil)},
+		{name: "paused", agent: agent(nil, &now), want: ErrPausedKey},
+		{name: "revoked while paused", agent: agent(&now, &now), want: ErrInvalidKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := delegatingAgentRefusal(test.agent, now); !errors.Is(got, test.want) {
+				t.Fatalf("delegating agent refusal = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

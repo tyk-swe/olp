@@ -17938,6 +17938,53 @@
     }
   },
   {
+    "name": "get_api_key_pause_rollout",
+    "group": "api-keys",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/api-keys/{api_key_id}/pause-rollout",
+    "description": "get api key pause rollout",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_budget_group",
     "group": "budget-groups",
     "method": "GET",
@@ -26931,6 +26978,77 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "pause_api_key",
+    "group": "api-keys",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/api-keys/{api_key_id}/pause",
+    "description": "pause api key",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current API-key ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique pause key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
     }
   },
   {
@@ -39386,6 +39504,77 @@
       "additionalProperties": false,
       "required": [
         "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "resume_api_key",
+    "group": "api-keys",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/api-keys/{api_key_id}/resume",
+    "description": "resume api key",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "api_key_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "api_key_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "api_key_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current API-key ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique resume key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
         "idempotency_key"
       ]
     }
