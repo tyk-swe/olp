@@ -199,8 +199,8 @@ owns takes that handler as an argument, as `retained.Register` takes the
 retrieval query for vector store search. The kernel never names a surface or a vendor
 flag for one. A surface that needs something from a shared step sets a general
 field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
-kernel's tests register the same assembly, so the refusal matrix in
-`kernel/surfaces_test.go` covers a surface's routes after it moves.
+refusal matrix in `internal/gateway/surfaces_test.go` registers the same
+assembly, so it covers a surface's routes after it moves.
 
 The kernel owns the `/gemini/{version}/models/{model}:{action}` route because
 generation lives there. A surface that serves one of those actions returns it

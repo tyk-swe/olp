@@ -49,10 +49,10 @@ describe('routing explanations', () => {
       adaptiveNotes({
         ...decision,
         strategy: 'bounded_cost',
-        bounded_cost_fallback_reason: 'insufficient_comparable_bounds'
+        bounded_cost_fallback_reason: 'insufficient_cost_bounds'
       })
     ).toEqual([
-      'Fewer than two targets in this tier have a comparable cost bound in the installation currency, so ordered by weight'
+      'Fewer than two targets in this tier have a cost bound, so ordered by weight'
     ]);
     expect(
       decisionRows([

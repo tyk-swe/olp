@@ -279,8 +279,8 @@ func (x *Call) targetCostBound(provider routing.Provider, target routing.Target,
 		if !ok {
 			return routing.CostBound{}, false
 		}
-		cost, ok := price.Cost(u, x.request.startedAt, true, discount)
-		return routing.CostBound{Cost: cost}, ok
+		cost, priced := price.Cost(u, x.request.startedAt, true, discount)
+		return routing.CostBound{Cost: cost}, priced
 	}
 	if x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
 		cost, ok := price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, x.request.startedAt, true, discount)

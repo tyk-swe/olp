@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { errorMessage } from '#lib/management/http.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import { enrollMFA, verifyMFA } from './api';
+  import { webauthnCredential } from './webauthn';
   import type {
     MFAEnrollment,
     MFAVerification
@@ -26,8 +27,7 @@
   let code = $state('');
   let name = $state('My authenticator');
   let kind = $state<'totp' | 'webauthn'>('totp');
-  let busy = $state(false);
-  let error = $state('');
+  const mfa = useAction();
   let codes = $state<string[] | null>(null);
   let completed = $state<MFAVerification>();
   const methods = $derived(
@@ -37,80 +37,57 @@
   const controller = new AbortController();
   onDestroy(() => controller.abort());
   async function begin() {
-    busy = true;
-    error = '';
-    try {
-      started = await enrollMFA(kind, name, challenge?.challenge);
-    } catch (e) {
-      error = errorMessage(e, 'Enrollment could not be started.');
-    } finally {
-      busy = false;
-    }
+    await mfa.run(
+      () => enrollMFA(kind, name, challenge?.challenge),
+      (enrollment) => {
+        started = enrollment;
+      },
+      { fallback: 'Enrollment could not be started.' }
+    );
   }
   async function verify(event?: SubmitEvent) {
     event?.preventDefault();
-    if (busy) return;
-    busy = true;
-    error = '';
-    try {
-      const token = current?.challenge ?? challenge?.challenge;
-      if (!token || !selected) {
-        error = 'Start verification again.';
-        return;
-      }
-      let credential: Record<string, unknown> | undefined;
-      if (selected === 'webauthn') {
-        if (
-          typeof PublicKeyCredential === 'undefined' ||
-          !window.isSecureContext
-        )
-          throw new Error(
-            'Security keys require a supported browser and a secure origin.'
-          );
-        const raw = (current?.public_key ?? challenge?.public_key)?.publicKey;
-        const result = current
-          ? await navigator.credentials.create({
-              publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(
-                raw as PublicKeyCredentialCreationOptionsJSON
-              ),
-              signal: controller.signal
-            })
-          : await navigator.credentials.get({
-              publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(
-                raw as PublicKeyCredentialRequestOptionsJSON
-              ),
-              signal: controller.signal
-            });
-        if (!(result instanceof PublicKeyCredential))
-          throw new Error('No security-key response was received.');
-        credential = { ...result.toJSON() };
-      }
-      const result = await verifyMFA(
-        {
-          challenge: token,
-          method: selected,
-          ...(credential ? { credential } : { code })
-        },
-        controller.signal
-      );
-      code = '';
-      if (
-        result &&
-        'recovery_codes' in result &&
-        result.recovery_codes?.length
-      ) {
-        codes = result.recovery_codes;
-        completed = result;
-      } else onComplete(result);
-    } catch (e) {
-      error = errorMessage(e, 'Verification did not succeed.');
-    } finally {
-      busy = false;
+    const token = current?.challenge ?? challenge?.challenge;
+    if (!token || !selected) {
+      mfa.error = 'Start verification again.';
+      return;
     }
+    await mfa.run(
+      async () => {
+        const credential =
+          selected === 'webauthn'
+            ? await webauthnCredential(
+                (current?.public_key ?? challenge?.public_key)?.publicKey,
+                current ? 'create' : 'get',
+                controller.signal
+              )
+            : undefined;
+        return await verifyMFA(
+          {
+            challenge: token,
+            method: selected,
+            ...(credential ? { credential } : { code })
+          },
+          controller.signal
+        );
+      },
+      (result) => {
+        code = '';
+        if (
+          result &&
+          'recovery_codes' in result &&
+          result.recovery_codes?.length
+        ) {
+          codes = result.recovery_codes;
+          completed = result;
+        } else onComplete(result);
+      },
+      { fallback: 'Verification did not succeed.' }
+    );
   }
 </script>
 
-{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+{#if mfa.error}<p class="inline-problem" role="alert">{mfa.error}</p>{/if}
 {#if codes}
   <h3>Save your recovery codes</h3>
   <p>
@@ -144,7 +121,7 @@
       <label for="mfa-kind">Authenticator</label><select
         id="mfa-kind"
         bind:value={kind}
-        disabled={busy}
+        disabled={mfa.busy}
         ><option value="totp">Authenticator app</option><option
           value="webauthn"
           disabled={challenge.webauthn_available === false}
@@ -158,11 +135,11 @@
         maxlength="100"
         required
         bind:value={name}
-        disabled={busy}
+        disabled={mfa.busy}
       />
     </div>
-    <button class="button button-primary" type="submit" disabled={busy}
-      >{busy ? 'Starting…' : 'Start enrollment'}</button
+    <button class="button button-primary" type="submit" disabled={mfa.busy}
+      >{mfa.busy ? 'Starting…' : 'Start enrollment'}</button
     >
   </form>
 {:else}
@@ -189,7 +166,7 @@
         <label for="mfa-method">Verification method</label><select
           id="mfa-method"
           bind:value={method}
-          disabled={busy}
+          disabled={mfa.busy}
           >{#each methods as option (option)}<option value={option}
               >{option === 'totp'
                 ? 'Authenticator app'
@@ -212,14 +189,14 @@
           maxlength="128"
           inputmode={selected === 'totp' ? 'numeric' : 'text'}
           autocomplete="one-time-code"
-          disabled={busy}
+          disabled={mfa.busy}
         />
       </div>{:else}<p>
         Use your security key or passkey and confirm its PIN or device
         verification.
       </p>{/if}
-    <button class="button button-primary" type="submit" disabled={busy}
-      >{busy
+    <button class="button button-primary" type="submit" disabled={mfa.busy}
+      >{mfa.busy
         ? 'Verifying…'
         : selected === 'webauthn'
           ? 'Use security key'

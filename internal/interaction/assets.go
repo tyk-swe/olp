@@ -22,68 +22,6 @@ func checkAssetResources(document oif.Document, encodedWire wire.Format, resolve
 		}
 		return incompatible("resource_affinity", path, "asset_resource_authority", "Provider asset references require resolved ownership and historical serving authority.")
 	}
-	var parts func(oif.Value, string) error
-	parts = func(value oif.Value, path string) error {
-		for index, part := range value.Elements() {
-			at := oif.Pointer(path, strconv.Itoa(index))
-			switch encodedWire {
-			case wire.Chat, wire.Responses:
-				if kind := valueText(member(part, "type")); kind == "file" || kind == "input_file" || kind == "input_image" || kind == "computer_screenshot" {
-					if _, present := part.Lookup("file_id"); present {
-						if err := fail(at + "/file_id"); err != nil {
-							return err
-						}
-					}
-					if _, present := member(part, "file").Lookup("file_id"); present {
-						if err := fail(at + "/file/file_id"); err != nil {
-							return err
-						}
-					}
-				}
-			case wire.Anthropic:
-				if kind := valueText(member(part, "type")); kind == "image" || kind == "document" || kind == "container_upload" {
-					if _, present := part.Lookup("file_id"); present {
-						if err := fail(at + "/file_id"); err != nil {
-							return err
-						}
-					}
-					source := member(part, "source")
-					if _, present := source.Lookup("file_id"); present || valueText(member(source, "type")) == "file" {
-						if err := fail(at + "/source/file_id"); err != nil {
-							return err
-						}
-					}
-				}
-				if valueText(member(part, "type")) == "tool_result" {
-					if err := parts(member(part, "content"), at+"/content"); err != nil {
-						return err
-					}
-				}
-			case wire.Gemini, wire.GeminiStream:
-				uri := valueText(member(member(part, "fileData"), "fileUri"))
-				if uri != "" {
-					parsed, err := url.Parse(uri)
-					if err != nil || strings.HasPrefix(strings.TrimPrefix(uri, "/"), "files/") || strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), "generativelanguage.googleapis.com") || strings.EqualFold(parsed.Scheme, "gs") || strings.EqualFold(parsed.Scheme, "s3") {
-						if err := fail(at + "/fileData/fileUri"); err != nil {
-							return err
-						}
-					}
-				}
-			case wire.Bedrock:
-				for _, kind := range []string{"image", "document", "video"} {
-					if _, present := member(member(part, kind), "source").Lookup("s3Location"); present {
-						if err := fail(at + "/" + kind + "/source/s3Location"); err != nil {
-							return err
-						}
-					}
-				}
-				if err := parts(member(member(part, "toolResult"), "content"), at+"/toolResult/content"); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
 	root := document.Root()
 	if encodedWire == wire.Responses {
 		for i, tool := range member(root, "tools").Elements() {
@@ -130,7 +68,69 @@ func checkAssetResources(document oif.Document, encodedWire wire.Format, resolve
 			if field == "contents" {
 				partName = "parts"
 			}
-			if err := parts(member(message, partName), path+"/"+partName); err != nil {
+			if err := checkAssetParts(member(message, partName), path+"/"+partName, encodedWire, fail); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkAssetParts(value oif.Value, path string, encodedWire wire.Format, fail func(string) error) error {
+	for index, part := range value.Elements() {
+		at := oif.Pointer(path, strconv.Itoa(index))
+		switch encodedWire {
+		case wire.Chat, wire.Responses:
+			if kind := valueText(member(part, "type")); kind == "file" || kind == "input_file" || kind == "input_image" || kind == "computer_screenshot" {
+				if _, present := part.Lookup("file_id"); present {
+					if err := fail(at + "/file_id"); err != nil {
+						return err
+					}
+				}
+				if _, present := member(part, "file").Lookup("file_id"); present {
+					if err := fail(at + "/file/file_id"); err != nil {
+						return err
+					}
+				}
+			}
+		case wire.Anthropic:
+			if kind := valueText(member(part, "type")); kind == "image" || kind == "document" || kind == "container_upload" {
+				if _, present := part.Lookup("file_id"); present {
+					if err := fail(at + "/file_id"); err != nil {
+						return err
+					}
+				}
+				source := member(part, "source")
+				if _, present := source.Lookup("file_id"); present || valueText(member(source, "type")) == "file" {
+					if err := fail(at + "/source/file_id"); err != nil {
+						return err
+					}
+				}
+			}
+			if valueText(member(part, "type")) == "tool_result" {
+				if err := checkAssetParts(member(part, "content"), at+"/content", encodedWire, fail); err != nil {
+					return err
+				}
+			}
+		case wire.Gemini, wire.GeminiStream:
+			uri := valueText(member(member(part, "fileData"), "fileUri"))
+			if uri != "" {
+				parsed, err := url.Parse(uri)
+				if err != nil || strings.HasPrefix(strings.TrimPrefix(uri, "/"), "files/") || strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), "generativelanguage.googleapis.com") || strings.EqualFold(parsed.Scheme, "gs") || strings.EqualFold(parsed.Scheme, "s3") {
+					if err := fail(at + "/fileData/fileUri"); err != nil {
+						return err
+					}
+				}
+			}
+		case wire.Bedrock:
+			for _, kind := range []string{"image", "document", "video"} {
+				if _, present := member(member(part, kind), "source").Lookup("s3Location"); present {
+					if err := fail(at + "/" + kind + "/source/s3Location"); err != nil {
+						return err
+					}
+				}
+			}
+			if err := checkAssetParts(member(member(part, "toolResult"), "content"), at+"/toolResult/content", encodedWire, fail); err != nil {
 				return err
 			}
 		}

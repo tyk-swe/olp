@@ -80,3 +80,121 @@ it('retires the ready plan when external credential bindings change', async () =
   );
   await vi.waitFor(() => expect(button('Apply')).toBeDefined());
 });
+
+it('ignores a deferred plan result after the artifact changed', async () => {
+  let release: (value: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => (release = resolve));
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/configuration/plan') return pending;
+      return json({});
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(ConfigurationPanel, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  const click = (name: string) => {
+    button(name)?.click();
+    flushSync();
+  };
+  const setArtifact = (id: string) => {
+    const field = target.querySelector<HTMLTextAreaElement>(
+      '#promotion-artifact'
+    );
+    if (!field) throw new Error('Missing artifact field');
+    field.value = JSON.stringify({
+      api_version: 'openllmproxy.dev/config/v2',
+      projects: [{ id }],
+      providers: [],
+      routes: [],
+      pricing: null
+    });
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+  flushSync();
+  setArtifact('first');
+  click('Plan');
+  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(true));
+  setArtifact('second');
+  release(
+    json({
+      digest: 'plan-digest',
+      actions: [],
+      blockers: [],
+      conflicts: []
+    })
+  );
+  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(false));
+  expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
+  expect(button('Apply')).toBeUndefined();
+  click('Plan');
+});
+
+it('keeps Apply and Plan disabled until a conflict refresh finishes', async () => {
+  const refresh = Promise.withResolvers<Response>();
+  const planResponse = (digest: string) =>
+    json({ digest, actions: [], blockers: [], conflicts: [] });
+  const plans = vi
+    .fn(() => refresh.promise)
+    .mockResolvedValueOnce(planResponse('initial'));
+  const applies = vi.fn(() => json({ title: 'Conflict', status: 409 }, 409));
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/configuration/plan') return plans();
+      if (path === '/api/v1/configuration/apply') return applies();
+      return json({});
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(ConfigurationPanel, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find((item) =>
+      item.textContent?.trim().startsWith(name)
+    );
+  flushSync();
+  const artifact = target.querySelector<HTMLTextAreaElement>(
+    '#promotion-artifact'
+  )!;
+  artifact.value = JSON.stringify({
+    api_version: 'openllmproxy.dev/config/v2',
+    projects: [],
+    providers: [],
+    routes: [],
+    pricing: null
+  });
+  artifact.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  button('Plan')?.click();
+  await vi.waitFor(() => expect(button('Apply')?.disabled).toBe(false));
+  button('Apply')?.click();
+  await vi.waitFor(() => expect(plans).toHaveBeenCalledTimes(2));
+  expect(button('Apply')?.disabled).toBe(true);
+  expect(button('Plan')?.disabled).toBe(true);
+  expect(applies).toHaveBeenCalledOnce();
+  refresh.resolve(planResponse('refreshed'));
+  await vi.waitFor(() => expect(button('Apply')?.disabled).toBe(false));
+  expect(target.textContent).toContain('Digest refreshed');
+  expect(target.querySelector('[role="alert"]')?.textContent).toBe('Conflict');
+});

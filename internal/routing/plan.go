@@ -3,14 +3,10 @@ package routing
 import (
 	"cmp"
 	"context"
-	"encoding/json"
-	"errors"
-	"math"
 	"math/big"
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
@@ -86,10 +82,6 @@ type Options struct {
 	// EstimateCost asks the plan to record each target's minimum and maximum
 	// possible cost; only simulations set it, so live planning adds nothing.
 	EstimateCost bool
-	// InstallationCurrency is the currency installation prices use. The
-	// bounded_cost strategy compares only bounds in this currency when it
-	// is set; without it, bounds compare only with bounds sharing a currency.
-	InstallationCurrency string
 	// WorstCost bounds one candidate's attempt cost — provider cost with the
 	// attempt's pinned discount — or reports it cannot be bounded. It runs only
 	// when an effective maximum-cost ceiling, cost estimation or the
@@ -98,45 +90,38 @@ type Options struct {
 }
 
 // CostBound is one candidate's upper attempt cost. InputTokens and
-// OutputTokens name the token counts the bound priced — the input estimate
-// and the reserved output allowance — or stay nil when the bound did not
-// price tokens, as a per-request or media price does not.
+// OutputTokens are the input estimate and reserved output allowance the bound
+// priced, nil when it priced no tokens, as a per-request or media price does.
 type CostBound struct {
 	Cost         rates.Cost
 	InputTokens  *int64
 	OutputTokens *int64
 }
 type Decision struct {
-	Incompatibility       *Incompatibility           `json:"incompatibility,omitempty"`
-	TargetID              string                     `json:"target_id"`
-	ProviderID            string                     `json:"provider_id"`
-	UpstreamModel         string                     `json:"upstream_model"`
-	Eligible              bool                       `json:"eligible"`
-	Priority              int                        `json:"priority"`
-	Strategy              string                     `json:"strategy"`
-	Attempt               *int                       `json:"attempt"`
-	CredentialSlotID      *string                    `json:"credential_slot_id"`
-	Reason                *string                    `json:"reason"`
-	Price                 *rates.RoutingPrice        `json:"price"`
-	Performance           *routinginputs.Performance `json:"performance"`
-	VendorID              *string                    `json:"vendor_id"`
-	MetadataObservedAt    *time.Time                 `json:"metadata_observed_at"`
-	EstimatedInputTokens  *int64                     `json:"estimated_input_tokens"`
-	RequestedOutputTokens *int64                     `json:"requested_output_tokens"`
-	ContextLength         *int64                     `json:"context_length"`
-	MaxOutputTokens       *int64                     `json:"max_output_tokens"`
-	Selector              *string                    `json:"selector,omitempty"`
-	Shadow                bool                       `json:"shadow,omitempty"`
-	Unhealthy             bool                       `json:"unhealthy,omitempty"`
-	Headroom              *float64                   `json:"headroom,omitempty"`
-	// MaxCost is the effective cost ceiling eligibility applied, in the
-	// installation currency, or null when no scope set one. It is the rule
-	// that admitted the attempt, never the attempt's own estimate.
-	MaxCost *string `json:"max_cost"`
-	// BoundedCostFallbackReason names why the bounded_cost strategy ordered
-	// this candidate by weight instead of by its upper estimate, or stays
-	// absent when the upper estimate decided its place or another strategy ran.
-	BoundedCostFallbackReason *string `json:"bounded_cost_fallback_reason,omitempty"`
+	Incompatibility           *Incompatibility           `json:"incompatibility,omitempty"`
+	TargetID                  string                     `json:"target_id"`
+	ProviderID                string                     `json:"provider_id"`
+	UpstreamModel             string                     `json:"upstream_model"`
+	Eligible                  bool                       `json:"eligible"`
+	Priority                  int                        `json:"priority"`
+	Strategy                  string                     `json:"strategy"`
+	Attempt                   *int                       `json:"attempt"`
+	CredentialSlotID          *string                    `json:"credential_slot_id"`
+	Reason                    *string                    `json:"reason"`
+	Price                     *rates.RoutingPrice        `json:"price"`
+	Performance               *routinginputs.Performance `json:"performance"`
+	VendorID                  *string                    `json:"vendor_id"`
+	MetadataObservedAt        *time.Time                 `json:"metadata_observed_at"`
+	EstimatedInputTokens      *int64                     `json:"estimated_input_tokens"`
+	RequestedOutputTokens     *int64                     `json:"requested_output_tokens"`
+	ContextLength             *int64                     `json:"context_length"`
+	MaxOutputTokens           *int64                     `json:"max_output_tokens"`
+	Selector                  *string                    `json:"selector,omitempty"`
+	Shadow                    bool                       `json:"shadow,omitempty"`
+	Unhealthy                 bool                       `json:"unhealthy,omitempty"`
+	Headroom                  *float64                   `json:"headroom,omitempty"`
+	MaxCost                   *string                    `json:"max_cost"`
+	BoundedCostFallbackReason *string                    `json:"bounded_cost_fallback_reason,omitempty"`
 	// EstimatedCost is the attempt's cost bound pair for a simulation, null
 	// when the target's price cannot bound or no demand is known.
 	EstimatedCost *EstimatedCost `json:"estimated_cost"`
@@ -144,9 +129,9 @@ type Decision struct {
 
 // EstimatedCost is the minimum and maximum one attempt on a target could
 // cost: the floor prices the input estimate at the cheapest input rate; the
-// bound prices the worst case the gateway would reserve. The token counts
-// name what the maximum priced: the input estimate and the reserved output
-// allowance, or null when the bound did not price tokens.
+// bound prices the worst case the gateway would reserve. The token counts are
+// the input estimate and reserved output allowance the maximum priced, null
+// when it priced no tokens.
 type EstimatedCost struct {
 	Minimum              string `json:"minimum"`
 	Maximum              string `json:"maximum"`
@@ -238,8 +223,7 @@ type rankedCandidate struct {
 	preference int
 	locality   int
 	shadow     bool
-	bound      CostBound
-	boundKnown bool
+	bound      *CostBound
 	costRanked bool
 	// allowed marks a target that only the matching selector excluded.
 	allowed bool
@@ -296,7 +280,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
 		plan.Baseline = baseline(rows, operation)
 	}
-	applyBoundedCost(rows, policy.Strategy, operation, options.InstallationCurrency)
+	applyBoundedCost(rows, policy.Strategy, operation)
 	orderCandidates(rows, policy.Strategy, operation)
 	plan.addCandidates(rows, options.CheckSlots)
 	return plan, nil
@@ -325,28 +309,16 @@ func baseline(rows []rankedCandidate, operation string) *Baseline {
 // estimatedCost is the bound pair a simulation reports for a target. A
 // committed provider can only charge zero; a target without a demand or a
 // boundable price reports nothing.
-func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates.RoutingDiscount, demand *TokenDemand, now time.Time, bound CostBound, boundKnown bool, operation string) *EstimatedCost {
+func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates.RoutingDiscount, demand *TokenDemand, now time.Time, worst func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (CostBound, bool), target Target) *EstimatedCost {
 	if price == nil || demand == nil {
 		return nil
 	}
 	estimated := &EstimatedCost{Minimum: "0", Maximum: "0", Currency: price.Currency}
-	if operation == "generation" {
-		estimated.PricedInputTokens, estimated.ReservedOutputTokens = bound.InputTokens, bound.OutputTokens
-		if estimated.PricedInputTokens == nil {
-			input := demand.EstimatedInputTokens
-			if demand.CostInputTokens != nil {
-				input = *demand.CostInputTokens
-			}
-			estimated.PricedInputTokens = &input
-		}
-		if estimated.ReservedOutputTokens == nil {
-			estimated.ReservedOutputTokens = demand.MaxOutputTokens
-		}
-	}
 	if provider.CommitmentAt(now) != nil {
 		return estimated
 	}
-	if !boundKnown {
+	bound, ok := worst(provider, target, price, discount)
+	if !ok {
 		return nil
 	}
 	input := demand.EstimatedInputTokens
@@ -358,480 +330,10 @@ func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates
 		return nil
 	}
 	estimated.Minimum, estimated.Maximum = floor.String(), bound.Cost.String()
+	estimated.PricedInputTokens, estimated.ReservedOutputTokens = bound.InputTokens, bound.OutputTokens
 	return estimated
 }
 
-// applyBoundedCost marks the candidates the bounded_cost strategy orders by
-// upper estimate. Within each health, priority, locality and preference
-// tier — serving and shadow candidates apart — only known bounds in one
-// currency compare: the installation currency when the caller names it, or
-// else the currency the most bounds in the tier share. A tier ranks by bound
-// only when at least two candidates compare; the rest keep weighted order,
-// with the fallback named on their decisions. Eligibility is final when this
-// runs, so a fallback never revives an excluded target.
-func applyBoundedCost(rows []rankedCandidate, strategy, operation, installationCurrency string) {
-	if strategy != strategyBoundedCost {
-		return
-	}
-	type tier struct {
-		unhealthy                 bool
-		priority, locality, order int
-		preference                int
-		shadow                    bool
-	}
-	groups := map[tier][]int{}
-	for i := range rows {
-		if !rows[i].decision.Eligible {
-			continue
-		}
-		key := tier{rows[i].decision.Unhealthy, rows[i].attempt.Priority, rows[i].locality, rows[i].order, rows[i].preference, rows[i].shadow}
-		groups[key] = append(groups[key], i)
-	}
-	for _, group := range groups {
-		if len(group) < 2 {
-			continue
-		}
-		fallback := func(reason string) {
-			for _, i := range group {
-				rows[i].decision.BoundedCostFallbackReason = &reason
-			}
-		}
-		if operation != "generation" {
-			fallback("operation_not_generation")
-			continue
-		}
-		counts := map[string]int{}
-		for _, i := range group {
-			if rows[i].boundKnown && rows[i].decision.Price != nil {
-				counts[rows[i].decision.Price.Currency]++
-			}
-		}
-		currency := installationCurrency
-		if currency == "" {
-			for _, i := range group {
-				if price := rows[i].decision.Price; rows[i].boundKnown && price != nil && counts[price.Currency] > counts[currency] {
-					currency = price.Currency
-				}
-			}
-		}
-		ranked := 0
-		for _, i := range group {
-			if rows[i].boundKnown && rows[i].decision.Price != nil && rows[i].decision.Price.Currency == currency {
-				ranked++
-			}
-		}
-		if ranked < 2 {
-			fallback("insufficient_comparable_bounds")
-			continue
-		}
-		for _, i := range group {
-			if rows[i].boundKnown && rows[i].decision.Price != nil && rows[i].decision.Price.Currency == currency {
-				rows[i].costRanked = true
-			} else {
-				reason := "cost_bound_not_comparable"
-				rows[i].decision.BoundedCostFallbackReason = &reason
-			}
-		}
-	}
-}
-
 func strptr(s string) *string { return &s }
-
-// evaluateCandidates preserves admission order: published eligibility and
-// source constraints precede preparation, then effective request constraints.
-func evaluateCandidates(s selectionSource, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options) ([]rankedCandidate, error) {
-	now := options.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	routeID, e := uuid.Parse(route.RoutingID)
-	if e != nil {
-		return nil, &SelectionError{Code: NoEligibleTargets}
-	}
-	rows := make([]rankedCandidate, 0, len(route.Targets))
-	for _, target := range route.Targets {
-		provider, exists := s.lookupProvider(target.ProviderID)
-		row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
-		if chosen.selector != nil && !row.shadow {
-			row.decision.Selector = &chosen.selector.ID
-		}
-		row.decision.Unhealthy = options.Unhealthy != nil && options.Unhealthy(target.ProviderID)
-		if provider.VendorID != "" {
-			row.decision.VendorID = &provider.VendorID
-		}
-		metadata, _ := provider.Metadata(target.ProviderModel)
-		connectionRegion := provider.CloudRegion
-		if connectionRegion == "" && metadata.Region != nil {
-			connectionRegion = *metadata.Region
-		}
-		if options.Region != "" && connectionRegion != options.Region {
-			row.locality = 1
-		}
-		row.decision.MetadataObservedAt = metadata.ObservedAt
-		row.decision.ContextLength = metadata.ContextLength
-		row.decision.MaxOutputTokens = metadata.MaxOutputTokens
-		demand := options.TokenDemand
-		if options.Demand != nil {
-			demand = options.Demand(provider, target)
-		}
-		if demand != nil {
-			input := demand.EstimatedInputTokens
-			row.decision.EstimatedInputTokens = &input
-			row.decision.RequestedOutputTokens = demand.MaxOutputTokens
-		}
-		row.decision.Price = options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
-		row.attempt.Discount = options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
-		row.decision.MaxCost = policy.MaxCost
-		needBound := options.WorstCost != nil && (options.EstimateCost || policy.MaxCost != nil || policy.Strategy == strategyBoundedCost)
-		if needBound {
-			row.bound, row.boundKnown = options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
-		}
-		if options.EstimateCost && options.WorstCost != nil {
-			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, row.bound, row.boundKnown, operation)
-		}
-		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
-		reason := ""
-		switch {
-		case !exists:
-			reason = "target_unknown"
-		case !provider.Enabled:
-			reason = "provider_not_active"
-		case provider.Plugin != nil && provider.Plugin.Unconfined() && !options.UnconfinedPlugins:
-			reason = "plugin_unconfined_disabled"
-		case !(route.IsPassthrough() && operation == PassthroughOperation) && !provider.Supports(target.ProviderModel, operation, surface, mode):
-			reason = "capability_not_certified"
-		case row.shadow && (options.Mirror == nil || !Sampled(target.ID, options.Mirror, target.Shadow.SampleRate)):
-			reason = "shadow_not_sampled"
-		case !row.shadow && !chosen.admits(target):
-			reason = "selector_excluded"
-		}
-		if reason == "selector_excluded" {
-			row.allowed = capacityReason(metadata, demand) == "" && constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters) == ""
-		}
-		if reason == "" {
-			reason = capacityReason(metadata, demand)
-		}
-		if reason == "" {
-			reason = constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters)
-		}
-		for index, selector := range policy.Preferences.Order {
-			if selectorMatches(selector, provider) {
-				row.order = index
-				break
-			}
-		}
-		if reason == "" && policy.Preferences.AllowFallbacks != nil && !*policy.Preferences.AllowFallbacks && len(policy.Preferences.Order) > 0 && row.order == len(policy.Preferences.Order) {
-			reason = "outside_preferred_order"
-		}
-		if reason == "" && options.CheckSlots {
-			if provider.Network != nil && provider.Network.CredentialID != "" && options.CredentialEligibility != nil {
-				if eligibility := options.CredentialEligibility(provider.Network.CredentialID); eligibility != Eligible {
-					reason = "network_credential_" + string(eligibility)
-				}
-			}
-		}
-		if reason == "" && options.CheckSlots {
-			row.slots, row.skipped = eligibleSlots(SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity), options.CredentialEligibility)
-			if len(row.slots) == 0 {
-				reason = noSlotReason(row.skipped)
-			}
-		}
-
-		if reason == "" && options.Prepare != nil {
-			prepared, err := options.Prepare(provider, target)
-			if err != nil {
-				reason = "unsupported_request_semantics"
-				var detail incompatibilityError
-				if errors.As(err, &detail) {
-					code, field, requirement, message := detail.Incompatibility()
-					row.decision.Incompatibility = &Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
-					reason = code
-				}
-			} else if prepared != nil {
-				reason = capacityReason(metadata, prepared.Demand)
-				if reason == "" {
-					reason = constraintReason(policy, provider, metadata, row.decision.Price, prepared.Parameters)
-				}
-				if needBound {
-					row.bound, row.boundKnown = options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
-				}
-				if prepared.Demand != nil {
-					input := prepared.Demand.EstimatedInputTokens
-					row.decision.EstimatedInputTokens = &input
-					row.decision.RequestedOutputTokens = prepared.Demand.MaxOutputTokens
-					if options.EstimateCost && options.WorstCost != nil {
-						row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, row.bound, row.boundKnown, operation)
-					}
-				}
-			}
-		}
-		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
-			if !row.boundKnown || !lessOrEqual(strptr(row.bound.Cost.String()), policy.MaxCost) {
-				reason = "cost_limit_exceeded"
-			}
-		}
-		targetID, e := uuid.Parse(target.RoutingID)
-		if e != nil {
-			reason = "target_unknown"
-		}
-		if reason != "" {
-			row.decision.Reason = &reason
-		} else {
-			row.decision.Eligible = true
-		}
-		row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: string(provider.Kind), UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
-		perf := row.decision.Performance
-		if policy.Strategy == strategyLatency && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
-			row.preference = 1
-		}
-		if policy.Strategy == strategyThroughput && policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*policy.Preferences.PreferredMinThroughput)) {
-			row.preference = 1
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
-}
-
-func orderCandidates(rows []rankedCandidate, strategy, operation string) {
-	slices.SortStableFunc(rows, func(a, b rankedCandidate) int {
-		if a.decision.Eligible != b.decision.Eligible {
-			if a.decision.Eligible {
-				return -1
-			}
-			return 1
-		}
-		if a.decision.Unhealthy != b.decision.Unhealthy {
-			if b.decision.Unhealthy {
-				return -1
-			}
-			return 1
-		}
-		if order := cmp.Compare(a.attempt.Priority, b.attempt.Priority); order != 0 {
-			return order
-		}
-		if order := cmp.Compare(a.locality, b.locality); order != 0 {
-			return order
-		}
-		if order := cmp.Compare(a.order, b.order); order != 0 {
-			return order
-		}
-		if order := cmp.Compare(a.preference, b.preference); order != 0 {
-			return order
-		}
-		switch strategy {
-		case strategyCapacity:
-			ah, bh := a.decision.Headroom, b.decision.Headroom
-			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
-				return order
-			}
-		case strategyBoundedCost:
-			if a.costRanked != b.costRanked {
-				if a.costRanked {
-					return -1
-				}
-				return 1
-			}
-			if a.costRanked && b.costRanked {
-				if order := a.bound.Cost.Cmp(b.bound.Cost); order != 0 {
-					return order
-				}
-			}
-		case strategyPrice:
-			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
-			if (ap == nil) != (bp == nil) {
-				if ap != nil {
-					return -1
-				}
-				return 1
-			}
-			if ap != nil && ap.Cmp(bp) != 0 {
-				return ap.Cmp(bp)
-			}
-		case strategyLatency, strategyThroughput:
-			ap, bp := a.decision.Performance, b.decision.Performance
-			if strategy == strategyThroughput {
-				if ap != nil && ap.Throughput == nil {
-					ap = nil
-				}
-				if bp != nil && bp.Throughput == nil {
-					bp = nil
-				}
-			}
-			if (ap == nil) != (bp == nil) {
-				if ap != nil {
-					return -1
-				}
-				return 1
-			}
-			if ap != nil {
-				if strategy == strategyLatency && ap.LatencyMS != bp.LatencyMS {
-					return cmp.Compare(ap.LatencyMS, bp.LatencyMS)
-				}
-				if strategy == strategyThroughput && *ap.Throughput != *bp.Throughput {
-					return cmp.Compare(*bp.Throughput, *ap.Throughput)
-				}
-			}
-		}
-		return cmp.Compare(b.attempt.Score, a.attempt.Score)
-	})
-}
-
-// addCandidates retains every eligible target for execution. Preview ordinals
-// account for credential slots; excluded credentials never spend the budget.
-func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
-	ordinal := 0
-	for _, row := range rows {
-		if row.shadow {
-			if row.decision.Eligible {
-				plan.Shadows = append(plan.Shadows, row.attempt)
-			}
-			plan.Decisions = append(plan.Decisions, row.decision)
-			continue
-		}
-		if !row.decision.Eligible {
-			plan.Decisions = append(plan.Decisions, row.decision)
-			continue
-		}
-		plan.Attempts = append(plan.Attempts, row.attempt)
-		count := len(row.slots)
-		if !checkSlots {
-			count = 1
-		}
-		for i := 0; i < count; i++ {
-			decision := row.decision
-			if checkSlots {
-				id := row.slots[i].ID
-				decision.CredentialSlotID = &id
-			}
-			ordinal++
-			if ordinal <= plan.Budget {
-				n := ordinal
-				decision.Attempt = &n
-			} else {
-				decision.Eligible = false
-				reason := "attempt_budget_exhausted"
-				decision.Reason = &reason
-			}
-			plan.Decisions = append(plan.Decisions, decision)
-		}
-		for _, slot := range row.skipped {
-			decision := row.decision
-			decision.Eligible = false
-			decision.CredentialSlotID, decision.Reason = &slot.id, &slot.reason
-			plan.Decisions = append(plan.Decisions, decision)
-		}
-	}
-}
-
-// skippedSlot is a credential slot planning skips because its credential
-// version may not serve, with the plan reason that names why.
-type skippedSlot struct {
-	id, reason string
-}
-
-// eligibleSlots keeps a target's selected slots whose credential versions may
-// serve and returns the rest as skipped, with their reasons. Skipped slots
-// never spend the attempt budget.
-func eligibleSlots(slots []Slot, eligibility func(string) Eligibility) ([]Slot, []skippedSlot) {
-	if eligibility == nil {
-		return slots, nil
-	}
-	var skipped []skippedSlot
-	slots = slices.DeleteFunc(slots, func(slot Slot) bool {
-		if slot.CredentialID == nil {
-			return false
-		}
-		if e := eligibility(*slot.CredentialID); e != Eligible {
-			skipped = append(skipped, skippedSlot{id: slot.ID, reason: "credential_" + string(e)})
-			return true
-		}
-		return false
-	})
-	return slots, skipped
-}
-
-// noSlotReason names why a target has no credential slot to try: the reason
-// every skipped slot shares, such as credential_lapsed, or
-// no_eligible_credentials.
-func noSlotReason(skipped []skippedSlot) string {
-	if len(skipped) == 0 || slices.ContainsFunc(skipped, func(slot skippedSlot) bool { return slot.reason != skipped[0].reason }) {
-		return "no_eligible_credentials"
-	}
-	return skipped[0].reason
-}
-
-func capacityReason(m ModelMetadata, demand *TokenDemand) string {
-	if demand == nil {
-		return ""
-	}
-	if m.ContextLength != nil {
-		if demand.EstimatedInputTokens > *m.ContextLength {
-			return "context_length_exceeded"
-		}
-		if demand.MaxOutputTokens != nil && saturatingSum(demand.EstimatedInputTokens, *demand.MaxOutputTokens) > *m.ContextLength {
-			return "context_length_exceeded"
-		}
-	}
-	if m.MaxOutputTokens != nil && demand.MaxOutputTokens != nil && *demand.MaxOutputTokens > *m.MaxOutputTokens {
-		return "max_output_tokens_exceeded"
-	}
-	return ""
-}
-
-func saturatingSum(a, b int64) int64 {
-	if a > math.MaxInt64-b {
-		return math.MaxInt64
-	}
-	return a + b
-}
-
-func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *rates.RoutingPrice, parameters Names) string {
-	for _, c := range policy.Constraints {
-		if c.Only != nil && !anySelector(c.Only, p) {
-			return "provider_not_allowed"
-		}
-		if anySelector(c.Ignore, p) {
-			return "provider_ignored"
-		}
-		if !factAllowed(c.Regions, m.Region) {
-			return "region_not_allowed"
-		}
-		if !factAllowed(c.Quantizations, m.Quantization) {
-			return "quantization_not_allowed"
-		}
-		if required(c.DenyDataCollection) && (m.DataCollection == nil || *m.DataCollection || m.Source == nil || m.ObservedAt == nil) {
-			return "data_collection_not_allowed"
-		}
-		if required(c.RequireZeroDataRetention) && (m.ZeroDataRetention == nil || !*m.ZeroDataRetention || m.Source == nil || m.ObservedAt == nil) {
-			return "zero_data_retention_required"
-		}
-		if required(c.RequireParameters) {
-			if names := parameters.list(); len(names) > 0 {
-				if m.SupportedParameters == nil {
-					return "parameters_unknown"
-				}
-				for _, name := range names {
-					if !slices.Contains(*m.SupportedParameters, name) {
-						return "parameter_not_supported"
-					}
-				}
-			}
-		}
-		if len(c.MaxPrice) > 0 && string(c.MaxPrice) != "null" {
-			var ceiling PriceCeiling
-			_ = json.Unmarshal(c.MaxPrice, &ceiling)
-			if price == nil || !lessOrEqual(price.InputPerMillion, ceiling.Input) || !lessOrEqual(price.OutputPerMillion, ceiling.Output) || !lessOrEqual(price.UnitPrice, ceiling.Unit) {
-				return "price_ceiling_exceeded_or_unknown"
-			}
-		}
-	}
-	return ""
-}
-func deref(v *float64) float64 {
-	if v == nil {
-		return 0
-	}
-	return *v
-}
 
 func unsupportedBudget() error { return &SelectionError{Code: "attempt_budget_increase_forbidden"} }

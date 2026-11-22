@@ -573,7 +573,7 @@ and `input_reference`; internal cleanup markers are excluded.
 | `latency` | Median time to first meaningful output for streams, total attempt latency for unary operations |
 | `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded |
 | `capacity` | Remaining headroom of each credential slot, the smallest of its connection's and its own remaining request, token and concurrency fractions, read in one pipelined Valkey round trip; slots without quotas rank after slots with known headroom |
-| `bounded_cost` | Exact-decimal upper estimate of this request on each target (generation only); targets without a comparable bound keep weighted order after the ranked ones |
+| `bounded_cost` | Exact-decimal upper estimate of this request on each target (generation only); targets without a bound keep weighted order after the ranked ones |
 
 `bounded_cost` prices the actual request instead of comparing rate sums, so a
 long prompt with a short answer can prefer a target `price` would not. It
@@ -581,12 +581,15 @@ applies only to generation and only inside the tier every other ordering
 already respects (health, priority, locality and preferred order), after all
 eligibility checks including `max_cost`. Each candidate's upper estimate is
 the same worst case the gateway would reserve, with the attempt's pinned
-discount. Only known bounds in the installation currency compare, and a
-missing bound is never treated as zero. When at least two candidates in a
-tier compare, they rank by bound, ties fall back to weighted order, and the
-rest follow in weighted order. When fewer than two compare, the whole tier
-keeps the weighted order and the route explanation names the fallback. The
-fallback never restores a target that eligibility already excluded.
+discount, and a committed provider bounds at zero. A missing bound is never
+treated as zero. When at least two candidates in a tier have a bound, they
+rank by it, ties fall back to weighted order, and candidates without one
+follow in weighted order with `bounded_cost_fallback_reason` set to
+`cost_bound_unknown`. When fewer than two have a bound, the whole tier keeps
+the weighted order and each candidate reports `insufficient_cost_bounds`. A
+non-generation request keeps weighted order and reports
+`operation_not_generation`. The fallback never restores a target that
+eligibility already excluded.
 
 Prices resolve connection scope before vendor scope before connector-kind scope,
 then the latest effective revision. Future rates become eligible at their

@@ -30,9 +30,6 @@ func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options 
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()
-	if inputs != nil {
-		options.InstallationCurrency = inputs.Currency
-	}
 	options.WorstCost = func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 		return x.targetCostBound(provider, target, price, discount)
 	}

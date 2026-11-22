@@ -1,3 +1,5 @@
+import { captureResult, type Result } from '#lib/editing/result.js';
+
 export type InstallationBookmark = { name: string; origin: string };
 const storageKey = 'olp.installations.v1';
 
@@ -69,4 +71,57 @@ export function saveInstallations(
   bookmarks: InstallationBookmark[]
 ) {
   storage.setItem(storageKey, JSON.stringify(bookmarks));
+}
+
+export function storedBookmarks(
+  storage: () => Pick<Storage, 'getItem'>,
+  current: string
+): Result<InstallationBookmark[]> {
+  return captureResult(() => {
+    const kept: InstallationBookmark[] = [];
+    for (const entry of readInstallations(storage())) {
+      try {
+        bookmarkOrigin(entry.origin, current, kept);
+        kept.push(entry);
+      } catch {
+        /* Ignore stale bookmarks that would share installation cookies. */
+      }
+    }
+    return kept;
+  });
+}
+
+export function addBookmark(
+  storage: () => Pick<Storage, 'setItem'>,
+  current: string,
+  bookmarks: InstallationBookmark[],
+  name: string,
+  url: string
+): Result<InstallationBookmark[]> {
+  return captureResult(() => {
+    const target = bookmarkOrigin(url, current, bookmarks);
+    const label = name.trim();
+    if (!label || label.length > 100)
+      throw new Error('Use a name of 1–100 characters.');
+    const next = [
+      ...bookmarks.filter((entry) => entry.origin !== target),
+      { name: label, origin: target }
+    ];
+    if (next.length > 20)
+      throw new Error('Keep at most 20 installation bookmarks.');
+    saveInstallations(storage(), next);
+    return next;
+  });
+}
+
+export function removeBookmark(
+  storage: () => Pick<Storage, 'setItem'>,
+  bookmarks: InstallationBookmark[],
+  target: string
+): Result<InstallationBookmark[]> {
+  return captureResult(() => {
+    const next = bookmarks.filter((entry) => entry.origin !== target);
+    saveInstallations(storage(), next);
+    return next;
+  });
 }

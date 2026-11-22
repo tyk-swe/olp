@@ -12952,10 +12952,16 @@
             ]
           },
           "bounded_cost_fallback_reason": {
-            "description": "Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate: operation_not_generation, insufficient_comparable_bounds or cost_bound_not_comparable. Absent when the upper estimate decided its place or another strategy ran.",
+            "description": "Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.",
             "type": [
               "string",
               "null"
+            ],
+            "enum": [
+              "operation_not_generation",
+              "insufficient_cost_bounds",
+              "cost_bound_unknown",
+              null
             ]
           },
           "estimated_cost": {

@@ -274,113 +274,129 @@ func workflowApprovalFrames(pause *workflowPause, maxEvent, maxResponse int) ([]
 	return output.Bytes(), nil
 }
 
+type pauseSSEEvent struct {
+	name string
+	data json.RawMessage
+}
+
+type pauseChatDelta struct {
+	Role string `json:"role"`
+}
+
+type pauseChatChoice struct {
+	Index        int            `json:"index"`
+	Delta        pauseChatDelta `json:"delta"`
+	FinishReason string         `json:"finish_reason"`
+}
+
+type pauseChatEvent struct {
+	ID       string            `json:"id"`
+	Object   string            `json:"object"`
+	Created  int64             `json:"created"`
+	Model    string            `json:"model"`
+	Choices  []pauseChatChoice `json:"choices"`
+	Approval *workflowPause    `json:"olp_approval"`
+}
+
+type pauseMessageUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type pauseMessage struct {
+	ID      string            `json:"id"`
+	Type    string            `json:"type"`
+	Role    string            `json:"role"`
+	Model   string            `json:"model"`
+	Content []json.RawMessage `json:"content"`
+	Usage   pauseMessageUsage `json:"usage"`
+}
+
+type pauseMessageStart struct {
+	Type    string       `json:"type"`
+	Message pauseMessage `json:"message"`
+}
+
+type pauseMessageDeltaFields struct {
+	StopReason   string  `json:"stop_reason"`
+	StopSequence *string `json:"stop_sequence"`
+}
+
+type pauseMessageDelta struct {
+	Type     string                  `json:"type"`
+	Delta    pauseMessageDeltaFields `json:"delta"`
+	Usage    pauseMessageUsage       `json:"usage"`
+	Approval *workflowPause          `json:"olp_approval"`
+}
+
+type pauseMessageStop struct {
+	Type string `json:"type"`
+}
+
+type pauseResponse struct {
+	ID        string            `json:"id"`
+	Object    string            `json:"object"`
+	CreatedAt int64             `json:"created_at"`
+	Model     string            `json:"model"`
+	Status    string            `json:"status"`
+	Output    []json.RawMessage `json:"output"`
+	Approval  *workflowPause    `json:"olp_approval"`
+}
+
+type pauseResponseEvent struct {
+	Type     string        `json:"type"`
+	Sequence int           `json:"sequence_number"`
+	Response pauseResponse `json:"response"`
+}
+
+type pauseGeminiContent struct {
+	Role  string            `json:"role"`
+	Parts []json.RawMessage `json:"parts"`
+}
+
+type pauseGeminiCandidate struct {
+	Index        int                `json:"index"`
+	Content      pauseGeminiContent `json:"content"`
+	FinishReason string             `json:"finishReason"`
+}
+
+type pauseGeminiEvent struct {
+	Candidates []pauseGeminiCandidate `json:"candidates"`
+	Approval   *workflowPause         `json:"olp_approval"`
+}
+
+func workflowPauseEvents(family wire.Format, model, id string, pause *workflowPause) ([]pauseSSEEvent, error) {
+	switch {
+	case family == wire.Chat:
+		data, err := json.Marshal(pauseChatEvent{ID: "chatcmpl_" + id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: model, Choices: []pauseChatChoice{{Delta: pauseChatDelta{Role: "assistant"}, FinishReason: "stop"}}, Approval: pause})
+		return []pauseSSEEvent{{data: data}, {data: json.RawMessage("[DONE]")}}, err
+	case family == wire.Anthropic:
+		start, err := json.Marshal(pauseMessageStart{Type: "message_start", Message: pauseMessage{ID: "msg_" + id, Type: "message", Role: "assistant", Model: model, Content: []json.RawMessage{}}})
+		if err != nil {
+			return nil, err
+		}
+		delta, err := json.Marshal(pauseMessageDelta{Type: "message_delta", Delta: pauseMessageDeltaFields{StopReason: "end_turn"}, Approval: pause})
+		if err != nil {
+			return nil, err
+		}
+		stop, err := json.Marshal(pauseMessageStop{Type: "message_stop"})
+		return []pauseSSEEvent{{name: "message_start", data: start}, {name: "message_delta", data: delta}, {name: "message_stop", data: stop}}, err
+	case family == wire.Responses:
+		data, err := json.Marshal(pauseResponseEvent{Type: "response.incomplete", Response: pauseResponse{ID: "resp_" + id, Object: "response", CreatedAt: time.Now().Unix(), Model: model, Status: "incomplete", Output: []json.RawMessage{}, Approval: pause}})
+		return []pauseSSEEvent{{name: "response.incomplete", data: data}}, err
+	case family.Surface() == "gemini":
+		data, err := json.Marshal(pauseGeminiEvent{Candidates: []pauseGeminiCandidate{{Content: pauseGeminiContent{Role: "model", Parts: []json.RawMessage{}}, FinishReason: "STOP"}}, Approval: pause})
+		return []pauseSSEEvent{{data: data}}, err
+	default:
+		return nil, ErrResponseTooLarge
+	}
+}
+
 func workflowPauseFrames(family wire.Format, model, id string, pause *workflowPause, maxEvent, maxResponse int) ([]byte, error) {
 	if len(pause.Output) > 0 {
 		return workflowApprovalFrames(pause, maxEvent, maxResponse)
 	}
-	type event struct {
-		name string
-		data json.RawMessage
-	}
-	type chatDelta struct {
-		Role string `json:"role"`
-	}
-	type chatChoice struct {
-		Index        int       `json:"index"`
-		Delta        chatDelta `json:"delta"`
-		FinishReason string    `json:"finish_reason"`
-	}
-	type chatEvent struct {
-		ID       string         `json:"id"`
-		Object   string         `json:"object"`
-		Created  int64          `json:"created"`
-		Model    string         `json:"model"`
-		Choices  []chatChoice   `json:"choices"`
-		Approval *workflowPause `json:"olp_approval"`
-	}
-	type messageUsage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	}
-	type message struct {
-		ID      string            `json:"id"`
-		Type    string            `json:"type"`
-		Role    string            `json:"role"`
-		Model   string            `json:"model"`
-		Content []json.RawMessage `json:"content"`
-		Usage   messageUsage      `json:"usage"`
-	}
-	type messageStart struct {
-		Type    string  `json:"type"`
-		Message message `json:"message"`
-	}
-	type messageDeltaFields struct {
-		StopReason   string  `json:"stop_reason"`
-		StopSequence *string `json:"stop_sequence"`
-	}
-	type messageDelta struct {
-		Type     string             `json:"type"`
-		Delta    messageDeltaFields `json:"delta"`
-		Usage    messageUsage       `json:"usage"`
-		Approval *workflowPause     `json:"olp_approval"`
-	}
-	type messageStop struct {
-		Type string `json:"type"`
-	}
-	type response struct {
-		ID        string            `json:"id"`
-		Object    string            `json:"object"`
-		CreatedAt int64             `json:"created_at"`
-		Model     string            `json:"model"`
-		Status    string            `json:"status"`
-		Output    []json.RawMessage `json:"output"`
-		Approval  *workflowPause    `json:"olp_approval"`
-	}
-	type responseEvent struct {
-		Type     string   `json:"type"`
-		Sequence int      `json:"sequence_number"`
-		Response response `json:"response"`
-	}
-	type geminiContent struct {
-		Role  string            `json:"role"`
-		Parts []json.RawMessage `json:"parts"`
-	}
-	type geminiCandidate struct {
-		Index        int           `json:"index"`
-		Content      geminiContent `json:"content"`
-		FinishReason string        `json:"finishReason"`
-	}
-	type geminiEvent struct {
-		Candidates []geminiCandidate `json:"candidates"`
-		Approval   *workflowPause    `json:"olp_approval"`
-	}
-
-	events, err := func() ([]event, error) {
-		switch {
-		case family == wire.Chat:
-			data, err := json.Marshal(chatEvent{ID: "chatcmpl_" + id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: model, Choices: []chatChoice{{Delta: chatDelta{Role: "assistant"}, FinishReason: "stop"}}, Approval: pause})
-			return []event{{data: data}, {data: json.RawMessage("[DONE]")}}, err
-		case family == wire.Anthropic:
-			start, err := json.Marshal(messageStart{Type: "message_start", Message: message{ID: "msg_" + id, Type: "message", Role: "assistant", Model: model, Content: []json.RawMessage{}}})
-			if err != nil {
-				return nil, err
-			}
-			delta, err := json.Marshal(messageDelta{Type: "message_delta", Delta: messageDeltaFields{StopReason: "end_turn"}, Approval: pause})
-			if err != nil {
-				return nil, err
-			}
-			stop, err := json.Marshal(messageStop{Type: "message_stop"})
-			return []event{{name: "message_start", data: start}, {name: "message_delta", data: delta}, {name: "message_stop", data: stop}}, err
-		case family == wire.Responses:
-			data, err := json.Marshal(responseEvent{Type: "response.incomplete", Response: response{ID: "resp_" + id, Object: "response", CreatedAt: time.Now().Unix(), Model: model, Status: "incomplete", Output: []json.RawMessage{}, Approval: pause}})
-			return []event{{name: "response.incomplete", data: data}}, err
-		case family.Surface() == "gemini":
-			data, err := json.Marshal(geminiEvent{Candidates: []geminiCandidate{{Content: geminiContent{Role: "model", Parts: []json.RawMessage{}}, FinishReason: "STOP"}}, Approval: pause})
-			return []event{{data: data}}, err
-		default:
-			return nil, ErrResponseTooLarge
-		}
-	}()
+	events, err := workflowPauseEvents(family, model, id, pause)
 	if err != nil {
 		return nil, ErrResponseTooLarge
 	}

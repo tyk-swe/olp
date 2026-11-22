@@ -11,28 +11,8 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	c := r.c
 	if family == wire.Chat {
 		r.parameter("reasoning_effort", "reasoning_effort")
-		if value := r.take("tool_choice"); present(value) {
-			switch str(value) {
-			case "auto", "none", "required":
-			default:
-				choice, err := read(value, "/tool_choice", c)
-				if err != nil {
-					return err
-				}
-				if str(choice.take("type")) != "function" {
-					return unsupported("/tool_choice/type")
-				}
-				function, err := read(choice.take("function"), "/tool_choice/function", c)
-				if err != nil {
-					return err
-				}
-				if str(function.take("name")) == "" {
-					return unsupported("/tool_choice/function/name")
-				}
-				function.finish()
-				choice.finish()
-			}
-			c.Parameters["tool_choice"] = value
+		if err := decodeChatToolChoice(r.take("tool_choice"), c); err != nil {
+			return err
 		}
 	} else {
 		r.parameter("tool_choice", "tool_choice")
@@ -43,15 +23,10 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	r.parameter("max_tokens", "max_output_tokens")
 	r.parameter("max_completion_tokens", "max_output_tokens")
 	r.parameter("max_output_tokens", "max_output_tokens")
-	if family == wire.Completions {
-		prompt := r.take("prompt")
-		var text string
-		if json.Unmarshal(prompt, &text) == nil {
-			c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
-		} else {
-			c.Extensions = append(c.Extensions, "/prompt")
-		}
-	} else if family == wire.Chat {
+	switch family {
+	case wire.Completions:
+		decodeCompletionsPrompt(r.take("prompt"), c)
+	case wire.Chat:
 		for i, v := range arr(r.take("messages")) {
 			m, e := decodeChatMessage(v, fmt.Sprintf("/messages/%d", i), c)
 			if e != nil {
@@ -59,72 +34,126 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 			}
 			c.Messages = append(c.Messages, m)
 		}
-	} else {
-		r.ignoreDefault("include", "[]")
-		if instructions := r.take("instructions"); present(instructions) {
-			c.Messages = append(c.Messages, Message{Role: "system", Parts: []Part{{Text: str(instructions)}}})
+	default:
+		if err := decodeResponsesBody(r, c); err != nil {
+			return err
 		}
-		input := r.take("input")
-		var text string
-		if json.Unmarshal(input, &text) == nil {
-			c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
-		} else {
-			for i, v := range arr(input) {
-				p := fmt.Sprintf("/input/%d", i)
-				item, e := read(v, p, c)
-				if e != nil {
-					return e
-				}
-				kind := str(item.take("type"))
-				switch kind {
-				case "", "message":
-					item.take("status")
-					item.take("id")
-					m := Message{Role: str(item.take("role"))}
-					m.Parts, e = decodeParts(item.take("content"), "responses", p+"/content", c)
-					if e != nil {
-						return e
-					}
-					c.Messages = append(c.Messages, m)
-				case "function_call":
-					item.take("id")
-					item.take("status")
-					tc := wire.ToolCall{ID: str(item.take("call_id")), Name: str(item.take("name")), Arguments: str(item.take("arguments"))}
-					c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []wire.ToolCall{tc}})
-				case "function_call_output":
-					item.take("id")
-					item.ignoreDefault("status", `"completed"`)
-					m := Message{Role: "tool", ToolID: str(item.take("call_id"))}
-					m.Parts, e = decodeParts(item.take("output"), "responses", p+"/output", c)
-					if e != nil {
-						return e
-					}
-					c.Messages = append(c.Messages, m)
-				default:
-					c.Extensions = append(c.Extensions, p+"/type")
-				}
-				item.finish()
+	}
+	return decodeOpenAITools(r, family, c)
+}
+
+func decodeChatToolChoice(value json.RawMessage, c *Generation) error {
+	if !present(value) {
+		return nil
+	}
+	switch str(value) {
+	case "auto", "none", "required":
+	default:
+		choice, err := read(value, "/tool_choice", c)
+		if err != nil {
+			return err
+		}
+		if str(choice.take("type")) != "function" {
+			return unsupported("/tool_choice/type")
+		}
+		function, err := read(choice.take("function"), "/tool_choice/function", c)
+		if err != nil {
+			return err
+		}
+		if str(function.take("name")) == "" {
+			return unsupported("/tool_choice/function/name")
+		}
+		function.finish()
+		choice.finish()
+	}
+	c.Parameters["tool_choice"] = value
+	return nil
+}
+
+func decodeCompletionsPrompt(prompt json.RawMessage, c *Generation) {
+	var text string
+	if json.Unmarshal(prompt, &text) == nil {
+		c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
+		return
+	}
+	c.Extensions = append(c.Extensions, "/prompt")
+}
+
+func decodeResponsesBody(r *reader, c *Generation) error {
+	r.ignoreDefault("include", "[]")
+	if instructions := r.take("instructions"); present(instructions) {
+		c.Messages = append(c.Messages, Message{Role: "system", Parts: []Part{{Text: str(instructions)}}})
+	}
+	input := r.take("input")
+	var text string
+	if json.Unmarshal(input, &text) == nil {
+		c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
+	} else {
+		for i, v := range arr(input) {
+			if err := decodeResponsesInputItem(v, fmt.Sprintf("/input/%d", i), c); err != nil {
+				return err
 			}
 		}
-		if text := r.take("text"); present(text) {
-			t, e := read(text, "/text", c)
+	}
+	if text := r.take("text"); present(text) {
+		t, e := read(text, "/text", c)
+		if e != nil {
+			return e
+		}
+		if format := t.take("format"); present(format) {
+			fo, e := object(format)
 			if e != nil {
 				return e
 			}
-			if format := t.take("format"); present(format) {
-				fo, e := object(format)
-				if e != nil {
-					return e
-				}
-				if str(fo["type"]) == "json_schema" {
-					c.Parameters["response_format"] = raw(Object{"type": raw("json_schema"), "json_schema": raw(fo)})
-				} else {
-					c.Parameters["response_format"] = format
-				}
+			if str(fo["type"]) == "json_schema" {
+				c.Parameters["response_format"] = raw(Object{"type": raw("json_schema"), "json_schema": raw(fo)})
+			} else {
+				c.Parameters["response_format"] = format
 			}
-			t.finish()
 		}
+		t.finish()
 	}
+	return nil
+}
+
+func decodeResponsesInputItem(v json.RawMessage, p string, c *Generation) error {
+	item, e := read(v, p, c)
+	if e != nil {
+		return e
+	}
+	kind := str(item.take("type"))
+	switch kind {
+	case "", "message":
+		item.take("status")
+		item.take("id")
+		m := Message{Role: str(item.take("role"))}
+		m.Parts, e = decodeParts(item.take("content"), "responses", p+"/content", c)
+		if e != nil {
+			return e
+		}
+		c.Messages = append(c.Messages, m)
+	case "function_call":
+		item.take("id")
+		item.take("status")
+		tc := wire.ToolCall{ID: str(item.take("call_id")), Name: str(item.take("name")), Arguments: str(item.take("arguments"))}
+		c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []wire.ToolCall{tc}})
+	case "function_call_output":
+		item.take("id")
+		item.ignoreDefault("status", `"completed"`)
+		m := Message{Role: "tool", ToolID: str(item.take("call_id"))}
+		m.Parts, e = decodeParts(item.take("output"), "responses", p+"/output", c)
+		if e != nil {
+			return e
+		}
+		c.Messages = append(c.Messages, m)
+	default:
+		c.Extensions = append(c.Extensions, p+"/type")
+	}
+	item.finish()
+	return nil
+}
+
+func decodeOpenAITools(r *reader, family wire.Format, c *Generation) error {
 	for i, v := range arr(r.take("tools")) {
 		p := fmt.Sprintf("/tools/%d", i)
 		t, e := read(v, p, c)
@@ -134,15 +163,10 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 		if str(t.take("type")) != "function" {
 			c.Extensions = append(c.Extensions, p+"/type")
 		}
-		if family == wire.Completions {
-			prompt := r.take("prompt")
-			var text string
-			if json.Unmarshal(prompt, &text) == nil {
-				c.Messages = append(c.Messages, Message{Role: "user", Parts: []Part{{Text: text}}})
-			} else {
-				c.Extensions = append(c.Extensions, "/prompt")
-			}
-		} else if family == wire.Chat {
+		switch family {
+		case wire.Completions:
+			decodeCompletionsPrompt(r.take("prompt"), c)
+		case wire.Chat:
 			nested, e := read(t.take("function"), p+"/function", c)
 			if e != nil {
 				return e
@@ -150,7 +174,7 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 			nested.ignoreDefault("strict", "false")
 			c.Tools = append(c.Tools, decodeTool(nested))
 			nested.finish()
-		} else {
+		default:
 			t.ignoreDefault("strict", "false")
 			c.Tools = append(c.Tools, decodeTool(t))
 		}
@@ -160,9 +184,37 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 }
 
 func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, error) {
-	f := Object{"model": raw(model)}
+	f := Object{"model": raw(model), "messages": raw(encodeOpenAIChatMessages(c.Messages))}
+	for k, v := range c.Parameters {
+		if k == "max_output_tokens" {
+			k = "max_completion_tokens"
+		}
+		f[k] = v
+	}
+	if len(c.Tools) > 0 {
+		tools := []Object{}
+		for _, t := range c.Tools {
+			fn := map[string]any{"name": t.Name, "description": t.Description}
+			if present(t.Schema) {
+				fn["parameters"] = t.Schema
+			}
+			tools = append(tools, Object{"type": raw("function"), "function": raw(fn)})
+		}
+		f["tools"] = raw(tools)
+	}
+	if count {
+		return encodeOpenAICountPayload(c, f)
+	}
+	f["stream"] = raw(c.Stream)
+	if c.Stream {
+		f["stream_options"] = raw(map[string]bool{"include_usage": true})
+	}
+	return f, nil
+}
+
+func encodeOpenAIChatMessages(input []Message) []Object {
 	messages := []Object{}
-	for _, m := range c.Messages {
+	for _, m := range input {
 		v := Object{"role": raw(m.Role)}
 		if m.Name != "" {
 			v["name"] = raw(m.Name)
@@ -202,105 +254,82 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 		}
 		messages = append(messages, v)
 	}
-	f["messages"] = raw(messages)
-	for k, v := range c.Parameters {
-		if k == "max_output_tokens" {
-			k = "max_completion_tokens"
+	return messages
+}
+
+func encodeOpenAICountPayload(c *Generation, f Object) (Object, error) {
+	if effort := f["reasoning_effort"]; present(effort) {
+		delete(f, "reasoning_effort")
+		f["reasoning"] = raw(map[string]json.RawMessage{"effort": effort})
+	}
+	input := []Object{}
+	for _, m := range c.Messages {
+		for _, call := range m.Calls {
+			input = append(input, Object{"type": raw("function_call"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": raw(call.Arguments)})
 		}
-		f[k] = v
+		if m.Role == "tool" {
+			input = append(input, Object{"type": raw("function_call_output"), "call_id": raw(m.ToolID), "output": raw(joinText(m.Parts))})
+		} else if len(m.Parts) > 0 {
+			// Responses assistant history carries output_text, never input_text.
+			textType := "input_text"
+			if m.Role == "assistant" {
+				textType = "output_text"
+			}
+			parts := []Object{}
+			for _, p := range m.Parts {
+				if p.URL != "" {
+					image := Object{"type": raw("input_image"), "image_url": raw(p.URL)}
+					if p.Detail != "" {
+						image["detail"] = raw(p.Detail)
+					}
+					parts = append(parts, image)
+				} else {
+					parts = append(parts, Object{"type": raw(textType), "text": raw(p.Text)})
+				}
+			}
+			input = append(input, Object{"role": raw(m.Role), "content": raw(parts)})
+		}
+	}
+	delete(f, "messages")
+	f["input"] = raw(input)
+	// input_tokens takes the Responses request shape and no sampling or
+	// output-limit controls.
+	for _, k := range []string{"max_completion_tokens", "temperature", "top_p", "stop", "n", "seed", "response_format"} {
+		delete(f, k)
+	}
+	if v := c.Parameters["response_format"]; present(v) {
+		rf, e := object(v)
+		if e != nil {
+			return nil, e
+		}
+		format := v
+		if str(rf["type"]) == "json_schema" {
+			schema, e := object(rf["json_schema"])
+			if e != nil {
+				return nil, e
+			}
+			schema["type"] = raw("json_schema")
+			format = raw(schema)
+		}
+		f["text"] = raw(Object{"format": format})
+	}
+	if v := c.Parameters["tool_choice"]; present(v) {
+		if tc, e := object(v); e == nil {
+			if fn, e := object(tc["function"]); e == nil && present(fn["name"]) {
+				f["tool_choice"] = raw(Object{"type": raw("function"), "name": fn["name"]})
+			}
+		}
 	}
 	if len(c.Tools) > 0 {
 		tools := []Object{}
 		for _, t := range c.Tools {
-			fn := map[string]any{"name": t.Name, "description": t.Description}
+			tool := Object{"type": raw("function"), "name": raw(t.Name), "description": raw(t.Description)}
 			if present(t.Schema) {
-				fn["parameters"] = t.Schema
+				tool["parameters"] = t.Schema
 			}
-			tools = append(tools, Object{"type": raw("function"), "function": raw(fn)})
+			tools = append(tools, tool)
 		}
 		f["tools"] = raw(tools)
-	}
-	if count {
-		if effort := f["reasoning_effort"]; present(effort) {
-			delete(f, "reasoning_effort")
-			f["reasoning"] = raw(map[string]json.RawMessage{"effort": effort})
-		}
-		input := []Object{}
-		for _, m := range c.Messages {
-			if len(m.Calls) > 0 {
-				for _, call := range m.Calls {
-					input = append(input, Object{"type": raw("function_call"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": raw(call.Arguments)})
-				}
-			}
-			if m.Role == "tool" {
-				input = append(input, Object{"type": raw("function_call_output"), "call_id": raw(m.ToolID), "output": raw(joinText(m.Parts))})
-			} else if len(m.Parts) > 0 {
-				// Responses assistant history carries output_text, never input_text.
-				textType := "input_text"
-				if m.Role == "assistant" {
-					textType = "output_text"
-				}
-				parts := []Object{}
-				for _, p := range m.Parts {
-					if p.URL != "" {
-						image := Object{"type": raw("input_image"), "image_url": raw(p.URL)}
-						if p.Detail != "" {
-							image["detail"] = raw(p.Detail)
-						}
-						parts = append(parts, image)
-					} else {
-						parts = append(parts, Object{"type": raw(textType), "text": raw(p.Text)})
-					}
-				}
-				input = append(input, Object{"role": raw(m.Role), "content": raw(parts)})
-			}
-		}
-		delete(f, "messages")
-		f["input"] = raw(input)
-		// input_tokens takes the Responses request shape and no sampling or
-		// output-limit controls.
-		for _, k := range []string{"max_completion_tokens", "temperature", "top_p", "stop", "n", "seed", "response_format"} {
-			delete(f, k)
-		}
-		if v := c.Parameters["response_format"]; present(v) {
-			rf, e := object(v)
-			if e != nil {
-				return nil, e
-			}
-			format := v
-			if str(rf["type"]) == "json_schema" {
-				schema, e := object(rf["json_schema"])
-				if e != nil {
-					return nil, e
-				}
-				schema["type"] = raw("json_schema")
-				format = raw(schema)
-			}
-			f["text"] = raw(Object{"format": format})
-		}
-		if v := c.Parameters["tool_choice"]; present(v) {
-			if tc, e := object(v); e == nil {
-				if fn, e := object(tc["function"]); e == nil && present(fn["name"]) {
-					f["tool_choice"] = raw(Object{"type": raw("function"), "name": fn["name"]})
-				}
-			}
-		}
-		if len(c.Tools) > 0 {
-			tools := []Object{}
-			for _, t := range c.Tools {
-				tool := Object{"type": raw("function"), "name": raw(t.Name), "description": raw(t.Description)}
-				if present(t.Schema) {
-					tool["parameters"] = t.Schema
-				}
-				tools = append(tools, tool)
-			}
-			f["tools"] = raw(tools)
-		}
-	} else {
-		f["stream"] = raw(c.Stream)
-		if c.Stream {
-			f["stream_options"] = raw(map[string]bool{"include_usage": true})
-		}
 	}
 	return f, nil
 }

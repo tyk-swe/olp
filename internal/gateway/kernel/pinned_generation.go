@@ -20,7 +20,7 @@ func (s *Server) Enter(w http.ResponseWriter, r *http.Request, family wire.Forma
 		actor = "api_key_resource"
 	}
 	x := &Call{request: s.begin(w, r), family: family, actor: actor, mode: "unary"}
-	authority, ok := s.enter(w, r, x, authenticate)
+	authority, ok := s.EnterCall(w, r, x, authenticate)
 	return x, authority, ok
 }
 
@@ -92,12 +92,6 @@ func (x *Call) LastAttemptFact() *events.AttemptFact {
 	return &x.facts[len(x.facts)-1]
 }
 
-func (s *Server) EnterBedrock(w http.ResponseWriter, r *http.Request, family wire.Format, mode string) (*Call, keyauthority.Authority, bool) {
-	x := &Call{request: s.begin(w, r), family: family, actor: "api_key", mode: mode}
-	authority, ok := s.enter(w, r, x, s.Gate.BedrockAuthenticate)
-	return x, authority, ok
-}
-
 func (x *Call) SizedBody(bodyBytes int) {
 	sized := int64(bodyBytes) / 4
 	x.estimate, x.sizedInput = max(ResourceEstimate, sized), &sized
@@ -107,7 +101,7 @@ func (s *Server) ReleaseLease(ctx context.Context, x *Call) {
 	quota.SettleKey(ctx, x.lease, false, nil, s.Log)
 }
 
-func (s *Server) SettleBedrock(ctx context.Context, x *Call, p *Pin) {
+func (s *Server) SettlePinnedRequest(ctx context.Context, x *Call, p *Pin) {
 	actual := x.settledTokens()
 	s.SettlePinnedHold(ctx, p.Hold)
 	s.recordCost(x)

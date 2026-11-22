@@ -53,19 +53,19 @@ export function adaptiveNotes(decision: RoutingDecision): string[] {
     notes.push(`${Math.round(decision.headroom * 100)}% capacity headroom`);
   if (decision.bounded_cost_fallback_reason)
     notes.push(
-      (boundedCostFallbackLabels[decision.bounded_cost_fallback_reason] ??
-        'Ordered by weight under bounded cost routing') +
-        ', so ordered by weight'
+      `${boundedCostFallbackLabels[decision.bounded_cost_fallback_reason]}, so ordered by weight`
     );
   return notes;
 }
 
-const boundedCostFallbackLabels: Record<string, string> = {
+const boundedCostFallbackLabels: Record<
+  NonNullable<RoutingDecision['bounded_cost_fallback_reason']>,
+  string
+> = {
   operation_not_generation: 'Bounded cost ordering applies to generation only',
-  insufficient_comparable_bounds:
-    'Fewer than two targets in this tier have a comparable cost bound in the installation currency',
-  cost_bound_not_comparable:
-    'No comparable cost bound in the installation currency'
+  insufficient_cost_bounds:
+    'Fewer than two targets in this tier have a cost bound',
+  cost_bound_unknown: 'No cost bound for this request'
 };
 
 const provenanceLabels: Record<string, string> = {

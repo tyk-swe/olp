@@ -1,5 +1,6 @@
 <script lang="ts">
   import { IncompleteJSON, type NativePath } from '#lib/nativeJson.js';
+  import { captureResult } from '#lib/editing/result.js';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
   import type { FieldSchema } from './providerProfiles';
   let {
@@ -47,16 +48,17 @@
   );
   function edit(source: string) {
     actionIssue = '';
-    try {
-      if (stringField) draft.set(path, source);
-      else draft.setJSON(path, source);
-      onChange();
-    } catch (error) {
+    const result = captureResult(() =>
+      stringField ? draft.set(path, source) : draft.setJSON(path, source)
+    );
+    if (!result.ok) {
       actionIssue =
-        error instanceof Error
-          ? error.message
+        result.error instanceof Error
+          ? result.error.message
           : 'Correct the advanced configuration first.';
+      return;
     }
+    onChange();
   }
   function remove() {
     draft.set(path, undefined);

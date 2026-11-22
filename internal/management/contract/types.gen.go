@@ -6724,6 +6724,30 @@ func (e RouteTemplateResultOutcome) Valid() bool {
 	}
 }
 
+// Defines values for RoutingDecisionBoundedCostFallbackReason.
+const (
+	RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown       RoutingDecisionBoundedCostFallbackReason = "cost_bound_unknown"
+	RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds RoutingDecisionBoundedCostFallbackReason = "insufficient_cost_bounds"
+	RoutingDecisionBoundedCostFallbackReasonLessThannil            RoutingDecisionBoundedCostFallbackReason = "<nil>"
+	RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration RoutingDecisionBoundedCostFallbackReason = "operation_not_generation"
+)
+
+// Valid indicates whether the value is a known member of the RoutingDecisionBoundedCostFallbackReason enum.
+func (e RoutingDecisionBoundedCostFallbackReason) Valid() bool {
+	switch e {
+	case RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonLessThannil:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
 	RoutingStrategyBoundedCost RoutingStrategy = "bounded_cost"
@@ -16574,9 +16598,9 @@ type RoutingConstraints struct {
 type RoutingDecision struct {
 	Attempt nullable.Nullable[int] `json:"attempt,omitempty"`
 
-	// BoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate: operation_not_generation, insufficient_comparable_bounds or cost_bound_not_comparable. Absent when the upper estimate decided its place or another strategy ran.
-	BoundedCostFallbackReason nullable.Nullable[string] `json:"bounded_cost_fallback_reason,omitempty"`
-	ContextLength             nullable.Nullable[int64]  `json:"context_length,omitempty"`
+	// BoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+	BoundedCostFallbackReason nullable.Nullable[RoutingDecisionBoundedCostFallbackReason] `json:"bounded_cost_fallback_reason,omitempty"`
+	ContextLength             nullable.Nullable[int64]                                    `json:"context_length,omitempty"`
 
 	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
 	ContextWindow    *RouteContextWindowPreview            `json:"context_window,omitempty"`
@@ -16643,6 +16667,9 @@ type RoutingDecision struct {
 	UpstreamModel string                    `json:"upstream_model"`
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
+
+// RoutingDecisionBoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+type RoutingDecisionBoundedCostFallbackReason string
 
 // RoutingPolicy defines model for RoutingPolicy.
 type RoutingPolicy struct {

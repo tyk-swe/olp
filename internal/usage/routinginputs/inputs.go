@@ -33,8 +33,6 @@ type Inputs struct {
 	priceIndex  map[routingPriceKey][]*rates.RoutingPrice
 	Prices      []rates.RoutingPrice
 	Performance map[string]Performance
-	// Currency is the installation pricing currency every price uses.
-	Currency string
 	// Discounts are the multipliers in force now plus every scheduled one;
 	// the most specific scope at the plan time is pinned on the attempt.
 	Discounts []rates.RoutingDiscount
@@ -302,20 +300,6 @@ func Load(ctx context.Context, q Querier, now time.Time) (*Inputs, error) {
 	if err = loadRoutingRateCards(ctx, q, now, in); err != nil {
 		return nil, err
 	}
-	rows, err = q.Query(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`)
-	if err != nil {
-		return nil, err
-	}
-	if rows.Next() {
-		if err = rows.Scan(&in.Currency); err != nil {
-			rows.Close()
-			return nil, err
-		}
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
 	in.priceIndex = indexRoutingPrices(in.Prices)
 	return in, nil
 }
@@ -448,7 +432,34 @@ func loadRoutingRateCards(ctx context.Context, q Querier, now time.Time, in *Inp
 		}
 		return nil
 	}
-	rows, err = q.Query(ctx, `SELECT rate_card_revision_id::text,provider_kind,vendor_id,model,operation,
+	if err := loadCardPrices(ctx, q, revisionIDs, revisions); err != nil {
+		return err
+	}
+	for _, id := range order {
+		for _, revision := range cardRevisions[id] {
+			cards[id].Revisions = append(cards[id].Revisions, *revision)
+		}
+		in.RateCards = append(in.RateCards, *cards[id])
+	}
+	return nil
+}
+
+func (p Performance) MarshalJSON() ([]byte, error) {
+	var throughput *int64
+	if p.Throughput != nil {
+		v := int64(math.Floor(*p.Throughput))
+		throughput = &v
+	}
+	return json.Marshal(struct {
+		Latency    int64     `json:"latency_ms"`
+		Samples    int64     `json:"samples"`
+		Throughput *int64    `json:"output_tokens_per_second"`
+		ObservedAt time.Time `json:"observed_at"`
+	}{int64(math.Ceil(p.LatencyMS)), p.SampleCount, throughput, p.ObservedAt})
+}
+
+func loadCardPrices(ctx context.Context, q Querier, revisionIDs []string, revisions map[string]*rates.RoutingCardRevision) error {
+	rows, err := q.Query(ctx, `SELECT rate_card_revision_id::text,provider_kind,vendor_id,model,operation,
  input_per_million::text,cached_input_per_million::text,cache_write_input_per_million::text,
  cache_write_5m_input_per_million::text,cache_write_1h_input_per_million::text,
  output_per_million::text,audio_input_per_million::text,cached_audio_input_per_million::text,
@@ -494,25 +505,5 @@ func loadRoutingRateCards(ctx context.Context, q Querier, now time.Time, in *Inp
 	if priceCount > 100000 {
 		return errors.New("routing rate card price catalogue exceeds bounded capacity")
 	}
-	for _, id := range order {
-		for _, revision := range cardRevisions[id] {
-			cards[id].Revisions = append(cards[id].Revisions, *revision)
-		}
-		in.RateCards = append(in.RateCards, *cards[id])
-	}
 	return nil
-}
-
-func (p Performance) MarshalJSON() ([]byte, error) {
-	var throughput *int64
-	if p.Throughput != nil {
-		v := int64(math.Floor(*p.Throughput))
-		throughput = &v
-	}
-	return json.Marshal(struct {
-		Latency    int64     `json:"latency_ms"`
-		Samples    int64     `json:"samples"`
-		Throughput *int64    `json:"output_tokens_per_second"`
-		ObservedAt time.Time `json:"observed_at"`
-	}{int64(math.Ceil(p.LatencyMS)), p.SampleCount, throughput, p.ObservedAt})
 }
