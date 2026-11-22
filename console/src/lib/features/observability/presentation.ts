@@ -1,4 +1,19 @@
-import type { ExportSink, FocusDataset } from './api';
+import type { ExportSink, FocusDataset, MeteringDelivery } from './api';
+
+const meteringDeliveryLabels: Record<MeteringDelivery['outcome'], string> = {
+  pending: 'Pending',
+  retrying: 'Retrying',
+  accepted: 'Accepted by sink',
+  delivery_unconfirmed: 'Delivery unconfirmed',
+  expired_before_delivery: 'Expired before delivery',
+  no_retained_evidence: 'No retained evidence'
+};
+
+export function meteringDeliveryLabel(
+  outcome: MeteringDelivery['outcome']
+): string {
+  return meteringDeliveryLabels[outcome];
+}
 
 export type SinkStreamStatus = {
   stream?: string;

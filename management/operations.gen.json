@@ -18547,6 +18547,64 @@
     }
   },
   {
+    "name": "get_export_sink_metering_delivery",
+    "group": "observability",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}",
+    "description": "get export sink metering delivery",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "attempt_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id",
+            "attempt_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_guardrail",
     "group": "guardrails",
     "method": "GET",

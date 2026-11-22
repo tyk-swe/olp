@@ -22,6 +22,7 @@ export type CreateCapturePolicyInput = Schemas['CreateCapturePolicyRequest'];
 export type UpdateCapturePolicyInput = Schemas['UpdateCapturePolicyRequest'];
 export type CaptureConfiguration = Schemas['CaptureConfiguration'];
 export type FocusDataset = Schemas['FocusDataset'];
+export type MeteringDelivery = Schemas['MeteringDeliveryLookup'];
 
 export async function listExportSinks(
   signal?: AbortSignal
@@ -124,6 +125,21 @@ export async function listExportSinkFocusDatasets(
     }
   );
   return unwrapPage(response);
+}
+
+export async function getMeteringDelivery(
+  sinkId: string,
+  attemptId: string,
+  signal?: AbortSignal
+): Promise<MeteringDelivery> {
+  const response = await apiClient.GET(
+    '/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}',
+    {
+      params: { path: { export_sink_id: sinkId, attempt_id: attemptId } },
+      signal
+    }
+  );
+  return unwrap(response);
 }
 
 export async function getCaptureConfiguration(

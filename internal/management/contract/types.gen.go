@@ -5074,6 +5074,36 @@ func (e ManagementTokenScope) Valid() bool {
 	}
 }
 
+// Defines values for MeteringDeliveryLookupOutcome.
+const (
+	MeteringDeliveryLookupOutcomeAccepted              MeteringDeliveryLookupOutcome = "accepted"
+	MeteringDeliveryLookupOutcomeDeliveryUnconfirmed   MeteringDeliveryLookupOutcome = "delivery_unconfirmed"
+	MeteringDeliveryLookupOutcomeExpiredBeforeDelivery MeteringDeliveryLookupOutcome = "expired_before_delivery"
+	MeteringDeliveryLookupOutcomeNoRetainedEvidence    MeteringDeliveryLookupOutcome = "no_retained_evidence"
+	MeteringDeliveryLookupOutcomePending               MeteringDeliveryLookupOutcome = "pending"
+	MeteringDeliveryLookupOutcomeRetrying              MeteringDeliveryLookupOutcome = "retrying"
+)
+
+// Valid indicates whether the value is a known member of the MeteringDeliveryLookupOutcome enum.
+func (e MeteringDeliveryLookupOutcome) Valid() bool {
+	switch e {
+	case MeteringDeliveryLookupOutcomeAccepted:
+		return true
+	case MeteringDeliveryLookupOutcomeDeliveryUnconfirmed:
+		return true
+	case MeteringDeliveryLookupOutcomeExpiredBeforeDelivery:
+		return true
+	case MeteringDeliveryLookupOutcomeNoRetainedEvidence:
+		return true
+	case MeteringDeliveryLookupOutcomePending:
+		return true
+	case MeteringDeliveryLookupOutcomeRetrying:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotificationDeliveryReason.
 const (
 	NotificationDeliveryReasonExpiry      NotificationDeliveryReason = "expiry"
@@ -13295,6 +13325,40 @@ type MediaJobListResponse struct {
 	Items      []MediaJobItem            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
+
+// MeteringDeliveryLookup What OLP can prove about one priced attempt's delivery to one CloudEvents metering sink. Accepted means the sink answered 2xx and OLP recorded it. Delivery unconfirmed means retries ended after a send may have occurred without a recorded acknowledgement. No payload or destination is included.
+type MeteringDeliveryLookup struct {
+	// AttemptId Attempt id, which is also the CloudEvents event id
+	AttemptId openapi_types.UUID `json:"attempt_id"`
+
+	// Attempts Delivery claims made for this attempt on this sink, or null when no evidence remains
+	Attempts nullable.Nullable[int32] `json:"attempts"`
+
+	// EventId Durable export record id sent as X-OLP-Event-ID, or null when no evidence remains
+	EventId      nullable.Nullable[openapi_types.UUID] `json:"event_id"`
+	ExportSinkId openapi_types.UUID                    `json:"export_sink_id"`
+
+	// LastAttemptAt When the most recent delivery claim was made, or null
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastErrorCode Safe category of the most recent delivery failure, or null
+	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
+
+	// OccurredAt When the priced attempt was observed, or null when no evidence remains
+	OccurredAt nullable.Nullable[time.Time] `json:"occurred_at"`
+
+	// Outcome pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope
+	Outcome MeteringDeliveryLookupOutcome `json:"outcome"`
+
+	// QueuedAt When the export record was queued, or null when no evidence remains
+	QueuedAt nullable.Nullable[time.Time] `json:"queued_at"`
+
+	// SettledAt When delivery was recorded as accepted or the receipt reached its terminal state, or null while queued
+	SettledAt nullable.Nullable[time.Time] `json:"settled_at"`
+}
+
+// MeteringDeliveryLookupOutcome pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope
+type MeteringDeliveryLookupOutcome string
 
 // ModelCatalogResponse defines model for ModelCatalogResponse.
 type ModelCatalogResponse struct {

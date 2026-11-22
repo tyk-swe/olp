@@ -44,6 +44,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "PATCH /api/v1/observability/sinks/{export_sink_id}", a.update)
 	a.server.Route(mux, "DELETE /api/v1/observability/sinks/{export_sink_id}", a.delete)
 	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/gaps", a.gaps)
+	a.server.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}", a.meteringDelivery)
 }
 
 func RequireScope(ctx context.Context, server *access.Server, q database.Queryer, p authz.Principal, projectID *string) error {
