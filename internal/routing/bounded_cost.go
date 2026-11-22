@@ -5,60 +5,62 @@ type costTier struct {
 	priority, locality, order, preference int
 }
 
-// applyBoundedCost decides which eligible candidates the bounded_cost
-// strategy orders by upper estimate. Within each health, priority, locality
-// and preference tier, candidates with a known bound rank first only when at
-// least two of them have one; otherwise the whole tier keeps weighted order.
-// Every candidate left in weighted order names why.
-func applyBoundedCost(rows []rankedCandidate, strategy, operation string, callerCostExempt bool) {
-	if strategy != strategyBoundedCost {
-		return
-	}
-	tiers := map[costTier][]int{}
-	for i, row := range rows {
-		if row.decision.Eligible {
-			key := costTier{row.decision.Unhealthy, row.shadow, row.attempt.Priority, row.locality, row.order, row.preference}
-			tiers[key] = append(tiers[key], i)
-		}
-	}
-	for _, tier := range tiers {
-		rankTier(rows, tier, tierFallback(rows, tier, operation, callerCostExempt))
-	}
+func (row rankedCandidate) costTier() costTier {
+	return costTier{row.decision.Unhealthy, row.shadow, row.attempt.Priority, row.locality, row.order, row.preference}
 }
 
-func tierFallback(rows []rankedCandidate, tier []int, operation string, callerCostExempt bool) string {
+func applyBoundedCost(rows []rankedCandidate, strategy, operation string, callerCostExempt bool) []rankedCandidate {
+	if strategy != strategyBoundedCost {
+		return rows
+	}
+	tiers := map[costTier][]rankedCandidate{}
+	for _, row := range rows {
+		if row.decision.Eligible {
+			tiers[row.costTier()] = append(tiers[row.costTier()], row)
+		}
+	}
+	ranked := make([]rankedCandidate, len(rows))
+	for i, row := range rows {
+		ranked[i] = boundedCostRow(row, tiers[row.costTier()], operation, callerCostExempt)
+	}
+	return ranked
+}
+
+func boundedCostRow(row rankedCandidate, tier []rankedCandidate, operation string, callerCostExempt bool) rankedCandidate {
+	if !row.decision.Eligible || len(tier) < 2 {
+		return row
+	}
+	ranked := row
+	fallback := tierFallback(tier, operation, callerCostExempt)
+	switch {
+	case fallback != "":
+		ranked.decision.BoundedCostFallbackReason = strptr(fallback)
+	case row.bound == nil:
+		ranked.decision.BoundedCostFallbackReason = strptr("cost_bound_unknown")
+	default:
+		ranked.costRanked = true
+	}
+	return ranked
+}
+
+func tierFallback(tier []rankedCandidate, operation string, callerCostExempt bool) string {
 	if operation != "generation" {
 		return "operation_not_generation"
 	}
-	if callerCostExempt {
-		return "insufficient_cost_bounds"
-	}
-	bounded := 0
-	for _, i := range tier {
-		if rows[i].bound != nil {
-			bounded++
-		}
-	}
-	if bounded < 2 {
+	if callerCostExempt || boundedCount(tier) < 2 {
 		return "insufficient_cost_bounds"
 	}
 	return ""
 }
 
-func rankTier(rows []rankedCandidate, tier []int, fallback string) {
-	if len(tier) < 2 {
-		return
-	}
-	for _, i := range tier {
-		switch {
-		case fallback != "":
-			rows[i].decision.BoundedCostFallbackReason = strptr(fallback)
-		case rows[i].bound == nil:
-			rows[i].decision.BoundedCostFallbackReason = strptr("cost_bound_unknown")
-		default:
-			rows[i].costRanked = true
+func boundedCount(tier []rankedCandidate) int {
+	count := 0
+	for _, row := range tier {
+		if row.bound != nil {
+			count++
 		}
 	}
+	return count
 }
 
 func compareBoundedCost(a, b rankedCandidate) int {

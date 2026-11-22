@@ -284,9 +284,9 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
 		plan.Baseline = baseline(rows, operation)
 	}
-	applyBoundedCost(rows, policy.Strategy, operation, options.CallerCostExempt)
-	orderCandidates(rows, policy.Strategy, operation)
-	plan.addCandidates(rows, options.CheckSlots)
+	ranked := applyBoundedCost(rows, policy.Strategy, operation, options.CallerCostExempt)
+	orderCandidates(ranked, policy.Strategy, operation)
+	plan.addCandidates(ranked, options.CheckSlots)
 	return plan, nil
 }
 
