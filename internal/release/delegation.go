@@ -172,13 +172,23 @@ func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion
 	return m.authenticateDelegation(ctx, token, assertion, true)
 }
 
+func delegatingAgentRefusal(agent *keyauthority.Authority, now time.Time) error {
+	if agent == nil || !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(now) {
+		return ErrInvalidKey
+	}
+	if agent.PausedAt != nil {
+		return ErrPausedKey
+	}
+	return nil
+}
+
 func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion string, consumed bool) (*keyauthority.Authority, error) {
 	agent, err := m.Authenticate(assertion)
 	if err != nil {
 		return nil, err
 	}
-	if agent == nil || !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(time.Now()) {
-		return nil, ErrInvalidKey
+	if refusal := delegatingAgentRefusal(agent, time.Now()); refusal != nil {
+		return nil, refusal
 	}
 	tx, err := m.delegationTransaction(ctx, agent.SnapshotID)
 	if err != nil {

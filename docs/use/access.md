@@ -134,8 +134,9 @@ not by itself prove fleet-wide enforcement. `GET
 /api/v1/api-keys/{id}/pause-rollout` reports the generation each recently
 reporting serving replica has installed. It reports `enforced` only when every
 reported replica is at or past the pause generation while the key is still
-paused, and the console shows the pause as enforced only then. Already admitted
-work is not canceled.
+paused, and the console shows the pause as enforced only then. Requests already
+admitted finish, while established realtime sessions close at their next
+five-second recheck, as they do on revocation.
 
 Rotation while paused follows the normal overlap rules and keeps the key
 paused, with overlap deadlines still running. Resume clears only the pause

@@ -360,9 +360,6 @@ func (m *Manager) Authenticate(secret string) (*keyauthority.Authority, error) {
 	if strings.IndexByte(presented[separator+1:], '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return nil, ErrInvalidKey
 	}
-	if record.authority.PausedAt != nil {
-		return nil, ErrPausedKey
-	}
 	return &record.authority, nil
 }
 
