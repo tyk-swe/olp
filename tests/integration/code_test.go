@@ -1891,8 +1891,38 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 	if available.Status != codemode.ThreadAvailable || available.RetryAt != nil {
 		t.Fatalf("recovered status = %+v, want available", available)
 	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections='{}' WHERE id=$1`, revisionID); err != nil {
+		t.Fatal(err)
+	}
+	unpublished, err := status(base.Add(8*time.Minute), route, key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unpublished.Status != codemode.ThreadUnavailable || unpublished.RetryAt != nil {
+		t.Fatalf("status without the pinned provider's connection = %+v, want unavailable", unpublished)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections=$2 WHERE id=$1`, revisionID, connections); err != nil {
+		t.Fatal(err)
+	}
+	slot, paidBinding := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_slots(id, provider_id, position, name, credential_id) VALUES($1, $2, 0, 'default', $3)`, slot, provider, credential); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.code_paid_bindings(id, project_id, route_id, api_key_id, conversation, root_id, model, selected_model, provider_id, slot_id, credential_id, subscription_root_id)
+		VALUES($1, $2, $3, $4, 'status-paid', $1, 'model', 'model', $5, $6, $7, $8)`, paidBinding, project, routeID, key, provider, slot, credential, permit.Binding.RootID); err != nil {
+		t.Fatal(err)
+	}
+	paid := codemode.Identity{Conversation: "status-paid"}
+	paidLive, err := status(base.Add(8*time.Minute), route, key, paid)
+	if err != nil || paidLive.Status != codemode.ThreadUnknown {
+		t.Fatalf("paid status = %+v, %v, want unknown while its subscription tree is live", paidLive, err)
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_bindings SET retired_at=now() WHERE id=$1`, permit.Binding.RootID); err != nil {
 		t.Fatal(err)
+	}
+	paidRetired, err := status(base.Add(9*time.Minute), route, key, paid)
+	if err != nil || paidRetired.Status != codemode.ThreadUnavailable {
+		t.Fatalf("paid status = %+v, %v, want unavailable once its subscription tree retires", paidRetired, err)
 	}
 	retired, err := status(base.Add(9*time.Minute), route, key, identity)
 	if err != nil {

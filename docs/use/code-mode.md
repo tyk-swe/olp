@@ -976,7 +976,7 @@ fi
 curl -fsS --max-time 2 "$OLP_CODE_STATUS_URL" \
   -H "Authorization: Bearer $OLP_API_KEY" \
   -H "X-Claude-Code-Session-Id: $session" \
-  | jq -r '"OLP \(.status)" + (if .retry_at then " retry \(.retry_at)" else "" end)' \
+  | jq -er '"OLP \(.status)" + (if .retry_at then " retry \(.retry_at)" else "" end)' \
   || printf 'OLP unknown'
 ```
 

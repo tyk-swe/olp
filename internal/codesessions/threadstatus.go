@@ -102,6 +102,7 @@ func threadAccountEvidence(ctx context.Context, tx pgx.Tx, route codemode.Route,
 	err := tx.QueryRow(ctx, `SELECT a.principal,a.models,a.health,a.health_observed_at,a.unavailable_until,a.allowance,
 		(a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id AND a.project_id=$2
 			AND EXISTS(SELECT 1 FROM olp.code_pool_accounts pa WHERE pa.pool_id=$3 AND pa.account_id=a.id)
+			AND EXISTS(SELECT 1 FROM olp.code_route_revisions v WHERE v.id=$5 AND v.connections->(a.provider_id::text) IS NOT NULL)
 			AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND `+grants.LiveCondition+`),
 		(SELECT max(cd.retry_at) FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND (cd.model IS NULL OR cd.model=ANY($4::text[]))),
 		(SELECT max(cd.observed_at) FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND (cd.model IS NULL OR cd.model=ANY($4::text[])))
@@ -109,7 +110,7 @@ func threadAccountEvidence(ctx context.Context, tx pgx.Tx, route codemode.Route,
 		JOIN olp.providers p ON p.id=a.provider_id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id
 		JOIN olp.provider_grants g ON g.credential_id=c.id
-		WHERE a.id=$1`, accountID, route.ProjectID, route.PoolID, models).Scan(
+		WHERE a.id=$1`, accountID, route.ProjectID, route.PoolID, models, route.RevisionID).Scan(
 		&account.Principal, &account.Models, &account.Health, &account.HealthObservedAt, &account.UnavailableUntil, &account.Allowance,
 		&eligible, &cooldownRetryAt, &cooldownObservedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -134,8 +135,9 @@ func paidThreadStatus(ctx context.Context, tx pgx.Tx, in Admission, identity cod
 	var none codemode.ThreadStatus
 	var parentID *string
 	var retired bool
-	err := tx.QueryRow(ctx, `SELECT b.parent_id::text, root.retired_at IS NOT NULL
+	err := tx.QueryRow(ctx, `SELECT b.parent_id::text, root.retired_at IS NOT NULL OR subscription.retired_at IS NOT NULL
 		FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id
+		LEFT JOIN olp.code_bindings subscription ON subscription.id=root.subscription_root_id
 		WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 ORDER BY b.id LIMIT 1`,
 		in.Route.ID, in.APIKeyID, identity.Conversation).Scan(&parentID, &retired)
 	if errors.Is(err, pgx.ErrNoRows) {

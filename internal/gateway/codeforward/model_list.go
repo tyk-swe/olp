@@ -41,6 +41,9 @@ func (f *Forwarder) codeReadRoute(r *http.Request, missing string) (codemode.Rou
 	if failure != nil {
 		return codemode.Route{}, "", codemode.Refuse(failure.Status, "code_authentication_refused")
 	}
+	if authority.TaskCapability != nil {
+		return codemode.Route{}, "", codemode.Refuse(403, "code_authentication_refused")
+	}
 	release := f.runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		return codemode.Route{}, "", codemode.Refuse(503, "code_runtime_unavailable")
