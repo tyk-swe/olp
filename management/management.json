@@ -9078,6 +9078,160 @@
         ],
         "type": "object"
       },
+      "ProviderListingRouteResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "ProviderListingNewModelResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "display_name"
+        ],
+        "type": "object"
+      },
+      "ProviderListingDisplayNameChangeResponse": {
+        "properties": {
+          "listed_display_name": {
+            "type": "string"
+          },
+          "published_display_name": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "published_display_name",
+          "listed_display_name"
+        ],
+        "type": "object"
+      },
+      "ProviderListingOmissionResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingRouteResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream_model",
+          "display_name",
+          "routes"
+        ],
+        "type": "object"
+      },
+      "ProviderListingComparisonResponse": {
+        "description": "A comparison of one complete upstream model listing with the published inventory of one active provider revision. An incomplete comparison carries no new, changed or missing-model verdicts. Not listed does not mean retired.",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "changed_display_names": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingDisplayNameChangeResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credential_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "new_models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingNewModelResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "not_listed": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingOmissionResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "type": "string"
+          },
+          "unverified": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderListingOmissionResponse"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider_id",
+          "revision_id",
+          "revision",
+          "status",
+          "detail",
+          "checked_at",
+          "api_version",
+          "credential_version",
+          "new_models",
+          "changed_display_names",
+          "not_listed",
+          "unverified"
+        ],
+        "type": "object"
+      },
       "ProviderModelInventoryListResponse": {
         "properties": {
           "items": {
@@ -43839,6 +43993,72 @@
         "tags": [
           "providers"
         ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/listing-comparison": {
+      "post": {
+        "description": "Reads every page of the upstream model listing with the published credential version of the active revision and compares it with the published inventory. The comparison changes no draft, revision or certification state. Only the native anthropic adapter with one enabled, stored API-key credential slot is supported.",
+        "operationId": "compare_provider_listing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderListingComparisonResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider has no active revision, or its published listing configuration is not the supported native anthropic adapter with one enabled, stored API-key credential slot"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-olp-read-only": true
       }
     },
     "/api/v1/providers/{provider_id}/models": {

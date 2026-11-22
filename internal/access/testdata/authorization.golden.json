@@ -359,6 +359,7 @@
     "POST /api/v1/providers/{provider_id}/grant-enrollments": "YYYY----YYYY",
     "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue": "YYYY----YYYY",
     "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll": "YYYY----YYYY",
+    "POST /api/v1/providers/{provider_id}/listing-comparison": "YYYY----YYYY",
     "POST /api/v1/providers/{provider_id}/models/{model_id}/certify": "YYYY----YYYY",
     "POST /api/v1/providers/{provider_id}/network-credentials": "YYYY----YYYY",
     "POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke": "YYYY----YYYY",

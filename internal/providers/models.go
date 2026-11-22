@@ -38,15 +38,22 @@ type storedModel struct {
 	Enabled       bool               `json:"enabled"`
 	Capabilities  []storedCapability `json:"capabilities"`
 	DiscoveredAt  *time.Time         `json:"discovered_at"`
+	Listing       *routing.RevisionListing
 }
 
-const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at"
+const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at,discovered_listing_endpoint,discovered_listing_api_version,discovered_listing_credential_id::text,discovered_listing_credential_version,discovered_listing_at"
 
 func scanModel(row pgx.Row) (storedModel, error) {
 	var m storedModel
 	var capabilities []byte
-	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
+	var listingEndpoint, listingAPIVersion, listingCredentialID *string
+	var listingCredentialVersion *int
+	var listingAt *time.Time
+	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &listingEndpoint, &listingAPIVersion, &listingCredentialID, &listingCredentialVersion, &listingAt); err != nil {
 		return storedModel{}, err
+	}
+	if listingEndpoint != nil && listingAPIVersion != nil && listingCredentialID != nil && listingCredentialVersion != nil && listingAt != nil {
+		m.Listing = &routing.RevisionListing{Endpoint: *listingEndpoint, APIVersion: *listingAPIVersion, CredentialID: *listingCredentialID, CredentialVersion: *listingCredentialVersion, ListedAt: listingAt.UTC()}
 	}
 	if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
 		return storedModel{}, err
@@ -291,7 +298,7 @@ func (s *Server) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, 
 	return nil
 }
 
-func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time) error {
+func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time, listing *routing.RevisionListing) error {
 	document := current.Connection.Document()
 	metadata := maps.Clone(document.Options.Models)
 	for _, m := range models {
@@ -302,7 +309,14 @@ func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *
 		if merged {
 			metadata[m.Name] = facts
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", httpkit.NewID(), current.ID, m.Name, m.Display, at); err != nil {
+		endpoint, apiVersion, credentialID, credentialVersion, listedAt := listingValues(listing)
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at,discovered_listing_endpoint,discovered_listing_api_version,discovered_listing_credential_id,discovered_listing_credential_version,discovered_listing_at) VALUES($1,$2,$3,$4,false,'[]',$5,$6,$7,$8,$9,$10)
+			ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at,
+			discovered_listing_endpoint=coalesce(excluded.discovered_listing_endpoint,olp.provider_models.discovered_listing_endpoint),
+			discovered_listing_api_version=coalesce(excluded.discovered_listing_api_version,olp.provider_models.discovered_listing_api_version),
+			discovered_listing_credential_id=coalesce(excluded.discovered_listing_credential_id,olp.provider_models.discovered_listing_credential_id),
+			discovered_listing_credential_version=coalesce(excluded.discovered_listing_credential_version,olp.provider_models.discovered_listing_credential_version),
+			discovered_listing_at=coalesce(excluded.discovered_listing_at,olp.provider_models.discovered_listing_at)`, httpkit.NewID(), current.ID, m.Name, m.Display, at, endpoint, apiVersion, credentialID, credentialVersion, listedAt); err != nil {
 			return err
 		}
 	}
@@ -392,16 +406,22 @@ func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeed
 }
 
 func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, error) {
+	credential, _, err := s.credentialSlotFor(ctx, tx, p)
+	return credential, err
+}
+
+func (s *Server) credentialSlotFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *slotRow, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg := p.Connection.Document()
 	slot := selectProbeSlot(slots, cfg, nil)
 	if slot == nil {
-		return nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+		return nil, nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
-	return s.probeCredential(ctx, tx, cfg, *slot)
+	credential, err := s.probeCredential(ctx, tx, cfg, *slot)
+	return credential, slot, err
 }
 
 func (s *Server) probeCredential(ctx context.Context, q database.Queryer, cfg connection.Configuration, slot slotRow) ([]byte, error) {
