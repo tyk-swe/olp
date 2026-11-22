@@ -22,6 +22,7 @@ export { profileKeys } from './profile/profileKeys.js';
 export { reauthenticateWithPassword } from './profile/reauthentication.js';
 export { default as ProjectScopeField } from './projects/ProjectScopeField.svelte';
 export {
+  type Project,
   type ProjectMembership,
   listAllProjectMembers,
   listProjectMemberships,

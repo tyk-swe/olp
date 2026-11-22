@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  const runAction = useAction();
   import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import {
@@ -34,7 +36,7 @@
   let id = $state('');
   let result = $state('');
   let problem = $state('');
-  let busy = $state(false);
+
   let nextPage = $state('');
   let submissionKey = crypto.randomUUID();
   let submittedDefinition = '';
@@ -51,51 +53,57 @@
   });
 
   async function run(action: AgentAction, pageToken?: string) {
-    if (busy) return;
-    busy = true;
+    if (runAction.busy) return;
     problem = '';
     controller = new AbortController();
-    try {
-      if (action === 'create') {
-        const fingerprint = agentSubmissionFingerprint(route, definition);
-        if (fingerprint !== submittedDefinition) {
-          submissionKey = crypto.randomUUID();
-          submittedDefinition = fingerprint;
+    const owner = controller;
+    await runAction.run(
+      () => {
+        if (action === 'create') {
+          const fingerprint = agentSubmissionFingerprint(route, definition);
+          if (fingerprint !== submittedDefinition) {
+            submissionKey = crypto.randomUUID();
+            submittedDefinition = fingerprint;
+          }
+        }
+        return runAgentRequest({
+          action,
+          apiKey,
+          route,
+          id,
+          body: definition,
+          submissionKey,
+          pageToken,
+          signal: owner.signal
+        });
+      },
+      (response, current) => {
+        if (destroyed || !current()) return;
+        result = response || 'Resource deleted.';
+        nextPage = '';
+        if (response) {
+          const parsed = parseNativeJSON(response);
+          if (nativeObject(parsed)) {
+            if (typeof parsed.id === 'string') id = parsed.id;
+            if (typeof parsed.next_page_token === 'string')
+              nextPage = parsed.next_page_token;
+          }
+        }
+        if (action === 'create') submittedDefinition = '';
+      },
+      {
+        failure: (error) => {
+          if (destroyed || owner.signal.aborted) return '';
+          if (error instanceof ResourceRequestError && error.resourceId)
+            id = error.resourceId;
+          return errorMessage(
+            error,
+            'The resource request could not be completed.'
+          );
         }
       }
-      const response = await runAgentRequest({
-        action,
-        apiKey,
-        route,
-        id,
-        body: definition,
-        submissionKey,
-        pageToken,
-        signal: controller.signal
-      });
-      if (destroyed) return;
-      result = response || 'Resource deleted.';
-      nextPage = '';
-      if (response) {
-        const parsed = parseNativeJSON(response);
-        if (nativeObject(parsed)) {
-          if (typeof parsed.id === 'string') id = parsed.id;
-          if (typeof parsed.next_page_token === 'string')
-            nextPage = parsed.next_page_token;
-        }
-      }
-      if (action === 'create') submittedDefinition = '';
-    } catch (error) {
-      if (destroyed || controller.signal.aborted) return;
-      problem = errorMessage(
-        error,
-        'The resource request could not be completed.'
-      );
-      if (error instanceof ResourceRequestError && error.resourceId)
-        id = error.resourceId;
-    } finally {
-      if (!destroyed) busy = false;
-    }
+    );
+    if (!destroyed) problem = runAction.error;
   }
 </script>
 
@@ -111,13 +119,13 @@
         type="password"
         autocomplete="off"
         bind:value={apiKey}
-        disabled={busy}
+        disabled={runAction.busy}
       /></label
     >
     <label
       >Published route<select
         bind:value={route}
-        disabled={busy || routes.isPending}
+        disabled={runAction.busy || routes.isPending}
       >
         <option value="">Choose a route</option>
         {#each eligible as item (item.slug)}<option value={item.slug}
@@ -136,7 +144,7 @@
     >Agent definition (JSON)<textarea
       rows="7"
       bind:value={definition}
-      disabled={busy}
+      disabled={runAction.busy}
       spellcheck="false"></textarea></label
   >
   <div class="resource-actions">
@@ -144,19 +152,19 @@
       class="button button-primary"
       type="button"
       onclick={() => run('create')}
-      disabled={busy || !route || !apiKey}>Create agent</button
+      disabled={runAction.busy || !route || !apiKey}>Create agent</button
     >
     <button
       class="button button-secondary"
       type="button"
       onclick={() => run('list')}
-      disabled={busy || !apiKey}>List my agents</button
+      disabled={runAction.busy || !apiKey}>List my agents</button
     >
   </div>
   <label
     >Agent resource ID<input
       bind:value={id}
-      disabled={busy}
+      disabled={runAction.busy}
       placeholder="agent_resource_…"
     /></label
   >
@@ -165,7 +173,7 @@
       class="button button-secondary"
       type="button"
       onclick={() => run('get')}
-      disabled={busy || !id || !apiKey}>Inspect agent</button
+      disabled={runAction.busy || !id || !apiKey}>Inspect agent</button
     >
     <button
       class="button button-secondary"
@@ -181,21 +189,23 @@
         )
           await run('delete');
       }}
-      disabled={busy || !id || !apiKey}>Delete agent</button
+      disabled={runAction.busy || !id || !apiKey}>Delete agent</button
     >
     {#if nextPage}<button
         class="button button-secondary"
         type="button"
         onclick={() => run('list', nextPage)}
-        disabled={busy}>Next page</button
+        disabled={runAction.busy}>Next page</button
       >{/if}
-    {#if busy}<button
+    {#if runAction.busy}<button
         class="button button-secondary"
         type="button"
         onclick={() => controller?.abort()}>Stop waiting</button
       >{/if}
   </div>
-  {#if busy}<p role="status">Waiting for the resource operation…</p>{/if}
+  {#if runAction.busy}<p role="status">
+      Waiting for the resource operation…
+    </p>{/if}
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
   {#if result}<pre aria-label="Agent resource result">{result}</pre>{/if}
 </section>

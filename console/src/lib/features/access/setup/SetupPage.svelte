@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { readResult } from '#lib/editing/result.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getSetupStatus } from '#lib/features/access/setup/api.js';
   import OwnerSetup from '#lib/features/access/setup/OwnerSetup.svelte';
@@ -16,21 +17,25 @@
 
   async function checkStatus() {
     activeController?.abort();
-    activeController = new AbortController();
+    const controller = new AbortController();
+    activeController = controller;
     setupView = 'checking';
     message = '';
-    try {
-      const status = await getSetupStatus(activeController.signal);
-      if (!status.setup_required) {
-        onDone();
-        return;
-      }
-      setupView = status.bootstrap_token_configured ? 'ready' : 'no-token';
-    } catch (error) {
-      if (activeController.signal.aborted) return;
-      message = errorMessage(error, 'The setup status could not be loaded.');
+    const result = await readResult(() => getSetupStatus(controller.signal));
+    if (controller.signal.aborted) return;
+    if (!result.ok) {
+      message = errorMessage(
+        result.error,
+        'The setup status could not be loaded.'
+      );
       setupView = 'error';
+      return;
     }
+    if (!result.value.setup_required) {
+      onDone();
+      return;
+    }
+    setupView = result.value.bootstrap_token_configured ? 'ready' : 'no-token';
   }
 
   onMount(() => {

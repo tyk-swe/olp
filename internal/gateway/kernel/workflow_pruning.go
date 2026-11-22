@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/decision"
@@ -192,38 +193,13 @@ func (x *Call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *fault.Error) {
 	route, ok := parent.request.release.Snapshot().FindRoute(policy.Config.Route)
 	if !ok || !slices.Contains(route.Operations, "decision") {
-		if policy.Revision.OnError == guardrails.FailOpen {
-			return nil, nil
-		}
-		return nil, guardrailError(guardrails.ErrSurface)
+		return pruningSurfaceError(policy, guardrails.ErrSurface)
 	}
 	current, problem := s.workflowAuthority(ctx, parent, &route, "")
 	if problem != nil {
 		return nil, problem
 	}
-	state, err := json.Marshal(struct {
-		Task      string                               `json:"task"`
-		System    []string                             `json:"system,omitempty"`
-		Exchanges map[string]workflowRelevanceExchange `json:"exchanges"`
-	}{Task: protocols.WorkflowPruningTask(request, guardrails.MaxContentBytes), System: system, Exchanges: maps.Collect(func(yield func(string, workflowRelevanceExchange) bool) {
-		for index, candidate := range candidates {
-			if !yield(protocols.WorkflowExchangeName(index), candidate) {
-				return
-			}
-		}
-	})})
-	if err != nil {
-		return nil, guardrailError(err)
-	}
-	questions := maps.Collect(func(yield func(string, pruningQuestion) bool) {
-		for index := range candidates {
-			name := protocols.WorkflowExchangeName(index)
-			if !yield(name, pruningQuestion{Type: "noul", Instructions: "Is the completed tool exchange " + name + " relevant to the current task?"}) {
-				return
-			}
-		}
-	})
-	body, err := json.Marshal(pruningRequest{Model: route.Slug, State: string(state), Questions: questions})
+	body, err := buildPruningBody(route.Slug, request, system, candidates)
 	if err != nil {
 		return nil, guardrailError(err)
 	}
@@ -242,6 +218,47 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy gua
 		}
 		return first, nil
 	}
+	raw, problem := s.runPruningDecision(ctx, parent, &route, *current, policy, body)
+	if problem != nil || raw == nil {
+		return nil, problem
+	}
+	return parsePruningSelection(raw, len(candidates), policy)
+}
+
+func pruningSurfaceError(policy guardrails.TypeSafePolicy, err error) ([]int, *fault.Error) {
+	if policy.Revision.OnError == guardrails.FailOpen {
+		return nil, nil
+	}
+	return nil, guardrailError(err)
+}
+
+func buildPruningBody(slug string, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]byte, error) {
+	state, err := json.Marshal(struct {
+		Task      string                               `json:"task"`
+		System    []string                             `json:"system,omitempty"`
+		Exchanges map[string]workflowRelevanceExchange `json:"exchanges"`
+	}{Task: protocols.WorkflowPruningTask(request, guardrails.MaxContentBytes), System: system, Exchanges: maps.Collect(func(yield func(string, workflowRelevanceExchange) bool) {
+		for index, candidate := range candidates {
+			if !yield(protocols.WorkflowExchangeName(index), candidate) {
+				return
+			}
+		}
+	})})
+	if err != nil {
+		return nil, err
+	}
+	questions := maps.Collect(func(yield func(string, pruningQuestion) bool) {
+		for index := range candidates {
+			name := protocols.WorkflowExchangeName(index)
+			if !yield(name, pruningQuestion{Type: "noul", Instructions: "Is the completed tool exchange " + name + " relevant to the current task?"}) {
+				return
+			}
+		}
+	})
+	return json.Marshal(pruningRequest{Model: slug, State: string(state), Questions: questions})
+}
+
+func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *routing.Route, current keyauthority.Authority, policy guardrails.TypeSafePolicy, body []byte) ([]byte, *fault.Error) {
 	codec, ok := operationregistry.Lookup(decision.SystemOne)
 	if !ok {
 		return nil, guardrailError(guardrails.ErrSurface)
@@ -253,15 +270,14 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy gua
 		}
 		return nil, guardrailError(err)
 	}
-	accountingID := parent.request.accountingID()
 	x := &Call{
 		request: requestMetadataForPruning(parent, body), family: wire.SystemOne, mode: "unary",
 		actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID,
-		authority: *current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
-		userID: parent.userID, origin: usage.OriginClassifier, parent: accountingID,
+		authority: current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
+		userID: parent.userID, origin: usage.OriginClassifier, parent: parent.request.accountingID(),
 		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
 		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
-		routeLeg: routeLeg{Route: &route}, workflow: parent.workflow,
+		routeLeg: routeLeg{Route: route}, workflow: parent.workflow,
 		generation: generationCall{runLimits: parent.generation.runLimits},
 		unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
 	}
@@ -290,24 +306,22 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy gua
 		}
 		return nil, result.err
 	}
+	return result.result.Body, nil
+}
+
+func parsePruningSelection(raw []byte, count int, policy guardrails.TypeSafePolicy) ([]int, *fault.Error) {
 	var decoded pruningResponse
-	if json.Unmarshal(result.result.Body, &decoded) != nil || len(decoded.Answers) != len(candidates) {
-		if policy.Revision.OnError == guardrails.FailOpen {
-			return nil, nil
-		}
-		return nil, guardrailError(guardrails.ErrSurface)
+	if json.Unmarshal(raw, &decoded) != nil || len(decoded.Answers) != count {
+		return pruningSurfaceError(policy, guardrails.ErrSurface)
 	}
-	for index := range candidates {
+	for index := range count {
 		answer, exists := decoded.Answers[protocols.WorkflowExchangeName(index)]
 		if !exists || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
-			if policy.Revision.OnError == guardrails.FailOpen {
-				return nil, nil
-			}
-			return nil, guardrailError(guardrails.ErrSurface)
+			return pruningSurfaceError(policy, guardrails.ErrSurface)
 		}
 	}
 	return slices.Collect(func(yield func(int) bool) {
-		for index := range candidates {
+		for index := range count {
 			if *decoded.Answers[protocols.WorkflowExchangeName(index)].Noul < 0.2 && !yield(index) {
 				return
 			}

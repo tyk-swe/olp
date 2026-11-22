@@ -936,6 +936,15 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 	}
 	t.Run("terminal frame could not be delivered", func(t *testing.T) {
 		h := newHarness(t, Config{})
+		h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+			for id, provider := range snapshot.Providers {
+				provider.Kind, provider.VendorID, provider.ProfileID, provider.ProfileRevision = "bedrock", "", "", ""
+				provider.CloudRegion, provider.AuthMode = "us-east-1", "static"
+				provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "bedrock", Mode: "streaming"}}
+				snapshot.Providers[id] = provider
+			}
+		})
+		serveBedrock(t, h)
 		var source bytes.Buffer
 		for _, frame := range []*eventstream.Message{
 			bedrockMetadata(`{"usage":{"inputTokens":2,"outputTokens":3,"totalTokens":5}}`),
@@ -949,15 +958,12 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 			w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 			_, _ = w.Write(source.Bytes())
 		})
-		p := testPinnedTarget(h, 0)
-		x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Bedrock, keyID: h.keyID}
-		resp, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodPost, p.Provider.Endpoint, nil, "")
-		if failure != nil {
-			t.Fatalf("provider stream: %+v", failure)
-		}
-		defer resp.Body.Close()
+		req := httptest.NewRequest(http.MethodPost, "/bedrock/model/team-chat/converse-stream", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"inferenceConfig":{"maxTokens":16}}`))
+		req.SetPathValue("model", routeSlug)
+		req.Header.Set("Authorization", "Bearer "+fullKey)
+		req.Header.Set("Content-Type", "application/json")
 		writer := &bedrockFrameWriter{ResponseRecorder: httptest.NewRecorder()}
-		h.gateway.RelayBedrockStream(t.Context(), writer, x, resp)
+		BedrockConverseStream(h.gateway)(writer, req)
 		h.sink.mu.Lock()
 		defer h.sink.mu.Unlock()
 		if len(h.sink.envs) != 1 {

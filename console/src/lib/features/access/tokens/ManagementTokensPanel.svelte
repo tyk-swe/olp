@@ -9,15 +9,19 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ManagementTokenForm, {
+    type TokenFormInput
+  } from './ManagementTokenForm.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { managementTokenKeys } from '#lib/features/access/tokens/tokenKeys.js';
   import {
-    MANAGEMENT_TOKEN_SCOPES,
     createManagementToken,
     listManagementTokenPage,
     revokeManagementToken,
     type ManagementToken,
-    type ManagementTokenScope,
     type ManagementTokenSecret
   } from '#lib/features/access/tokens/api.js';
   import { listProjects } from '#lib/features/access/projects/api.js';
@@ -34,31 +38,9 @@
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import { formatDate } from '#lib/format.js';
 
-  const revokeManagementTokenIntent = useMutationIntent();
-
+  const write = useAction();
   const createIntent = useMutationIntent();
-
-  const expiryChoices = [
-    { days: 7, label: '7 days' },
-    { days: 30, label: '30 days' },
-    { days: 90, label: '90 days' },
-    { days: 180, label: '180 days' },
-    // The server caps expiry at 366 days on its own clock; 365 leaves a
-    // day of headroom for client clock skew.
-    { days: 365, label: '365 days' }
-  ];
-  const scopeLabels: Record<string, string> = {
-    read: 'Read management state',
-    access_read: 'Read members and sessions',
-    access: 'Manage members and provisioning',
-    settings: 'Manage settings and pricing',
-    configure: 'Manage providers and routes',
-    keys: 'Manage API keys',
-    manage_projects: 'Manage installation projects',
-    manage_organization: 'Manage organizations',
-    playground: 'Use the playground',
-    usage: 'Read usage and request history'
-  };
+  const revokeIntent = useMutationIntent();
 
   function status(token: ManagementToken): string {
     if (token.revoked_at) return 'revoked';
@@ -69,14 +51,7 @@
   const access = useRole();
   const isOwner = $derived(access.allows('POST /api/v1/management-tokens'));
   const pagination = $state(emptyCursorHistory());
-  let busy = $state('');
-  let error = $state('');
   let creating = $state(false);
-  let name = $state('');
-  let scopes = $state<ManagementTokenScope[]>(['read']);
-  let expiresInDays = $state(30);
-  let allProjects = $state(true);
-  let projectIds = $state<string[]>([]);
   let tokenSecret = $state<ManagementTokenSecret | null>(null);
   let copied = $state(false);
   let copyError = $state('');
@@ -97,27 +72,10 @@
 
   const captureOwner = usePrincipalLifetime(() => {
     tokenSecret = null;
-    name = '';
-    scopes = ['read'];
-    allProjects = true;
-    projectIds = [];
-    expiresInDays = 30;
     copied = false;
-    copyError = error = busy = '';
+    copyError = '';
     creating = false;
   });
-
-  function toggle(scope: ManagementTokenScope) {
-    scopes = scopes.includes(scope)
-      ? scopes.filter((item) => item !== scope)
-      : [...scopes, scope];
-  }
-
-  function toggleProject(id: string) {
-    projectIds = projectIds.includes(id)
-      ? projectIds.filter((item) => item !== id)
-      : [...projectIds, id];
-  }
 
   function projectScopeLabel(token: ManagementToken): string {
     if (token.all_projects) return 'All projects';
@@ -127,77 +85,60 @@
     return names || 'No projects';
   }
 
-  async function run(
-    label: string,
-    action: (isCurrent: () => boolean) => Promise<void>
-  ) {
-    const isCurrent = captureOwner();
-    busy = label;
-    error = '';
-    try {
-      await action(isCurrent);
-    } catch (cause) {
-      if (isCurrent()) error = errorMessage(cause);
-    } finally {
-      if (isCurrent()) busy = '';
+  function create(input: TokenFormInput) {
+    if (!isOwner) return Promise.resolve(false);
+    if (!input.name.trim()) {
+      write.error = 'Enter a token name.';
+      return Promise.resolve(false);
     }
-  }
-
-  async function create(event: SubmitEvent) {
-    event.preventDefault();
-    if (!isOwner) return;
-    if (!name.trim()) {
-      error = 'Enter a token name.';
-      return;
+    if (!input.scopes.length) {
+      write.error = 'Select at least one scope.';
+      return Promise.resolve(false);
     }
-    if (!scopes.length) {
-      error = 'Select at least one scope.';
-      return;
+    if (!input.allProjects && !input.projectIds.length) {
+      write.error = 'Select at least one project, or choose all projects.';
+      return Promise.resolve(false);
     }
-    if (!allProjects && !projectIds.length) {
-      error = 'Select at least one project, or choose all projects.';
-      return;
-    }
-    await run('create', async (isCurrent) => {
-      const submission = createIntent.prepare(
-        {
-          name: name.trim(),
-          scopes,
-          expiresInDays,
-          projectIds: allProjects ? undefined : projectIds
-        },
-        () => ({
-          name: name.trim(),
-          scopes,
-          expiresAt: new Date(
-            Date.now() + expiresInDays * 24 * 60 * 60 * 1000
-          ).toISOString(),
-          projectIds: allProjects ? undefined : projectIds
-        })
-      );
-      const result = await createManagementToken(
-        submission.input.name,
-        submission.input.scopes,
-        submission.input.expiresAt,
-        submission.input.projectIds,
-        submission.requestId
-      );
-      if (!isCurrent()) return;
-      tokenSecret = result;
-      createIntent.reset();
-      name = '';
-      scopes = ['read'];
-      allProjects = true;
-      projectIds = [];
-      creating = false;
-      try {
-        const observation = await tokens.refetch();
-        if (observation?.isError) throw observation.error;
-      } catch (cause) {
-        if (isCurrent())
-          error = `Management token created, but refreshing failed. ${errorMessage(cause)}`;
-      }
-    });
+    return write.run(
+      () =>
+        createIntent.submitBuilt(
+          {
+            name: input.name.trim(),
+            scopes: input.scopes,
+            expiresInDays: input.expiresInDays,
+            projectIds: input.allProjects ? undefined : input.projectIds
+          },
+          () => ({
+            name: input.name.trim(),
+            scopes: input.scopes,
+            expiresAt: new Date(
+              Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000
+            ).toISOString(),
+            projectIds: input.allProjects ? undefined : input.projectIds
+          }),
+          (submission, requestId) =>
+            createManagementToken(
+              submission.name,
+              submission.scopes,
+              submission.expiresAt,
+              submission.projectIds,
+              requestId
+            )
+        ),
+      async (result, current) => {
+        tokenSecret = result;
+        creating = false;
+        const observation = await readResult(() => tokens.refetch());
+        const failed = observation.ok
+          ? observation.value?.isError
+            ? observation.value.error
+            : null
+          : observation.error;
+        if (failed !== null && current())
+          write.error = `Management token created, but refreshing failed. ${errorMessage(failed)}`;
+      },
+      { key: 'create' }
+    );
   }
 
   async function revoke(token: ManagementToken) {
@@ -210,15 +151,18 @@
       }))
     )
       return;
-    await run(`revoke-${token.id}`, async (isCurrent) => {
-      await revokeManagementTokenIntent.submit(
-        [token.id, token.etag] as const,
-        (input, requestId) => revokeManagementToken(...input, requestId)
-      );
-      if (!isCurrent()) return;
-      await tokens.refetch();
-      if (isCurrent()) notify('Token revoked');
-    });
+    await write.run(
+      () =>
+        revokeIntent.submit(
+          [token.id, token.etag] as const,
+          (input, requestId) => revokeManagementToken(...input, requestId)
+        ),
+      async (_value, current) => {
+        await tokens.refetch();
+        if (current()) notify('Token revoked');
+      },
+      { key: `revoke-${token.id}` }
+    );
   }
 
   async function copySecret() {
@@ -272,7 +216,7 @@
   </SecretDialog>
 {/if}
 
-{#if error}<Callout tone="danger">{error}</Callout>{/if}
+{#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
 
 {#if !isOwner}
   <ReadOnlyNote>Only owners can manage management tokens.</ReadOnlyNote>
@@ -297,99 +241,27 @@
     placement="side"
     onClose={() => (creating = false)}
   >
-    <form class="token-form" onsubmit={create} novalidate>
-      <label
-        ><span>Name</span><input
-          type="text"
-          autocomplete="off"
-          bind:value={name}
-          placeholder="deploy-automation"
-          maxlength="100"
-        /></label
-      >
-      <fieldset>
-        <legend>Scopes</legend>
-        {#each MANAGEMENT_TOKEN_SCOPES as scope (scope)}
-          <label class="scope-option"
-            ><input
-              type="checkbox"
-              checked={scopes.includes(scope)}
-              onchange={() => toggle(scope)}
-            />{scopeLabels[scope] ?? scope}<code>{scope}</code></label
-          >
-        {/each}
-      </fieldset>
-      <fieldset>
-        <legend>Projects</legend>
-        <label class="scope-option"
-          ><input
-            type="radio"
-            name="token-projects"
-            checked={allProjects}
-            onchange={() => (allProjects = true)}
-          />All projects</label
-        >
-        <label class="scope-option"
-          ><input
-            type="radio"
-            name="token-projects"
-            checked={!allProjects}
-            onchange={() => (allProjects = false)}
-          />Selected projects</label
-        >
-        {#if !allProjects}
-          {#if projects.isPending}<span class="inline-status" role="status"
-              >Loading projects…</span
-            >{:else if projects.isError}<span
-              class="inline-problem"
-              role="alert"
-              >Projects are unavailable.
-              <button
-                class="text-button"
-                type="button"
-                onclick={() => projects.refetch()}>Retry</button
-              ></span
-            >{:else}{#each projects.data ?? [] as project (project.id)}<label
-                class="scope-option"
-                ><input
-                  type="checkbox"
-                  checked={projectIds.includes(project.id)}
-                  onchange={() => toggleProject(project.id)}
-                />{project.name}</label
-              >{:else}<span
-                >No projects yet. Create one under Access, Projects.</span
-              >{/each}{/if}
-        {/if}
-      </fieldset>
-      <label
-        ><span>Expires in</span><select bind:value={expiresInDays}
-          >{#each expiryChoices as choice (choice.days)}<option
-              value={choice.days}>{choice.label}</option
-            >{/each}</select
-        ></label
-      >
-      <button
-        class="button button-primary"
-        type="submit"
-        disabled={busy === 'create'}
-        >{busy === 'create' ? 'Creating…' : 'Create token'}</button
-      >
-    </form>
+    <ManagementTokenForm
+      submitting={write.key === 'create'}
+      {projects}
+      onSubmit={create}
+    />
   </Dialog>
 {/if}
 
 {#if isOwner}
-  {#if tokens.isPending}
-    <div class="loading-state" role="status">Loading management tokens…</div>
-  {:else if tokens.isError}
-    <Callout tone="danger" title="Tokens could not be loaded"
-      >{errorMessage(tokens.error)}</Callout
-    >
-  {:else if !tokens.data?.items.length && pagination.history.length === 0}
-    <EmptyState title="No management tokens yet"
-      >Create one when a script or pipeline needs to manage this installation.</EmptyState
-    >
-  {:else}
+  <QueryView
+    query={tokens}
+    loading="Loading management tokens…"
+    errorTitle="Tokens could not be loaded"
+    failure={errorMessage(tokens.error)}
+    emptyWhen={!tokens.data?.items.length && pagination.history.length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No management tokens yet"
+        >Create one when a script or pipeline needs to manage this installation.</EmptyState
+      >
+    {/snippet}
     <ScrollTable label="Management tokens">
       <table class="data-table">
         <thead
@@ -430,7 +302,7 @@
                     class="button button-secondary button-danger"
                     type="button"
                     onclick={() => revoke(token)}
-                    disabled={Boolean(busy)}>Revoke</button
+                    disabled={write.busy}>Revoke</button
                   >{/if}</td
               >
             </tr>
@@ -442,7 +314,7 @@
       {...cursorPaginationProps(pagination, tokens.data?.nextCursor)}
       label="Management token pages"
     />
-  {/if}
+  </QueryView>
 {/if}
 
 <style>
@@ -450,56 +322,6 @@
     max-width: 60ch;
     margin: 0;
     color: var(--foreground-muted);
-  }
-  .token-form {
-    display: grid;
-    gap: 0.65rem;
-  }
-  .token-form label {
-    display: grid;
-    gap: 0.4rem;
-    font-weight: 500;
-  }
-  .token-form input[type='text'],
-  .token-form select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .token-form input:hover,
-  .token-form select:hover {
-    border-color: var(--border-strong);
-  }
-  .token-form input::placeholder {
-    color: var(--foreground-muted);
-  }
-  .token-form fieldset {
-    display: grid;
-    gap: 0.4rem;
-    margin: 0;
-    padding: 0.65rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-  }
-  .token-form legend {
-    padding: 0 0.3rem;
-    font-weight: 500;
-  }
-  .scope-option {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 400;
-  }
-  .scope-option code {
-    margin-left: auto;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
   }
   .token-secret {
     display: block;
@@ -518,11 +340,6 @@
   }
   td small {
     color: var(--foreground-muted);
-  }
-  @media (max-width: 64rem) {
-    .token-form {
-      display: grid;
-    }
   }
   @media (max-width: 42rem) {
     .dialog-actions {

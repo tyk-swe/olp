@@ -4,6 +4,8 @@
     useMutationIntents,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import { listRoutes } from '#lib/features/routes/index.js';
@@ -17,6 +19,7 @@
   import { ApiProblem, errorMessage } from '#lib/management/http.js';
 
   const intents = useMutationIntents();
+  const rowAction = useAction();
   let {
     selected,
     onChanged
@@ -133,18 +136,13 @@
       review === submittedReview &&
       selectionScope === submittedReview.scope;
     busy = true;
-    try {
-      await refresh(isCurrent);
-    } catch (error) {
-      if (isCurrent())
-        outcomes = [
-          ...submittedReview.outcomes.values(),
-          `Refreshing failed: ${errorMessage(error)}`
-        ];
-    } finally {
-      if (generation === submittedGeneration && principalCurrent())
-        busy = false;
-    }
+    const result = await readResult(() => refresh(isCurrent));
+    if (!result.ok && isCurrent())
+      outcomes = [
+        ...submittedReview.outcomes.values(),
+        `Refreshing failed: ${errorMessage(result.error)}`
+      ];
+    if (generation === submittedGeneration && principalCurrent()) busy = false;
   }
   async function apply() {
     if (
@@ -169,66 +167,59 @@
     for (const provider of submittedReview.targets) {
       if (!isCurrent()) break;
       if (submittedReview.confirmed.has(provider.id)) continue;
-      try {
-        // The API enforces the reviewed selection's ETag. A fresh GET here
-        // would refuse a committed request's replay before its key reaches
-        // the idempotency boundary.
-        if (submittedReview.action === 'disable')
-          await intents.submit(
-            'disableProvider' + ':' + provider.id,
-            { id: provider.id, etag: provider.etag },
-            (input, requestId) => disableProvider(input, requestId)
+      // The API enforces the reviewed selection's ETag. A fresh GET here
+      // would refuse a committed request's replay before its key reaches
+      // the idempotency boundary.
+      const snap = { id: provider.id, etag: provider.etag };
+      const send = (input: typeof snap, requestId: string): Promise<unknown> =>
+        submittedReview.action === 'disable'
+          ? disableProvider(input, requestId)
+          : submittedReview.action === 'restore'
+            ? restoreProviderAsDraft(input, requestId)
+            : activateProvider(input, requestId);
+      const key = `${submittedReview.action === 'disable' ? 'disableProvider' : submittedReview.action === 'restore' ? 'restoreProviderAsDraft' : 'activateProvider'}:${provider.id}`;
+      await rowAction.run(
+        () => intents.submit(key, snap, send),
+        () => {
+          submittedReview.confirmed.add(provider.id);
+          submittedReview.outcomes.set(
+            provider.id,
+            `${provider.name}: ${submittedReview.action === 'activate' ? 'activated' : submittedReview.action === 'disable' ? 'disabled' : 'restored as draft'}.`
           );
-        else if (submittedReview.action === 'restore')
-          await intents.submit(
-            'restoreProviderAsDraft' + ':' + provider.id,
-            { id: provider.id, etag: provider.etag },
-            (input, requestId) => restoreProviderAsDraft(input, requestId)
-          );
-        else
-          await intents.submit(
-            'activateProvider' + ':' + provider.id,
-            { id: provider.id, etag: provider.etag },
-            (input, requestId) => activateProvider(input, requestId)
-          );
-        submittedReview.confirmed.add(provider.id);
-        submittedReview.outcomes.set(
-          provider.id,
-          `${provider.name}: ${submittedReview.action === 'activate' ? 'activated' : submittedReview.action === 'disable' ? 'disabled' : 'restored as draft'}.`
-        );
-        if (!isCurrent()) break;
-        refreshPending = true;
-      } catch (error) {
-        if (!isCurrent()) break;
-        const refused =
-          error instanceof ApiProblem &&
-          error.problem.status >= 400 &&
-          error.problem.status < 500 &&
-          ![408, 429].includes(error.problem.status) &&
-          !error.problem.type?.endsWith('/idempotency_conflict');
-        if (refused && !submittedReview.ambiguous.has(provider.id))
-          submittedReview.refused.add(provider.id);
-        else submittedReview.ambiguous.add(provider.id);
-        submittedReview.outcomes.set(
-          provider.id,
-          `${provider.name}: ${errorMessage(error)}`
-        );
-      }
+          if (isCurrent()) refreshPending = true;
+        },
+        {
+          key: provider.id,
+          failure: (error) => {
+            if (!isCurrent()) return '';
+            const refused =
+              error instanceof ApiProblem &&
+              error.problem.status >= 400 &&
+              error.problem.status < 500 &&
+              ![408, 429].includes(error.problem.status) &&
+              !error.problem.type?.endsWith('/idempotency_conflict');
+            if (refused && !submittedReview.ambiguous.has(provider.id))
+              submittedReview.refused.add(provider.id);
+            else submittedReview.ambiguous.add(provider.id);
+            submittedReview.outcomes.set(
+              provider.id,
+              `${provider.name}: ${errorMessage(error)}`
+            );
+            return errorMessage(error);
+          }
+        }
+      );
+      if (!isCurrent()) break;
       outcomes = [...submittedReview.outcomes.values()];
     }
     if (!isCurrent()) return;
-    try {
-      await refresh(isCurrent);
-    } catch (error) {
-      if (isCurrent())
-        outcomes = [
-          ...submittedReview.outcomes.values(),
-          `Refreshing failed: ${errorMessage(error)}`
-        ];
-    } finally {
-      if (generation === submittedGeneration && principalCurrent())
-        busy = false;
-    }
+    const result = await readResult(() => refresh(isCurrent));
+    if (!result.ok && isCurrent())
+      outcomes = [
+        ...submittedReview.outcomes.values(),
+        `Refreshing failed: ${errorMessage(result.error)}`
+      ];
+    if (generation === submittedGeneration && principalCurrent()) busy = false;
   }
 </script>
 

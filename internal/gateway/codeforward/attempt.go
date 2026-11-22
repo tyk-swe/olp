@@ -53,43 +53,14 @@ type codeAttempt struct {
 }
 
 func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
-	authority, failure := f.gate.Authenticate(r, "inference")
-	if failure != nil {
-		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
-	}
-	if !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
-		return nil, codemode.Refuse(403, "code_permission_denied")
-	}
-	resolved, err := route.ResolveModel(observation.Operation)
-	if err != nil {
-		return nil, err
-	}
-	operation, err := func() (codemode.Operation, error) {
-		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
-			return resolved, nil
-		}
-		return f.ledger.ResolvePaidModel(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
-	}()
-	if err != nil {
-		return nil, err
-	}
-	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
-		return f.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
-	}
-	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
-		selected, err := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
-		if err != nil {
-			return nil, err
-		}
-		if selected != nil {
-			return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
-		}
+	authority, operation, paidAttempt, err := f.resolveCodeIngress(r, release, route, observation, inbound, transport, recovery, body)
+	if err != nil || paidAttempt != nil {
+		return paidAttempt, err
 	}
 	providers := release.Snapshot().CodeModelProviders(route, inbound.path, operation.Model, transport)
 	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, inbound.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
-
 	labels, failure := ingress.ParseAttribution(r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
@@ -98,29 +69,14 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := f.ledger.Admit(r.Context(), codesessions.Admission{
-		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
-	})
-	if err != nil {
-		quota.SettleKey(r.Context(), lease, false, nil, f.log)
-		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
-			selected, selectionErr := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
-			if selectionErr != nil {
-				return nil, selectionErr
-			}
-			if selected != nil {
-				return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, recovery, true)
-			}
-		}
-		return nil, err
+	permit, fallbackAttempt, err := f.admitCodePermit(r, release, route, observation, operation, inbound, transport, authority, labels, providers, lease, recovery, body)
+	if err != nil || fallbackAttempt != nil {
+		return fallbackAttempt, err
 	}
-	model := func() string {
-		if permit.Pin.TargetModel != "" {
-			return permit.Pin.TargetModel
-		}
-		return operation.Model
-	}()
+	model := operation.Model
+	if permit.Pin.TargetModel != "" {
+		model = permit.Pin.TargetModel
+	}
 	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
@@ -128,58 +84,11 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 			a.finish(r.Context())
 		}
 	}()
-	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
+	if err := f.reconcileCodePermit(r, a, authority, labels, observation, route.Slug); err != nil {
 		return nil, err
 	}
-	a.permit.Authority = permit.Authority
-	if !permit.Authority.AllowsAttribution(labels) {
-		return nil, codemode.Refuse(409, "code_attribution_changed")
-	}
-	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
-		quota.SettleKey(r.Context(), a.lease, false, nil, f.log)
-		a.lease = nil
-		fresh := permit.Authority
-		if failure = f.gate.CheckKeyAddress(r, fresh); failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
-		}
-		fresh, failure = f.gate.IdentifyEndUser(r, fresh)
-		if failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_end_user_invalid")
-		}
-		if fresh.EndUserDigest != authority.EndUserDigest {
-			return nil, codemode.Refuse(409, "code_end_user_changed")
-		}
-		a.lease, failure = f.admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
-		if failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
-		}
-	}
-	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
-		return nil, codemode.Refuse(503, "code_binding_invalid")
-	}
-	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, inbound, transport)
-	if err != nil {
+	if err := f.bindCodeTarget(r, a, release, route, observation, inbound, transport, recovery, model); err != nil {
 		return nil, err
-	}
-	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
-		return nil, codemode.Refuse(503, "code_configuration_unsupported")
-	}
-	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint, observation.ChatChoices)
-	a.adapter = target.adapter.Adapter
-	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, codeProviderDemand(observation), codeGenerationTimeout+time.Minute)
-	if failure != nil {
-		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
-	}
-	a.auth, err = f.authorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
-	if err != nil {
-		return nil, codemode.Refuse(503, "code_account_unavailable")
-	}
-	if err := target.adapter.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
-		return nil, err
-	}
-	if recovery != nil && recovery.AccountID != "" && (a.auth.CredentialID != recovery.CredentialID || a.auth.GrantGeneration <= recovery.GrantGeneration) {
-		return nil, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	ok = true
 	return a, nil

@@ -92,6 +92,19 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 			}
 		}
 	}
+	if err := enrichRetainedMeter(r, e, root, meta); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil || len(raw) > metadataLimit {
+		return ErrMetadataTooLarge
+	}
+	r.Metadata = raw
+	return nil
+}
+
+func enrichRetainedMeter(r *Resource, e retainedapi.Endpoint, root oif.Value, meta map[string]json.RawMessage) error {
+	put := func(name string, value any) { meta[name], _ = json.Marshal(value) }
 	if r.Kind == "context_cache" && e.Action != "delete" {
 		model, modelOK := retainedText(root, "model")
 		var pinned string
@@ -158,11 +171,6 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 			put("memory_tier", tier)
 		}
 	}
-	raw, err := json.Marshal(meta)
-	if err != nil || len(raw) > metadataLimit {
-		return ErrMetadataTooLarge
-	}
-	r.Metadata = raw
 	return nil
 }
 

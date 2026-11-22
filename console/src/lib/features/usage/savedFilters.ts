@@ -1,3 +1,5 @@
+import { captureResult, type Result } from '#lib/editing/result.js';
+
 export type FilterScope = 'usage' | 'history';
 export type SavedFilter = { name: string; search: string };
 const prefix = 'olp.saved-filters.v1.';
@@ -111,4 +113,23 @@ export function saveFilters(
     return { name: name.trim(), search: filterSearch(scope, search) };
   });
   storage.setItem(key(session, scope), JSON.stringify(normalized));
+}
+
+export function sessionFilters(
+  session: string,
+  scope: FilterScope
+): Result<SavedFilter[]> {
+  return captureResult(() =>
+    readSavedFilters(window.sessionStorage, session, scope)
+  );
+}
+
+export function writeSessionFilters(
+  session: string,
+  scope: FilterScope,
+  filters: SavedFilter[]
+): Result<void> {
+  return captureResult(() =>
+    saveFilters(window.sessionStorage, session, scope, filters)
+  );
 }

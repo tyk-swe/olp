@@ -9,6 +9,7 @@ export { parseExternalReference } from './externalReference.js';
 export { GrantEnrollmentState } from './grantEnrollment.svelte.js';
 export { importSubscriptionCredentials } from './grants.js';
 export {
+  type ProviderKindCapability,
   type ProviderModelInventory,
   listProviderKinds,
   listProviderModelInventory
@@ -20,7 +21,9 @@ export {
 export { parseManualModelNames, requiresGrant } from './providerEditor.js';
 export { providerKeys } from './providerKeys.js';
 export {
+  type Provider,
   type ProviderKind,
+  type ProviderVendor,
   getProvider,
   listProviderVendors,
   listProviders

@@ -6,6 +6,10 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     listIssuers,
     saveIssuer,
@@ -41,15 +45,14 @@
   let lifetime = $state('3600');
   let disabledKeys = $state('');
   let mappings = $state('[]');
-  let requestId = $state('');
   let pending = $state<IssuerWrite>();
-  let busy = $state(false);
-  let error = $state('');
+  const write = useAction();
+  const saveIntent = useMutationIntent();
   const disableIntent = useMutationIntent();
-  const captureOwner = usePrincipalLifetime(() => {
+  usePrincipalLifetime(() => {
     editing = pending = undefined;
-    opened = busy = false;
-    name = issuer = jwks = audiences = disabledKeys = requestId = error = '';
+    opened = false;
+    name = issuer = jwks = audiences = disabledKeys = '';
     enabled = true;
     algorithms = ['RS256'];
     lifetime = '3600';
@@ -83,19 +86,17 @@
       null,
       2
     );
-    requestId = crypto.randomUUID();
     pending = undefined;
-    error = '';
+    write.error = '';
+    saveIntent.reset();
     opened = true;
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !editable) return;
-    const isCurrent = captureOwner();
-    let committed = false;
-    error = '';
-    try {
-      if (!pending) {
+    if (write.busy || !editable) return;
+    let draft = pending;
+    if (!draft) {
+      const built = captureResult((): IssuerWrite => {
         const parsed: unknown = JSON.parse(mappings);
         if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 32)
           throw new Error('Provide one to 32 claim mappings.');
@@ -109,7 +110,7 @@
           throw new Error(
             'Choose a signature algorithm and a maximum lifetime between 60 and 86400 seconds.'
           );
-        pending = {
+        return {
           name: name.trim(),
           issuer,
           jwks_url: jwks,
@@ -120,30 +121,41 @@
           disabled_key_ids: words(disabledKeys),
           mappings: parsed as IssuerWrite['mappings']
         };
+      });
+      if (!built.ok) {
+        write.error = errorMessage(
+          built.error,
+          'Unable to save the workload issuer.'
+        );
+        return;
       }
-      busy = true;
-      await saveIssuer(pending, requestId, editing);
-      if (!isCurrent()) return;
-      committed = true;
-      opened = false;
-      notify(editing ? 'Workload issuer saved' : 'Workload issuer added');
-      await client.invalidateQueries(
-        { queryKey: workloadIssuerKeys.root },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error =
-        (committed ? 'Issuer saved, but refreshing the view failed: ' : '') +
-        (cause instanceof Error
-          ? cause.message
-          : 'Unable to save the workload issuer.');
-    } finally {
-      if (isCurrent()) busy = false;
+      pending = built.value;
+      draft = built.value;
     }
+    await write.run(
+      () =>
+        saveIntent.submit(draft, (input, id) => saveIssuer(input, id, editing)),
+      async () => {
+        opened = false;
+        notify(editing ? 'Workload issuer saved' : 'Workload issuer added');
+        await client.invalidateQueries(
+          { queryKey: workloadIssuerKeys.root },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          (stage === 'accept'
+            ? 'Issuer saved, but refreshing the view failed: '
+            : '') +
+          (cause instanceof Error
+            ? cause.message
+            : 'Unable to save the workload issuer.')
+      }
+    );
   }
   async function disable(value: Issuer) {
-    if (busy) return;
+    if (write.busy) return;
     if (
       !(await confirmAction({
         title: `Disable ${value.name}?`,
@@ -153,34 +165,31 @@
       }))
     )
       return;
-    const isCurrent = captureOwner();
-    let committed = false;
-    busy = true;
-    error = '';
-    try {
-      const saved = await disableIntent.submit(
-        { input: { ...issuerInput(value), enabled: false }, current: value },
-        (attempt, attemptId) =>
-          saveIssuer(attempt.input, attemptId, attempt.current)
-      );
-      if (!isCurrent()) return;
-      committed = true;
-      if (editing?.id === value.id) open(saved);
-      notify('Issuer disabled');
-      await client.invalidateQueries(
-        { queryKey: workloadIssuerKeys.root },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error =
-        (committed ? 'Issuer disabled, but refreshing the view failed: ' : '') +
-        (cause instanceof Error
-          ? cause.message
-          : 'Unable to disable the issuer.');
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    await write.run(
+      () =>
+        disableIntent.submit(
+          { input: { ...issuerInput(value), enabled: false }, current: value },
+          (attempt, attemptId) =>
+            saveIssuer(attempt.input, attemptId, attempt.current)
+        ),
+      async (saved) => {
+        if (editing?.id === value.id) open(saved);
+        notify('Issuer disabled');
+        await client.invalidateQueries(
+          { queryKey: workloadIssuerKeys.root },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          (stage === 'accept'
+            ? 'Issuer disabled, but refreshing the view failed: '
+            : '') +
+          (cause instanceof Error
+            ? cause.message
+            : 'Unable to disable the issuer.')
+      }
+    );
   }
 </script>
 
@@ -193,25 +202,22 @@
   {#if editable}<div class="page-actions">
       <button
         class="button button-primary"
-        disabled={busy}
+        disabled={write.busy}
         onclick={() => open()}>New issuer</button
       >
     </div>{/if}
 </div>
-{#if error}<Callout tone="danger">{error}</Callout>{/if}
-{#if query.isPending}<p class="loading-state">
-    Loading issuers…
-  </p>{:else if query.error}<Callout
-    tone="danger"
-    title="Issuers could not be loaded"
-    >Check your connection and try again.{#snippet actions()}<button
-        class="button button-secondary"
-        onclick={() => query.refetch()}>Retry</button
-      >{/snippet}</Callout
-  >{:else if (query.data ?? []).length === 0}<EmptyState
-    title="No workload issuers yet"
-    >Add an issuer to let workloads authenticate without an API key.</EmptyState
-  >{:else}
+{#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
+<QueryView
+  {query}
+  loading="Loading issuers…"
+  errorTitle="Issuers could not be loaded"
+  failure="Check your connection and try again."
+  emptyWhen={(query.data ?? []).length === 0}
+>
+  {#snippet empty()}<EmptyState title="No workload issuers yet"
+      >Add an issuer to let workloads authenticate without an API key.</EmptyState
+    >{/snippet}
   <ScrollTable label="Workload issuers">
     <table class="data-table">
       <thead
@@ -235,13 +241,13 @@
             <td class="row-actions">
               <button
                 class="text-button"
-                disabled={busy}
+                disabled={write.busy}
                 onclick={() => open(value)}
                 aria-label={`Edit ${value.name}`}
                 >{editable ? 'Edit' : 'View'}</button
               >{#if editable && value.enabled}<button
                   class="text-button danger"
-                  disabled={busy}
+                  disabled={write.busy}
                   onclick={() => disable(value)}
                   aria-label={`Disable ${value.name}`}>Disable</button
                 >{/if}
@@ -251,7 +257,7 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>
 {#if opened}
   <Dialog
     title={editing ? `Edit ${editing.name}` : 'New workload issuer'}
@@ -263,7 +269,7 @@
     }}
   >
     <form onsubmit={submit}>
-      <fieldset disabled={!editable || busy || Boolean(pending)}>
+      <fieldset disabled={!editable || write.busy || Boolean(pending)}>
         <div class="form-field">
           <label for="issuer-name">Name</label><input
             id="issuer-name"
@@ -347,8 +353,8 @@
           issuer to change it.
         </p>{/if}
       <div class="actions">
-        <button class="button button-primary" disabled={busy || !editable}
-          >{busy
+        <button class="button button-primary" disabled={write.busy || !editable}
+          >{write.busy
             ? 'Saving…'
             : pending
               ? 'Retry save'
@@ -356,7 +362,7 @@
         ><button
           type="button"
           class="button button-secondary"
-          disabled={busy}
+          disabled={write.busy}
           onclick={() => {
             opened = false;
             pending = undefined;

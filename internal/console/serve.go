@@ -63,6 +63,10 @@ func Handler(directory string) (http.Handler, func() error, error) {
 	}
 	csp := "default-src 'self'; script-src " + scriptPolicy.String() + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
 	files := http.FileServerFS(assets)
+	return assetHandler(assets, files, index, indexVariants, indexInfo, csp), root.Close, nil
+}
+
+func assetHandler(assets fs.FS, files http.Handler, index []byte, indexVariants map[string][]byte, indexInfo fs.FileInfo, csp string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -143,7 +147,7 @@ func Handler(directory string) (http.Handler, func() error, error) {
 			}
 		}
 		http.ServeContent(w, r, "index.html", indexInfo.ModTime(), bytes.NewReader(body))
-	}), root.Close, nil
+	})
 }
 
 // acceptedCoding returns the available compression coding preferred by the

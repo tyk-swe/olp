@@ -115,76 +115,19 @@ func (f *Forwarder) forwardCode(w http.ResponseWriter, r *http.Request, release 
 		return
 	}
 	defer attempt.finish(ctx)
-	payload, err := func() (codePayload, error) {
-		requestBody, rewriteErr := func() ([]byte, error) {
-			if attempt.model != attempt.publicModel {
-				return codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
-			}
-			return body, nil
-		}()
-		if rewriteErr != nil {
-			return codePayload{}, rewriteErr
-		}
-		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
-			return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
-		}
-		if attempt.endpoint.Protocol == inbound.protocol {
-			if attempt.model != attempt.publicModel {
-				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
-			}
-			return codePayload{body: raw, query: r.URL.RawQuery}, nil
-		}
-		if inbound.protocol == codemode.ProtocolChat {
-			return codeTranslateChat(requestBody, r, attempt.model)
-		}
-		return codeTranslateMessages(requestBody, r, attempt.model)
-	}()
+	payload, err := buildCodePayload(attempt, r, inbound, raw, body)
 	if err != nil {
 		refuse(err)
 		return
 	}
-
-	client, err := f.codeClient(r.Context(), release, attempt.config, attempt.providerID())
+	client, err := f.codeClient(ctx, release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := attempt.requestURL(payload.query, payload.stream)
+	request, err := buildCodeHTTPRequest(ctx, r, attempt, payload)
 	if err != nil {
-		refuse(err)
-		return
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload.body})
-	if err != nil {
-		refuse(codemode.Refuse(502, "code_connection_invalid"))
-		return
-	}
-	request.ContentLength = int64(len(payload.body))
-	request.Header = attempt.headers(r.Header)
-	if attempt.model != attempt.publicModel {
-		request.Header.Del("Content-Encoding")
-		request.Header.Del("Content-Length")
-		request.Header.Set("Accept-Encoding", "identity")
-	}
-	if payload.translated || payload.target != "" {
-		request.Header.Del("Content-Encoding")
-		request.Header.Del("Content-Length")
-		request.Header.Del("Anthropic-Version")
-		request.Header.Del("Anthropic-Beta")
-		request.Header.Set("Accept-Encoding", "identity")
-		request.Header.Set("Content-Type", "application/json")
-	} else {
-		request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
-	}
-	if len(request.Trailer) != 0 {
-		request.ContentLength = -1
-		request.Header.Del("Content-Length")
-	}
-	// A non-rewindable body and a fresh HTTP/1 connection prevent net/http replay.
-	request.GetBody = nil
-	request.Close = true
-	if err := attempt.authorizePaid(request, payload.body); err != nil {
 		refuse(err)
 		return
 	}
@@ -215,6 +158,73 @@ func (f *Forwarder) forwardCode(w http.ResponseWriter, r *http.Request, release 
 		f.forwardCode(w, r, release, route, observation, inbound, raw, body, next, refuse)
 		return
 	}
+	deliverCodeResponse(ctx, w, r, attempt, response, observation, inbound, payload)
+}
+
+func buildCodePayload(attempt *codeAttempt, r *http.Request, inbound codeIngress, raw, body []byte) (codePayload, error) {
+	requestBody := body
+	if attempt.model != attempt.publicModel {
+		rewritten, err := codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+		if err != nil {
+			return codePayload{}, err
+		}
+		requestBody = rewritten
+	}
+	if attempt.endpoint.Target == codeadapter.TargetAntigravity {
+		return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
+	}
+	if attempt.endpoint.Protocol == inbound.protocol {
+		if attempt.model != attempt.publicModel {
+			return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
+		}
+		return codePayload{body: raw, query: r.URL.RawQuery}, nil
+	}
+	if inbound.protocol == codemode.ProtocolChat {
+		return codeTranslateChat(requestBody, r, attempt.model)
+	}
+	return codeTranslateMessages(requestBody, r, attempt.model)
+}
+
+func buildCodeHTTPRequest(ctx context.Context, r *http.Request, attempt *codeAttempt, payload codePayload) (*http.Request, error) {
+	target, err := attempt.requestURL(payload.query, payload.stream)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload.body})
+	if err != nil {
+		return nil, codemode.Refuse(502, "code_connection_invalid")
+	}
+	request.ContentLength = int64(len(payload.body))
+	request.Header = attempt.headers(r.Header)
+	if attempt.model != attempt.publicModel {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Set("Accept-Encoding", "identity")
+	}
+	if payload.translated || payload.target != "" {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Del("Anthropic-Version")
+		request.Header.Del("Anthropic-Beta")
+		request.Header.Set("Accept-Encoding", "identity")
+		request.Header.Set("Content-Type", "application/json")
+	} else {
+		request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
+	}
+	if len(request.Trailer) != 0 {
+		request.ContentLength = -1
+		request.Header.Del("Content-Length")
+	}
+	// A non-rewindable body and a fresh HTTP/1 connection prevent net/http replay.
+	request.GetBody = nil
+	request.Close = true
+	if err := attempt.authorizePaid(request, payload.body); err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
+func deliverCodeResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, attempt *codeAttempt, response *http.Response, observation codemode.Request, inbound codeIngress, payload codePayload) {
 	if payload.target == codeadapter.TargetAntigravity {
 		attempt.antigravityResponse(ctx, w, r, response, observation.Operation.Model, payload)
 		return

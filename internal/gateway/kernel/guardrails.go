@@ -2,39 +2,24 @@ package kernel
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
-	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/guardstream"
-	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/panics"
-	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 var errGuardrailCredentials = errors.New("guardrail credentials unavailable")
@@ -214,6 +199,9 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
 	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
+	if x.Strict() && x.guard.engine.HasLegacyInput() {
+		evaluation.LegacyInputTexts = contentpolicy.InputTexts(document)
+	}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
 		for _, segment := range surface.Segments {
 			if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
@@ -221,13 +209,6 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 			}
 		}
 	})
-	if x.Strict() && x.guard.engine.HasLegacyInput() {
-		texts := contentpolicy.InputTexts(document)
-		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
-		for i, text := range texts {
-			evaluation.LegacyInput[i] = guardrails.Segment{ID: "legacy_" + strconv.Itoa(i), Text: text}
-		}
-	}
 	result, err := x.guard.engine.Evaluate(ctx, evaluation, x.guard.masks)
 	if recoverable && x.workflow != nil && len(result.Recovery) > 0 {
 		x.workflowRecovery = result.Recovery
@@ -241,6 +222,7 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 	}
 	return guardrailInput{document: document, segments: result.Segments, decisions: result.Decisions}, err
 }
+
 func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrails.Evidence, error) {
 	segments := make([]guardrails.Segment, len(texts))
 	for i, t := range texts {
@@ -250,6 +232,7 @@ func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrails.Evid
 	x.guard.input = segments
 	return result.Decisions, x.legacyGuardrailError(result, err)
 }
+
 func (x *Call) inspectOperationOutput(texts []operations.Text) error {
 	segments := make([]guardrails.Segment, len(texts))
 	for i, text := range texts {
@@ -259,6 +242,7 @@ func (x *Call) inspectOperationOutput(texts []operations.Text) error {
 	x.guard.record(result.Decisions)
 	return x.legacyGuardrailError(result, err)
 }
+
 func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	if !x.guard.engine.HasPhase(guardrails.Output) && !x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
 		return body, nil
@@ -328,6 +312,7 @@ type parallelGuardrail struct {
 	finished bool
 	err      error
 }
+
 type guardrailResult struct {
 	result guardrails.Result
 	err    error
@@ -356,6 +341,7 @@ func (s *Server) startParallel(ctx context.Context, x *Call, cancelUpstream cont
 	}()
 	return p
 }
+
 func (p *parallelGuardrail) join(x *Call, wait bool) error {
 	if p == nil || p.finished {
 		return nilIfParallel(p)
@@ -375,324 +361,12 @@ func (p *parallelGuardrail) join(x *Call, wait bool) error {
 	x.guard.record(result.result.Decisions)
 	return p.err
 }
+
 func nilIfParallel(p *parallelGuardrail) error {
 	if p == nil {
 		return nil
 	}
 	return p.err
-}
-
-func (s *Server) EnterGuardrails(w http.ResponseWriter, r *http.Request) (*Call, bool) {
-	req := s.begin(w, r)
-	s.cors(w, r)
-	if !s.Gate.Admit(r.Context()) {
-		fault.WriteError(w, fault.Overloaded)
-		return nil, false
-	}
-	authority, e := s.Gate.Authenticate(r, "guardrails")
-	if e != nil {
-		fault.WriteError(w, e)
-		s.Gate.Release(r.Context())
-		return nil, false
-	}
-	return &Call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}, true
-}
-
-func (s *Server) ApplyGuardrails(ctx context.Context, h http.Header, x *Call, in guardrails.Application) (guardrails.AppliedResult, *fault.Error) {
-	result, err := s.evaluateGuardrails(ctx, x, in, func(view *routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
-		return view.CompileGuardrailPolicy(in.PolicyRevisionID)
-	})
-	if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
-		return guardrails.AppliedResult{}, guardrailError(err)
-	}
-	x.guard.metadata = x.request.guardrailMetadata
-	x.guardrailHeaders(h, false, false)
-	return guardrails.Applied(result, err), nil
-}
-
-func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID string, phase guardrails.Phase, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
-	if s == nil || release == nil || release.Snapshot() == nil {
-		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
-	}
-	parent := &Call{
-		request:       request{id: requestID, minted: true, startedAt: s.Now(), release: release},
-		actor:         "api_key",
-		keyID:         authority.ID,
-		budgetGroupID: authority.BudgetGroupID,
-		authority:     authority,
-		attribution:   authority.Attribution,
-		endUserDigest: authority.EndUserDigest,
-		family:        wire.Chat,
-	}
-	evaluation := guardrails.Evaluation{RequestID: parent.request.accountingID(), Phase: phase, Segments: segments}
-	return s.boundGuardrails(parent, engine).Evaluate(ctx, evaluation, masks)
-}
-
-func (s *Server) EvaluateGuardrails(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-	if s == nil || s.Deps.Runtime == nil {
-		return guardrails.Result{}, httpkit.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
-	}
-	if !s.Gate.Admit(r.Context()) {
-		return guardrails.Result{}, httpkit.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
-	}
-	defer s.Gate.Release(r.Context())
-	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
-	x.authorize = func(route *routing.Route) *fault.Error {
-		if err := p.Authorize(authz.Playground); err != nil {
-			return fault.PermissionError("guardrail_forbidden", "Playground access is required.")
-		}
-		if err := p.Project(route.ProjectID, authz.View); err != nil {
-			return fault.ModelNotFound(route.Slug)
-		}
-		return nil
-	}
-	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
-		return pinned.Compile()
-	})
-	s.SettleAdmission(context.WithoutCancel(r.Context()), x)
-	if err == nil || errors.Is(err, guardrails.ErrBlocked) {
-		s.Finish(x, &Outcome{}, 200)
-		return result, err
-	}
-	failure := guardrailError(err)
-	s.Finish(x, &Outcome{Err: failure}, failure.Status)
-	return result, httpkit.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
-}
-func (s *Server) evaluateGuardrails(ctx context.Context, x *Call, in guardrails.Application, policy func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error)) (guardrails.Result, error) {
-	x.Route = &routing.Route{Slug: "guardrails", OverallTimeout: 30000, MaxAttempts: 1}
-	x.primary = x.Route
-	x.mode = "unary"
-	if x.request.release == nil {
-		return guardrails.Result{}, guardrails.ErrSurface
-	}
-	p, compiled, err := policy(x.Snapshot())
-	if err != nil {
-		return guardrails.Result{}, err
-	}
-	if x.keyID != "" && (x.authority.ProjectID == nil || *x.authority.ProjectID != p.ProjectID) {
-		return guardrails.Result{}, guardrails.ErrSurface
-	}
-	engine := s.boundGuardrails(x, compiled)
-	x.guard.engine = engine
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if x.keyID != "" {
-		var n int64
-		for _, segment := range in.Segments {
-			n += int64(len(segment.Text))
-		}
-		x.estimate = max(1, (n+3)/4)
-		lease, e := s.Deps.Admission.ReserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
-		if e != nil {
-			return guardrails.Result{}, e
-		}
-		x.lease = lease
-	}
-	x.dispatched = true
-	result, err := engine.Evaluate(ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Phase: in.Phase, Segments: in.Segments}, &guardrails.Masking{})
-	x.guard.record(result.Decisions)
-	return result, err
-}
-
-func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.Revision, spec guardrails.ModelSpec, e guardrails.Evaluation) (verdict guardrails.Verdict, err error) {
-	if parent.guard.internal || parent.request.release == nil {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	// Candidate preparation can see identical effective input for several
-	// targets. Charge one evaluator request for each distinct synchronous input.
-	if e.Phase == guardrails.Input {
-		raw, _ := json.Marshal(struct {
-			Revision string
-			Segments []guardrails.Segment
-		}{d.ID, e.Segments})
-		key := sha256.Sum256(raw)
-		if value, ok := parent.guard.models[key]; ok {
-			return value, nil
-		}
-		defer func() {
-			if err == nil {
-				if parent.guard.models == nil {
-					parent.guard.models = map[[32]byte]guardrails.Verdict{}
-				}
-				parent.guard.models[key] = verdict
-			}
-		}()
-	}
-	similarity, semantic := spec.Judge.(guardrails.SemanticRule)
-	rule, _ := spec.Judge.(guardrails.ModelRule)
-	// A retained serving snapshot contains only its pinned route/provider.
-	// Evaluators belong to the full release pinned at request admission.
-	route, ok := parent.request.release.Snapshot().FindRoute(spec.Route)
-	if !ok {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	if parent.authorize != nil && parent.authorize(&route) != nil {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	if parent.keyID != "" && !parent.authority.Allows("inference", route.Slug, route.ProjectID, s.Now()) {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	var text string
-	var embeddingInputs []string
-	if semantic {
-		if !slices.Contains(route.Operations, "embeddings") {
-			return guardrails.Verdict{}, guardrails.ErrSurface
-		}
-		embeddingInputs, err = guardrails.SemanticInputs(e, similarity)
-		if err != nil {
-			return guardrails.Verdict{}, err
-		}
-		if len(embeddingInputs) == 0 {
-			return guardrails.Verdict{}, nil
-		}
-	} else {
-		segments, _ := json.Marshal(e.Segments)
-		text = rule.Prompt + "\n" + string(segments)
-	}
-	x := &Call{
-		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
-		actor:                parent.actor,
-		keyID:                parent.keyID,
-		budgetGroupID:        parent.budgetGroupID,
-		authority:            parent.authority,
-		attribution:          parent.attribution,
-		endUserDigest:        parent.endUserDigest,
-		userID:               parent.userID,
-		origin:               usage.OriginClassifier,
-		parent:               parent.request.accountingID(),
-		priority:             parent.priority,
-		guard:                guardrailCall{internal: true},
-		evaluatorGuardrailID: d.GuardrailID,
-		authorize:            parent.authorize,
-		routeLeg:             routeLeg{Route: &route},
-	}
-	if parent.keyID == "" {
-		x.origin = usage.OriginPlayground
-	}
-	defer s.SettleAdmission(context.WithoutCancel(ctx), x)
-	var raw []byte
-	var out *Outcome
-	if semantic {
-		body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": embeddingInputs, "encoding_format": "float"})
-		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
-		x.family, x.mode = wire.Embeddings, "unary"
-		if route.Fidelity.Strict() {
-			codec, _ := operationregistry.Lookup("openai-embeddings")
-			source, parseErr := operationplan.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
-			if parseErr != nil {
-				return guardrails.Verdict{}, guardrails.ErrSurface
-			}
-			x.unary = &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "openai"}
-			if prepareErr := s.prepareUnary(ctx, x); prepareErr != nil {
-				out = &Outcome{Err: prepareErr}
-			} else {
-				embeddingCtx, cancel := x.routeContext(ctx)
-				defer cancel()
-				if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
-					out = &Outcome{Err: admissionErr}
-				} else {
-					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
-						return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
-					}})
-					raw = result.result.Body
-					out = &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}
-				}
-			}
-		} else {
-			parsed, parseErr := protocols.Parse(wire.Embeddings, body, "")
-			if parseErr != nil {
-				return guardrails.Verdict{}, guardrails.ErrSurface
-			}
-			x.generation.parsed = parsed
-			if prepareErr := s.prepare(ctx, x, guardrailAuthorizer(s, x)); prepareErr != nil {
-				out = &Outcome{Err: prepareErr}
-			} else if admissionErr := s.admitClassifier(ctx, x); admissionErr != nil {
-				out = &Outcome{Err: admissionErr}
-			} else {
-				out = s.execute(ctx, x)
-				if out.Completion != nil {
-					raw = out.Completion.Body
-				}
-			}
-		}
-	} else if slices.Contains(route.Operations, "classification") || slices.Contains(route.Operations, "moderation") {
-		dialect := "tei-classification"
-		body, _ := json.Marshal(map[string]string{"inputs": text})
-		if slices.Contains(route.Operations, "moderation") {
-			dialect = "openai-moderation"
-			body, _ = json.Marshal(map[string]string{"model": route.Slug, "input": text})
-		}
-		codec, _ := operationregistry.Lookup(dialect)
-		source, parseErr := operationplan.Parse(dialect, body, int(s.Config.MaxBodyBytes))
-		if parseErr != nil {
-			return guardrails.Verdict{}, guardrails.ErrSurface
-		}
-		x.unary = &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "native"}
-		x.mode = "unary"
-		if e := s.prepareUnary(ctx, x); e != nil {
-			out = &Outcome{Err: e}
-		} else if e := s.admitClassifier(ctx, x); e != nil {
-			out = &Outcome{Err: e}
-		} else {
-			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
-				return s.unaryAttempt(ctx, x, a, p, slot, fact)
-			}})
-			raw = result.result.Body
-			out = &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}
-		}
-	} else if slices.Contains(route.Operations, "generation") {
-		body, _ := json.Marshal(map[string]any{"model": route.Slug, "messages": []map[string]string{{"role": "user", "content": text}}})
-		parsed, err := protocols.Parse(wire.Chat, body, "")
-		if err != nil {
-			return guardrails.Verdict{}, err
-		}
-		x.family, x.generation.parsed = wire.Chat, parsed
-		if e := s.prepare(ctx, x, guardrailAuthorizer(s, x)); e != nil {
-			out = &Outcome{Err: e}
-		} else if e := s.admitClassifier(ctx, x); e != nil {
-			out = &Outcome{Err: e}
-		} else {
-			out = s.execute(ctx, x)
-			if out.Completion != nil {
-				raw = []byte(strings.TrimSpace(out.Completion.OutputText))
-			}
-		}
-	} else {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	if out == nil {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	s.Finish(x, out, max(200, errorStatus(out.Err)))
-	if out.Err != nil {
-		return guardrails.Verdict{}, out.Err
-	}
-	if semantic {
-		return guardrails.SemanticVerdict(raw, similarity, len(embeddingInputs)-len(similarity.Utterances))
-	}
-	return guardrails.ModelVerdict(raw, rule)
-}
-
-func (s *Server) pluginGuardrail(ctx context.Context, d guardrails.Revision, spec guardrails.PluginSpec, e guardrails.Evaluation) (guardrails.Verdict, error) {
-	host, ok := s.Config.Predicates.(interface {
-		Guardrail(context.Context, string, abi.GuardrailRequest) (abi.GuardrailVerdict, error)
-	})
-	if !ok {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	in := abi.GuardrailRequest{Guardrail: d.Name, Phase: string(e.Phase), RequestID: e.RequestID, Route: e.Route, Segments: make([]abi.GuardrailSegment, len(e.Segments))}
-	for i, segment := range e.Segments {
-		in.Segments[i] = abi.GuardrailSegment{ID: segment.ID, Role: string(segment.Role), Text: segment.Text, Kind: string(segment.Kind), ToolName: segment.ToolName, Untrusted: segment.Untrusted}
-	}
-	verdict, err := host.Guardrail(ctx, spec.Version, in)
-	if err != nil {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
-	out := guardrails.WireVerdict{Action: verdict.Action, Categories: verdict.Categories, Redactions: make([]guardrails.Redaction, len(verdict.Redactions))}
-	for i, r := range verdict.Redactions {
-		out.Redactions[i] = guardrails.Redaction{Segment: r.Segment, Start: r.Start, End: r.End, Replacement: r.Replacement}
-	}
-	return out.Verdict()
 }
 
 func (x *Call) guardrailHeaders(h http.Header, streamed, trailers bool) {

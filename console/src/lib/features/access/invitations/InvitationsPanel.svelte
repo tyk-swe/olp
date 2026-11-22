@@ -4,9 +4,13 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import {
-    useMutationIntent,
+    useMutationIntents,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import InvitationForm from './InvitationForm.svelte';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { invitationKeys } from '#lib/features/access/invitations/invitationKeys.js';
 
@@ -24,26 +28,14 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
-  import { FIXED_ROLES } from '#lib/session/authorization.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import { formatDate } from '#lib/format.js';
 
-  const revokeInvitationIntent = useMutationIntent();
-
-  const createIntent = useMutationIntent();
-
-  // The API defaults to seven days and rejects anything over thirty.
-  const DEFAULT_EXPIRY_HOURS = 7 * 24;
-  const expiryChoices = [
-    { hours: 24, label: '24 hours' },
-    { hours: 3 * 24, label: '3 days' },
-    { hours: DEFAULT_EXPIRY_HOURS, label: '7 days' },
-    { hours: 14 * 24, label: '14 days' },
-    { hours: 30 * 24, label: '30 days' }
-  ];
+  const write = useAction();
+  const intents = useMutationIntents();
 
   /** The id is the fallback for an operator whose account no longer exists. */
   function invitedBy(invitation: Invitation): string {
@@ -54,11 +46,6 @@
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
   const pagination = $state(emptyCursorHistory());
-  let busy = $state('');
-  let error = $state('');
-  let email = $state('');
-  let role = $state('developer');
-  let expiresInHours = $state(DEFAULT_EXPIRY_HOURS);
   let invitationSecret = $state<InvitationSecret | null>(null);
   let copied = $state(false);
   let copyError = $state('');
@@ -70,61 +57,52 @@
 
   const captureOwner = usePrincipalLifetime(() => {
     invitationSecret = null;
-    email = '';
-    role = 'developer';
-    expiresInHours = DEFAULT_EXPIRY_HOURS;
     copied = false;
-    copyError = error = busy = '';
+    copyError = '';
   });
 
-  async function run(
-    label: string,
-    action: (isCurrent: () => boolean) => Promise<void>
-  ) {
-    const isCurrent = captureOwner();
-    busy = label;
-    error = '';
-    try {
-      await action(isCurrent);
-    } catch (cause) {
-      if (isCurrent()) error = errorMessage(cause);
-    } finally {
-      if (isCurrent()) busy = '';
+  function invite(input: {
+    email: string;
+    role: string;
+    expiresInHours: number;
+  }) {
+    if (!canManage || !capabilities.localLoginEnabled)
+      return Promise.resolve(false);
+    if (!input.email.trim() || !input.email.includes('@')) {
+      write.error = 'Enter a valid email address.';
+      return Promise.resolve(false);
     }
-  }
-
-  async function invite(event: SubmitEvent) {
-    event.preventDefault();
-    if (!canManage || !capabilities.localLoginEnabled) return;
-    if (!email.trim() || !email.includes('@')) {
-      error = 'Enter a valid email address.';
-      return;
-    }
-    await run('invite', async (isCurrent) => {
-      const submission = createIntent.prepare({
-        email: email.trim(),
-        role,
-        expiresInHours
-      });
-      const result = await createInvitation(
-        submission.input.email,
-        submission.input.role,
-        submission.input.expiresInHours,
-        submission.requestId
-      );
-      if (!isCurrent()) return;
-      invitationSecret = result;
-      createIntent.reset();
-      email = '';
-      notify('Invitation created.');
-      try {
-        const observation = await invitations.refetch();
-        if (observation?.isError) throw observation.error;
-      } catch (cause) {
-        if (isCurrent())
-          error = `Invitation created, but refreshing failed. ${errorMessage(cause)}`;
-      }
-    });
+    return write.run(
+      () =>
+        intents.submit(
+          'create',
+          {
+            email: input.email.trim(),
+            role: input.role,
+            expiresInHours: input.expiresInHours
+          },
+          (submission, requestId) =>
+            createInvitation(
+              submission.email,
+              submission.role,
+              submission.expiresInHours,
+              requestId
+            )
+        ),
+      async (result, current) => {
+        invitationSecret = result;
+        notify('Invitation created.');
+        const observation = await readResult(() => invitations.refetch());
+        const failed = observation.ok
+          ? observation.value?.isError
+            ? observation.value.error
+            : null
+          : observation.error;
+        if (failed !== null && current())
+          write.error = `Invitation created, but refreshing failed. ${errorMessage(failed)}`;
+      },
+      { key: 'invite' }
+    );
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
@@ -137,14 +115,17 @@
       }))
     )
       return;
-    await run(`invitation-${id}`, async (isCurrent) => {
-      await revokeInvitationIntent.submit(id, (input, requestId) =>
-        revokeInvitation(input, requestId)
-      );
-      if (!isCurrent()) return;
-      await invitations.refetch();
-      notify('Invitation revoked.');
-    });
+    await write.run(
+      () =>
+        intents.submit(`invitation-${id}`, id, (input, requestId) =>
+          revokeInvitation(input, requestId)
+        ),
+      async () => {
+        await invitations.refetch();
+        notify('Invitation revoked.');
+      },
+      { key: `invitation-${id}` }
+    );
   }
 
   function invitationLink() {
@@ -206,86 +187,36 @@
   </SecretDialog>
 {/if}
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+{#if write.error}<div class="inline-problem" role="alert">
+    {write.error}
+  </div>{/if}
 
 {#if !canManage}
   <ReadOnlyNote>
     Your role can view invitations but not create or revoke them.
   </ReadOnlyNote>
 {/if}
-<section class="card invite-panel" aria-labelledby="invite-heading">
-  <div>
-    <p class="eyebrow">New invitation</p>
-    <h2 id="invite-heading">Invite by email</h2>
-    <p>The acceptance token is shown once. No email service is required.</p>
-  </div>
-  {#if capabilities.pending}
-    <p class="inline-status" role="status">Checking invitation availability…</p>
-  {:else if capabilities.error}
-    <div role="alert">
-      Invitation availability could not be checked.
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => capabilities.retry()}>Retry</button
-      >
-    </div>
-  {:else if !capabilities.localLoginEnabled}
-    <p class="inline-status" role="status">
-      Password invitations require local sign-in. Configure an OIDC role mapping
-      and ask the member to sign in with single sign-on.
-    </p>
-  {/if}
-  <form onsubmit={invite} novalidate>
-    <label
-      ><span>Email address</span><input
-        type="email"
-        autocomplete="email"
-        bind:value={email}
-        placeholder="person@example.com"
-        disabled={!canManage || !capabilities.localLoginEnabled}
-      /></label
-    >
-    <label
-      ><span>Role</span><select
-        bind:value={role}
-        disabled={!canManage || !capabilities.localLoginEnabled}
-        >{#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}
-            >{fixedRole}</option
-          >{/each}</select
-      ></label
-    >
-    <label
-      ><span>Expires in</span><select
-        bind:value={expiresInHours}
-        disabled={!canManage || !capabilities.localLoginEnabled}
-        >{#each expiryChoices as choice (choice.hours)}<option
-            value={choice.hours}>{choice.label}</option
-          >{/each}</select
-      ></label
-    >
-    <button
-      class="button button-primary"
-      type="submit"
-      disabled={!canManage ||
-        !capabilities.localLoginEnabled ||
-        busy === 'invite'}
-      >{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button
-    >
-  </form>
-</section>
+<InvitationForm
+  {canManage}
+  pending={capabilities.pending}
+  failed={Boolean(capabilities.error)}
+  loginEnabled={capabilities.localLoginEnabled}
+  onRetry={() => capabilities.retry()}
+  creating={write.key === 'invite'}
+  onSubmit={invite}
+/>
 
-{#if invitations.isPending}
-  <div class="loading-state" role="status">Loading invitation history…</div>
-{:else if invitations.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(invitations.error)}
-  </div>
-{:else if !invitations.data?.items.length && pagination.history.length === 0}
-  <EmptyState title="No invitations yet"
-    >Invite someone by email and choose their role.</EmptyState
-  >
-{:else}
+<QueryView
+  query={invitations}
+  loading="Loading invitation history…"
+  failure={errorMessage(invitations.error)}
+  emptyWhen={!invitations.data?.items.length && pagination.history.length === 0}
+>
+  {#snippet empty()}
+    <EmptyState title="No invitations yet"
+      >Invite someone by email and choose their role.</EmptyState
+    >
+  {/snippet}
   <ScrollTable label="Invitations">
     <table class="data-table">
       <thead
@@ -332,7 +263,7 @@
                   type="button"
                   onclick={() =>
                     removeInvitation(invitation.id, invitation.email)}
-                  disabled={Boolean(busy)}>Revoke</button
+                  disabled={write.busy}>Revoke</button
                 >{/if}</td
             >
           </tr>
@@ -344,55 +275,9 @@
     {...cursorPaginationProps(pagination, invitations.data?.nextCursor)}
     label="Invitation pages"
   />
-{/if}
+</QueryView>
 
 <style>
-  h2 {
-    margin: 0;
-    font-size: var(--text-body);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
-  .invite-panel {
-    display: flex;
-    align-items: end;
-    justify-content: space-between;
-    gap: 2rem;
-    margin-bottom: 1rem;
-    padding: 1.5rem;
-  }
-  .invite-panel h2 + p {
-    margin: 0.4rem 0 0;
-    color: var(--foreground-muted);
-  }
-  .invite-panel form {
-    display: flex;
-    align-items: end;
-    gap: 0.65rem;
-  }
-  .invite-panel label {
-    display: grid;
-    gap: 0.4rem;
-    font-weight: 500;
-  }
-  .invite-panel input,
-  .invite-panel select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .invite-panel input:hover,
-  .invite-panel select:hover {
-    border-color: var(--border-strong);
-  }
-  .invite-panel input::placeholder {
-    color: var(--foreground-muted);
-  }
   td small {
     color: var(--foreground-muted);
   }
@@ -411,13 +296,7 @@
     justify-content: flex-end;
     gap: 0.65rem;
   }
-  @media (max-width: 64rem) {
-    .invite-panel {
-      display: grid;
-    }
-  }
   @media (max-width: 42rem) {
-    .invite-panel form,
     .dialog-actions {
       display: grid;
     }

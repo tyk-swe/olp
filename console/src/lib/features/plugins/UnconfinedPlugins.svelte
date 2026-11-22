@@ -1,4 +1,7 @@
 <script lang="ts">
+  import UnconfinedReview from './UnconfinedReview.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { onMount } from 'svelte';
@@ -46,11 +49,14 @@
 
   let review = $state<UnconfinedExecutableReview | null>(null);
   let acknowledged = $state(false);
-  let busy = $state('');
+  const pluginAction = useAction();
+  const reauthAction = useAction();
+  let reviewing = $state('');
+  const busy = $derived(reviewing || pluginAction.key);
+  const reauthenticationBusy = $derived(reauthAction.busy);
   let error = $state('');
   let notice = $state('');
   let reauthenticating = $state(false);
-  let reauthenticationBusy = $state(false);
   let reauthenticationError = $state('');
   let singleSignOn = $state(false);
 
@@ -73,17 +79,14 @@
   });
 
   async function reviewExecutable(name: string) {
-    busy = `review-${name}`;
+    reviewing = `review-${name}`;
     error = notice = '';
     review = null;
     acknowledged = false;
-    try {
-      review = await reviewUnconfinedExecutable(name);
-    } catch (cause) {
-      error = pluginProblem(cause);
-    } finally {
-      busy = '';
-    }
+    const result = await readResult(() => reviewUnconfinedExecutable(name));
+    reviewing = '';
+    if (result.ok) review = result.value;
+    else error = pluginProblem(result.error);
   }
 
   async function permit() {
@@ -93,78 +96,92 @@
   }
 
   async function reauthenticate() {
-    busy = 'permit';
     error = '';
-    try {
-      const identities = await listOidcIdentities();
-      if (identities.has_local_password) {
-        singleSignOn = identities.oidc_reauthentication_available === true;
-        reauthenticationError = '';
-        reauthenticating = true;
-        return;
-      }
-      window.location.assign(
-        await beginIdentityReauthentication('plugin_permit')
-      );
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = '';
-    }
+    await pluginAction.run(
+      async () => {
+        const identities = await listOidcIdentities();
+        if (identities.has_local_password)
+          return { kind: 'password' as const, identities };
+        return {
+          kind: 'sso' as const,
+          redirect: await beginIdentityReauthentication('plugin_permit')
+        };
+      },
+      (result, current) => {
+        if (!current()) return;
+        if (result.kind === 'password') {
+          singleSignOn =
+            result.identities.oidc_reauthentication_available === true;
+          reauthenticationError = '';
+          reauthenticating = true;
+          return;
+        }
+        window.location.assign(result.redirect);
+      },
+      { key: 'permit', failure: (cause) => errorMessage(cause) }
+    );
+    error = pluginAction.error;
   }
 
   async function confirmWithPassword(password: string) {
-    reauthenticationBusy = true;
     reauthenticationError = '';
-    try {
-      await reauthenticateWithPassword(password, 'plugin_permit');
-    } catch (cause) {
-      reauthenticationError = errorMessage(cause);
+    const ok = await reauthAction.run(
+      () => reauthenticateWithPassword(password, 'plugin_permit'),
+      undefined,
+      { key: 'password', failure: (cause) => errorMessage(cause) }
+    );
+    if (!ok) {
+      reauthenticationError = reauthAction.error;
       return;
-    } finally {
-      reauthenticationBusy = false;
     }
     reauthenticating = false;
     await submitPermission();
   }
 
   async function confirmWithSingleSignOn() {
-    reauthenticationBusy = true;
     reauthenticationError = '';
-    try {
-      window.location.assign(
-        await beginIdentityReauthentication('plugin_permit')
-      );
-    } catch (cause) {
-      reauthenticationError = errorMessage(cause);
-    } finally {
-      reauthenticationBusy = false;
-    }
+    await reauthAction.run(
+      async () => {
+        window.location.assign(
+          await beginIdentityReauthentication('plugin_permit')
+        );
+      },
+      undefined,
+      { key: 'sso', failure: (cause) => errorMessage(cause) }
+    );
+    reauthenticationError = reauthAction.error;
   }
 
   async function submitPermission() {
     const reviewed = review;
     if (!reviewed) return;
-    busy = 'permit';
     error = notice = '';
-    try {
-      const plugin = await permitUnconfinedPlugin(reviewed);
-      verified = false;
-      clearTimeout(verifiedExpiry);
-      review = null;
-      acknowledged = false;
-      await Promise.all([executables.refetch(), onPermitted()]);
-      notice = `Permitted ${pluginTitle(plugin)}. Providers may now use its profiles.`;
-    } catch (cause) {
-      if (needsReauthentication(cause)) {
+    let failureCause: unknown;
+    const committed = await pluginAction.run(
+      () => permitUnconfinedPlugin(reviewed),
+      async (plugin, current) => {
         verified = false;
-        await reauthenticate();
-        return;
+        clearTimeout(verifiedExpiry);
+        review = null;
+        acknowledged = false;
+        await Promise.all([executables.refetch(), onPermitted()]);
+        if (!current()) return;
+        notice = `Permitted ${pluginTitle(plugin)}. Providers may now use its profiles.`;
+      },
+      {
+        key: 'permit',
+        failure: (cause) => {
+          failureCause = cause;
+          return pluginProblem(cause);
+        }
       }
-      error = pluginProblem(cause);
-    } finally {
-      busy = '';
+    );
+    if (!committed && needsReauthentication(failureCause)) {
+      verified = false;
+      await reauthenticate();
+      return;
     }
+    error = pluginAction.error;
   }
 </script>
 
@@ -254,82 +271,13 @@
         </table>
       </ScrollTable>
     {/if}
-    {#if review}
-      <section class="review" aria-labelledby="unconfined-review-heading">
-        <h3 id="unconfined-review-heading">Review {pluginTitle(review)}</h3>
-        {#if review.manifest.description}<p>
-            {review.manifest.description}
-          </p>{/if}
-        <dl class="facts">
-          <div>
-            <dt>Executable</dt>
-            <dd><code>{review.name}</code></dd>
-          </div>
-          <div>
-            <dt>Digest</dt>
-            <dd><code class="digest">{review.digest}</code></dd>
-          </div>
-          <div>
-            <dt>ABI</dt>
-            <dd>{review.abi_version}</dd>
-          </div>
-        </dl>
-        <ScrollTable label="Plugin profiles">
-          <table class="data-table">
-            <thead
-              ><tr
-                ><th>Profile</th><th>Label</th><th>Dialect</th><th>Address</th
-                ></tr
-              ></thead
-            >
-            <tbody>
-              {#each review.manifest.profiles as profile (profile.id)}
-                <tr
-                  ><td><code>{profile.id}</code></td><td>{profile.label}</td><td
-                    ><code>{profile.dialect}</code></td
-                  ><td
-                    ><code class="address">{profile.hosting.address}</code></td
-                  ></tr
-                >
-              {/each}
-            </tbody>
-          </table>
-        </ScrollTable>
-        <p class="muted">
-          Declared origins:
-          {#each review.manifest.origins as origin, index (origin)}{index
-              ? ', '
-              : ''}<code>{origin}</code>{:else}none{/each}.
-        </p>
-        <div class="risk" role="note">
-          <strong>High risk.</strong> An unconfined plugin runs outside every confinement,
-          with the operating system privileges of each OpenLLMProxy process that serves
-          its providers. It receives their credentials and requests, can read whatever
-          those processes can, reaches any network and bypasses the egress policy.
-          Permit only an executable you trust as much as OpenLLMProxy itself.
-        </div>
-        <label class="acknowledge"
-          ><input type="checkbox" bind:checked={acknowledged} /> I understand
-          that {review.name} will run unconfined, with OpenLLMProxy's privileges.</label
-        >
-        <div class="actions">
-          <button
-            class="button button-primary"
-            type="button"
-            disabled={!acknowledged || Boolean(busy)}
-            onclick={permit}
-            >{busy === 'permit'
-              ? 'Permitting…'
-              : 'Permit unconfined plugin'}</button
-          ><button
-            class="button button-secondary"
-            type="button"
-            disabled={Boolean(busy)}
-            onclick={() => (review = null)}>Cancel</button
-          >
-        </div>
-      </section>
-    {/if}
+    {#if review}<UnconfinedReview
+        {review}
+        bind:acknowledged
+        {busy}
+        {permit}
+        oncancel={() => (review = null)}
+      />{/if}
   {/if}
 </section>
 
@@ -365,65 +313,8 @@
     font-weight: 500;
     letter-spacing: -0.02em;
   }
-  h3 {
-    margin: 0;
-    font-size: var(--text-body);
-    font-weight: 500;
-  }
   .muted,
-  .facts dt {
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   .row-action {
     text-align: right;
-  }
-  .review {
-    display: grid;
-    gap: 0.9rem;
-    padding: 1rem;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-control);
-  }
-  .review p {
-    margin: 0;
-  }
-  .facts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-    gap: 1rem;
-    margin: 0;
-  }
-  .facts dt {
-    font-size: var(--text-caption);
-  }
-  .facts dd {
-    margin: 0.25rem 0 0;
-    min-width: 0;
-  }
-  .digest,
-  .address {
-    overflow-wrap: anywhere;
-  }
-  .risk {
-    padding: 0.9rem 1rem;
-    border: 1px solid var(--danger);
-    border-radius: var(--radius-control);
-    background: var(--danger-soft);
-    color: var(--foreground);
-  }
-  .risk strong {
-    color: var(--danger);
-  }
-  .acknowledge {
-    display: flex;
-    align-items: start;
-    gap: 0.5rem;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.65rem;
   }
 </style>

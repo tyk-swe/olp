@@ -17,7 +17,8 @@
   import Menu from '#lib/components/Menu.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
@@ -40,7 +41,8 @@
     projects.data?.find((project) => project.id === projectId)
   );
   const queryClient = useQueryClient();
-  const deleteIntent = useMutationIntent();
+  const rename = useAction();
+  const removal = useMutation();
   const canManage = $derived(
     access.allows('GET /api/v1/projects/{project_id}')
   );
@@ -52,8 +54,6 @@
 
   let renaming = $state(false);
   let renameValue = $state('');
-  let renameBusy = $state(false);
-  let actionProblem = $state('');
 
   const conflict = (error: unknown) =>
     isEtagMismatch(error)
@@ -62,19 +62,18 @@
 
   async function submitRename(event: SubmitEvent) {
     event.preventDefault();
-    if (!detail.data || renameBusy || !renameValue.trim()) return;
-    renameBusy = true;
-    actionProblem = '';
-    try {
-      await renameProject(detail.data, renameValue.trim());
-      await queryClient.invalidateQueries({ queryKey: projectKeys.root });
-      renaming = false;
-      notify('Project renamed');
-    } catch (error) {
-      actionProblem = conflict(error);
-    } finally {
-      renameBusy = false;
-    }
+    const project = detail.data;
+    if (!project || rename.busy || !renameValue.trim()) return;
+    await rename.run(
+      () => renameProject(project, renameValue.trim()),
+      async (_value, current) => {
+        await queryClient.invalidateQueries({ queryKey: projectKeys.root });
+        if (!current()) return;
+        renaming = false;
+        notify('Project renamed');
+      },
+      { failure: (cause) => conflict(cause) }
+    );
   }
 
   async function remove() {
@@ -87,17 +86,17 @@
       danger: true
     });
     if (!confirmed) return;
-    actionProblem = '';
-    try {
-      await deleteIntent.submit(project, (input, requestId) =>
-        deleteProject(input, requestId)
-      );
-      await queryClient.invalidateQueries({ queryKey: projectKeys.root });
-      notify(`Deleted ${project.name}`);
-      await goto(resolve('projects'));
-    } catch (error) {
-      actionProblem = conflict(error);
-    }
+    await removal.submit(
+      project,
+      (input, requestId) => deleteProject(input, requestId),
+      async (_value, current) => {
+        await queryClient.invalidateQueries({ queryKey: projectKeys.root });
+        if (!current()) return;
+        notify(`Deleted ${project.name}`);
+        await goto(resolve('projects'));
+      },
+      { failure: (cause) => conflict(cause) }
+    );
   }
 
   const editable = $derived(
@@ -108,81 +107,81 @@
 
 <PageTitle title={selected?.name ?? 'Project'} />
 
-{#if projects.isPending}
-  <div class="loading-state" role="status">Loading project…</div>
-{:else if projects.isError}
-  <Callout tone="danger" title="Project didn’t load">
-    {errorMessage(projects.error)}
-    {#snippet actions()}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => projects.refetch()}>Try again</button
-      >{/snippet}
-  </Callout>
-{:else if !selected}
-  <EmptyState title="Project not found">
-    It may have been removed, or you may not be a member.
-    {#snippet action()}<a
-        class="button button-secondary"
-        href={resolve('projects')}>All projects</a
-      >{/snippet}
-  </EmptyState>
-{:else}
-  <PageHeader title={selected.name}>
-    {#snippet actions()}{#if detail.data}<Menu label="Project actions">
-          {#if access.allows('PATCH /api/v1/projects/{project_id}')}<button
-              type="button"
-              onclick={() => {
-                renameValue = selected.name;
-                actionProblem = '';
-                renaming = true;
-              }}>Rename</button
-            >{/if}
-          {#if access.allows('DELETE /api/v1/projects/{project_id}')}<button
-              type="button"
-              class="danger"
-              onclick={remove}>Delete project</button
-            >{/if}
-        </Menu>{/if}{/snippet}
-    {#snippet meta()}<StatusBadge
-        label={selected.role === 'manager' ? 'Manager' : 'Member'}
-        tone="neutral"
-      />{/snippet}
-  </PageHeader>
-  {#if !editable}
-    <p class="read-only-note">
-      You can see these settings. Changing them needs a project manager who can
-      manage keys.
-    </p>
-  {/if}
-  {#if actionProblem && !renaming}<Callout tone="danger"
-      >{actionProblem}</Callout
-    >{/if}
-  {#key selected.id}
-    {#if detail.data}
-      <section class="group" aria-labelledby="project-members">
-        <h2 id="project-members">Members</h2>
-        <ProjectMembers project={detail.data} />
-      </section>
+<QueryView
+  query={projects}
+  loading="Loading project…"
+  errorTitle="Project didn’t load"
+  failure={errorMessage(projects.error)}
+  retryLabel="Try again"
+  emptyWhen={!selected}
+>
+  {#snippet empty()}
+    <EmptyState title="Project not found">
+      It may have been removed, or you may not be a member.
+      {#snippet action()}<a
+          class="button button-secondary"
+          href={resolve('projects')}>All projects</a
+        >{/snippet}
+    </EmptyState>
+  {/snippet}
+  {#if selected}
+    <PageHeader title={selected.name}>
+      {#snippet actions()}{#if detail.data}<Menu label="Project actions">
+            {#if access.allows('PATCH /api/v1/projects/{project_id}')}<button
+                type="button"
+                onclick={() => {
+                  renameValue = selected.name;
+                  rename.error = '';
+                  removal.error = '';
+                  renaming = true;
+                }}>Rename</button
+              >{/if}
+            {#if access.allows('DELETE /api/v1/projects/{project_id}')}<button
+                type="button"
+                class="danger"
+                onclick={remove}>Delete project</button
+              >{/if}
+          </Menu>{/if}{/snippet}
+      {#snippet meta()}<StatusBadge
+          label={selected.role === 'manager' ? 'Manager' : 'Member'}
+          tone="neutral"
+        />{/snippet}
+    </PageHeader>
+    {#if !editable}
+      <p class="read-only-note">
+        You can see these settings. Changing them needs a project manager who
+        can manage keys.
+      </p>
     {/if}
-    <section class="group" aria-labelledby="project-access">
-      <h2 id="project-access">Models and routes</h2>
-      <PublicationPanel projectId={selected.id} />
-      <ProjectRouteGroupsPanel projectId={selected.id} {editable} />
-    </section>
-    <section class="group" aria-labelledby="project-end-users">
-      <h2 id="project-end-users">End users</h2>
-      <ProjectEndUserPolicyPanel projectId={selected.id} {editable} />
-      <ProjectAttributionPolicyPanel projectId={selected.id} {editable} />
-    </section>
-    <section class="group" aria-labelledby="project-limits">
-      <h2 id="project-limits">Spending limits</h2>
-      <AggregateBudgetPanel projectId={selected.id} {editable} />
-      <ProjectLimitTemplatesPanel projectId={selected.id} {editable} />
-      <ProjectAttributionBudgetsPanel projectId={selected.id} {editable} />
-    </section>
-  {/key}
-{/if}
+    {#if (rename.error || removal.error) && !renaming}<Callout tone="danger"
+        >{rename.error || removal.error}</Callout
+      >{/if}
+    {#key selected.id}
+      {#if detail.data}
+        <section class="group" aria-labelledby="project-members">
+          <h2 id="project-members">Members</h2>
+          <ProjectMembers project={detail.data} />
+        </section>
+      {/if}
+      <section class="group" aria-labelledby="project-access">
+        <h2 id="project-access">Models and routes</h2>
+        <PublicationPanel projectId={selected.id} />
+        <ProjectRouteGroupsPanel projectId={selected.id} {editable} />
+      </section>
+      <section class="group" aria-labelledby="project-end-users">
+        <h2 id="project-end-users">End users</h2>
+        <ProjectEndUserPolicyPanel projectId={selected.id} {editable} />
+        <ProjectAttributionPolicyPanel projectId={selected.id} {editable} />
+      </section>
+      <section class="group" aria-labelledby="project-limits">
+        <h2 id="project-limits">Spending limits</h2>
+        <AggregateBudgetPanel projectId={selected.id} {editable} />
+        <ProjectLimitTemplatesPanel projectId={selected.id} {editable} />
+        <ProjectAttributionBudgetsPanel projectId={selected.id} {editable} />
+      </section>
+    {/key}
+  {/if}
+</QueryView>
 
 {#if renaming}
   <Dialog title="Rename project" onClose={() => (renaming = false)}>
@@ -196,11 +195,11 @@
             bind:value={renameValue}
             maxlength="100"
             required
-            disabled={renameBusy}
+            disabled={rename.busy}
           />
         </div>
-        {#if actionProblem}<p class="inline-problem" role="alert">
-            {actionProblem}
+        {#if rename.error}<p class="inline-problem" role="alert">
+            {rename.error}
           </p>{/if}
         <div class="page-actions">
           <button class="button button-secondary" type="button" onclick={close}
@@ -209,8 +208,8 @@
           <button
             class="button button-primary"
             type="submit"
-            disabled={renameBusy || !renameValue.trim()}
-            >{renameBusy ? 'Saving…' : 'Save'}</button
+            disabled={rename.busy || !renameValue.trim()}
+            >{rename.busy ? 'Saving…' : 'Save'}</button
           >
         </div>
       </form>

@@ -20,16 +20,21 @@
   import type { PriceDraft } from '#lib/features/usage/pricing.js';
   import { formatDate } from '#lib/format.js';
   import {
-    bundledCatalogHint,
-    catalogProvenanceLabel,
     sourceAddress,
     sourceFormatLabel
   } from '#lib/features/usage/pricingSourcePresentation.js';
 
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
+  import PricingSourceCreateForm from './PricingSourceCreateForm.svelte';
+  import PricingSourceEditForm from './PricingSourceEditForm.svelte';
+  import PricingSourceSnapshots from './PricingSourceSnapshots.svelte';
 
-  const createIntent = useMutationIntent();
-  const publishIntent = useMutationIntent();
+  const create = useMutation();
+  const publish = useMutation();
+  const editAction = useAction();
+  const toggleAction = useAction();
+  const refreshAction = useAction();
 
   const queryClient = useQueryClient();
   const access = useRole();
@@ -45,14 +50,11 @@
     staleTime: Infinity
   }));
 
-  let error = $state('');
   let notice = $state('');
-  let busy = $state('');
 
   let createName = $state('');
   let createFormat = $state<PricingSourceFormat>('prices');
   let createUrl = $state('');
-  let createBusy = $state(false);
 
   let editId = $state('');
   let editName = $state('');
@@ -71,45 +73,59 @@
   let publishEffectiveAt = $state('');
   let publishOverrides = $state('');
 
+  const busy = $derived(
+    editAction.key || toggleAction.key || refreshAction.key || publish.key || ''
+  );
+  const error = $derived(
+    create.error ||
+      editAction.error ||
+      toggleAction.error ||
+      refreshAction.error ||
+      publish.error
+  );
+  function clearErrors() {
+    create.error = '';
+    editAction.error = '';
+    toggleAction.error = '';
+    refreshAction.error = '';
+    publish.error = '';
+  }
+
   function startEdit(source: PricingSource) {
     editId = source.id;
     editName = source.name;
     editUrl = source.url ?? '';
     editEnabled = source.enabled;
-    error = '';
+    clearErrors();
   }
 
   async function submitCreate(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEdit || createBusy || !createReady) return;
-    createBusy = true;
-    error = notice = '';
-    let committed = false;
-    try {
-      const submission = createIntent.prepare<
-        Parameters<typeof createPricingSource>[0]
-      >({
+    if (!canEdit || create.busy || !createReady) return;
+    notice = '';
+    await create.submit(
+      {
         name: createName.trim(),
         format: createFormat,
         url: createUrl.trim() || null
-      });
-      await createPricingSource(submission.input, submission.requestId);
-      createIntent.reset();
-      committed = true;
-      createName = createUrl = '';
-      createFormat = 'prices';
-      notice = 'Pricing source created.';
-      await queryClient.invalidateQueries(
-        { queryKey: pricingKeys.sources() },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      error = committed
-        ? `Pricing source created, but refreshing failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The pricing source could not be created.');
-    } finally {
-      createBusy = false;
-    }
+      },
+      (input, requestId) => createPricingSource(input, requestId),
+      async () => {
+        createName = createUrl = '';
+        createFormat = 'prices';
+        notice = 'Pricing source created.';
+        await queryClient.invalidateQueries(
+          { queryKey: pricingKeys.sources() },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Pricing source created, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The pricing source could not be created.')
+      }
+    );
   }
 
   function updateError(cause: unknown): string {
@@ -126,85 +142,89 @@
       (source.format === 'prices' && !editUrl.trim())
     )
       return;
-    busy = source.id;
-    error = notice = '';
-    try {
-      await updatePricingSource(source, {
-        name: editName.trim(),
-        url: editUrl.trim() || null,
-        enabled: editEnabled
-      });
-      editId = '';
-      notice = 'Pricing source updated.';
-    } catch (cause) {
-      error = updateError(cause);
-      if (isEtagMismatch(cause)) editId = '';
-    } finally {
-      // A conflicted edit must be reopened from the refreshed values.
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
-      busy = '';
-    }
+    notice = '';
+    await editAction.run(
+      () =>
+        updatePricingSource(source, {
+          name: editName.trim(),
+          url: editUrl.trim() || null,
+          enabled: editEnabled
+        }),
+      () => {
+        editId = '';
+        notice = 'Pricing source updated.';
+      },
+      {
+        key: source.id,
+        failure: (cause) => {
+          if (isEtagMismatch(cause)) editId = '';
+          return updateError(cause);
+        }
+      }
+    );
+    // A conflicted edit must be reopened from the refreshed values.
+    await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
   }
 
   async function toggle(source: PricingSource) {
     if (!canEdit || busy) return;
-    busy = source.id;
-    error = notice = '';
-    try {
-      await updatePricingSource(source, { enabled: !source.enabled });
-    } catch (cause) {
-      error = updateError(cause);
-    } finally {
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
-      busy = '';
-    }
+    notice = '';
+    await toggleAction.run(
+      () => updatePricingSource(source, { enabled: !source.enabled }),
+      undefined,
+      { key: source.id, failure: (cause) => updateError(cause) }
+    );
+    await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
   }
 
   async function refresh(source: PricingSource) {
     if (!canEdit || busy) return;
-    busy = source.id;
-    error = notice = '';
-    try {
-      const result = await refreshPricingSource(source);
-      refreshed = { ...refreshed, [source.id]: result };
-      snapshots = {
-        ...snapshots,
-        [source.id]: await listPricingSourceSnapshots(source)
-      };
-      notice = `Snapshot ${result.snapshot.sha256.slice(0, 12)}… fetched: ${result.diff.added_count} added, ${result.diff.changed_count} changed, ${result.diff.removed_count} removed against the latest revision.`;
-      if (result.skipped.length)
-        notice += ` ${result.skipped.length} catalog prices name a vendor or operation this release does not know and were skipped.`;
-    } catch (cause) {
-      error = errorMessage(cause, 'The pricing source could not be fetched.');
-    } finally {
-      busy = '';
-    }
+    notice = '';
+    await refreshAction.run(
+      () => refreshPricingSource(source),
+      async (result) => {
+        refreshed = { ...refreshed, [source.id]: result };
+        snapshots = {
+          ...snapshots,
+          [source.id]: await listPricingSourceSnapshots(source)
+        };
+        notice = `Snapshot ${result.snapshot.sha256.slice(0, 12)}… fetched: ${result.diff.added_count} added, ${result.diff.changed_count} changed, ${result.diff.removed_count} removed against the latest revision.`;
+        if (result.skipped.length)
+          notice += ` ${result.skipped.length} catalog prices name a vendor or operation this release does not know and were skipped.`;
+      },
+      {
+        key: source.id,
+        failure: (cause) =>
+          errorMessage(cause, 'The pricing source could not be fetched.')
+      }
+    );
   }
 
   function startPublish(snapshot: PricingSourceSnapshot) {
     publishId = snapshot.id;
     publishEffectiveAt = '';
     publishOverrides = '';
-    error = '';
+    clearErrors();
   }
 
   async function submitPublish(snapshot: PricingSourceSnapshot) {
     if (!canEdit || busy) return;
     let overrides: PriceDraft[] | undefined;
     if (publishOverrides.trim()) {
-      try {
-        const parsed: unknown = JSON.parse(publishOverrides);
-        if (!Array.isArray(parsed)) throw new Error('not an array');
-        overrides = parsed as PriceDraft[];
-      } catch {
-        error = 'Overrides must be a JSON array of price entries.';
+      const parsed = captureResult(() => {
+        const value: unknown = JSON.parse(publishOverrides);
+        if (!Array.isArray(value)) throw new Error('not an array');
+        return value as PriceDraft[];
+      });
+      if (!parsed.ok) {
+        publish.error = 'Overrides must be a JSON array of price entries.';
         return;
       }
+      overrides = parsed.value;
     }
-    busy = snapshot.id;
-    error = notice = '';
-    try {
-      const submission = publishIntent.prepare({
+    notice = '';
+    await publish.submit(
+      {
         snapshot: { id: snapshot.id },
         input: {
           effective_at: publishEffectiveAt
@@ -212,30 +232,29 @@
             : null,
           overrides
         }
-      });
-      const revision = await publishPricingSnapshot(
-        submission.input.snapshot,
-        submission.input.input,
-        submission.requestId
-      );
-      publishIntent.reset();
-      publishId = '';
-      notice = `Published pricing revision ${revision.revision} from ${snapshot.sha256.slice(0, 12)}….`;
-      await queryClient.invalidateQueries(
-        { queryKey: pricingKeys.root },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      error = notice
-        ? `${notice} Refresh failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The snapshot could not be published.');
-    } finally {
-      busy = '';
-    }
-  }
-
-  function diffKeys(entries: Record<string, string>[]) {
-    return entries.map((entry) => Object.values(entry).join('·')).join(', ');
+      },
+      (submission, requestId) =>
+        publishPricingSnapshot(
+          submission.snapshot,
+          submission.input,
+          requestId
+        ),
+      async (revision) => {
+        publishId = '';
+        notice = `Published pricing revision ${revision.revision} from ${snapshot.sha256.slice(0, 12)}….`;
+        await queryClient.invalidateQueries(
+          { queryKey: pricingKeys.root },
+          { throwOnError: true }
+        );
+      },
+      {
+        key: snapshot.id,
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `${notice} Refresh failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The snapshot could not be published.')
+      }
+    );
   }
 </script>
 
@@ -259,52 +278,15 @@
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
   {#if canEdit}
-    <form class="card source-form" onsubmit={submitCreate}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="source-name">Source name</label><input
-            id="source-name"
-            bind:value={createName}
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="source-format">Format</label><select
-            id="source-format"
-            bind:value={createFormat}
-          >
-            <option value="prices">Price list (JSON)</option>
-            <option value="catalog">Signed reference catalog</option>
-          </select>
-        </div>
-        <div class="form-field full">
-          <label for="source-url"
-            >Document URL{createFormat === 'catalog'
-              ? ' (optional)'
-              : ''}</label
-          ><input
-            id="source-url"
-            type="url"
-            aria-describedby="source-url-help"
-            bind:value={createUrl}
-            required={createFormat === 'prices'}
-            placeholder={createFormat === 'catalog'
-              ? 'https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json'
-              : 'https://prices.example.com/openai.json'}
-          /><small id="source-url-help"
-            >{createFormat === 'catalog'
-              ? bundledCatalogHint(referenceCatalog.data)
-              : 'A JSON price list, fetched through the egress policy.'}</small
-          >
-        </div>
-      </div>
-      <button
-        class="button button-primary"
-        type="submit"
-        disabled={createBusy || !createReady}
-        >{createBusy ? 'Creating…' : 'Create pricing source'}</button
-      >
-    </form>
+    <PricingSourceCreateForm
+      bind:name={createName}
+      bind:format={createFormat}
+      bind:url={createUrl}
+      ready={createReady}
+      busy={create.busy}
+      catalog={referenceCatalog.data}
+      onSubmit={submitCreate}
+    />
   {/if}
 
   {#if sources.isPending}<div class="loading-state" role="status">
@@ -327,48 +309,15 @@
         {@const fetched = refreshed[source.id]}
         <article class="card source-row">
           {#if editId === source.id}
-            <div class="form-grid">
-              <div class="form-field">
-                <label for={`edit-name-${source.id}`}>Name</label><input
-                  id={`edit-name-${source.id}`}
-                  bind:value={editName}
-                  required
-                />
-              </div>
-              <div class="form-field">
-                <label for={`edit-url-${source.id}`}
-                  >Document URL{source.format === 'catalog'
-                    ? ' (empty for the bundled catalog)'
-                    : ''}</label
-                ><input
-                  id={`edit-url-${source.id}`}
-                  type="url"
-                  bind:value={editUrl}
-                  required={source.format === 'prices'}
-                />
-              </div>
-              <div class="form-field">
-                <label for={`edit-enabled-${source.id}`}>Enabled</label><input
-                  id={`edit-enabled-${source.id}`}
-                  type="checkbox"
-                  bind:checked={editEnabled}
-                />
-              </div>
-            </div>
-            <div class="form-actions">
-              <button
-                class="text-button"
-                type="button"
-                disabled={busy === source.id}
-                onclick={() => saveEdit(source)}
-                >{busy === source.id ? 'Saving…' : 'Save'}</button
-              ><button
-                class="text-button"
-                type="button"
-                disabled={Boolean(busy)}
-                onclick={() => (editId = '')}>Cancel</button
-              >
-            </div>
+            <PricingSourceEditForm
+              {source}
+              bind:name={editName}
+              bind:url={editUrl}
+              bind:enabled={editEnabled}
+              {busy}
+              onSave={() => saveEdit(source)}
+              onCancel={() => (editId = '')}
+            />
           {:else}
             <div class="source-head">
               <div>
@@ -404,115 +353,18 @@
                 </div>
               {/if}
             </div>
-            {#if fetched}
-              <div class="diff" aria-live="polite">
-                <p>
-                  Snapshot <span class="mono"
-                    >{fetched.snapshot.sha256.slice(0, 16)}…</span
-                  >
-                  · {fetched.snapshot.price_count} prices ·
-                  {fetched.snapshot.currency}
-                </p>
-                {#if fetched.snapshot.catalog}<p>
-                    {catalogProvenanceLabel(fetched.snapshot)}
-                  </p>{/if}
-                <p>
-                  Diff vs latest revision: {fetched.diff.added_count} added,
-                  {fetched.diff.changed_count} changed, {fetched.diff
-                    .removed_count} removed
-                </p>
-                {#if fetched.diff.added_count > 0}<p>
-                    Added: {diffKeys(fetched.diff.added)}
-                  </p>{/if}
-                {#if fetched.diff.changed_count > 0}<p>
-                    Changed: {diffKeys(fetched.diff.changed)}
-                  </p>{/if}
-                {#if fetched.diff.removed_count > 0}<p>
-                    Removed: {diffKeys(fetched.diff.removed)}
-                  </p>{/if}
-                {#if fetched.snapshot.document.unrepresentable?.length}<details>
-                    <summary
-                      >{fetched.snapshot.document.unrepresentable.length} price components
-                      no revision can hold</summary
-                    >
-                    <ul>
-                      {#each fetched.snapshot.document.unrepresentable as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}/${entry.component}`)}<li
-                        >
-                          <span class="mono"
-                            >{entry.vendor_id}/{entry.model}</span
-                          >
-                          · {entry.operation} · {entry.component}: {entry.detail}
-                        </li>{/each}
-                    </ul>
-                  </details>{/if}
-                {#if fetched.skipped.length}<details>
-                    <summary
-                      >{fetched.skipped.length} catalog prices skipped</summary
-                    >
-                    <ul>
-                      {#each fetched.skipped as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}`)}<li
-                        >
-                          <span class="mono"
-                            >{entry.vendor_id}/{entry.model}</span
-                          >
-                          · {entry.operation}: {entry.reason}
-                        </li>{/each}
-                    </ul>
-                  </details>{/if}
-              </div>
-            {/if}
-            {#if (snapshots[source.id] ?? []).length}
-              <div class="snapshot-list">
-                {#each snapshots[source.id] ?? [] as snapshot (snapshot.id)}
-                  <div class="snapshot-row">
-                    <span class="mono">{snapshot.sha256.slice(0, 16)}…</span
-                    ><small
-                      >{snapshot.price_count} prices · fetched {formatDate(
-                        snapshot.fetched_at
-                      )}</small
-                    >{#if snapshot.catalog}<small
-                        >{catalogProvenanceLabel(snapshot)}</small
-                      >{/if}
-                    {#if canEdit}
-                      {#if publishId === snapshot.id}
-                        <div class="publish-form">
-                          <input
-                            aria-label="Effective at"
-                            type="datetime-local"
-                            bind:value={publishEffectiveAt}
-                          /><input
-                            aria-label="Overrides JSON"
-                            bind:value={publishOverrides}
-                            placeholder="Optional overrides JSON array"
-                          /><button
-                            class="text-button"
-                            type="button"
-                            disabled={busy === snapshot.id}
-                            onclick={() => submitPublish(snapshot)}
-                            >{busy === snapshot.id
-                              ? 'Publishing…'
-                              : 'Publish'}</button
-                          ><button
-                            class="text-button"
-                            type="button"
-                            disabled={Boolean(busy)}
-                            onclick={() => (publishId = '')}>Cancel</button
-                          >
-                        </div>
-                      {:else}
-                        <button
-                          class="text-button"
-                          type="button"
-                          disabled={Boolean(busy)}
-                          onclick={() => startPublish(snapshot)}
-                          >Publish…</button
-                        >
-                      {/if}
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/if}
+            <PricingSourceSnapshots
+              {fetched}
+              snapshots={snapshots[source.id] ?? []}
+              {canEdit}
+              {busy}
+              {publishId}
+              bind:publishEffectiveAt
+              bind:publishOverrides
+              onStartPublish={startPublish}
+              onSubmitPublish={submitPublish}
+              onCancelPublish={() => (publishId = '')}
+            />
           {/if}
         </article>
       {/each}
@@ -521,11 +373,6 @@
 </section>
 
 <style>
-  .source-form {
-    display: grid;
-    gap: 1rem;
-    padding: 1.25rem;
-  }
   .source-list {
     display: grid;
     gap: 0.75rem;
@@ -553,49 +400,5 @@
     display: flex;
     gap: 0.75rem;
     white-space: nowrap;
-  }
-  .diff {
-    display: grid;
-    gap: 0.25rem;
-    padding: 0.75rem;
-    border-radius: var(--radius-control);
-    background: var(--surface-raised);
-    font-size: 0.8rem;
-  }
-  .diff p {
-    margin: 0;
-  }
-  .diff ul {
-    margin: 0.4rem 0 0;
-    padding-left: 1.1rem;
-  }
-  .full {
-    grid-column: 1 / -1;
-  }
-  .snapshot-list {
-    display: grid;
-    gap: 0.4rem;
-  }
-  .snapshot-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    font-size: 0.8rem;
-  }
-  .snapshot-row small {
-    color: var(--foreground-muted);
-  }
-  .publish-form {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    width: 100%;
-  }
-  .form-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
   }
 </style>

@@ -23,7 +23,7 @@ import (
 func (s surface) duplexDial(ctx context.Context, x *kernel.Call, p *kernel.Pin, template *duplexcontract.Template) (kernel.DuplexPeer, *fault.Error) {
 	switch template.Transport() {
 	case duplexcontract.TransportBedrockBidi:
-		return s.kernel.BedrockDuplexDial(ctx, x, p)
+		return s.dialBedrockDuplex(ctx, x, p)
 	case duplexcontract.TransportWebSocket:
 		endpoint, err := p.Provider.Connector().DuplexURL(p.Model)
 		if err != nil {

@@ -148,46 +148,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if err = s.admit(r, "mfa_verify", f.UserID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	var valid bool
-	var credential *webauthn.Credential
-	var counter int64
-	switch f.Purpose {
-	case "login", "manage", "reauth":
-		valid, err = s.verifyMFAProof(r, tx, f, input)
-	case "enroll_totp":
-		if input.Method == "totp" && f.SecretID != nil {
-			var secret []byte
-			secret, err = s.access.Keys.Read(r.Context(), tx, s.access.Installation, *f.SecretID, secrets.MFATOTP)
-			if err == nil {
-				counter, valid = totpCounter(string(secret), input.Code, time.Now(), -1)
-				clear(secret)
-			}
-		}
-	case "enroll_webauthn":
-		if input.Method == "webauthn" && f.Data.WebAuthn != nil {
-			var parsed *protocol.ParsedCredentialCreationData
-			parsed, err = protocol.ParseCredentialCreationResponseBytes(input.Credential)
-			if err != nil {
-				err = nil
-				break
-			}
-			var user mfaUser
-			user, err = s.mfaUser(r.Context(), tx, f.UserID)
-			if err != nil {
-				break
-			}
-			var w *webauthn.WebAuthn
-			w, err = s.webAuthn()
-			if err != nil {
-				break
-			}
-			credential, err = w.CreateCredential(user, *f.Data.WebAuthn, parsed)
-			valid = err == nil && len(credential.ID) > 0 && len(credential.ID) <= 1024
-			err = nil
-		}
-	default:
-		return httpkit.Reply{}, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
-	}
+	valid, credential, counter, err := s.evaluateMFAFlow(r, tx, f, input)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -204,7 +165,59 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", f.ID); err != nil {
 		return httpkit.Reply{}, err
 	}
+	reply, err := s.completeMFAOutcome(r, tx, f, codes)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
+		return httpkit.Reply{}, err
+	}
+	return reply, tx.Commit(r.Context())
+}
+
+func (s *Server) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, *webauthn.Credential, int64, error) {
+	switch f.Purpose {
+	case "login", "manage", "reauth":
+		valid, err := s.verifyMFAProof(r, tx, f, input)
+		return valid, nil, 0, err
+	case "enroll_totp":
+		if input.Method != "totp" || f.SecretID == nil {
+			return false, nil, 0, nil
+		}
+		secret, err := s.access.Keys.Read(r.Context(), tx, s.access.Installation, *f.SecretID, secrets.MFATOTP)
+		if err != nil {
+			return false, nil, 0, err
+		}
+		counter, valid := totpCounter(string(secret), input.Code, time.Now(), -1)
+		clear(secret)
+		return valid, nil, counter, nil
+	case "enroll_webauthn":
+		if input.Method != "webauthn" || f.Data.WebAuthn == nil {
+			return false, nil, 0, nil
+		}
+		parsed, err := protocol.ParseCredentialCreationResponseBytes(input.Credential)
+		if err != nil {
+			return false, nil, 0, nil
+		}
+		user, err := s.mfaUser(r.Context(), tx, f.UserID)
+		if err != nil {
+			return false, nil, 0, err
+		}
+		w, err := s.webAuthn()
+		if err != nil {
+			return false, nil, 0, err
+		}
+		credential, err := w.CreateCredential(user, *f.Data.WebAuthn, parsed)
+		valid := err == nil && len(credential.ID) > 0 && len(credential.ID) <= 1024
+		return valid, credential, 0, nil
+	default:
+		return false, nil, 0, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+	}
+}
+
+func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
 	var reply httpkit.Reply
+	var err error
 	switch {
 	case f.Purpose == "login" || f.SessionID == nil:
 		if local, e := s.localLoginEnabled(r, tx); e != nil {
@@ -243,10 +256,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if codes != nil && f.SessionID == nil {
 		reply.Body = map[string]any{"session": reply.Body, "recovery_codes": codes}
 	}
-	if err = access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+	return reply, nil
 }
 
 func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {
