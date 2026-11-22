@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
+  const runAction = useAction();
   import { onDestroy } from 'svelte';
   import OperationResult from './OperationResult.svelte';
   import {
@@ -38,27 +40,31 @@
     result = null;
     busy = true;
     abort = new AbortController();
-    try {
-      const value = await runNativeOperation(
-        operation,
-        dialect,
-        route,
-        key,
-        requestText,
-        abort.signal
-      );
-      if (owner === epoch) result = value;
-    } catch (reason) {
-      if (owner === epoch)
-        error =
+    const controller = abort;
+    await runAction.run(
+      () =>
+        runNativeOperation(
+          operation,
+          dialect,
+          route,
+          key,
+          requestText,
+          controller.signal
+        ),
+      (value, current) => {
+        if (owner === epoch && current()) result = value;
+      },
+      {
+        failure: (reason) =>
           reason instanceof Error
             ? reason.message
-            : 'The public native operation could not be completed.';
-    } finally {
-      if (owner === epoch) {
-        busy = false;
-        abort = null;
+            : 'The public native operation could not be completed.'
       }
+    );
+    if (owner === epoch) {
+      error = runAction.error;
+      busy = false;
+      if (abort === controller) abort = null;
     }
   }
 

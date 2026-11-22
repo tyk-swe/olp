@@ -1,4 +1,8 @@
 <script lang="ts">
+  import MediaJobDetail from './MediaJobDetail.svelte';
+  import MediaJobList from './MediaJobList.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
@@ -8,9 +12,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
-  import { timeInputType } from '#lib/listing/filters.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     deleteMediaJob,
     downloadMediaJobContent,
@@ -20,10 +22,7 @@
     type MediaContentVariant
   } from '#lib/features/media/api.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { cursorPaginationProps } from '#lib/listing/pagination.js';
-  import { formatDate, stateLabel } from '#lib/format.js';
   import { downloadBlob } from '#lib/download.js';
-  import MediaTimeline from './MediaTimeline.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     mediaJobFilters,
@@ -32,8 +31,6 @@
     mediaJobProblem,
     mediaJobSearch,
     mediaJobUrl,
-    mediaJobStates,
-    mediaJobLifecycles,
     readMediaJobForm,
     type MediaJobListState
   } from '#lib/features/media/mediaJobListState.js';
@@ -59,7 +56,11 @@
   const access = useRole();
   const canOperate = $derived(access.can('media.manage'));
 
-  let actionBusy = $state<string | null>(null);
+  const jobAction = useAction();
+  let downloading = $state(false);
+  const actionBusy = $derived(
+    jobAction.key || (downloading ? 'download' : null)
+  );
   let actionError = $state<string | null>(null);
   let downloadVariant = $state<MediaContentVariant>('video');
 
@@ -92,34 +93,39 @@
 
   async function refreshNow() {
     if (actionBusy) return;
-    actionBusy = 'refresh';
     actionError = null;
-    try {
-      const updated = await refreshMediaJob(jobId);
-      queryClient.setQueryData(mediaJobKeys.detail(jobId), updated);
-      void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
-    } catch (error) {
-      actionError = errorMessage(error, 'The refresh could not be completed.');
-    } finally {
-      actionBusy = null;
-    }
+    await jobAction.run(
+      () => refreshMediaJob(jobId),
+      (updated) => {
+        queryClient.setQueryData(mediaJobKeys.detail(jobId), updated);
+        void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
+      },
+      {
+        key: 'refresh',
+        failure: (error) =>
+          errorMessage(error, 'The refresh could not be completed.')
+      }
+    );
+    actionError = jobAction.error;
   }
 
   async function download() {
     if (actionBusy) return;
-    actionBusy = 'download';
+    downloading = true;
     actionError = null;
-    try {
+    const result = await readResult(async () => {
       const { blob, filename } = await downloadMediaJobContent(
         jobId,
         downloadVariant
       );
       downloadBlob(blob, filename);
-    } catch (error) {
-      actionError = errorMessage(error, 'The content could not be downloaded.');
-    } finally {
-      actionBusy = null;
-    }
+    });
+    downloading = false;
+    if (!result.ok)
+      actionError = errorMessage(
+        result.error,
+        'The content could not be downloaded.'
+      );
   }
 
   async function remove() {
@@ -134,20 +140,26 @@
       }))
     )
       return;
-    actionBusy = 'delete';
     actionError = null;
-    try {
-      await deleteMediaJob(jobId, job.etag);
-      await queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
-      await goto(resolve(`media-jobs${page.url.search}`));
-    } catch (error) {
-      actionError = errorMessage(error, 'The job could not be deleted.');
-      // A refused delete may still have moved the job (for example to
-      // delete_pending with a new ETag), so show the server's current state.
-      void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
-    } finally {
-      actionBusy = null;
-    }
+    await jobAction.run(
+      () => deleteMediaJob(jobId, job.etag),
+      async (_, current) => {
+        await queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
+        if (!current()) return;
+        await goto(resolve(`media-jobs${page.url.search}`));
+      },
+      {
+        key: 'delete',
+        failure: (error) => {
+          // A refused delete may still have moved the job (for example to
+          // delete_pending with a new ETag), so show the server's current
+          // state.
+          void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
+          return errorMessage(error, 'The job could not be deleted.');
+        }
+      }
+    );
+    actionError = jobAction.error;
   }
 
   function apply(event: SubmitEvent) {
@@ -164,12 +176,6 @@
   function clear() {
     validation = null;
     applyListSearch(listState, mediaJobUrl, '');
-  }
-
-  function tone(state: string) {
-    if (state === 'succeeded') return 'success';
-    if (state === 'failed' || state === 'cancelled') return 'danger';
-    return 'warning';
   }
 </script>
 
@@ -205,166 +211,16 @@
       >
     </div>
   {:else if detail.data}
-    <section class="card job-detail" aria-labelledby="job-state-heading">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">{detail.data.operation}</p>
-          <h2 id="job-state-heading">{detail.data.route}</h2>
-        </div>
-        <span class={`badge ${tone(detail.data.state)}`}
-          >{detail.data.state}</span
-        >
-      </div>
-      <dl>
-        <div>
-          <dt>Lifecycle</dt>
-          <dd>{stateLabel(detail.data.lifecycle)}</dd>
-        </div>
-        <div>
-          <dt>Progress</dt>
-          <dd>
-            {detail.data.progress_percent == null
-              ? '—'
-              : `${detail.data.progress_percent}%`}
-          </dd>
-        </div>
-        <div>
-          <dt>Provider</dt>
-          <dd>
-            {detail.data.provider_name}<small
-              >{detail.data.provider_model}</small
-            >
-          </dd>
-        </div>
-        <div>
-          <dt>Client surface</dt>
-          <dd>{detail.data.surface}</dd>
-        </div>
-        <div>
-          <dt>Content status</dt>
-          <dd>
-            {detail.data.content_available
-              ? 'Available through the authenticated vendor API'
-              : 'Not available'}
-          </dd>
-        </div>
-        <div>
-          <dt>Created</dt>
-          <dd>{formatDate(detail.data.created_at)}</dd>
-        </div>
-        <div>
-          <dt>Completed</dt>
-          <dd>
-            {detail.data.completed_at
-              ? formatDate(detail.data.completed_at)
-              : 'Not finished'}
-          </dd>
-        </div>
-        <div>
-          <dt>Last polled</dt>
-          <dd>
-            {detail.data.last_polled_at
-              ? formatDate(detail.data.last_polled_at)
-              : 'Never polled'}
-          </dd>
-        </div>
-        <div>
-          <dt>Expires</dt>
-          <dd>
-            {detail.data.expires_at
-              ? formatDate(detail.data.expires_at)
-              : 'No retention deadline'}
-          </dd>
-        </div>
-        <div>
-          <dt>Deleted</dt>
-          <dd>
-            {detail.data.deleted_at
-              ? formatDate(detail.data.deleted_at)
-              : 'Not deleted'}
-          </dd>
-        </div>
-        <div>
-          <dt>Updated</dt>
-          <dd>{formatDate(detail.data.updated_at)}</dd>
-        </div>
-      </dl>
-      <MediaTimeline job={detail.data} />
-      {#if detail.data.error_class || detail.data.reconciliation_error}<div
-          class="inline-problem"
-          role="alert"
-        >
-          <strong>{detail.data.error_class ?? 'Reconciliation error'}</strong>
-          <p>
-            {detail.data.reconciliation_error ?? 'The upstream job failed.'}
-          </p>
-        </div>{/if}
-      <div class="identifiers">
-        <p>
-          <strong>OLP job</strong>
-          <code>{detail.data.id}</code>
-        </p>
-
-        <p>
-          <strong>Upstream job</strong>
-          <code>{detail.data.upstream_job_id ?? 'not assigned'}</code>
-        </p>
-
-        <p>
-          <strong>API key ID</strong>
-          <code>{detail.data.api_key_id}</code>
-        </p>
-
-        <p>
-          <strong>Provider ID</strong>
-          <code>{detail.data.provider_id}</code>
-        </p>
-      </div>
-      {#if canOperate}
-        <div class="job-actions">
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={refreshNow}
-            disabled={actionBusy !== null}
-            >{actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh now'}</button
-          >
-          {#if detail.data.content_available && detail.data.state === 'succeeded'}
-            <label class="variant-picker"
-              >Variant
-              <select bind:value={downloadVariant}>
-                <option value="video">Video</option>
-                <option value="thumbnail">Thumbnail</option>
-                <option value="spritesheet">Spritesheet</option>
-              </select></label
-            >
-            <button
-              class="button button-secondary"
-              type="button"
-              onclick={download}
-              disabled={actionBusy !== null}
-              >{actionBusy === 'download'
-                ? 'Downloading…'
-                : 'Download content'}</button
-            >
-          {/if}
-          {#if detail.data.lifecycle !== 'deleted'}
-            <button
-              class="button button-secondary button-danger"
-              type="button"
-              onclick={remove}
-              disabled={actionBusy !== null}
-              >{actionBusy === 'delete'
-                ? 'Deleting…'
-                : 'Delete content'}</button
-            >
-          {/if}
-        </div>
-      {/if}
-      {#if actionError}<div class="inline-problem" role="alert">
-          {actionError}
-        </div>{/if}
-    </section>
+    <MediaJobDetail
+      job={detail.data}
+      {canOperate}
+      {actionBusy}
+      {actionError}
+      bind:downloadVariant
+      onDownload={download}
+      onRefresh={refreshNow}
+      onRemove={remove}
+    />
   {/if}
 {:else}
   <PageHeader
@@ -380,341 +236,20 @@
       >
     {/snippet}
   </PageHeader>
-  <form class="card filters" aria-label="Media job filters" onsubmit={apply}>
-    <label
-      >Route <input bind:value={listState.route} placeholder="All routes" />
-    </label>
-
-    <label>
-      State
-
-      <select bind:value={listState.jobState}>
-        <option value="">All states</option>
-
-        {#if listState.jobState && !mediaJobStates.includes(listState.jobState)}
-          <option value={listState.jobState}>{listState.jobState}</option>
-        {/if}{#each mediaJobStates as value (value)}
-          <option {value}>{value}</option>
-        {/each}
-      </select>
-    </label>
-
-    <label>
-      Lifecycle
-
-      <select bind:value={listState.lifecycle}>
-        <option value="">All lifecycles</option>
-
-        {#if listState.lifecycle && !mediaJobLifecycles.includes(listState.lifecycle)}
-          <option value={listState.lifecycle}>{listState.lifecycle}</option>
-        {/if}{#each mediaJobLifecycles as value (value)}
-          <option {value}>{stateLabel(value)}</option>
-        {/each}
-      </select>
-    </label>
-
-    <label>
-      API key ID
-
-      <input
-        bind:value={listState.apiKeyId}
-        class="mono"
-        placeholder="All keys"
-      /></label
-    >
-    <label
-      >Provider ID <input
-        bind:value={listState.providerId}
-        class="mono"
-        placeholder="All providers"
-      /></label
-    >
-    <label
-      >Created after <input
-        bind:value={listState.createdAfter}
-        type={timeInputType(listState.createdAfter)}
-      /></label
-    >
-    <label
-      >Created before <input
-        bind:value={listState.createdBefore}
-        type={timeInputType(listState.createdBefore)}
-      /></label
-    >
-    <div class="filter-actions">
-      <button class="button button-primary" type="submit">Apply filters</button
-      ><button class="button button-secondary" type="button" onclick={clear}
-        >Clear</button
-      >
-    </div>
-  </form>
-  {#if validation ?? urlProblem}<div class="inline-problem" role="alert">
-      {validation ?? urlProblem}
-    </div>{/if}
-  {#if !urlProblem}
-    {#if jobs.isPending}<div class="loading-state" role="status">
-        Loading media jobs…
-      </div>
-    {:else if jobs.isError}<div class="inline-problem" role="alert">
-        {errorMessage(jobs.error, 'Media jobs are unavailable.')}
-        <button class="text-button" type="button" onclick={() => jobs.refetch()}
-          >Retry</button
-        >
-      </div>
-    {:else if jobs.data?.items.length === 0 && listState.history.length === 0}<section
-        class="card empty-state"
-      >
-        <p>No media jobs match these filters.</p>
-      </section>
-    {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-      <div
-        class="table-shell job-table-shell"
-        tabindex="0"
-        role="region"
-        aria-label="Media job results"
-      >
-        <table class="data-table job-table">
-          <caption class="sr-only">Asynchronous media jobs</caption><thead
-            ><tr
-              ><th scope="col">Route / operation</th><th scope="col"
-                >Provider</th
-              ><th scope="col">State</th><th scope="col">Lifecycle</th><th
-                scope="col">Progress</th
-              ><th scope="col">Created</th><th scope="col">Updated</th><th
-                scope="col"><span class="sr-only">Actions</span></th
-              ></tr
-            ></thead
-          ><tbody
-            >{#each jobs.data?.items ?? [] as job (job.id)}<tr
-                ><td data-label="Route / operation"
-                  ><strong>{job.route}</strong><small>{job.operation}</small
-                  ></td
-                ><td data-label="Provider"
-                  >{job.provider_name}<small>{job.provider_model}</small><small
-                    class="mono">{job.provider_id}</small
-                  ></td
-                ><td data-label="State"
-                  ><span class={`badge ${tone(job.state)}`}>{job.state}</span
-                  ></td
-                ><td data-label="Lifecycle">{stateLabel(job.lifecycle)}</td><td
-                  data-label="Progress"
-                  >{job.progress_percent == null
-                    ? '—'
-                    : `${job.progress_percent}%`}</td
-                ><td data-label="Created">{formatDate(job.created_at)}</td><td
-                  data-label="Updated">{formatDate(job.updated_at)}</td
-                ><td class="job-action"
-                  ><a
-                    class="button button-secondary"
-                    href={resolve(`media-jobs/${job.id}${page.url.search}`)}
-                    >View</a
-                  >
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <CursorPagination
-        {...cursorPaginationProps(
-          listState,
-          jobs.isPlaceholderData ? null : jobs.data?.nextCursor
-        )}
-        label="Media job pages"
-      />{/if}
-  {/if}
+  <MediaJobList
+    bind:listState
+    problem={validation ?? urlProblem}
+    blocked={Boolean(urlProblem)}
+    pending={jobs.isPending}
+    error={jobs.isError
+      ? errorMessage(jobs.error, 'Media jobs are unavailable.')
+      : null}
+    items={jobs.data?.items ?? []}
+    hasHistory={listState.history.length > 0}
+    placeholder={jobs.isPlaceholderData}
+    nextCursor={jobs.data?.nextCursor}
+    onApply={apply}
+    onClear={clear}
+    onRetry={() => jobs.refetch()}
+  />
 {/if}
-
-<style>
-  .filters {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: 0.75rem;
-    margin: 1.5rem 0;
-    padding: 1.25rem;
-  }
-  .filters label {
-    display: grid;
-    gap: 0.4rem;
-    font-size: var(--text-body-sm);
-    font-weight: 500;
-  }
-  /* Operator-typed values are content, not labels: they keep the body weight
-     instead of inheriting the label's emphasis. */
-  .filters input,
-  .filters select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-size: var(--text-body-sm);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .filters input:hover,
-  .filters select:hover {
-    border-color: var(--border-strong);
-  }
-  .filter-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
-  td strong,
-  td small,
-  dd small {
-    display: block;
-  }
-  td small,
-  dd small {
-    color: var(--foreground-muted);
-  }
-  .job-detail {
-    max-width: 64rem;
-    margin-top: 1.5rem;
-    padding: 1.5rem;
-  }
-  .section-heading {
-    display: flex;
-    align-items: start;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-  h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    font-weight: 400;
-    letter-spacing: -0.02em;
-  }
-  dl {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-top: 1.25rem;
-  }
-  dl div,
-  .identifiers p {
-    min-width: 0;
-    padding: 0.75rem 1rem;
-    border: 0;
-    border-radius: var(--radius-control);
-    background: var(--surface-raised);
-  }
-  dt,
-  .identifiers strong {
-    color: var(--foreground-subtle);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  dd {
-    margin: 0.35rem 0 0;
-    overflow-wrap: anywhere;
-  }
-  .identifiers {
-    display: grid;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-  .identifiers p {
-    display: grid;
-    gap: 0.35rem;
-    margin: 0;
-  }
-  .identifiers code {
-    overflow-wrap: anywhere;
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-  }
-  .job-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: 0.75rem;
-    margin-top: 1rem;
-  }
-  .variant-picker {
-    display: grid;
-    gap: 0.4rem;
-    font-size: var(--text-body-sm);
-    font-weight: 500;
-  }
-  .variant-picker select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-  }
-  /* Eight columns still cannot fit a phone. Left as a scrolling table, the row
-     width also pushes mobile browsers into shrinking the whole page. */
-  @media (max-width: 48rem) {
-    dl {
-      grid-template-columns: 1fr;
-    }
-    .filters {
-      display: grid;
-    }
-    .job-table-shell {
-      overflow: visible;
-      border: 0;
-      background: transparent;
-    }
-    .job-table,
-    .job-table tbody {
-      display: grid;
-      gap: 0.75rem;
-    }
-    .job-table thead {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-    }
-    .job-table tbody tr {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 0.75rem;
-      padding: 1rem;
-      border: 1px solid var(--border-hairline);
-      border-radius: var(--radius-card);
-      background: transparent;
-    }
-    .job-table tbody td {
-      display: block;
-      min-width: 0;
-      min-height: 0;
-      padding: 0;
-      border: 0;
-      overflow-wrap: anywhere;
-    }
-    .job-table tbody td::before {
-      display: block;
-      margin-bottom: 0.25rem;
-      color: var(--foreground-subtle);
-      content: attr(data-label);
-      font-family: var(--font-mono);
-      font-size: var(--text-caption);
-      font-weight: 400;
-      letter-spacing: -0.02em;
-      text-transform: uppercase;
-    }
-    .job-table tbody td:first-child,
-    .job-table tbody .job-action {
-      grid-column: 1 / -1;
-    }
-    .job-table tbody .job-action::before {
-      display: none;
-    }
-    .job-table tbody .job-action .button {
-      width: 100%;
-    }
-  }
-</style>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useAction } from '#lib/editing/action.svelte.js';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import BrandingPanel from './BrandingPanel.svelte';
@@ -49,7 +50,8 @@
 
   let drafts = $state<Record<string, { value: string; etag: string }>>({});
   let fieldErrors = $state<Record<string, string>>({});
-  let savingKey = $state('');
+  const saveAction = useAction();
+  const savingKey = $derived(saveAction.key);
   let conflictKey = $state('');
   let problem = $state('');
 
@@ -133,37 +135,39 @@
     event.preventDefault();
     const draft = drafts[setting.key];
     if (!draft || !editable(setting) || savingKey) return;
-    savingKey = setting.key;
     problem = '';
     delete fieldErrors[setting.key];
-    try {
-      const updated = await updateSetting(
-        { ...setting, etag: draft.etag },
-        draft.value
-      );
-      queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
-        current?.map((item) => (item.key === updated.key ? updated : item))
-      );
-      if (drafts[setting.key]?.value === draft.value)
-        delete drafts[setting.key];
-      else if (drafts[setting.key])
-        drafts[setting.key] = { ...drafts[setting.key], etag: updated.etag };
-      if (setting.key === 'auth.local_login_enabled')
-        await queryClient.invalidateQueries({
-          queryKey: sessionKeys.serviceCapabilities
-        });
-      notify(`${label(setting.key)} saved`);
-    } catch (cause) {
-      if (isEtagMismatch(cause)) conflictKey = setting.key;
-      const fields = applyServerFieldErrors(cause, {
-        request: 'value',
-        value: 'value'
-      });
-      if (fields.value) fieldErrors[setting.key] = fields.value;
-      else problem = errorMessage(cause);
-    } finally {
-      savingKey = '';
-    }
+    await saveAction.run(
+      () => updateSetting({ ...setting, etag: draft.etag }, draft.value),
+      async (updated, current) => {
+        queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
+          current?.map((item) => (item.key === updated.key ? updated : item))
+        );
+        if (drafts[setting.key]?.value === draft.value)
+          delete drafts[setting.key];
+        else if (drafts[setting.key])
+          drafts[setting.key] = { ...drafts[setting.key], etag: updated.etag };
+        if (setting.key === 'auth.local_login_enabled')
+          await queryClient.invalidateQueries({
+            queryKey: sessionKeys.serviceCapabilities
+          });
+        if (!current()) return;
+        notify(`${label(setting.key)} saved`);
+      },
+      {
+        key: setting.key,
+        failure: (cause) => {
+          if (isEtagMismatch(cause)) conflictKey = setting.key;
+          const fields = applyServerFieldErrors(cause, {
+            request: 'value',
+            value: 'value'
+          });
+          if (fields.value) fieldErrors[setting.key] = fields.value;
+          else if (!isEtagMismatch(cause)) problem = errorMessage(cause);
+          return '';
+        }
+      }
+    );
   }
 </script>
 

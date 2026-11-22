@@ -1,7 +1,6 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
-  import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
@@ -11,7 +10,6 @@
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import {
     retireBudgetGroup,
     createBudgetGroup,
@@ -23,12 +21,13 @@
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
   import { limitsError } from '../budgets/limitForm';
 
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import BudgetGroupCreateDialog from './BudgetGroupCreateDialog.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
 
-  const createIntent = useMutationIntent();
+  const create = useMutation();
+  const edit = useAction();
 
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
@@ -41,26 +40,13 @@
   }));
   const items = $derived(groups.data ?? []);
 
-  let createName = $state('');
-  let createProjectId = $state('');
-  let createBasis = $state('cost');
-  let createDaily = $state('');
-  let createMonthly = $state('');
-  let createWeekly = $state('');
-  let createTemplate = $state('');
-  let createRates = $state({
-    requests_per_minute: '',
-    tokens_per_minute: '',
-    max_concurrency: ''
-  });
+  let creating = $state(false);
+
   const rateFields = [
     'requests_per_minute',
     'tokens_per_minute',
     'max_concurrency'
   ] as const;
-  let createBusy = $state(false);
-  let creating = $state(false);
-  let error = $state('');
 
   let editingId = $state('');
   let editingGroup = $state.raw<BudgetGroup | null>(null);
@@ -75,20 +61,12 @@
     tokens_per_minute: '',
     max_concurrency: ''
   });
-  let editBusy = $state(false);
 
   function optionalDecimal(value: string): string | null {
     return value.trim() || null;
   }
 
-  const captureOwner = usePrincipalLifetime(() => {
-    createName =
-      createProjectId =
-      createDaily =
-      createMonthly =
-      createWeekly =
-      createTemplate =
-        '';
+  usePrincipalLifetime(() => {
     editingId =
       editName =
       editDaily =
@@ -96,14 +74,12 @@
       editWeekly =
       editTemplate =
         '';
-    for (const field of rateFields) createRates[field] = editRates[field] = '';
-    createBusy = editBusy = false;
+    for (const field of rateFields) editRates[field] = '';
     editingGroup = null;
-    error = '';
   });
 
   function startEdit(group: BudgetGroup) {
-    if (editBusy) return;
+    if (edit.busy) return;
     editingGroup = group;
     editingId = group.id;
     editName = group.name;
@@ -113,91 +89,32 @@
     editWeekly = group.weekly_cost_limit ?? '';
     editTemplate = group.limit_template ?? '';
     for (const f of rateFields) editRates[f] = group[f]?.toString() ?? '';
-    error = '';
+    edit.error = '';
   }
 
-  async function submitCreate(event: SubmitEvent) {
-    event.preventDefault();
-    if (!canManage || createBusy || !createName.trim()) return;
-    if (
-      !createTemplate.trim() &&
-      !Object.values(createRates).some(Boolean) &&
-      !createDaily.trim() &&
-      !createMonthly.trim() &&
-      !createWeekly.trim()
-    ) {
-      error = 'Set a limit or reference a project template.';
-      return;
-    }
-    const validation =
-      limitsError({
-        ...createRates,
-        cost_basis: createBasis as 'cost' | 'charge',
-        daily_cost_limit: createDaily,
-        weekly_cost_limit: createWeekly,
-        monthly_cost_limit: createMonthly
-      }) ||
-      (createTemplate &&
-      (!createProjectId || !validRouteSlug(createTemplate.trim()))
-        ? 'Choose a project and a valid template name.'
-        : '');
-    if (validation) {
-      error = validation;
-      return;
-    }
-    createBusy = true;
-    const isCurrent = captureOwner();
-    error = '';
-    let committed = false;
-    try {
-      const submission = createIntent.prepare<
-        Parameters<typeof createBudgetGroup>[0]
-      >({
-        name: createName.trim(),
-        cost_basis: createBasis as 'cost' | 'charge',
-        project_id: createProjectId || null,
-        daily_cost_limit: optionalDecimal(createDaily),
-        weekly_cost_limit: optionalDecimal(createWeekly),
-        monthly_cost_limit: optionalDecimal(createMonthly),
-        limit_template: createTemplate.trim() || null,
-        requests_per_minute: createRates.requests_per_minute
-          ? Number(createRates.requests_per_minute)
-          : null,
-        tokens_per_minute: createRates.tokens_per_minute
-          ? Number(createRates.tokens_per_minute)
-          : null,
-        max_concurrency: createRates.max_concurrency
-          ? Number(createRates.max_concurrency)
-          : null
-      });
-      await createBudgetGroup(submission.input, submission.requestId);
-      if (!isCurrent()) return;
-      createIntent.reset();
-      committed = true;
-      createName = '';
-      createTemplate = '';
-      for (const f of rateFields) createRates[f] = '';
-      createDaily = '';
-      createMonthly = '';
-      createWeekly = '';
-      creating = false;
-      notify('Budget group created');
-      await queryClient.invalidateQueries(
-        { queryKey: budgetGroupKeys.root },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = committed
-        ? `Budget group created, but refreshing failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The budget group could not be created.');
-    } finally {
-      if (isCurrent()) createBusy = false;
-    }
+  function submitCreate(input: Parameters<typeof createBudgetGroup>[0]) {
+    if (!canManage) return Promise.resolve(false);
+    return create.submit(
+      input,
+      (value, requestId) => createBudgetGroup(value, requestId),
+      async () => {
+        notify('Budget group created');
+        await queryClient.invalidateQueries(
+          { queryKey: budgetGroupKeys.root },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Budget group created, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The budget group could not be created.')
+      }
+    );
   }
 
   async function submitEdit(group: BudgetGroup) {
-    if (!canManage || editBusy || !editName.trim()) return;
+    if (!canManage || edit.busy || !editName.trim()) return;
     const current = editingGroup;
     if (!current || current.id !== group.id) return;
     if (
@@ -207,7 +124,7 @@
       !editMonthly.trim() &&
       !editWeekly.trim()
     ) {
-      error = 'Set a limit or reference a project template.';
+      edit.error = 'Set a limit or reference a project template.';
       return;
     }
     const validation =
@@ -223,48 +140,44 @@
         ? 'Use a template from this group’s project.'
         : '');
     if (validation) {
-      error = validation;
+      edit.error = validation;
       return;
     }
-    editBusy = true;
-    const isCurrent = captureOwner();
-    error = '';
-    let committed = false;
-    try {
-      await updateBudgetGroup(current, {
-        name: editName.trim(),
-        cost_basis: editBasis as 'cost' | 'charge',
-        daily_cost_limit: optionalDecimal(editDaily),
-        weekly_cost_limit: optionalDecimal(editWeekly),
-        monthly_cost_limit: optionalDecimal(editMonthly),
-        limit_template: editTemplate.trim() || null,
-        requests_per_minute: editRates.requests_per_minute
-          ? Number(editRates.requests_per_minute)
-          : null,
-        tokens_per_minute: editRates.tokens_per_minute
-          ? Number(editRates.tokens_per_minute)
-          : null,
-        max_concurrency: editRates.max_concurrency
-          ? Number(editRates.max_concurrency)
-          : null
-      });
-      committed = true;
-      if (!isCurrent()) return;
-      editingId = '';
-      editingGroup = null;
-      notify('Budget group updated.');
-      await queryClient.invalidateQueries(
-        { queryKey: budgetGroupKeys.root },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (!isCurrent()) return;
-      error = committed
-        ? `Budget group updated, but refreshing failed. ${errorMessage(cause)}`
-        : errorMessage(cause, 'The budget group could not be updated.');
-    } finally {
-      if (isCurrent()) editBusy = false;
-    }
+    await edit.run(
+      () =>
+        updateBudgetGroup(current, {
+          name: editName.trim(),
+          cost_basis: editBasis as 'cost' | 'charge',
+          daily_cost_limit: optionalDecimal(editDaily),
+          weekly_cost_limit: optionalDecimal(editWeekly),
+          monthly_cost_limit: optionalDecimal(editMonthly),
+          limit_template: editTemplate.trim() || null,
+          requests_per_minute: editRates.requests_per_minute
+            ? Number(editRates.requests_per_minute)
+            : null,
+          tokens_per_minute: editRates.tokens_per_minute
+            ? Number(editRates.tokens_per_minute)
+            : null,
+          max_concurrency: editRates.max_concurrency
+            ? Number(editRates.max_concurrency)
+            : null
+        }),
+      async () => {
+        editingId = '';
+        editingGroup = null;
+        notify('Budget group updated.');
+        await queryClient.invalidateQueries(
+          { queryKey: budgetGroupKeys.root },
+          { throwOnError: true }
+        );
+      },
+      {
+        failure: (cause, stage) =>
+          stage === 'accept'
+            ? `Budget group updated, but refreshing failed. ${errorMessage(cause)}`
+            : errorMessage(cause, 'The budget group could not be updated.')
+      }
+    );
   }
 </script>
 
@@ -280,113 +193,37 @@
           class="button button-primary"
           type="button"
           onclick={() => {
-            error = '';
+            create.error = '';
             creating = true;
           }}>New group</button
         >
       </div>{/if}
   </div>
 
-  {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
+  {#if (create.error || edit.error) && !creating}<Callout tone="danger">
+      {create.error || edit.error}
+    </Callout>{/if}
 
   {#if creating}
-    <Dialog
-      title="New budget group"
-      description="Set at least one limit, or reference a project limit template."
-      placement="side"
+    <BudgetGroupCreateDialog
+      busy={create.busy}
+      bind:error={create.error}
       onClose={() => (creating = false)}
-    >
-      {#if error}<Callout tone="danger">{error}</Callout>{/if}
-      <form class="create-form" onsubmit={submitCreate}>
-        <fieldset class="submission-fields" disabled={createBusy}>
-          <div class="form-grid">
-            <div class="form-field">
-              <label for="group-name">Group name</label><input
-                id="group-name"
-                bind:value={createName}
-                required
-              />
-            </div>
-            <ProjectScopeField
-              id="group-project"
-              bind:value={createProjectId}
-            />
-            <div class="form-field">
-              <label for="group-template">Limit template</label><input
-                id="group-template"
-                bind:value={createTemplate}
-                maxlength="100"
-              />
-            </div>
-            {#each rateFields as field (field)}<div class="form-field">
-                <label for={`group-${field}`}
-                  >{field.replaceAll('_', ' ')}</label
-                ><input
-                  id={`group-${field}`}
-                  bind:value={createRates[field]}
-                  inputmode="numeric"
-                />
-              </div>{/each}
-            <div class="form-field">
-              <label for="group-daily">Daily cost limit</label><input
-                id="group-daily"
-                inputmode="decimal"
-                placeholder="10.00"
-                bind:value={createDaily}
-              />
-            </div>
-            <div class="form-field">
-              <label for="group-weekly">Weekly cost limit</label><input
-                id="group-weekly"
-                inputmode="decimal"
-                placeholder="100.00"
-                bind:value={createWeekly}
-              />
-            </div>
-            <div class="form-field">
-              <label for="group-monthly">Monthly cost limit</label><input
-                id="group-monthly"
-                inputmode="decimal"
-                placeholder="100.00"
-                bind:value={createMonthly}
-              />
-            </div>
-            <div class="form-field">
-              <label for="group-basis">Budget basis</label><select
-                id="group-basis"
-                bind:value={createBasis}
-                ><option value="cost">Provider cost</option><option
-                  value="charge">Consumer charge</option
-                ></select
-              >
-            </div>
-          </div>
-          <div class="form-actions">
-            <button
-              class="button button-primary"
-              type="submit"
-              disabled={createBusy || !createName.trim()}
-              >{createBusy ? 'Creating…' : 'Create group'}</button
-            >
-          </div>
-        </fieldset>
-      </form>
-    </Dialog>
+      onSubmit={submitCreate}
+    />
   {/if}
 
-  {#if groups.isPending}<span class="inline-status" role="status"
-      >Loading budget groups…</span
-    >
-  {:else if groups.isError}<span class="inline-problem" role="alert"
-      >Budget groups are unavailable.
-      <button class="text-button" type="button" onclick={() => groups.refetch()}
-        >Retry</button
-      ></span
-    >
-  {:else if !items.length}<EmptyState title="No budget groups yet"
-      >Create a group, then add API keys to it from each key's settings.</EmptyState
-    >
-  {:else}
+  <QueryView
+    query={groups}
+    loading="Loading budget groups…"
+    failure="Budget groups are unavailable."
+    emptyWhen={!items.length}
+  >
+    {#snippet empty()}
+      <EmptyState title="No budget groups yet"
+        >Create a group, then add API keys to it from each key's settings.</EmptyState
+      >
+    {/snippet}
     <ScrollTable label="Budget groups">
       <table class="data-table">
         <thead
@@ -408,7 +245,7 @@
                   ><input
                     aria-label="Group name"
                     bind:value={editName}
-                    disabled={editBusy}
+                    disabled={edit.busy}
                     required
                   /></td
                 ><td>{group.project_name ?? 'Installation-wide'}</td><td
@@ -416,27 +253,27 @@
                     aria-label="Daily cost limit"
                     inputmode="decimal"
                     bind:value={editDaily}
-                    disabled={editBusy}
+                    disabled={edit.busy}
                   /></td
                 ><td
                   ><input
                     aria-label="Weekly cost limit"
                     inputmode="decimal"
                     bind:value={editWeekly}
-                    disabled={editBusy}
+                    disabled={edit.busy}
                   /></td
                 ><td
                   ><input
                     aria-label="Monthly cost limit"
                     inputmode="decimal"
                     bind:value={editMonthly}
-                    disabled={editBusy}
+                    disabled={edit.busy}
                   /></td
                 ><td
                   ><select
                     aria-label="Budget basis"
                     bind:value={editBasis}
-                    disabled={editBusy}
+                    disabled={edit.busy}
                     ><option value="cost">Provider cost</option><option
                       value="charge">Consumer charge</option
                     ></select
@@ -445,14 +282,14 @@
                   ><button
                     class="text-button"
                     type="button"
-                    disabled={editBusy}
+                    disabled={edit.busy}
                     onclick={() => submitEdit(group)}
-                    >{editBusy ? 'Saving…' : 'Save'}</button
+                    >{edit.busy ? 'Saving…' : 'Save'}</button
                   >
                   <button
                     class="text-button"
                     type="button"
-                    disabled={editBusy}
+                    disabled={edit.busy}
                     onclick={() => {
                       editingId = '';
                       editingGroup = null;
@@ -507,7 +344,7 @@
                     ><button
                       class="text-button"
                       type="button"
-                      disabled={editBusy}
+                      disabled={edit.busy}
                       onclick={() => startEdit(group)}>Edit</button
                     >
                     {#if access.allows('DELETE /api/v1/budget-groups/{budget_group_id}')}<ConfirmAction
@@ -539,7 +376,7 @@
         on this installation.
       </p>
     {/if}
-  {/if}
+  </QueryView>
 </section>
 
 <style>
@@ -554,25 +391,6 @@
     font-size: var(--text-body);
     font-weight: 500;
     letter-spacing: -0.02em;
-  }
-  .submission-fields {
-    display: grid;
-    gap: inherit;
-    border: 0;
-    padding: 0;
-    margin: 0;
-    min-width: 0;
-  }
-  .create-form {
-    display: grid;
-    gap: 1rem;
-    padding: 1rem;
-    border-radius: var(--radius-control);
-    background: var(--surface-raised);
-  }
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
   }
   td small {
     color: var(--foreground-muted);

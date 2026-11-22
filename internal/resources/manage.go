@@ -217,6 +217,58 @@ func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, er
 }
 
 func (m *Management) page(ctx context.Context, filters manageFilters, cursor *manageCursor, limit int) ([]manageRecord, *string, error) {
+	query, args := managePageQuery(filters, cursor, limit)
+	rows, err := m.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var records []manageRecord
+	for rows.Next() {
+		var record manageRecord
+		var retainedRaw []byte
+		var settlementID *uuid.UUID
+		var settlementState *string
+		var expectedResults *int64
+		var settledResults, uncertainResults *int64
+		var lastErrorClass *string
+		var closeAfter, closedAt *time.Time
+		if err = rows.Scan(&record.uuid, &record.kind, &record.apiKeyID, &record.apiKeyName,
+			&record.route, &record.providerID, &record.providerName, &record.upstreamID,
+			&record.upstreamModel, &record.state, &record.expiresAt,
+			&record.createdAt, &record.updatedAt, &settlementID, &settlementState, &expectedResults,
+			&settledResults, &uncertainResults, &lastErrorClass, &closeAfter, &closedAt, &retainedRaw); err != nil {
+			return nil, nil, err
+		}
+		if len(retainedRaw) > 0 && string(retainedRaw) != "null" {
+			record.retained = &contract.RetainedSettlementStatus{}
+			if err = json.Unmarshal(retainedRaw, record.retained); err != nil {
+				return nil, nil, err
+			}
+		}
+		if settlementID != nil && settlementState != nil && closeAfter != nil {
+			record.settlement = &manageSettlementRecord{
+				state: *settlementState, expectedResults: expectedResults, settledResults: valueOrZero(settledResults),
+				uncertainResults: valueOrZero(uncertainResults), lastErrorClass: lastErrorClass,
+				closeAfter: *closeAfter, closedAt: closedAt,
+			}
+		}
+		records = append(records, record)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	var next *string
+	if len(records) > limit {
+		last := records[limit-1]
+		encoded := (&manageCursor{at: last.createdAt, id: last.uuid.String()}).encode()
+		next = &encoded
+		records = records[:limit]
+	}
+	return records, next, nil
+}
+
+func managePageQuery(filters manageFilters, cursor *manageCursor, limit int) (string, []any) {
 	query := `WITH entries AS (
 		SELECT r.id, r.kind, r.api_key_id, k.name AS api_key_name, r.route_slug AS route,
 			r.provider_id, p.name AS provider_name, r.upstream_id,
@@ -278,54 +330,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 	}
 	args = append(args, limit+1)
 	query += fmt.Sprintf(" ORDER BY e.created_at DESC, e.id DESC LIMIT $%d", len(args))
-	rows, err := m.Pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	var records []manageRecord
-	for rows.Next() {
-		var record manageRecord
-		var retainedRaw []byte
-		var settlementID *uuid.UUID
-		var settlementState *string
-		var expectedResults *int64
-		var settledResults, uncertainResults *int64
-		var lastErrorClass *string
-		var closeAfter, closedAt *time.Time
-		if err = rows.Scan(&record.uuid, &record.kind, &record.apiKeyID, &record.apiKeyName,
-			&record.route, &record.providerID, &record.providerName, &record.upstreamID,
-			&record.upstreamModel, &record.state, &record.expiresAt,
-			&record.createdAt, &record.updatedAt, &settlementID, &settlementState, &expectedResults,
-			&settledResults, &uncertainResults, &lastErrorClass, &closeAfter, &closedAt, &retainedRaw); err != nil {
-			return nil, nil, err
-		}
-		if len(retainedRaw) > 0 && string(retainedRaw) != "null" {
-			record.retained = &contract.RetainedSettlementStatus{}
-			if err = json.Unmarshal(retainedRaw, record.retained); err != nil {
-				return nil, nil, err
-			}
-		}
-		if settlementID != nil && settlementState != nil && closeAfter != nil {
-			record.settlement = &manageSettlementRecord{
-				state: *settlementState, expectedResults: expectedResults, settledResults: valueOrZero(settledResults),
-				uncertainResults: valueOrZero(uncertainResults), lastErrorClass: lastErrorClass,
-				closeAfter: *closeAfter, closedAt: closedAt,
-			}
-		}
-		records = append(records, record)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, nil, err
-	}
-	var next *string
-	if len(records) > limit {
-		last := records[limit-1]
-		encoded := (&manageCursor{at: last.createdAt, id: last.uuid.String()}).encode()
-		next = &encoded
-		records = records[:limit]
-	}
-	return records, next, nil
+	return query, args
 }
 
 func valueOrZero(value *int64) int64 {

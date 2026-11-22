@@ -64,61 +64,10 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 // their latest published revision.
 func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	snapshot := &routing.Snapshot{Commitments: map[string][]routing.Commitment{}, Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
-	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn("r")+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
-	if err != nil {
+	if err := readSnapshotProviders(ctx, tx, snapshot); err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var revision routing.ProviderRevision
-		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.InstalledPlugin); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		provider, err := routing.DecodeProviderRevision(revision)
-		if err != nil {
-			rows.Close()
-			return nil, err
-		}
-		provider.Limits = provider.Limits.Configured()
-		snapshot.Providers[provider.ID] = provider
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	rows, err = tx.Query(ctx, `SELECT provider_id::text,id::text,amount::text,period,effective_at,ends_at
- FROM olp.commitment_schedules WHERE ends_at IS NULL OR ends_at>clock_timestamp() ORDER BY effective_at`)
-	if err != nil {
-		return nil, err
-	}
-	for id, p := range snapshot.Providers {
-		p.Commitment = nil
-		snapshot.Providers[id] = p
-	}
-	for rows.Next() {
-		var id string
-		var c routing.Commitment
-		if err = rows.Scan(&id, &c.ID, &c.Amount, &c.Period, &c.EffectiveAt, &c.EndsAt); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		snapshot.Commitments[id] = append(snapshot.Commitments[id], c)
-		p, ok := snapshot.Providers[id]
-		if !ok {
-			continue
-		}
-		if c.EffectiveAt.After(time.Now()) {
-			p.PendingCommitment = &c
-		} else {
-			p.Commitment = &c
-		}
-		snapshot.Providers[id] = p
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity,v.behavior FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err := tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity,v.behavior FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
@@ -177,4 +126,59 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 		return nil, err
 	}
 	return snapshot, compileCodeMode(ctx, tx, snapshot)
+}
+
+func readSnapshotProviders(ctx context.Context, tx pgx.Tx, snapshot *routing.Snapshot) error {
+	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn("r")+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var revision routing.ProviderRevision
+		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.InstalledPlugin); err != nil {
+			rows.Close()
+			return err
+		}
+		provider, err := routing.DecodeProviderRevision(revision)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		provider.Limits = provider.Limits.Configured()
+		snapshot.Providers[provider.ID] = provider
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	rows, err = tx.Query(ctx, `SELECT provider_id::text,id::text,amount::text,period,effective_at,ends_at
+ FROM olp.commitment_schedules WHERE ends_at IS NULL OR ends_at>clock_timestamp() ORDER BY effective_at`)
+	if err != nil {
+		return err
+	}
+	for id, p := range snapshot.Providers {
+		p.Commitment = nil
+		snapshot.Providers[id] = p
+	}
+	for rows.Next() {
+		var id string
+		var c routing.Commitment
+		if err = rows.Scan(&id, &c.ID, &c.Amount, &c.Period, &c.EffectiveAt, &c.EndsAt); err != nil {
+			rows.Close()
+			return err
+		}
+		snapshot.Commitments[id] = append(snapshot.Commitments[id], c)
+		p, ok := snapshot.Providers[id]
+		if !ok {
+			continue
+		}
+		if c.EffectiveAt.After(time.Now()) {
+			p.PendingCommitment = &c
+		} else {
+			p.Commitment = &c
+		}
+		snapshot.Providers[id] = p
+	}
+	rows.Close()
+	return rows.Err()
 }

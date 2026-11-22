@@ -1,7 +1,8 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
-  import { errorMessage } from '#lib/management/http.js';
   import { notify } from '#lib/components/toasts.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { useRole } from '#lib/session/useRole.svelte.js';
@@ -28,8 +29,7 @@
   let memberships = $state<
     { id: string; value: string; role: 'manager' | 'viewer' }[]
   >([]);
-  let busy = $state(false);
-  let error = $state('');
+  const write = useAction();
   function edit(group: Group) {
     current = group;
     role = group.mapping.role ?? '';
@@ -38,35 +38,34 @@
       ...p,
       id: crypto.randomUUID()
     }));
-    error = '';
+    write.error = '';
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (!current || !editable || busy) return;
+    const group = current;
+    if (!group || !editable || write.busy) return;
     if (
       memberships.some((p) => !p.value) ||
       new Set(memberships.map((p) => p.value)).size !== memberships.length
     ) {
-      error = 'Choose each project at most once.';
+      write.error = 'Choose each project at most once.';
       return;
     }
-    busy = true;
-    error = '';
-    try {
-      const result = await saveMapping(current, {
-        ...(role ? { role } : {}),
-        accessScope: scope,
-        projects: memberships.map(({ value, role }) => ({ value, role }))
-      });
-      edit(result);
-      notify('Group access saved.');
-      await client.invalidateQueries({ queryKey: scimKeys.groups() });
-      await client.invalidateQueries({ queryKey: projectKeys.root });
-    } catch (e) {
-      error = errorMessage(e, 'Could not save the group mapping.');
-    } finally {
-      busy = false;
-    }
+    await write.run(
+      () =>
+        saveMapping(group, {
+          ...(role ? { role } : {}),
+          accessScope: scope,
+          projects: memberships.map(({ value, role }) => ({ value, role }))
+        }),
+      async (result) => {
+        edit(result);
+        notify('Group access saved.');
+        await client.invalidateQueries({ queryKey: scimKeys.groups() });
+        await client.invalidateQueries({ queryKey: projectKeys.root });
+      },
+      { fallback: 'Could not save the group mapping.' }
+    );
   }
 </script>
 
@@ -94,17 +93,16 @@
     that identity.
   </p>
 </section>
-{#if groups.isPending}<p role="status">
-    Loading provisioned groups…
-  </p>{:else if groups.isError}<p class="inline-problem" role="alert">
-    Could not load SCIM groups.
-  </p>
-  <button class="button button-secondary" onclick={() => groups.refetch()}
-    >Retry</button
-  >{:else if !groups.data?.length}<p>
-    No SCIM groups have been provisioned yet. Synchronize a group from your
-    directory to configure its access here.
-  </p>{:else}
+<QueryView
+  query={groups}
+  loading="Loading provisioned groups…"
+  failure="Could not load SCIM groups."
+  emptyWhen={!groups.data?.length}
+>
+  {#snippet empty()}<p>
+      No SCIM groups have been provisioned yet. Synchronize a group from your
+      directory to configure its access here.
+    </p>{/snippet}
   <section aria-labelledby="scim-groups">
     <h2 id="scim-groups">Provisioned groups</h2>
     <ul class="groups">
@@ -121,14 +119,14 @@
           </div>
           <button
             class="button button-secondary"
-            disabled={busy}
+            disabled={write.busy}
             onclick={() => edit(group)}
             >{editable ? 'Edit' : 'View'} {group.display_name}</button
           >
         </li>{/each}
     </ul>
   </section>
-{/if}
+</QueryView>
 {#if current}<form onsubmit={submit} aria-label="SCIM group mapping">
     <h2>{current.display_name}</h2>
     <p>
@@ -136,7 +134,7 @@
       an omitted OLP extension; explicitly supplied mappings replace these
       values.
     </p>
-    <fieldset disabled={!editable || busy}>
+    <fieldset disabled={!editable || write.busy}>
       <div class="form-field">
         <label for="scim-role">Additional installation role</label><select
           id="scim-role"
@@ -204,16 +202,16 @@
           ])}>Add project membership</button
       >
     </fieldset>
-    {#if error}<p class="inline-problem" role="alert">
-        {error}
+    {#if write.error}<p class="inline-problem" role="alert">
+        {write.error}
       </p>{/if}
     <div class="actions">
-      {#if editable}<button class="button button-primary" disabled={busy}
-          >{busy ? 'Saving…' : 'Save group access'}</button
+      {#if editable}<button class="button button-primary" disabled={write.busy}
+          >{write.busy ? 'Saving…' : 'Save group access'}</button
         >{/if}<button
         type="button"
         class="button button-secondary"
-        disabled={busy}
+        disabled={write.busy}
         onclick={() => (current = null)}>Close</button
       >
     </div>

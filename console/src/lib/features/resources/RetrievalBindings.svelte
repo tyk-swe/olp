@@ -1,14 +1,16 @@
 <script lang="ts">
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import RetrievalBindingList from './RetrievalBindingList.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
   import {
     listRetrievalBindings,
@@ -23,6 +25,7 @@
   const access = useRole();
   const client = useQueryClient();
   const intent = useMutationIntent();
+  const writeAction = useAction();
   const queryKey = ['retrieval-bindings'] as const;
   const bindings = createQuery(() => ({
     queryKey,
@@ -45,8 +48,9 @@
   let revision = $state('');
   let inspected = $state('');
   let error = $state('');
-  let busy = $state(false);
-  let conflict = $state(false);
+  let readBusy = $state(false);
+  const busy = $derived(readBusy || writeAction.busy);
+  const conflict = $derived(writeAction.conflict);
   let epoch = 0;
   const captureOwner = usePrincipalLifetime(() => {
     epoch += 1;
@@ -54,7 +58,6 @@
     editor = false;
     inspected = '';
     error = '';
-    busy = false;
   });
 
   function populate(value: RetrievalBinding | null) {
@@ -70,7 +73,7 @@
     grants = value?.key_grants.join('\n') ?? '';
     revision = value?.revision_id ?? '';
     inspected = '';
-    conflict = false;
+    writeAction.reset();
     intent.reset();
     editor = true;
   }
@@ -78,16 +81,15 @@
     if (busy) return;
     const version = ++epoch;
     const isCurrent = captureOwner();
-    busy = true;
+    readBusy = true;
     error = '';
-    try {
-      const value = id ? await getRetrievalBinding(id) : null;
-      if (isCurrent() && version === epoch) populate(value);
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
-    }
+    const result = await readResult(() =>
+      id ? getRetrievalBinding(id) : Promise.resolve(null)
+    );
+    if (!isCurrent() || version !== epoch) return;
+    readBusy = false;
+    if (result.ok) populate(result.value);
+    else error = errorMessage(result.error);
   }
   function input(): RetrievalBindingInput {
     const parsed = parseNativeJSON(fields);
@@ -123,61 +125,57 @@
   async function write(action: 'save' | 'retire') {
     if (busy || !canManage || conflict) return;
     const version = epoch;
-    const isCurrent = captureOwner();
     error = '';
-    busy = true;
-    try {
-      const next = action === 'save' ? input() : null;
-      const observed = current;
-      const saved = await intent.submit(
-        { action, observed, next },
-        async (submission, requestId) => {
-          if (submission.action === 'retire') {
-            if (!submission.observed)
-              throw new Error('Choose an existing binding.');
-            await retireRetrievalBinding(submission.observed, requestId);
-            return null;
+    await writeAction.run(
+      () => {
+        const next = action === 'save' ? input() : null;
+        const observed = current;
+        return intent.submit(
+          { action, observed, next },
+          async (submission, requestId) => {
+            if (submission.action === 'retire') {
+              if (!submission.observed)
+                throw new Error('Choose an existing binding.');
+              await retireRetrievalBinding(submission.observed, requestId);
+              return null;
+            }
+            if (!submission.next) throw new Error('Enter the binding fields.');
+            return saveRetrievalBinding(
+              submission.observed,
+              submission.next,
+              requestId
+            );
           }
-          if (!submission.next) throw new Error('Enter the binding fields.');
-          return saveRetrievalBinding(
-            submission.observed,
-            submission.next,
-            requestId
-          );
+        );
+      },
+      async (saved, isLive) => {
+        if (version !== epoch || !isLive()) return;
+        if (saved) populate(saved);
+        else {
+          current = null;
+          editor = false;
         }
-      );
-      if (!isCurrent() || version !== epoch) return;
-      if (saved) populate(saved);
-      else {
-        current = null;
-        editor = false;
-      }
-      notify(saved ? 'Binding revision saved.' : 'Binding retired.');
-      await client.invalidateQueries({ queryKey });
-    } catch (cause) {
-      if (isCurrent() && version === epoch) {
-        error = errorMessage(cause);
-        conflict = isEtagMismatch(cause);
-      }
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
-    }
+        notify(saved ? 'Binding revision saved.' : 'Binding retired.');
+        await client.invalidateQueries({ queryKey });
+      },
+      { failure: (cause) => (version === epoch ? errorMessage(cause) : '') }
+    );
+    if (writeAction.error) error = writeAction.error;
   }
   async function inspect() {
     if (!current || !revision || busy) return;
     const version = epoch;
     const isCurrent = captureOwner();
-    busy = true;
+    readBusy = true;
     error = '';
-    try {
-      const value = await getRetrievalRevision(current.id, revision.trim());
-      if (isCurrent() && version === epoch)
-        inspected = JSON.stringify(value, null, 2);
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
-    }
+    const binding = current;
+    const result = await readResult(() =>
+      getRetrievalRevision(binding.id, revision.trim())
+    );
+    if (!isCurrent() || version !== epoch) return;
+    readBusy = false;
+    if (result.ok) inspected = JSON.stringify(result.value, null, 2);
+    else error = errorMessage(result.error);
   }
 </script>
 
@@ -200,47 +198,7 @@
       disabled={busy || !canManage}>Add binding</button
     >
   </div>
-  {#if bindings.isPending}<p role="status">Loading retrieval bindings…</p>
-  {:else if bindings.isError}<p class="inline-problem" role="alert">
-      {errorMessage(bindings.error)}
-    </p>
-    <button class="text-button" type="button" onclick={() => bindings.refetch()}
-      >Retry</button
-    >
-  {:else if !bindings.data?.length}<p>
-      No cloud retrieval bindings are configured.
-    </p>
-  {:else}<ScrollTable label="Cloud retrieval bindings">
-      <table class="data-table">
-        <caption class="sr-only">Cloud retrieval bindings</caption>
-        <thead
-          ><tr
-            ><th scope="col">Name</th><th scope="col">Backend</th><th
-              scope="col">Route</th
-            ><th scope="col">Access</th><th scope="col">Actions</th></tr
-          ></thead
-        >
-        <tbody
-          >{#each bindings.data ?? [] as item (item.id)}<tr>
-              <td>{item.name}<small class="mono">{item.id}</small></td><td
-                >{item.backend}<small>{item.backend_resource}</small></td
-              >
-              <td>{item.route}</td><td
-                >{item.enabled ? 'Enabled' : 'Disabled'} · {item.key_grants
-                  .length} grants</td
-              >
-              <td
-                ><button
-                  class="text-button"
-                  type="button"
-                  onclick={() => edit(item.id)}
-                  disabled={busy}>Inspect / edit</button
-                ></td
-              >
-            </tr>{/each}</tbody
-        >
-      </table>
-    </ScrollTable>{/if}
+  <RetrievalBindingList {bindings} {busy} {edit} />
   {#if editor}
     <form
       onsubmit={(event) => {
@@ -398,11 +356,6 @@
     max-height: 25rem;
     overflow: auto;
     white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  td small {
-    display: block;
-    color: var(--foreground-muted);
     overflow-wrap: anywhere;
   }
 </style>

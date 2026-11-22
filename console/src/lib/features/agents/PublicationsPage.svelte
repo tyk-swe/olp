@@ -1,9 +1,10 @@
 <script lang="ts">
+  import PublicationEditor from './PublicationEditor.svelte';
+  import PublicationList from './PublicationList.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { readResult } from '#lib/editing/result.js';
   import Callout from '#lib/components/Callout.svelte';
-  import EmptyState from '#lib/components/EmptyState.svelte';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
@@ -61,7 +62,9 @@
   let current = $state<Publication | null>(null);
   let form = $state(publicationForm());
   let editor = $state(false);
-  let busy = $state(false);
+  let readBusy = $state(false);
+  const pubAction = useAction();
+  const busy = $derived(readBusy || pubAction.busy);
   let error = $state('');
   let notice = $state('');
   let pendingReceipt = $state<PublicationReceipt | null>(null);
@@ -86,7 +89,6 @@
     server = null;
     pricing = null;
     editor = false;
-    busy = false;
     error = '';
     notice = '';
     pendingReceipt = null;
@@ -140,20 +142,22 @@
     const version = epoch;
     const isCurrent = captureOwner();
     error = '';
-    busy = true;
-    try {
-      const value = id ? await getPublication(kind, id) : null;
-      if (!isCurrent() || version !== epoch) return;
-      current = value;
-      form = publicationForm(value);
-      if (!value) form.project = projects.data?.[0]?.id ?? '';
-      revisionID = value?.revision_id ?? '';
-      editor = true;
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
+    readBusy = true;
+    const result = await readResult(() =>
+      id ? getPublication(kind, id) : Promise.resolve(null)
+    );
+    if (!isCurrent() || version !== epoch) return;
+    readBusy = false;
+    if (!result.ok) {
+      error = errorMessage(result.error);
+      return;
     }
+    const value = result.value;
+    current = value;
+    form = publicationForm(value);
+    if (!value) form.project = projects.data?.[0]?.id ?? '';
+    revisionID = value?.revision_id ?? '';
+    editor = true;
   }
   async function chooseServer() {
     server = null;
@@ -162,14 +166,14 @@
     const version = epoch;
     const isCurrent = captureOwner();
     if (!selected) return;
-    try {
-      const value = await getServer(selected);
-      if (isCurrent() && version === epoch && selected === serverID) {
-        server = value;
-        pricing = serverPricingForm(value);
-      }
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
+    const result = await readResult(() => getServer(selected));
+    if (!result.ok) {
+      if (isCurrent() && version === epoch) error = errorMessage(result.error);
+      return;
+    }
+    if (isCurrent() && version === epoch && selected === serverID) {
+      server = result.value;
+      pricing = serverPricingForm(result.value);
     }
   }
   async function savePricing() {
@@ -178,71 +182,66 @@
     const isCurrent = captureOwner();
     const observed = server;
     const draft = pricing;
-    busy = true;
     error = '';
     notice = '';
-    try {
-      const pricingResult = serverPricingInput(observed, draft);
-      if (!pricingResult.ok) {
-        error = pricingResult.message;
-        return;
-      }
-      const input = pricingResult.input;
-      const result = await intent.submit(
-        { action: 'server-pricing', observed, input },
-        async (submission, requestId) =>
-          saveServer(submission.observed, submission.input, requestId)
-      );
-      if (!isCurrent() || version !== epoch) return;
-      server = result;
-      pricing = serverPricingForm(result);
-      serverID = result.id;
-      notice =
-        'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
-      try {
-        await client.invalidateQueries(
-          { queryKey: agentKeys.servers() },
-          { throwOnError: true }
-        );
-      } catch (cause) {
-        if (isCurrent() && version === epoch)
-          error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
-      }
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
-    } finally {
-      if (isCurrent() && version === epoch) busy = false;
+    const pricingResult = serverPricingInput(observed, draft);
+    if (!pricingResult.ok) {
+      error = pricingResult.message;
+      return;
     }
+    const input = pricingResult.input;
+    await pubAction.run(
+      () =>
+        intent.submit(
+          { action: 'server-pricing', observed, input },
+          async (submission, requestId) =>
+            saveServer(submission.observed, submission.input, requestId)
+        ),
+      async (result, current) => {
+        if (!current() || version !== epoch) return;
+        server = result;
+        pricing = serverPricingForm(result);
+        serverID = result.id;
+        notice =
+          'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
+        const refreshed = await readResult(() =>
+          client.invalidateQueries(
+            { queryKey: agentKeys.servers() },
+            { throwOnError: true }
+          )
+        );
+        if (!refreshed.ok && isCurrent() && version === epoch)
+          error = `Write saved, but refreshing failed. ${errorMessage(refreshed.error)}`;
+      },
+      {
+        key: 'pricing',
+        failure: (cause) => errorMessage(cause)
+      }
+    );
+    if (version === epoch && pubAction.error) error = pubAction.error;
   }
   async function addTool(name: string) {
     if (!server) return;
     const version = epoch;
     const isCurrent = captureOwner();
-    try {
-      const pinned = await toolPin(server, name);
-      if (!pinned.ok) {
-        if (isCurrent() && version === epoch) error = pinned.message;
-        return;
-      }
-      const pin = pinned.pin;
-      if (
-        isCurrent() &&
-        version === epoch &&
-        !form.tools.some((tool) => tool.alias === pin.alias)
-      )
-        form.tools = [...form.tools, pin];
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
+    const pinned = server;
+    const result = await readResult(() => toolPin(pinned, name));
+    if (!result.ok) {
+      if (isCurrent() && version === epoch) error = errorMessage(result.error);
+      return;
     }
-  }
-  function classifyTool(alias: string, value: string) {
-    const classification =
-      value === 'read_only' || value === 'approval_required'
-        ? value
-        : undefined;
-    form.tools = form.tools.map((tool) =>
-      tool.alias === alias ? { ...tool, classification } : tool
-    );
+    const pinnedResult = result.value;
+    if (!pinnedResult.ok) {
+      if (isCurrent() && version === epoch) error = pinnedResult.message;
+      return;
+    }
+    const pin = pinnedResult.pin;
+    if (
+      isCurrent() &&
+      version === epoch &&
+      !form.tools.some((tool) => tool.alias === pin.alias)
+    )
+      form.tools = [...form.tools, pin];
   }
   async function inspect() {
     if (!current) return;
@@ -250,29 +249,29 @@
     const isCurrent = captureOwner();
     const id = current.id;
     const revision = revisionID;
-    try {
-      const value = await getRevision(kind, id, revision);
-      if (isCurrent() && version === epoch && revision === revisionID)
-        inspected = value;
-    } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
+    const result = await readResult(() => getRevision(kind, id, revision));
+    if (!result.ok) {
+      if (isCurrent() && version === epoch) error = errorMessage(result.error);
+      return;
     }
+    if (isCurrent() && version === epoch && revision === revisionID)
+      inspected = result.value;
   }
   async function refreshReceipt(
     receipt: PublicationReceipt,
     isCurrent: () => boolean
   ) {
     pendingReceipt = receipt;
-    try {
-      await client.invalidateQueries(
+    const result = await readResult(() =>
+      client.invalidateQueries(
         { queryKey: agentKeys.publications },
         { throwOnError: true }
-      );
-      if (isCurrent()) pendingReceipt = null;
-    } catch (cause) {
-      if (isCurrent())
-        error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
-    }
+      )
+    );
+    if (!isCurrent()) return;
+    if (result.ok) pendingReceipt = null;
+    else
+      error = `Write saved, but refreshing failed. ${errorMessage(result.error)}`;
   }
   async function retryRefresh() {
     const receipt = pendingReceipt;
@@ -280,10 +279,10 @@
     const version = epoch;
     const owner = captureOwner();
     const isCurrent = () => owner() && version === epoch;
-    busy = true;
+    readBusy = true;
     error = '';
     await refreshReceipt(receipt, isCurrent);
-    if (isCurrent()) busy = false;
+    if (isCurrent()) readBusy = false;
   }
   async function write(action: PublicationAction) {
     const compiled = publicationCommand({
@@ -303,29 +302,28 @@
     const version = epoch;
     const owner = captureOwner();
     const isCurrent = () => owner() && version === epoch;
-    busy = true;
     error = '';
     notice = '';
-    try {
-      const receipt = await intent.submit(compiled.command, executePublication);
-      if (!isCurrent()) return;
-      credential = '';
-      entraClientSecret = '';
-      removeCredential = false;
-      current = receipt.kind === 'updated' ? receipt.publication : null;
-      inspected = null;
-      confirmRetire = false;
-      if (current) {
-        form = publicationForm(current);
-        revisionID = current.revision_id ?? '';
-      } else editor = false;
-      notice = receipt.notice;
-      await refreshReceipt(receipt, isCurrent);
-    } catch (cause) {
-      if (isCurrent()) error = errorMessage(cause);
-    } finally {
-      if (isCurrent()) busy = false;
-    }
+    await pubAction.run(
+      () => intent.submit(compiled.command, executePublication),
+      async (receipt, live) => {
+        if (!isCurrent() || !live()) return;
+        credential = '';
+        entraClientSecret = '';
+        removeCredential = false;
+        current = receipt.kind === 'updated' ? receipt.publication : null;
+        inspected = null;
+        confirmRetire = false;
+        if (current) {
+          form = publicationForm(current);
+          revisionID = current.revision_id ?? '';
+        } else editor = false;
+        notice = receipt.notice;
+        await refreshReceipt(receipt, isCurrent);
+      },
+      { key: 'publication', failure: (cause) => errorMessage(cause) }
+    );
+    if (isCurrent() && pubAction.error) error = pubAction.error;
   }
 </script>
 
@@ -341,530 +339,44 @@
     disabled={busy}
     onclick={retryRefresh}>Retry refresh</button
   >{/if}
-<section class="section" aria-label="Publications">
-  <div class="page-actions">
-    <button
-      class="button button-primary"
-      type="button"
-      disabled={busy || !canManage || (kind === 'agents' && !canTrust)}
-      onclick={() => edit()}>New {kind.slice(0, -1)}</button
-    >
-  </div>
-  {#if items.isPending}<div class="loading-state" role="status">
-      Loading publications…
-    </div>{:else if !items.data?.length}<EmptyState title={EMPTY[kind].title}
-      >{EMPTY[kind].body}</EmptyState
-    >{:else}<ScrollTable label="Publications">
-      <table class="data-table">
-        <thead
-          ><tr
-            ><th scope="col">Name</th><th scope="col">Project</th><th
-              scope="col">Published revision</th
-            ><th scope="col">Inspect</th></tr
-          ></thead
-        ><tbody
-          >{#each items.data ?? [] as item (item.id)}<tr
-              ><td>{item.name}</td><td
-                >{projects.data?.find(
-                  (project) => project.id === item.project_id
-                )?.name ?? item.project_id}</td
-              ><td><code>{item.revision_id ?? 'Draft only'}</code></td><td
-                ><button
-                  class="button button-secondary"
-                  type="button"
-                  disabled={busy}
-                  onclick={() => edit(item.id)}>Open</button
-                ></td
-              ></tr
-            >{/each}</tbody
-        >
-      </table>
-    </ScrollTable>{/if}
-</section>
+<PublicationList
+  {kind}
+  {busy}
+  canCreate={canManage && (kind !== 'agents' || !!canTrust)}
+  pending={items.isPending}
+  items={items.data ?? []}
+  projects={projects.data ?? []}
+  empty={EMPTY[kind]}
+  onCreate={() => edit()}
+  onOpen={edit}
+/>
+
 {#if editor}
-  <section class="card stack-card" aria-label="Publication editor">
-    <h2>{current ? 'Review publication' : 'New draft'}</h2>
-    <form
-      onsubmit={(event) => {
-        event.preventDefault();
-        void write('save');
-      }}
-    >
-      <fieldset disabled={busy || !canManage}>
-        <label class="form-field"
-          >Name <input bind:value={form.name} maxlength="100" required /></label
-        ><label class="form-field"
-          >Project <select
-            aria-label="Project"
-            bind:value={form.project}
-            disabled={!!current}
-            onchange={() => {
-              server = null;
-              pricing = null;
-              serverID = '';
-              form.tools = [];
-            }}
-            required
-          >
-            <option value="">Choose a project</option>
-
-            {#each projects.data ?? [] as project (project.id)}
-              <option value={project.id}>{project.name}</option>
-            {/each}
-          </select>
-        </label>
-
-        {#if kind === 'toolsets'}
-          <a class="text-button" href={resolve('mcp-servers')}
-            >Register or manage MCP servers</a
-          >
-
-          <label class="form-field">
-            Certified MCP server
-
-            <select
-              aria-label="Certified MCP server"
-              bind:value={serverID}
-              onchange={chooseServer}
-              ><option value="">Choose a server</option
-              >{#each (servers.data ?? []).filter((value) => value.project_id === form.project && value.enabled) as value (value.id)}<option
-                  value={value.id}>{value.name}</option
-                >{/each}</select
-            ></label
-          >
-          {#if server}<p>
-              Transport <code>{server.transport}</code>, MCP
-              <code>{server.catalog.protocol_version}</code>
-            </p>
-            <p>Catalog <code>{server.catalog.digest}</code></p>
-            {#each server.catalog.tools as tool (tool.name)}<button
-                class="button button-secondary"
-                type="button"
-                onclick={() => addTool(tool.name)}
-                disabled={form.tools.length >= 128 ||
-                  form.tools.some(
-                    (value) =>
-                      value.server_id === server?.id && value.name === tool.name
-                  )}>Add {tool.name}</button
-              >{/each}{/if}
-          <ul>
-            {#each form.tools as tool (tool.alias)}<li>
-                {tool.name} <code>{tool.revision_id}</code>
-                <label class="form-field">
-                  Execution classification
-                  <select
-                    aria-label={`Execution classification for ${tool.name}`}
-                    value={tool.classification ?? ''}
-                    onchange={(event) =>
-                      classifyTool(tool.alias, event.currentTarget.value)}
-                  >
-                    <option value="">Unclassified</option>
-                    <option value="read_only">Read-only</option>
-                    <option value="approval_required">Approval required</option>
-                  </select>
-                </label><button
-                  class="button button-secondary"
-                  type="button"
-                  onclick={() =>
-                    (form.tools = form.tools.filter(
-                      (value) => value.alias !== tool.alias
-                    ))}>Remove</button
-                >
-              </li>
-            {/each}
-          </ul>
-          <p>
-            Each selected tool pins its certified server revision; catalog drift
-            revokes its live authority. Only tools explicitly marked read-only
-            can run automatically in a gateway workflow.
-          </p>
-          {#if server && pricing}
-            <fieldset>
-              <legend>Tool pricing and limits</legend>
-              <label class="form-field"
-                >Server unit price (blank unpriced, 0 free) <input
-                  bind:value={pricing.unitPrice}
-                  inputmode="decimal"
-                /></label
-              >
-              {#each server.catalog.tools as tool (tool.name)}
-                <label class="form-field"
-                  >{tool.name} unit price
-                  <input
-                    bind:value={pricing.toolPrices[tool.name]}
-                    inputmode="decimal"
-                  /></label
-                >
-              {/each}
-              <label class="form-field"
-                >Server calls per minute <input
-                  bind:value={pricing.callsPerMinute}
-                  inputmode="numeric"
-                /></label
-              ><label class="form-field"
-                >Server max concurrency <input
-                  bind:value={pricing.maxConcurrency}
-                  inputmode="numeric"
-                /></label
-              ><label class="form-field"
-                >Per-key calls per minute <input
-                  bind:value={pricing.perKeyCallsPerMinute}
-                  inputmode="numeric"
-                /></label
-              ><label class="form-field"
-                >Per-key max concurrency <input
-                  bind:value={pricing.perKeyMaxConcurrency}
-                  inputmode="numeric"
-                /></label
-              >
-              <button
-                class="button button-secondary"
-                type="button"
-                disabled={busy || !canPrice}
-                onclick={() => void savePricing()}>Save pricing</button
-              >
-              <p>
-                Prices are in the installation pricing currency and pin with the
-                certified server revision. Saving recertifies the server, so
-                republish toolsets to pin the new revision.
-              </p>
-            </fieldset>
-          {/if}
-        {:else if kind === 'prompts'}
-          <label class="form-field"
-            >Prompt format <select bind:value={form.promptMode}>
-              <option value="template">Single template</option>
-              <option value="messages">Role-structured messages</option>
-            </select></label
-          >
-          {#if form.promptMode === 'template'}
-            <label class="form-field"
-              >Template <textarea
-                bind:value={form.template}
-                maxlength="65536"
-                rows="10"></textarea></label
-            >
-          {:else}
-            {#each form.messages as message, index (index)}
-              <fieldset>
-                <legend>Message {index + 1}</legend>
-                <label class="form-field"
-                  >Role <select bind:value={message.role}>
-                    <option value="system">System</option>
-                    <option value="user">User</option>
-                    <option value="assistant">Assistant</option>
-                  </select></label
-                >
-                <label class="form-field"
-                  >Content <textarea
-                    bind:value={message.content}
-                    maxlength="65536"
-                    rows="4"></textarea></label
-                >
-                <button
-                  class="button button-secondary"
-                  type="button"
-                  disabled={form.messages.length <= 1}
-                  onclick={() =>
-                    (form.messages = form.messages.filter(
-                      (_, i) => i !== index
-                    ))}>Remove message</button
-                >
-              </fieldset>
-            {/each}
-            <button
-              class="button button-secondary"
-              type="button"
-              disabled={form.messages.length >= 256}
-              onclick={() =>
-                (form.messages = [
-                  ...form.messages,
-                  { role: 'user', content: '' }
-                ])}>Add message</button
-            >
-          {/if}
-          <label class="form-field"
-            >String variables (comma separated) <input
-              bind:value={form.variables}
-            /></label
-          >
-          <fieldset>
-            <legend>Default generation parameters</legend>
-            <label class="form-field"
-              >Temperature <input
-                inputmode="decimal"
-                pattern="([01](\.[0-9]+)?|2(\.0+)?)"
-                bind:value={form.temperature}
-              /></label
-            ><label class="form-field"
-              >Top P <input
-                inputmode="decimal"
-                pattern="(0(\.[0-9]+)?|1(\.0+)?)"
-                bind:value={form.topP}
-              /></label
-            ><label class="form-field"
-              >Maximum output tokens <input
-                inputmode="numeric"
-                pattern="[1-9][0-9]*"
-                bind:value={form.maxOutputTokens}
-              /></label
-            >
-          </fieldset>
-          <p>
-            Use simple {'{{name}}'} variables only. Rendered prompts and variable
-            values are not stored here. Defaults apply only when the request does
-            not set a value.
-          </p>
-        {:else}
-          <label class="form-field"
-            >Protocol contract <select bind:value={form.protocol}
-              ><option value="a2a-1.0.0">A2A 1.0.0</option><option
-                value="a2a-0.3.0">A2A 0.3.0</option
-              ></select
-            ></label
-          ><label class="form-field"
-            >Approved endpoint <input
-              type="url"
-              bind:value={form.endpoint}
-              required
-              disabled={!canTrust}
-            /></label
-          ><label class="form-field"
-            >Reviewed agent-card SHA-256 <input
-              bind:value={form.cardDigest}
-              required
-              disabled={!canTrust}
-            /></label
-          ><label class="form-field"
-            >Pricing revision UUID <input
-              bind:value={form.pricingRevision}
-              required
-            /></label
-          ><label class="form-field"
-            >Finite maximum cost <input
-              bind:value={form.maxCost}
-              required
-            /></label
-          ><label class="form-field"
-            >Price per message <input
-              inputmode="decimal"
-              bind:value={form.messagePrice}
-            /></label
-          >
-          <p>Leave blank to disable sending, or enter 0 for free messages.</p>
-          <label class="form-field"
-            >Declared maximum remote work duration in seconds <input
-              inputmode="numeric"
-              pattern="[0-9]+"
-              bind:value={form.remoteWorkBoundSeconds}
-            /></label
-          >
-          <p>
-            The agent must enforce this bound on its own work. Budgeted calls
-            require a bound.
-          </p>
-          <label class="form-field"
-            >Maximum task continuations <input
-              inputmode="numeric"
-              pattern="[0-9]+"
-              bind:value={form.maxTaskContinuations}
-              placeholder="32"
-            /></label
-          >
-          <label class="form-field"
-            >Task deadline in seconds <input
-              inputmode="numeric"
-              pattern="[0-9]+"
-              bind:value={form.taskDeadlineSeconds}
-              placeholder="600"
-            /></label
-          >
-          <p>
-            Continuations are limited to 128 and the deadline to 3600 seconds.
-          </p>
-          <label class="form-field"
-            >Pinned toolset revision UUIDs <textarea
-              bind:value={form.toolsetRevisions}></textarea></label
-          ><label class="form-field"
-            >Pinned route revision UUIDs <textarea
-              bind:value={form.routeRevisions}></textarea></label
-          ><label class="form-field"
-            >Replacement bearer credential <input
-              type="password"
-              autocomplete="new-password"
-              bind:value={credential}
-              disabled={!canTrust || form.oauthEnabled}
-            /></label
-          ><label class="check-field"
-            ><input
-              type="checkbox"
-              bind:checked={removeCredential}
-              disabled={!canTrust || form.oauthEnabled}
-            /> Remove credential</label
-          >
-          <fieldset disabled={!canTrust}>
-            <legend>Personal OAuth authorization</legend>
-            <label class="check-field"
-              ><input type="checkbox" bind:checked={form.oauthEnabled} /> Use OAuth
-              grants</label
-            >
-            {#if form.oauthEnabled}
-              <p>
-                OAuth replaces any saved bearer credential. Publishing requires
-                a publicly readable agent card for publication and discovery.
-                Task requests use the caller's grant.
-              </p>
-              <label class="check-field"
-                ><input type="checkbox" bind:checked={form.oauthEntra} /> Use Entra
-                on-behalf-of</label
-              >
-              {#if form.oauthEntra}
-                <label class="form-field"
-                  >Workload issuer <input
-                    type="url"
-                    bind:value={form.oauthEntraIssuer}
-                    required
-                  /></label
-                >
-                <label class="form-field"
-                  >Replacement Entra client secret <input
-                    type="password"
-                    autocomplete="new-password"
-                    bind:value={entraClientSecret}
-                  /></label
-                >
-                <p>
-                  Supply the client secret when enabling Entra or changing its
-                  issuer, client ID, or token endpoint.
-                </p>
-              {/if}
-              <label class="form-field"
-                >Client ID <input
-                  bind:value={form.oauthClientID}
-                  required
-                /></label
-              >
-              <label class="form-field"
-                >Audience <input
-                  bind:value={form.oauthAudience}
-                  required
-                /></label
-              >
-              <label class="form-field"
-                >Scopes <input bind:value={form.oauthScopes} required /></label
-              >
-              {#if !form.oauthEntra}<label class="form-field"
-                  >Authorization endpoint <input
-                    type="url"
-                    bind:value={form.oauthAuthorizationEndpoint}
-                    required
-                  /></label
-                >{/if}
-              <label class="form-field"
-                >Token endpoint <input
-                  type="url"
-                  bind:value={form.oauthTokenEndpoint}
-                  required
-                /></label
-              >
-              {#if !form.oauthEntra}<label class="form-field"
-                  >Device authorization endpoint <input
-                    type="url"
-                    bind:value={form.oauthDeviceEndpoint}
-                  /></label
-                >{/if}
-              <p>
-                To change the agent endpoint, remove OAuth and publish the new
-                endpoint and card first. Then configure OAuth again.
-              </p>
-            {/if}
-          </fieldset>
-          <p>
-            Destination, card, and credential trust changes require installation
-            access. Existing credentials are never displayed.
-          </p>
-        {/if}<button class="button button-primary" type="submit"
-          >Save draft</button
-        >
-      </fieldset>
-    </form>
-    {#if current}<p>
-        Current revision: <code>{current.revision_id ?? 'Not published'}</code>
-      </p>
-      <button
-        class="button button-secondary"
-        type="button"
-        disabled={busy ||
-          !canManage ||
-          unsaved ||
-          !!credential ||
-          !!entraClientSecret ||
-          removeCredential}
-        onclick={() => write('publish')}>Publish saved draft</button
-      >{#if unsaved}<p>Save edits before publishing.</p>{/if}
-      <label class="form-field"
-        >Revision UUID <input bind:value={revisionID} disabled={busy} /></label
-      ><button
-        class="button button-secondary"
-        type="button"
-        disabled={busy || !revisionID}
-        onclick={inspect}>Inspect immutable revision</button
-      >
-      {#if inspected}<p>
-          Digest: <code>{inspected.digest}</code>; labels: {inspected.labels.join(
-            ', '
-          ) || 'none'}
-        </p>
-        <pre class="code-block">{JSON.stringify(
-            inspected.definition,
-            null,
-            2
-          )}</pre>{/if}
-      {#if kind === 'prompts'}<button
-          class="button button-secondary"
-          type="button"
-          disabled={busy || !canManage || !revisionID || unsaved}
-          onclick={() => write('staging')}>Set staging</button
-        ><button
-          class="button button-secondary"
-          type="button"
-          disabled={busy || !canManage || !revisionID || unsaved}
-          onclick={() => write('production')}>Set production</button
-        >{/if}
-      <label class="check-field"
-        ><input
-          type="checkbox"
-          bind:checked={confirmRetire}
-          disabled={busy || !canManage}
-        /> Retire and revoke this publication</label
-      ><button
-        class="button button-secondary"
-        type="button"
-        disabled={busy || !canManage || !confirmRetire}
-        onclick={() => write('retire')}>Confirm retirement</button
-      >
-    {/if}<button
-      class="button button-secondary"
-      type="button"
-      disabled={busy}
-      onclick={abandon}>Close</button
-    >
-  </section>
+  <PublicationEditor
+    {kind}
+    {current}
+    {busy}
+    {canManage}
+    {canPrice}
+    {canTrust}
+    {unsaved}
+    {revisionID}
+    {inspected}
+    projects={projects.data ?? []}
+    servers={servers.data ?? []}
+    bind:form
+    bind:server
+    bind:serverID
+    bind:pricing
+    bind:credential
+    bind:removeCredential
+    bind:entraClientSecret
+    bind:confirmRetire
+    onWrite={write}
+    onAbandon={abandon}
+    onChooseServer={chooseServer}
+    onSavePricing={savePricing}
+    onAddTool={addTool}
+    onInspect={inspect}
+  />
 {/if}
-
-<style>
-  form,
-  fieldset {
-    display: grid;
-    gap: 1rem;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-  }
-  fieldset > .button {
-    justify-self: start;
-  }
-  .stack-card > .button + .button {
-    margin-top: -0.5rem;
-  }
-</style>

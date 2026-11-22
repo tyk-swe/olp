@@ -355,64 +355,82 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		return err
 	}
 	if observed.lifecycle {
-		response := observed.response
-		id, present := event.Source().Lookup("/response/id")
-		upstreamID, valid := id.Text()
-		if s.upstreamID != "" && (!present || !valid || upstreamID != s.upstreamID) {
-			return &wire.ProtocolError{Detail: "response identity changed during the stream"}
-		}
-		if present && valid && upstreamID != "" {
-			s.upstreamID = upstreamID
-		}
-		if wire.IsTerminalResponseEvent(kind) {
-			completion, err := responseSummaryWithUsage(response, observed.usage.Usage)
-			if err != nil {
-				return err
-			}
-			if !s.collect {
-				completion.OutputText, completion.Refusal, completion.ToolCalls = "", "", nil
-			}
-			terminalErr := terminalResponseError(response)
-			if terminalErr != nil && kind != "response.failed" {
-				return terminalErr
-			}
-			if _, invalid := errors.AsType[*wire.ProtocolError](terminalErr); invalid {
-				return terminalErr
-			}
-			if kind == "response.failed" && terminalErr == nil {
-				terminalErr = &wire.UpstreamError{Message: "upstream reported a failed response"}
-			}
-			completion.UsageComplete = observed.usage.Complete
-			completion.Terminal = true
-			completion.Failure, _ = errors.AsType[*wire.UpstreamError](terminalErr)
-			if completion.Usage == nil && s.c != nil {
-				completion.Usage = s.c.Usage
-			}
-			s.c = completion
-			s.terminalErr = terminalErr
-			s.done = true
-		} else if observed.usage.Usage != nil {
-			if s.c == nil {
-				s.c = &wire.Completion{}
-			}
-			if !s.c.UsageComplete {
-				s.c.Usage = observed.usage.Usage
-				s.c.UpstreamID, _ = stringField(response, "id")
-				s.c.ProviderModel, _ = stringField(response, "model")
-			}
-		}
-		if _, present := source.Lookup("/response/model"); present {
-			bound, marshalErr := json.Marshal(s.route)
-			if marshalErr != nil {
-				return marshalErr
-			}
-			source, err = oif.Apply(source, []oif.Change{{Pointer: "/response/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published response model"}})
-			if err != nil {
-				return &responseProjectionError{cause: err}
-			}
+		source, err = s.applyLifecycle(event, source, kind, observed)
+		if err != nil {
+			return err
 		}
 	}
-	encoded := source.Bytes()
+	if err := s.emit(encodeResponsesSSEFrame(f, kind, source.Bytes())); err != nil {
+		return err
+	}
+	if s.done {
+		return errStreamComplete
+	}
+	return nil
+}
+
+func (s *responsesStream) applyLifecycle(event oif.Event, source oif.Document, kind string, observed responseEventUsage) (oif.Document, error) {
+	response := observed.response
+	id, present := event.Source().Lookup("/response/id")
+	upstreamID, valid := id.Text()
+	if s.upstreamID != "" && (!present || !valid || upstreamID != s.upstreamID) {
+		return source, &wire.ProtocolError{Detail: "response identity changed during the stream"}
+	}
+	if present && valid && upstreamID != "" {
+		s.upstreamID = upstreamID
+	}
+	if wire.IsTerminalResponseEvent(kind) {
+		completion, err := responseSummaryWithUsage(response, observed.usage.Usage)
+		if err != nil {
+			return source, err
+		}
+		if !s.collect {
+			completion.OutputText, completion.Refusal, completion.ToolCalls = "", "", nil
+		}
+		terminalErr := terminalResponseError(response)
+		if terminalErr != nil && kind != "response.failed" {
+			return source, terminalErr
+		}
+		if _, invalid := errors.AsType[*wire.ProtocolError](terminalErr); invalid {
+			return source, terminalErr
+		}
+		if kind == "response.failed" && terminalErr == nil {
+			terminalErr = &wire.UpstreamError{Message: "upstream reported a failed response"}
+		}
+		completion.UsageComplete = observed.usage.Complete
+		completion.Terminal = true
+		completion.Failure, _ = errors.AsType[*wire.UpstreamError](terminalErr)
+		if completion.Usage == nil && s.c != nil {
+			completion.Usage = s.c.Usage
+		}
+		s.c = completion
+		s.terminalErr = terminalErr
+		s.done = true
+	} else if observed.usage.Usage != nil {
+		if s.c == nil {
+			s.c = &wire.Completion{}
+		}
+		if !s.c.UsageComplete {
+			s.c.Usage = observed.usage.Usage
+			s.c.UpstreamID, _ = stringField(response, "id")
+			s.c.ProviderModel, _ = stringField(response, "model")
+		}
+	}
+	if _, present := source.Lookup("/response/model"); present {
+		bound, marshalErr := json.Marshal(s.route)
+		if marshalErr != nil {
+			return source, marshalErr
+		}
+		var err error
+		source, err = oif.Apply(source, []oif.Change{{Pointer: "/response/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published response model"}})
+		if err != nil {
+			return source, &responseProjectionError{cause: err}
+		}
+	}
+	return source, nil
+}
+
+func encodeResponsesSSEFrame(f sse.Frame, kind string, encoded []byte) []byte {
 	frame := make([]byte, 0, len(kind)+len(encoded)+48)
 	if f.ID != nil {
 		frame = append(frame, "id: "...)
@@ -428,13 +446,7 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 	frame = append(frame, kind...)
 	frame = append(frame, "\ndata: "...)
 	frame = append(frame, encoded...)
-	if err := s.emit(append(frame, '\n', '\n')); err != nil {
-		return err
-	}
-	if s.done {
-		return errStreamComplete
-	}
-	return nil
+	return append(frame, '\n', '\n')
 }
 
 func (s *responsesStream) finish() (*wire.Completion, error) {
