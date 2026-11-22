@@ -230,6 +230,7 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 	if count := activeBudgetIncreases(t, pool, project); count != 0 {
 		t.Fatalf("pending requests granted %d increases", count)
 	}
+	expectBudgetRequestStatus(t, "cross-project request", outsider("POST", "/api/v1/budget-increase-requests", "", fmt.Sprintf(`{"project_id":%q,"window":"day","amount":"5","reason":"launch traffic"}`, project)), http.StatusNotFound)
 	expectBudgetRequestStatus(t, "cross-project approval", outsider("POST", budgetRequestPath(twenty.ID, "approve"), "", ""), http.StatusNotFound)
 	expectBudgetRequestStatus(t, "viewer approval", requesterOne("POST", budgetRequestPath(thirty.ID, "approve"), "", ""), http.StatusForbidden)
 	if count := activeBudgetIncreases(t, pool, project); count != 0 {
