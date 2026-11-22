@@ -96,8 +96,9 @@ type SupplyQuery struct {
 	Caps  []SpendCap
 }
 
-// SupplySlot is a credential slot together with its connection, whose
-// windows bound the slot's headroom too.
+// SupplySlot is a credential slot serving one model, together with its
+// connection, whose windows and the model's shared token quota bound the
+// slot's headroom too.
 type SupplySlot struct {
 	Provider *Provider
 	Slot     Slot
@@ -120,12 +121,16 @@ type SupplyReader interface {
 // SupplyState is the live capacity and spend state the gateway reads for one
 // request, in one round trip. An absent entry is unknown.
 type SupplyState struct {
-	// Headroom maps a credential slot ID to the smallest remaining fraction of
-	// the request, token and concurrency windows of the slot and its connection.
-	Headroom map[string]float64
+	// Headroom maps a credential slot serving a model to the smallest remaining
+	// fraction of the request, token and concurrency windows of the slot, its
+	// connection and the model's shared token quota.
+	Headroom map[SlotModel]float64
 	// Spend maps a capped owner ID to whether its caps still allow spending.
 	Spend map[string]Spend
 }
+
+// SlotModel is a credential slot serving one upstream model.
+type SlotModel struct{ Slot, Model string }
 
 type Spend uint8
 
@@ -136,11 +141,11 @@ const (
 	SpendExhausted
 )
 
-func (s *SupplyState) headroom(slotID string) (float64, bool) {
+func (s *SupplyState) headroom(slotID, model string) (float64, bool) {
 	if s == nil {
 		return 0, false
 	}
-	fraction, ok := s.Headroom[slotID]
+	fraction, ok := s.Headroom[SlotModel{slotID, model}]
 	return fraction, ok
 }
 
@@ -245,7 +250,7 @@ func applySupply(route Route, rows []rankedCandidate, state *SupplyState) {
 			continue
 		}
 		for _, slot := range row.slots {
-			if fraction, ok := state.headroom(slot.ID); ok && (row.decision.Headroom == nil || fraction > *row.decision.Headroom) {
+			if fraction, ok := state.headroom(slot.ID, row.attempt.UpstreamModel); ok && (row.decision.Headroom == nil || fraction > *row.decision.Headroom) {
 				row.decision.Headroom = &fraction
 			}
 		}
@@ -255,13 +260,13 @@ func applySupply(route Route, rows []rankedCandidate, state *SupplyState) {
 // OrderSlots orders a target's credential slots for the capacity strategy:
 // by slot priority, then by remaining headroom, with slots of unknown headroom
 // after known ones. The sort is stable, so rendezvous order breaks ties.
-func OrderSlots(slots []Slot, state *SupplyState) {
+func OrderSlots(slots []Slot, model string, state *SupplyState) {
 	slices.SortStableFunc(slots, func(a, b Slot) int {
 		if order := cmp.Compare(a.Priority, b.Priority); order != 0 {
 			return order
 		}
-		ah, aok := state.headroom(a.ID)
-		bh, bok := state.headroom(b.ID)
+		ah, aok := state.headroom(a.ID, model)
+		bh, bok := state.headroom(b.ID, model)
 		return compareKnown(ah, aok, bh, bok)
 	})
 }

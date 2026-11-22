@@ -144,6 +144,34 @@ func TestSharedTokenQuotaLaggingReplicaKeepsReservingAfterUnrelatedRelease(t *te
 	older.Settle(t.Context(), false, nil)
 }
 
+func TestSharedTokenQuotaHeadroomFollowsEachModelsGroupOnOneSlot(t *testing.T) {
+	t.Parallel()
+	awayFromMinuteRollover()
+	replica, _ := sharedQuotaReplica(t, "olp:"+uuid.NewString()+":")
+	provider := sharedQuotaProvider(uuid.NewString(), "model-a", "group-a", 1000)
+	provider.SharedTokenQuotas = append(provider.SharedTokenQuotas, routing.SharedTokenQuota{Model: "model-b", Group: "group-b", TokensPerMinute: 1000})
+	slot := routing.Slot{ID: uuid.NewString()}
+	if err := quota.SyncSharedQuotas(t.Context(), replica.limiter, nil, sharedQuotaView(1, provider)); err != nil {
+		t.Fatal(err)
+	}
+	lease, refusal, skip := replica.ReserveTarget(t.Context(), &provider, &slot, quota.CombinedDemand(1000), time.Minute, "", "model-a", 1)
+	if refusal != nil || skip || lease == nil {
+		t.Fatalf("exhaust group-a: refusal=%+v skip=%v", refusal, skip)
+	}
+	defer lease.Settle(t.Context(), false, nil)
+
+	state := replica.ReadSupply(t.Context(), routing.SupplyQuery{Slots: []routing.SupplySlot{
+		{Provider: &provider, Slot: slot, Model: "model-a"},
+		{Provider: &provider, Slot: slot, Model: "model-b"},
+	}})
+	a, aKnown := state.Headroom[routing.SlotModel{Slot: slot.ID, Model: "model-a"}]
+	b, bKnown := state.Headroom[routing.SlotModel{Slot: slot.ID, Model: "model-b"}]
+	t.Logf("slot headroom model-a=%v (known %v) model-b=%v (known %v)", a, aKnown, b, bKnown)
+	if !aKnown || !bKnown || a != 0 || b != 1 {
+		t.Fatalf("headroom model-a=%v/%v model-b=%v/%v, want 0 and 1", a, aKnown, b, bKnown)
+	}
+}
+
 func TestSharedTokenQuotaCannotBeOverbookedAcrossConnections(t *testing.T) {
 	t.Parallel()
 	awayFromMinuteRollover()

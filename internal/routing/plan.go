@@ -252,7 +252,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 		applySupply(route, rows, state)
 		for i := range rows {
 			if capacity {
-				OrderSlots(rows[i].slots, state)
+				OrderSlots(rows[i].slots, rows[i].attempt.UpstreamModel, state)
 			}
 			if options.CheckSlots {
 				rows[i].attempt.Slots = slotIDs(rows[i].slots)

@@ -31,12 +31,12 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 		return len(quotas) - 1
 	}
 	type slotProbes struct {
-		ID                       string
+		key                      routing.SlotModel
 		connection, slot, shared int
 	}
 	slots := make([]slotProbes, 0, len(query.Slots))
 	for _, entry := range query.Slots {
-		probes := slotProbes{ID: entry.Slot.ID, connection: -1, shared: -1}
+		probes := slotProbes{key: routing.SlotModel{Slot: entry.Slot.ID, Model: entry.Model}, connection: -1, shared: -1}
 		if quota := entry.Provider.Limits; quota != nil {
 			probes.connection = probe(limits.ConnectionLookup(entry.Provider.ID), quota.RequestsPerMinute, quota.TokensPerMinute, quota.InputTokensPerMinute, quota.OutputTokensPerMinute, quota.MaxConcurrency)
 		}
@@ -50,7 +50,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 	for i, cap := range query.Caps {
 		caps[i] = admission.CapProbe{OwnerID: cap.OwnerID, Daily: cap.Limits.DailyCostLimit, Monthly: cap.Limits.MonthlyCostLimit}
 	}
-	state := &routing.SupplyState{Headroom: map[string]float64{}, Spend: map[string]routing.Spend{}}
+	state := &routing.SupplyState{Headroom: map[routing.SlotModel]float64{}, Spend: map[string]routing.Spend{}}
 	if len(quotas) == 0 && len(caps) == 0 {
 		return state
 	}
@@ -71,7 +71,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 			fraction, known = min(fraction, headroom[i].Fraction), true
 		}
 		if known {
-			state.Headroom[slot.ID] = fraction
+			state.Headroom[slot.key] = fraction
 		}
 	}
 	for i, cap := range caps {
