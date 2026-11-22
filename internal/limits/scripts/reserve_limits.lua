@@ -153,11 +153,12 @@ if member ~= nil then
   local state = redis.call("HMGET", KEYS[3], "@generation", "@ceiling", member)
   local installed, ceiling, stored = state[1], state[2], state[3]
   if installed ~= false or ceiling ~= false then
+    local installed_generation = parse_safe_unsigned_integer(installed)
     local stored_ceiling = parse_safe_unsigned_integer(ceiling)
-    if parse_safe_unsigned_integer(installed) == nil or stored_ceiling == nil then
+    if installed_generation == nil or stored_ceiling == nil then
       return failure("malformed_rate_state", window_id)
     end
-    if stored_ceiling == 0 or stored == false or string.sub(stored, 1, 1) == "-" then
+    if installed_generation < member_generation or stored_ceiling == 0 or stored == false or string.sub(stored, 1, 1) == "-" then
       return failure("stale_membership", window_id)
     end
     if parse_safe_unsigned_integer(stored) == nil then

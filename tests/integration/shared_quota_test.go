@@ -4,10 +4,10 @@ package integration_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,23 +70,34 @@ func groupTokens(t *testing.T, runner scripts.Runner, project, group string) int
 	return usage.TokensThisMinute
 }
 
-type roundTripBudget struct {
+type delayedValkey struct {
 	scripts.Commander
-	remaining atomic.Int64
+	latency time.Duration
 }
 
-func (b *roundTripBudget) Do(ctx context.Context, args ...string) (any, error) {
-	if b.remaining.Add(-1) < 0 {
-		return nil, context.DeadlineExceeded
+func (d delayedValkey) wait(ctx context.Context) error {
+	timer := time.NewTimer(d.latency)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-	return b.Commander.Do(ctx, args...)
 }
 
-func (b *roundTripBudget) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
-	if b.remaining.Add(-1) < 0 {
-		return nil, context.DeadlineExceeded
+func (d delayedValkey) Do(ctx context.Context, args ...string) (any, error) {
+	if err := d.wait(ctx); err != nil {
+		return nil, err
 	}
-	return b.Commander.Pipeline(ctx, commands...)
+	return d.Commander.Do(ctx, args...)
+}
+
+func (d delayedValkey) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+	if err := d.wait(ctx); err != nil {
+		return nil, err
+	}
+	return d.Commander.Pipeline(ctx, commands...)
 }
 
 func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
@@ -117,8 +128,9 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.runtime_releases (id,sequence,sha256,snapshot,created_by) VALUES ($1,$2,$3,$4,$5)`,
-			snapshot.Generation.ID, ordinal, digest, encoded(t, snapshot), fixture.ownerID); err != nil {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.runtime_releases (id,sequence,sha256,snapshot,created_by)
+			VALUES ($1,$2,$3,CASE WHEN $6 THEN jsonb_set($4::jsonb, ARRAY['providers',$7,'shared_token_quotas'], 'null') ELSE $4::jsonb END,$5)`,
+			snapshot.Generation.ID, ordinal, digest, encoded(t, snapshot), fixture.ownerID, provider.SharedTokenQuotas == nil, provider.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -129,11 +141,15 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	project := fixture.projectID
 	before := sharedQuotaProvider(project, "model-a", "group-a", 1000)
 	before.Kind, before.Name, before.RevisionID = connectors.KindOpenAICompatible, "shared quota", uuid.NewString()
+	gap := before
+	gap.SharedTokenQuotas = nil
 	after := before
-	after.SharedTokenQuotas = []routing.SharedTokenQuota{
-		{Model: "model-a", Group: "group-b", TokensPerMinute: 1000},
-		{Model: "model-c", Group: "group-c", TokensPerMinute: 1000},
-		{Model: "model-d", Group: "group-d", TokensPerMinute: 1000},
+	after.SharedTokenQuotas = make([]routing.SharedTokenQuota, 25)
+	after.SharedTokenQuotas[0] = routing.SharedTokenQuota{Model: "model-a", Group: "group-b", TokensPerMinute: 1000}
+	for index := 1; index < len(after.SharedTokenQuotas); index++ {
+		after.SharedTokenQuotas[index] = routing.SharedTokenQuota{
+			Model: fmt.Sprintf("model-%d", index), Group: fmt.Sprintf("group-%d", index), TokensPerMinute: 1000,
+		}
 	}
 	slot := routing.Slot{ID: uuid.NewString()}
 	demand := func(tokens int64) quota.TokenDemand { return quota.CombinedDemand(tokens) }
@@ -152,16 +168,19 @@ func TestSharedTokenQuotaMoveKeepsOutstandingLeasesInTheirGroup(t *testing.T) {
 	}
 	t.Logf("reserved 400 in group-a, group-a=%d group-b=%d", groupTokens(t, runner, project, "group-a"), groupTokens(t, runner, project, "group-b"))
 
-	publish(3, after)
-	bounded := &roundTripBudget{Commander: harness.Valkey(t)}
-	bounded.remaining.Store(2)
-	boundedRunner, err := scripts.NewRunner(bounded, prefix)
+	publish(3, gap)
+	publish(4, after)
+	delayed := delayedValkey{Commander: harness.Valkey(t), latency: 250 * time.Millisecond}
+	delayedRunner, err := scripts.NewRunner(delayed, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := manager(admission.NewDurable(boundedRunner, nil))
+	second := manager(admission.NewDurable(delayedRunner, nil))
 	if err := second.Refresh(t.Context()); err != nil {
-		t.Fatalf("refresh with a limited Valkey round-trip budget: %v", err)
+		t.Fatalf("refresh over a delayed Valkey connection: %v", err)
+	}
+	if installed := second.Release().Sequence; installed != 4 {
+		t.Fatalf("installed release = %d, want 4", installed)
 	}
 	moved, refusal, skip := secondReplica.ReserveTarget(t.Context(), &after, &slot, demand(200), time.Minute, "", "model-a", second.Release().Sequence)
 	if refusal != nil || skip || moved == nil {
@@ -222,6 +241,10 @@ func TestSharedTokenQuotaLaggingReplicaKeepsReservingAfterUnrelatedRelease(t *te
 	}
 	lowered := provider
 	lowered.SharedTokenQuotas = []routing.SharedTokenQuota{{Model: "model-a", Group: "shared", TokensPerMinute: 500}}
+	ahead, refusal, skip := current.ReserveTarget(t.Context(), &lowered, &slot, quota.CombinedDemand(1), time.Minute, "", "model-a", 3)
+	if ahead != nil || refusal != nil || !skip {
+		t.Fatalf("reserve against the older shared policy: reservation=%v refusal=%+v skip=%v", ahead != nil, refusal, skip)
+	}
 	if err := quota.SyncSharedQuotas(t.Context(), current.limiter, second, sharedQuotaView(3, lowered)); err != nil {
 		t.Fatal(err)
 	}
