@@ -6904,18 +6904,45 @@ func (e RouteTemplateResultOutcome) Valid() bool {
 	}
 }
 
+// Defines values for RoutingDecisionBoundedCostFallbackReason.
+const (
+	RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown       RoutingDecisionBoundedCostFallbackReason = "cost_bound_unknown"
+	RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds RoutingDecisionBoundedCostFallbackReason = "insufficient_cost_bounds"
+	RoutingDecisionBoundedCostFallbackReasonLessThannil            RoutingDecisionBoundedCostFallbackReason = "<nil>"
+	RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration RoutingDecisionBoundedCostFallbackReason = "operation_not_generation"
+)
+
+// Valid indicates whether the value is a known member of the RoutingDecisionBoundedCostFallbackReason enum.
+func (e RoutingDecisionBoundedCostFallbackReason) Valid() bool {
+	switch e {
+	case RoutingDecisionBoundedCostFallbackReasonCostBoundUnknown:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonInsufficientCostBounds:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonLessThannil:
+		return true
+	case RoutingDecisionBoundedCostFallbackReasonOperationNotGeneration:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
-	RoutingStrategyCapacity   RoutingStrategy = "capacity"
-	RoutingStrategyLatency    RoutingStrategy = "latency"
-	RoutingStrategyPrice      RoutingStrategy = "price"
-	RoutingStrategyThroughput RoutingStrategy = "throughput"
-	RoutingStrategyWeighted   RoutingStrategy = "weighted"
+	RoutingStrategyBoundedCost RoutingStrategy = "bounded_cost"
+	RoutingStrategyCapacity    RoutingStrategy = "capacity"
+	RoutingStrategyLatency     RoutingStrategy = "latency"
+	RoutingStrategyPrice       RoutingStrategy = "price"
+	RoutingStrategyThroughput  RoutingStrategy = "throughput"
+	RoutingStrategyWeighted    RoutingStrategy = "weighted"
 )
 
 // Valid indicates whether the value is a known member of the RoutingStrategy enum.
 func (e RoutingStrategy) Valid() bool {
 	switch e {
+	case RoutingStrategyBoundedCost:
+		return true
 	case RoutingStrategyCapacity:
 		return true
 	case RoutingStrategyLatency:
@@ -16851,8 +16878,11 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt       nullable.Nullable[int]   `json:"attempt,omitempty"`
-	ContextLength nullable.Nullable[int64] `json:"context_length,omitempty"`
+	Attempt nullable.Nullable[int] `json:"attempt,omitempty"`
+
+	// BoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+	BoundedCostFallbackReason nullable.Nullable[RoutingDecisionBoundedCostFallbackReason] `json:"bounded_cost_fallback_reason,omitempty"`
+	ContextLength             nullable.Nullable[int64]                                    `json:"context_length,omitempty"`
 
 	// ContextWindow Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.
 	ContextWindow    *RouteContextWindowPreview            `json:"context_window,omitempty"`
@@ -16862,11 +16892,17 @@ type RoutingDecision struct {
 	// EstimateProvenance How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.
 	EstimateProvenance nullable.Nullable[string] `json:"estimate_provenance,omitempty"`
 
-	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.
+	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve, with the priced input estimate and reserved output allowance the maximum covers. Null when the price cannot bound the request or no demand is known.
 	EstimatedCost nullable.Nullable[struct {
 		Currency string `json:"currency"`
 		Maximum  string `json:"maximum"`
 		Minimum  string `json:"minimum"`
+
+		// PricedInputTokens The input tokens the maximum priced. Null when the bound did not price tokens.
+		PricedInputTokens nullable.Nullable[int64] `json:"priced_input_tokens,omitempty"`
+
+		// ReservedOutputTokens The output allowance the maximum reserved: the declared reply bound, or the default allowance when none was declared. Null when the bound did not price tokens.
+		ReservedOutputTokens nullable.Nullable[int64] `json:"reserved_output_tokens,omitempty"`
 	}] `json:"estimated_cost,omitempty"`
 
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
@@ -16882,7 +16918,10 @@ type RoutingDecision struct {
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
 	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification.
-	Interaction        *InteractionInspection       `json:"interaction,omitempty"`
+	Interaction *InteractionInspection `json:"interaction,omitempty"`
+
+	// MaxCost The effective cost ceiling eligibility applied, in the installation currency. Null when no scope set one. The ceiling is the configured rule that admitted the attempt, separate from the attempt's own estimated_cost.
+	MaxCost            nullable.Nullable[string]    `json:"max_cost,omitempty"`
 	MaxOutputTokens    nullable.Nullable[int64]     `json:"max_output_tokens,omitempty"`
 	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
 
@@ -16910,6 +16949,9 @@ type RoutingDecision struct {
 	UpstreamModel string                    `json:"upstream_model"`
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
+
+// RoutingDecisionBoundedCostFallbackReason Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.
+type RoutingDecisionBoundedCostFallbackReason string
 
 // RoutingPolicy defines model for RoutingPolicy.
 type RoutingPolicy struct {

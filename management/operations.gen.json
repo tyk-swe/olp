@@ -883,7 +883,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -14392,7 +14393,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -17581,7 +17583,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -27331,7 +27334,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -36079,7 +36083,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -38744,7 +38749,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -43083,7 +43089,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },
@@ -43487,7 +43494,8 @@
             "price",
             "latency",
             "throughput",
-            "capacity"
+            "capacity",
+            "bounded_cost"
           ],
           "type": "string"
         },

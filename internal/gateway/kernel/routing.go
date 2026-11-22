@@ -22,6 +22,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options 
 		Inputs: inputs, Now: s.Now(),
 		CheckSlots: true, CredentialEligibility: s.Deps.Runtime.Eligibility,
 		UnconfinedPlugins: s.Config.UnconfinedPlugins, Context: ctx,
+		CallerCostExempt: x.callerCostExempt(),
 	}
 	if s.Deps.Admission.Ready() {
 		options.Supply = s.Deps.Admission
@@ -30,7 +31,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *Call) routing.Options 
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()
-	options.WorstCost = func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
+	options.WorstCost = func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (routing.CostBound, bool) {
 		return x.targetCostBound(provider, target, price, discount)
 	}
 	// Only a route with selectors pays to describe the request to them.

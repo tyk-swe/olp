@@ -573,6 +573,26 @@ and `input_reference`; internal cleanup markers are excluded.
 | `latency` | Median time to first meaningful output for streams, total attempt latency for unary operations |
 | `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded |
 | `capacity` | Remaining headroom of each credential slot, the smallest of its connection's and its own remaining request, token and concurrency fractions, read in one pipelined Valkey round trip; slots without quotas rank after slots with known headroom |
+| `bounded_cost` | Exact-decimal upper estimate of this request on each target (generation only); targets without a bound keep weighted order after the ranked ones |
+
+`bounded_cost` prices the actual request instead of comparing rate sums, so a
+long prompt with a short answer can prefer a target `price` would not. It
+applies only to generation and only inside the tier every other ordering
+already respects (health, priority, locality and preferred order), after all
+eligibility checks including `max_cost`. Each candidate's upper estimate is
+the same worst case the gateway would reserve, with the attempt's pinned
+discount, and a committed provider bounds at zero. A missing bound is never
+treated as zero. When at least two candidates in a tier have a bound, they
+rank by it, ties fall back to weighted order, and candidates without one
+follow in weighted order with `bounded_cost_fallback_reason` set to
+`cost_bound_unknown`. When fewer than two have a bound, the whole tier keeps
+the weighted order and each candidate reports `insufficient_cost_bounds`. A
+route with `caller_cost_exempt` bounds no attempt's cost, so it always keeps
+weighted order with `insufficient_cost_bounds`, while route explain still
+reports each target's estimated cost for information. A
+non-generation request keeps weighted order and reports
+`operation_not_generation`. The fallback never restores a target that
+eligibility already excluded.
 
 Prices resolve connection scope before vendor scope before connector-kind scope,
 then the latest effective revision. Future rates become eligible at their
@@ -617,7 +637,12 @@ content.
 Simulations also report each target's
 `estimated_cost`: the `minimum` prices the input estimate at the cheapest
 input-side rate the selected tier carries, plus the per-request fee; the
-`maximum` is the worst case the gateway would reserve. Server-side tool fees and
+`maximum` is the worst case the gateway would reserve. For generation the
+estimate also names the `priced_input_tokens` the maximum priced and the
+`reserved_output_tokens` it reserved, with the `currency` both are stated in.
+Each decision separately reports the effective `max_cost` ceiling that
+admitted or excluded it, null when no scope set one, so the estimate that
+describes the attempt never stands in for the rule that admits it. Server-side tool fees and
 batch multipliers are not bounded. The pair is null when the target's price
 cannot bound the request or no token demand is known. An explicit estimated count applies to
 all targets without provenance. Admission additionally reserves reply/larger
