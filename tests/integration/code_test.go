@@ -1813,13 +1813,13 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 	}
 	permit := admit(identity)
 	child := admit(codemode.Identity{Conversation: "status-child", Parent: "status-thread"})
-	var attempts int
 	attemptCount := func() int {
 		t.Helper()
-		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts`).Scan(&attempts); err != nil {
+		var count int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts WHERE account_id=$1`, account).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
-		return attempts
+		return count
 	}
 	baseline := attemptCount()
 	base := time.Now().UTC().Truncate(time.Second)
@@ -1874,11 +1874,11 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 		t.Fatal("wrong key, route or lineage must look the same as a missing thread")
 	}
 	var bound int
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_bindings WHERE conversation='never-bound'`).Scan(&bound); err != nil {
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_bindings WHERE route_id=$1 AND conversation='never-bound'`, route.ID).Scan(&bound); err != nil {
 		t.Fatal(err)
 	}
-	if bound != 0 || attemptCount() != baseline {
-		t.Fatalf("polling bound %d conversations and left %d attempts, want no writes over %d", bound, attempts, baseline)
+	if polled := attemptCount(); bound != 0 || polled != baseline {
+		t.Fatalf("polling bound %d conversations and left %d attempts, want no writes over %d", bound, polled, baseline)
 	}
 	recovered := base.Add(7 * time.Minute)
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET health='healthy', health_observed_at=$2, unavailable_until=NULL WHERE id=$1`, account, recovered); err != nil {
@@ -1901,7 +1901,7 @@ func TestCodeThreadStatusFromStoredEvidence(t *testing.T) {
 	if retired.Status != codemode.ThreadUnavailable || retired.RetryAt != nil {
 		t.Fatalf("retired status = %+v, want unavailable without a retry time", retired)
 	}
-	if attemptCount() != baseline {
-		t.Fatalf("status checks left %d attempts, want %d", attempts, baseline)
+	if checked := attemptCount(); checked != baseline {
+		t.Fatalf("status checks left %d attempts, want %d", checked, baseline)
 	}
 }

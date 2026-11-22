@@ -30,125 +30,60 @@ type ThreadAccountEvidence struct {
 	CooldownObservedAt *time.Time
 }
 
-type exhaustedAllowanceEvidence struct {
-	reset    *time.Time
-	observed time.Time
+type threadBlocker struct {
+	observedAt *time.Time
+	deadline   *time.Time
 }
 
-func exhaustedAllowanceEvidences(allowance *Allowance) []exhaustedAllowanceEvidence {
-	if allowance == nil {
-		return nil
-	}
-	return slices.Collect(func(yield func(exhaustedAllowanceEvidence) bool) {
-		for _, window := range allowance.Windows {
-			if window.EffectiveEvidence() == AllowanceEvidencePassive &&
-				(window.EffectiveUnit() == AllowanceUnitPercent && window.RemainingPercent == 0 ||
-					slices.Contains([]AllowanceUnit{AllowanceUnitCount, AllowanceUnitCredits, AllowanceUnitCents}, window.EffectiveUnit()) && window.RemainingValue != nil && *window.RemainingValue == 0) &&
-				!yield(exhaustedAllowanceEvidence{reset: window.ResetsAt, observed: window.ObservedAt}) {
-				return
-			}
-		}
-		if allowance.RemainingPercent != nil && *allowance.RemainingPercent == 0 &&
-			!slices.ContainsFunc(allowance.Windows, func(window AllowanceWindow) bool {
-				return window.LimitID == "codex" && window.Window == allowancePrimary
-			}) && !yield(exhaustedAllowanceEvidence{reset: allowance.ResetsAt, observed: allowance.ObservedAt}) {
+func (b threadBlocker) active(now time.Time) bool {
+	return b.deadline == nil || b.deadline.After(now)
+}
+
+func (b threadBlocker) outdates(healthy, now time.Time) bool {
+	return b.observedAt != nil && !healthy.After(*b.observedAt) || !b.active(now) && healthy.Before(*b.deadline)
+}
+
+func threadBlockers(evidence ThreadAccountEvidence) []threadBlocker {
+	return slices.Collect(func(yield func(threadBlocker) bool) {
+		if (evidence.Health == "unavailable" || evidence.Health == "quota_limited") &&
+			!yield(threadBlocker{observedAt: evidence.HealthObservedAt, deadline: evidence.UnavailableUntil}) {
 			return
 		}
-		for _, count := range []struct {
-			remaining   *int64
-			observation *CountObservation
-		}{{allowance.RemainingTokens, allowance.TokenObservation}, {allowance.RemainingRequests, allowance.RequestObservation}} {
-			if count.remaining == nil || *count.remaining != 0 {
-				continue
-			}
-			observation := allowanceCountObservation(count.remaining, count.observation, *allowance)
-			if !yield(exhaustedAllowanceEvidence{reset: observation.ResetsAt, observed: observation.ObservedAt}) {
+		if evidence.CooldownRetryAt != nil && !yield(threadBlocker{observedAt: evidence.CooldownObservedAt, deadline: evidence.CooldownRetryAt}) {
+			return
+		}
+		for exhaustion := range allowanceExhaustions(evidence.Allowance, false, "") {
+			if !yield(threadBlocker{observedAt: &exhaustion.observedAt, deadline: exhaustion.resetsAt}) {
 				return
 			}
 		}
 	})
 }
 
-func latestTime(times ...*time.Time) *time.Time {
-	var latest *time.Time
-	for _, candidate := range times {
-		if candidate == nil || candidate.IsZero() {
-			continue
-		}
-		if latest == nil || candidate.After(*latest) {
-			value := *candidate
-			latest = &value
-		}
-	}
-	return latest
-}
-
 type threadAccountAssessment struct {
-	blocked      bool
-	deadline     *time.Time
+	blocking     []*time.Time
 	positive     bool
 	lastObserved *time.Time
 }
 
 func assessThreadAccount(now time.Time, evidence ThreadAccountEvidence) threadAccountAssessment {
-	healthBlocking := evidence.Health == "unavailable" || evidence.Health == "quota_limited"
-	healthBlocked := healthBlocking && !(evidence.UnavailableUntil != nil && !evidence.UnavailableUntil.After(now))
-	cooling := evidence.CooldownRetryAt != nil && evidence.CooldownRetryAt.After(now)
-	allowanceBlocked := len(ExhaustedResets(evidence.Allowance, now, false, "")) > 0
-	blocked := healthBlocked || cooling || allowanceBlocked
-	deadline := func() *time.Time {
-		if !blocked || healthBlocked && evidence.UnavailableUntil == nil {
-			return nil
-		}
-		unavailableUntil := func() *time.Time {
-			if healthBlocking {
-				return evidence.UnavailableUntil
-			}
-			return nil
-		}()
-		return BlockingDeadline(now, unavailableUntil, evidence.CooldownRetryAt, evidence.Allowance, false, "")
-	}()
-	exhausted := exhaustedAllowanceEvidences(evidence.Allowance)
-	blockerObserved := latestTime(slices.Concat(
-		[]*time.Time{evidence.CooldownObservedAt},
-		slices.Collect(func(yield func(*time.Time) bool) {
-			if healthBlocking && !yield(evidence.HealthObservedAt) {
-				return
-			}
-			for _, item := range exhausted {
-				observed := item.observed
-				if !yield(&observed) {
-					return
-				}
-			}
-		}),
-	)...)
-	passedDeadline := latestTime(slices.Collect(func(yield func(*time.Time) bool) {
-		if healthBlocking && evidence.UnavailableUntil != nil && !evidence.UnavailableUntil.After(now) && !yield(evidence.UnavailableUntil) {
-			return
-		}
-		if evidence.CooldownRetryAt != nil && !evidence.CooldownRetryAt.After(now) && !yield(evidence.CooldownRetryAt) {
-			return
-		}
-		for _, item := range exhausted {
-			if item.reset != nil && !item.reset.After(now) && !yield(item.reset) {
-				return
-			}
-		}
-	})...)
-	positive := evidence.Health == "healthy" && evidence.HealthObservedAt != nil &&
-		(blockerObserved == nil || evidence.HealthObservedAt.After(*blockerObserved)) &&
-		(passedDeadline == nil || !evidence.HealthObservedAt.Before(*passedDeadline))
+	blockers := threadBlockers(evidence)
 	allowanceObserved := func() *time.Time {
-		if evidence.Allowance == nil || evidence.Allowance.ObservedAt.IsZero() {
+		if evidence.Allowance == nil {
 			return nil
 		}
 		return &evidence.Allowance.ObservedAt
 	}()
 	return threadAccountAssessment{
-		blocked:      blocked,
-		deadline:     deadline,
-		positive:     positive,
+		blocking: slices.Collect(func(yield func(*time.Time) bool) {
+			for _, blocker := range blockers {
+				if blocker.active(now) && !yield(blocker.deadline) {
+					return
+				}
+			}
+		}),
+		positive: evidence.Health == "healthy" && evidence.HealthObservedAt != nil &&
+			!slices.ContainsFunc(blockers, func(blocker threadBlocker) bool { return blocker.outdates(*evidence.HealthObservedAt, now) }),
 		lastObserved: latestTime(evidence.HealthObservedAt, evidence.CooldownObservedAt, allowanceObserved),
 	}
 }
@@ -168,31 +103,42 @@ func AssessThreadStatus(now time.Time, retired bool, accounts []ThreadAccountEvi
 			}
 		}
 	})...)
-	unavailable := retired ||
-		slices.ContainsFunc(accounts, func(account ThreadAccountEvidence) bool { return !account.Eligible }) ||
-		slices.ContainsFunc(assessments, func(assessment threadAccountAssessment) bool { return assessment.blocked })
-	if unavailable {
-		retryAt := func() *time.Time {
-			if retired || slices.ContainsFunc(accounts, func(account ThreadAccountEvidence) bool { return !account.Eligible }) {
-				return nil
+	blocking := slices.Concat(slices.Collect(func(yield func([]*time.Time) bool) {
+		for _, assessment := range assessments {
+			if !yield(assessment.blocking) {
+				return
 			}
-			if slices.ContainsFunc(assessments, func(assessment threadAccountAssessment) bool {
-				return assessment.blocked && assessment.deadline == nil
-			}) {
-				return nil
-			}
-			return latestTime(slices.Collect(func(yield func(*time.Time) bool) {
-				for _, assessment := range assessments {
-					if assessment.blocked && !yield(assessment.deadline) {
-						return
-					}
-				}
-			})...)
-		}()
-		return ThreadStatus{Status: ThreadUnavailable, CheckedAt: now, LastObservedAt: lastObserved, RetryAt: retryAt}
-	}
-	if len(assessments) > 0 && !slices.ContainsFunc(assessments, func(assessment threadAccountAssessment) bool { return !assessment.positive }) {
+		}
+	})...)
+	switch {
+	case retired || slices.ContainsFunc(accounts, func(account ThreadAccountEvidence) bool { return !account.Eligible }):
+		return ThreadStatus{Status: ThreadUnavailable, CheckedAt: now, LastObservedAt: lastObserved}
+	case len(blocking) > 0:
+		return ThreadStatus{Status: ThreadUnavailable, CheckedAt: now, LastObservedAt: lastObserved, RetryAt: knownDeadline(blocking)}
+	case len(assessments) > 0 && !slices.ContainsFunc(assessments, func(assessment threadAccountAssessment) bool { return !assessment.positive }):
 		return ThreadStatus{Status: ThreadAvailable, CheckedAt: now, LastObservedAt: lastObserved}
 	}
 	return ThreadStatus{Status: ThreadUnknown, CheckedAt: now, LastObservedAt: lastObserved}
+}
+
+func knownDeadline(deadlines []*time.Time) *time.Time {
+	if slices.Contains(deadlines, nil) {
+		return nil
+	}
+	return latestTime(deadlines...)
+}
+
+func latestTime(times ...*time.Time) *time.Time {
+	known := slices.Collect(func(yield func(time.Time) bool) {
+		for _, candidate := range times {
+			if candidate != nil && !candidate.IsZero() && !yield(*candidate) {
+				return
+			}
+		}
+	})
+	if len(known) == 0 {
+		return nil
+	}
+	latest := slices.MaxFunc(known, time.Time.Compare)
+	return &latest
 }

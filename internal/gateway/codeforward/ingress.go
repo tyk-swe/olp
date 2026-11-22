@@ -40,9 +40,9 @@ func classifyCode(inbound codeIngress, body []byte, headers http.Header, websock
 	return codemode.Request{}, codemode.Refuse(400, "code_operation_unsupported")
 }
 
-func codeConnectionIdentity(inbound codeIngress, headers http.Header) (codemode.Identity, error) {
+func codeConnectionIdentity(policy codeadapter.IdentityPolicy, headers http.Header) (codemode.Identity, error) {
 	identity, err := func() (codemode.Identity, error) {
-		if inbound.identity == codeadapter.IdentityCodex {
+		if policy == codeadapter.IdentityCodex {
 			return codexwire.ConnectionIdentity(headers)
 		}
 		return codewire.ClientIdentity(headers)

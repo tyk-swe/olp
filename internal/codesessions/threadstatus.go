@@ -26,14 +26,14 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 		return none, err
 	}
 	defer tx.Rollback(ctx)
+	in := Admission{Route: route, APIKeyID: key}
 	var authority keyauthority.Authority
-	if err := codeAuthorityFor(ctx, tx, Admission{Route: route, APIKeyID: key}, &authority, codeThreadStatus); err != nil {
+	if err := codeAuthorityFor(ctx, tx, in, &authority, codeThreadStatus); err != nil {
 		if _, refusal := errors.AsType[*codemode.Refusal](err); refusal {
 			return none, threadNotFound()
 		}
 		return none, err
 	}
-	in := Admission{Route: route, APIKeyID: key}
 	binding, err := codeConversation(ctx, tx, in, identity.Conversation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return paidThreadStatus(ctx, tx, in, identity, now.UTC())
@@ -96,12 +96,9 @@ func threadRetired(ctx context.Context, tx pgx.Tx, binding codemode.Binding) (bo
 }
 
 func threadAccountEvidence(ctx context.Context, tx pgx.Tx, route codemode.Route, accountID, principal string, models []string) (codemode.ThreadAccountEvidence, error) {
-	var evidence codemode.ThreadAccountEvidence
 	var account codemode.Account
 	var eligible bool
-	if models == nil {
-		models = []string{}
-	}
+	var cooldownRetryAt, cooldownObservedAt *time.Time
 	err := tx.QueryRow(ctx, `SELECT a.principal,a.models,a.health,a.health_observed_at,a.unavailable_until,a.allowance,
 		(a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id AND a.project_id=$2
 			AND EXISTS(SELECT 1 FROM olp.code_pool_accounts pa WHERE pa.pool_id=$3 AND pa.account_id=a.id)
@@ -114,20 +111,23 @@ func threadAccountEvidence(ctx context.Context, tx pgx.Tx, route codemode.Route,
 		JOIN olp.provider_grants g ON g.credential_id=c.id
 		WHERE a.id=$1`, accountID, route.ProjectID, route.PoolID, models).Scan(
 		&account.Principal, &account.Models, &account.Health, &account.HealthObservedAt, &account.UnavailableUntil, &account.Allowance,
-		&eligible, &evidence.CooldownRetryAt, &evidence.CooldownObservedAt)
+		&eligible, &cooldownRetryAt, &cooldownObservedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return evidence, nil
+		return codemode.ThreadAccountEvidence{}, nil
 	}
 	if err != nil {
-		return evidence, err
+		return codemode.ThreadAccountEvidence{}, err
 	}
-	evidence.Eligible = eligible && account.Principal == principal &&
-		!slices.ContainsFunc(models, func(model string) bool { return !slices.Contains(account.Models, model) })
-	evidence.Health = account.Health
-	evidence.HealthObservedAt = account.HealthObservedAt
-	evidence.UnavailableUntil = account.UnavailableUntil
-	evidence.Allowance = account.Allowance
-	return evidence, nil
+	return codemode.ThreadAccountEvidence{
+		Eligible: eligible && account.Principal == principal &&
+			!slices.ContainsFunc(models, func(model string) bool { return !slices.Contains(account.Models, model) }),
+		Health:             account.Health,
+		HealthObservedAt:   account.HealthObservedAt,
+		UnavailableUntil:   account.UnavailableUntil,
+		Allowance:          account.Allowance,
+		CooldownRetryAt:    cooldownRetryAt,
+		CooldownObservedAt: cooldownObservedAt,
+	}, nil
 }
 
 func paidThreadStatus(ctx context.Context, tx pgx.Tx, in Admission, identity codemode.Identity, now time.Time) (codemode.ThreadStatus, error) {
@@ -147,9 +147,8 @@ func paidThreadStatus(ctx context.Context, tx pgx.Tx, in Admission, identity cod
 	if err := threadLineage(ctx, tx, `olp.code_paid_bindings`, parentID, identity); err != nil {
 		return none, err
 	}
-	status := codemode.ThreadUnknown
 	if retired {
-		status = codemode.ThreadUnavailable
+		return codemode.ThreadStatus{Status: codemode.ThreadUnavailable, CheckedAt: now}, nil
 	}
-	return codemode.ThreadStatus{Status: status, CheckedAt: now}, nil
+	return codemode.ThreadStatus{Status: codemode.ThreadUnknown, CheckedAt: now}, nil
 }
