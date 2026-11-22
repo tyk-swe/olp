@@ -35,8 +35,8 @@ timed_suite() {
 start_services() {
   test_scratch=$(mktemp -d)
   test_processes=()
-  test_compose=(docker compose -p "olp-test-$$" -f deploy/compose.dev.yaml)
-  export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0 OLP_CACHE_VALKEY_PORT=0 OLP_POSTGRES_MAX_CONNECTIONS=400
+  test_compose=(docker compose -p "olp-test-$$" -f deploy/compose.dev.yaml -f deploy/compose.test.yaml)
+  export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0 OLP_CACHE_VALKEY_PORT=0
   trap stop_services EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
