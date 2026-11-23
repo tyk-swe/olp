@@ -67,8 +67,8 @@ type Contract struct {
 	// costs nothing and succeeds only for a valid credential. A media
 	// operation's certification rests on it and the reviewed codec, since
 	// proving a media model by generating with it would be billed.
-	AccountProbe string
-	BatchWindow *BatchWindow
+	AccountProbe   string
+	BatchWindow    *BatchWindow
 	BatchEndpoints []string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
