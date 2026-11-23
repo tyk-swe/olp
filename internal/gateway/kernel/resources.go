@@ -78,28 +78,6 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	return p.Connector().SupportsFilesBatches()
 }
 
-func FireworksBatchRefusal(x *Call, route *routing.Route) *fault.Error {
-	if x == nil || route == nil {
-		return nil
-	}
-	for _, target := range route.Targets {
-		provider, ok := x.Snapshot().FindProvider(target.ProviderID)
-		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
-			return PolicyUnavailable("target_capability",
-				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
-		}
-	}
-	return nil
-}
-
-func StrictBatchTargetRefusal(p *Pin) *fault.Error {
-	if p != nil && p.Provider.Kind != "openai" && p.Provider.Kind != "azure_openai" {
-		return PolicyUnavailable("target_capability",
-			"Strict routes serve files and batches only for OpenAI and Azure.")
-	}
-	return nil
-}
-
 func ResourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
 	return cfg.ResourceURL(model, path, query)
 }

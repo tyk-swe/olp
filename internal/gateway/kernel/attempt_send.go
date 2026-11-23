@@ -149,17 +149,11 @@ func (run attemptRun) accept(sent attemptSent, endpoint *url.URL) (attemptSent, 
 }
 
 func (run attemptRun) providerRequestID(sent attemptSent, endpoint *url.URL) string {
-	if sent.config.Kind != connectors.KindAnthropic || sent.plan.format != wire.Anthropic {
+	header := sent.config.RequestIDHeader(endpoint)
+	if header == "" || sent.plan.format != wire.Anthropic {
 		return ""
 	}
-	target := *endpoint
-	if target.Scheme == "https" && target.Port() == "443" {
-		target.Host = target.Hostname()
-	}
-	if target.String() != connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")+"/messages" {
-		return ""
-	}
-	ids := sent.response.Header.Values("Request-Id")
+	ids := sent.response.Header.Values(header)
 	if len(ids) != 1 || !usage.ValidProviderRequestID(ids[0]) || run.x.sensitive.Contains(ids[0]) {
 		return ""
 	}

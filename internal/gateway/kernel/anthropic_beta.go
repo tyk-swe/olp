@@ -32,24 +32,13 @@ func carriesAnthropicSource(x *Call) bool {
 	return x.generation.parsed.Family == wire.Anthropic || x.generation.parsed.Family == wire.AnthropicCount
 }
 
-// takesAnthropicBeta is whether a provider is sent the Anthropic-Beta header:
-// an automatic Anthropic provider, or one whose profile declares the header
-// among its semantic headers, as the Vertex AI hosting of Claude does. The
-// profile of Bedrock InvokeModel declares none, so it never receives it.
-func takesAnthropicBeta(cfg connectors.Config) bool {
-	if cfg.ProfileID == "" {
-		return cfg.Kind == "anthropic"
-	}
-	return cfg.DeclaresSemanticHeader("Anthropic-Beta")
-}
-
 // servesAnthropicBeta is whether a target of the route is a provider that
 // takes the header.
 func (x *Call) servesAnthropicBeta() bool {
 	snapshot := x.Snapshot()
 	return slices.ContainsFunc(x.Route.Targets, func(t routing.Target) bool {
 		provider := snapshot.Provider(t.ProviderID)
-		return takesAnthropicBeta(provider.Connector())
+		return provider.Connector().TakesAnthropicBeta()
 	})
 }
 
@@ -103,7 +92,7 @@ func (x *Call) checkAnthropicBeta() *fault.Error {
 	for _, target := range x.Route.Targets {
 		provider := snapshot.Provider(target.ProviderID)
 		cfg := provider.Connector()
-		if !takesAnthropicBeta(cfg) {
+		if !cfg.TakesAnthropicBeta() {
 			continue
 		}
 		if _, ok := anthropicBetaFor(cfg, caller); !ok {
@@ -127,7 +116,7 @@ func (x *Call) checkAnthropicBeta() *fault.Error {
 // request is hosted, which would replace a header set here, so the list to send
 // is published in the connector the request is hosted by instead.
 func forwardAnthropicBeta(header http.Header, x *Call, encodedWire wire.Format, cfg connectors.Config) connectors.Config {
-	if encodedWire != x.generation.parsed.Family || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !takesAnthropicBeta(cfg) {
+	if encodedWire != x.generation.parsed.Family || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !cfg.TakesAnthropicBeta() {
 		return cfg
 	}
 	caller, ok := anthropicBeta(x.semanticHeaders)

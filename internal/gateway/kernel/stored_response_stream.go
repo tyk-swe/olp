@@ -54,7 +54,7 @@ func (s *Server) StreamStoredResponse(ctx context.Context, w http.ResponseWriter
 	if refusal != nil {
 		return refusal
 	}
-	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
+	endpoint, err := ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath("/"+url.PathEscape(res.UpstreamID)), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}

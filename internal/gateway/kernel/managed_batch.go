@@ -283,11 +283,7 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 		line.Method != "POST" || len(line.Body) == 0 {
 		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported shape.", lineNumber)
 	}
-	classified := line.URL
-	if t.adapter == connectors.BatchOpenAI && t.pin.Provider.Kind == "azure_openai" {
-		classified = wire.CanonicalBatchEndpoint(line.URL)
-	}
-	operation, family, ok := managedBatchEndpoint(t.adapter, classified)
+	operation, family, ok := managedBatchEndpoint(t.adapter, t.pin.Provider.Connector().BatchLineEndpoint(line.URL))
 	if !ok {
 		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported or mixed endpoint.", lineNumber)
 	}
@@ -307,8 +303,8 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 }
 
 func (t managedLineTarget) bindOpenAILine(document oif.Document, line managedBatchLine, upstreamModel string) ([]byte, error) {
-	if t.pin.Provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
-		return nil, fault.InvalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", new("file"))
+	if e := BatchEndpointRefusal(t.pin, line.URL, "file"); e != nil {
+		return nil, e
 	}
 	bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(MustJSON(upstreamModel)), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
 	if err != nil {

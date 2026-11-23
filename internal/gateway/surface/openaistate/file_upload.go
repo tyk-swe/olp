@@ -231,12 +231,12 @@ func readStrictUploadSource(x *kernel.Call, r *http.Request, form *staging.Form,
 func (s surface) batchUploadPin(ctx context.Context, x *kernel.Call, route *routing.Route) (*kernel.Pin, *fault.Error) {
 	p, e := s.kernel.SelectPin(ctx, x, route, "batch", "unary")
 	if e != nil {
-		return nil, cmp.Or(kernel.FireworksBatchRefusal(x, route), e)
+		return nil, cmp.Or(fireworksBatchRefusal(x, route), e)
 	}
 	if !x.Strict() {
 		return p, nil
 	}
-	if refusal := kernel.StrictBatchTargetRefusal(p); refusal != nil {
+	if refusal := strictBatchTargetRefusal(p); refusal != nil {
 		s.kernel.ReleaseHold(ctx, p.Hold)
 		return nil, refusal
 	}

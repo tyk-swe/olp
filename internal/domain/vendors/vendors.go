@@ -67,9 +67,29 @@ type Contract struct {
 	// costs nothing and succeeds only for a valid credential. A media
 	// operation's certification rests on it and the reviewed codec, since
 	// proving a media model by generating with it would be billed.
-	AccountProbe string
+	AccountProbe   string
+	BatchWindow    *BatchWindow
+	BatchEndpoints []string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
+}
+
+type BatchWindow struct{ MinHours, MaxHours int }
+
+func BatchWindowFor(vendor string) (BatchWindow, bool) {
+	i, ok := index[vendor]
+	if !ok || contracts[i].BatchWindow == nil {
+		return BatchWindow{MinHours: 24, MaxHours: 24}, false
+	}
+	return *contracts[i].BatchWindow, true
+}
+
+func BatchEndpointsFor(vendor string) []string {
+	i, ok := index[vendor]
+	if !ok {
+		return nil
+	}
+	return slices.Clone(contracts[i].BatchEndpoints)
 }
 
 // ErrorClass classifies the failures with Status and error Type as Class: a
@@ -247,6 +267,7 @@ func (c Contract) clone() Contract {
 	c.Parameters = slices.Clone(c.Parameters)
 	c.Unsupported = slices.Clone(c.Unsupported)
 	c.OperationEndpoints = maps.Clone(c.OperationEndpoints)
+	c.BatchEndpoints = slices.Clone(c.BatchEndpoints)
 	if c.Requests != nil {
 		requests := make(map[string]RequestShape, len(c.Requests))
 		for operation, shape := range c.Requests {

@@ -98,3 +98,9 @@ if ! loop=$(module_edges "domain catalog" | tsort 2>&1 >/dev/null); then
   echo "check-lint: modules under internal/ import each other in a cycle. Move the shared piece into internal/domain or inject it from cmd/olp" >&2
   exit 1
 fi
+
+if branches=$(git grep -nE '(VendorID|(Provider|provider|cfg|config)\.Kind) *(==|!=) *"|connectors\.Kind[A-Z]' -- 'internal/gateway/kernel/*.go' ':!*_test.go'); then
+  echo "$branches" >&2
+  echo "check-lint: the kernel must not branch on a provider kind or vendor. Declare the fact on connectors.Config or domain/vendors, or move the branch into its surface" >&2
+  exit 1
+fi

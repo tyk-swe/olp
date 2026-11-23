@@ -301,3 +301,25 @@ func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 	}
 	return nil
 }
+
+func fireworksBatchRefusal(x *kernel.Call, route *routing.Route) *fault.Error {
+	if x == nil || route == nil {
+		return nil
+	}
+	for _, target := range route.Targets {
+		provider, ok := x.Snapshot().FindProvider(target.ProviderID)
+		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
+			return kernel.PolicyUnavailable("target_capability",
+				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
+		}
+	}
+	return nil
+}
+
+func strictBatchTargetRefusal(p *kernel.Pin) *fault.Error {
+	if p != nil && !p.Provider.Connector().NativeOpenAI() {
+		return kernel.PolicyUnavailable("target_capability",
+			"Strict routes serve files and batches only for OpenAI and Azure.")
+	}
+	return nil
+}
