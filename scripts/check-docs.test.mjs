@@ -63,7 +63,7 @@ test('broken files, anchors, index entries and em dashes are rejected', () => {
 });
 
 test('live-proven claims are rejected in guides and console copy', () => {
-  assert.deepEqual(findLiveProvenClaims('Codex bands are live-proven only'), [
+  assert.deepEqual(findLiveProvenClaims('Codex cooldowns are live-proven only'), [
     'live-proven only',
     'are live-proven'
   ]);
@@ -71,7 +71,7 @@ test('live-proven claims are rejected in guides and console copy', () => {
     'live proven ordering'
   ]);
   assert.deepEqual(findLiveProvenClaims('A mechanism counts as live proven only when a lane runs green'), []);
-  assert.deepEqual(findLiveProvenClaims('Codex bands, fixture-proven only'), []);
+  assert.deepEqual(findLiveProvenClaims('Codex cooldowns, fixture-proven only'), []);
   const userFacing = [
     'docs/use/code-mode.md',
     'console/src/lib/features/code-mode/presentation.ts',

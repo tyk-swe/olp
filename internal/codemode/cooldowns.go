@@ -52,23 +52,22 @@ func LatestDeadline(now time.Time, times ...*time.Time) *time.Time {
 type allowanceExhaustion struct {
 	resetsAt   *time.Time
 	observedAt time.Time
-	count      bool
 }
 
-func allowanceExhaustions(allowance *Allowance, bandOrdered bool, family string) iter.Seq[allowanceExhaustion] {
+func allowanceExhaustions(allowance *Allowance) iter.Seq[allowanceExhaustion] {
 	return func(yield func(allowanceExhaustion) bool) {
 		if allowance == nil {
 			return
 		}
 		for _, window := range allowance.Windows {
-			if window.EffectiveEvidence() == AllowanceEvidencePassive && (!bandOrdered || family != "" && window.LimitID == family) &&
+			if window.EffectiveEvidence() == AllowanceEvidencePassive &&
 				(window.EffectiveUnit() == AllowanceUnitPercent && window.RemainingPercent == 0 ||
 					slices.Contains([]AllowanceUnit{AllowanceUnitCount, AllowanceUnitCredits, AllowanceUnitCents}, window.EffectiveUnit()) && window.RemainingValue != nil && *window.RemainingValue == 0) &&
 				!yield(allowanceExhaustion{resetsAt: window.ResetsAt, observedAt: window.ObservedAt}) {
 				return
 			}
 		}
-		if allowance.RemainingPercent != nil && *allowance.RemainingPercent == 0 && (!bandOrdered || family == "codex") &&
+		if allowance.RemainingPercent != nil && *allowance.RemainingPercent == 0 &&
 			!slices.ContainsFunc(allowance.Windows, func(window AllowanceWindow) bool {
 				return window.LimitID == "codex" && window.Window == allowancePrimary
 			}) && !yield(allowanceExhaustion{resetsAt: allowance.ResetsAt, observedAt: allowance.ObservedAt}) {
@@ -82,24 +81,17 @@ func allowanceExhaustions(allowance *Allowance, bandOrdered bool, family string)
 				continue
 			}
 			observation := allowanceCountObservation(count.remaining, count.observation, *allowance)
-			if !yield(allowanceExhaustion{resetsAt: observation.ResetsAt, observedAt: observation.ObservedAt, count: true}) {
+			if !yield(allowanceExhaustion{resetsAt: observation.ResetsAt, observedAt: observation.ObservedAt}) {
 				return
 			}
 		}
 	}
 }
 
-func ExhaustedResets(allowance *Allowance, now time.Time, bandOrdered bool, family string) []*time.Time {
+func ExhaustedResets(allowance *Allowance, now time.Time) []*time.Time {
 	return slices.Collect(func(yield func(*time.Time) bool) {
-		for exhaustion := range allowanceExhaustions(allowance, bandOrdered, family) {
-			if !observationBlocks(exhaustion.resetsAt, exhaustion.observedAt, bandOrdered, now) {
-				continue
-			}
-			if exhaustion.count && bandOrdered && exhaustion.resetsAt == nil {
-				expiresAt := exhaustion.observedAt.Add(bandFreshness)
-				if !yield(&expiresAt) {
-					return
-				}
+		for exhaustion := range allowanceExhaustions(allowance) {
+			if exhaustion.resetsAt != nil && !exhaustion.resetsAt.After(now) {
 				continue
 			}
 			if !yield(exhaustion.resetsAt) {
@@ -109,15 +101,8 @@ func ExhaustedResets(allowance *Allowance, now time.Time, bandOrdered bool, fami
 	})
 }
 
-func observationBlocks(reset *time.Time, observedAt time.Time, bandOrdered bool, now time.Time) bool {
-	if reset != nil {
-		return reset.After(now)
-	}
-	return !bandOrdered || now.Sub(observedAt) <= bandFreshness
-}
-
-func BlockingDeadline(now time.Time, unavailableUntil, cooldownRetryAt *time.Time, allowance *Allowance, bandOrdered bool, family string) *time.Time {
-	resets := ExhaustedResets(allowance, now, bandOrdered, family)
+func BlockingDeadline(now time.Time, unavailableUntil, cooldownRetryAt *time.Time, allowance *Allowance) *time.Time {
+	resets := ExhaustedResets(allowance, now)
 	if slices.Contains(resets, nil) {
 		return nil
 	}

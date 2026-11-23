@@ -7,6 +7,16 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
+var allowanceNow = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+
+func percentWindow(remaining float64, resetsAt *time.Time, observedAt time.Time) codemode.AllowanceWindow {
+	return codemode.AllowanceWindow{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}
+}
+
+func allowanceOf(windows ...codemode.AllowanceWindow) *codemode.Allowance {
+	return &codemode.Allowance{Windows: windows, ObservedAt: allowanceNow}
+}
+
 func TestEarliestRecoveryPicksSoonestFutureReset(t *testing.T) {
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
@@ -46,47 +56,47 @@ func TestRefusalRetryAfterRoundsUpWithOneSecondFloor(t *testing.T) {
 }
 
 func TestBlockingDeadlineIgnoresNonBlockingEarlierResets(t *testing.T) {
-	early := bandNow.Add(10 * time.Minute)
-	middle := bandNow.Add(45 * time.Minute)
-	unavailable := bandNow.Add(time.Hour)
-	late := bandNow.Add(2 * time.Hour)
-	exhausted := percentWindow(0, &late, bandNow)
-	healthy := percentWindow(80, &early, bandNow)
+	early := allowanceNow.Add(10 * time.Minute)
+	middle := allowanceNow.Add(45 * time.Minute)
+	unavailable := allowanceNow.Add(time.Hour)
+	late := allowanceNow.Add(2 * time.Hour)
+	exhausted := percentWindow(0, &late, allowanceNow)
+	healthy := percentWindow(80, &early, allowanceNow)
 	healthy.Window = "secondary"
-	low := percentWindow(5, &early, bandNow)
+	low := percentWindow(5, &early, allowanceNow)
 	low.Window = "five_hour"
-	allowance := bandAllowance(exhausted, healthy, low)
-	cooldownRetry := bandNow.Add(30 * time.Minute)
-	deadline := codemode.BlockingDeadline(bandNow, &unavailable, &cooldownRetry, allowance, false, "")
+	allowance := allowanceOf(exhausted, healthy, low)
+	cooldownRetry := allowanceNow.Add(30 * time.Minute)
+	deadline := codemode.BlockingDeadline(allowanceNow, &unavailable, &cooldownRetry, allowance)
 	if deadline == nil || !deadline.Equal(late) {
 		t.Fatalf("BlockingDeadline = %v, want %v", deadline, late)
 	}
-	other := codemode.BlockingDeadline(bandNow, nil, &middle, bandAllowance(percentWindow(80, &early, bandNow)), false, "")
+	other := codemode.BlockingDeadline(allowanceNow, nil, &middle, allowanceOf(percentWindow(80, &early, allowanceNow)))
 	if other == nil || !other.Equal(middle) {
 		t.Fatalf("BlockingDeadline(other) = %v, want %v", other, middle)
 	}
-	if got := codemode.EarliestRecovery(bandNow, deadline, other); got == nil || !got.Equal(middle) {
+	if got := codemode.EarliestRecovery(allowanceNow, deadline, other); got == nil || !got.Equal(middle) {
 		t.Fatalf("EarliestRecovery = %v, want %v", got, middle)
 	}
 }
 
 func TestExhaustedResetsOnlyFreshExhaustedWindows(t *testing.T) {
-	future := bandNow.Add(time.Hour)
-	early := bandNow.Add(10 * time.Minute)
-	staleReset := bandNow.Add(-2 * time.Minute)
-	stale := percentWindow(0, &staleReset, bandNow.Add(-5*time.Minute))
+	future := allowanceNow.Add(time.Hour)
+	early := allowanceNow.Add(10 * time.Minute)
+	staleReset := allowanceNow.Add(-2 * time.Minute)
+	stale := percentWindow(0, &staleReset, allowanceNow.Add(-5*time.Minute))
 	stale.Window = "secondary"
-	allowance := bandAllowance(percentWindow(0, &future, bandNow), percentWindow(5, &early, bandNow), stale)
+	allowance := allowanceOf(percentWindow(0, &future, allowanceNow), percentWindow(5, &early, allowanceNow), stale)
 	allowance.Windows[1].Window = "five_hour"
-	resets := codemode.ExhaustedResets(allowance, bandNow, false, "")
+	resets := codemode.ExhaustedResets(allowance, allowanceNow)
 	if len(resets) != 1 || resets[0] == nil || !resets[0].Equal(future) {
 		t.Fatalf("ExhaustedResets = %v, want only %v", resets, future)
 	}
-	if got := codemode.BlockingDeadline(bandNow, nil, nil, bandAllowance(percentWindow(80, &early, bandNow)), false, ""); got != nil {
+	if got := codemode.BlockingDeadline(allowanceNow, nil, nil, allowanceOf(percentWindow(80, &early, allowanceNow))); got != nil {
 		t.Fatalf("healthy-only deadline = %v, want nil", got)
 	}
-	past := bandNow.Add(-time.Hour)
-	if got := codemode.BlockingDeadline(bandNow, &past, &past, nil, false, ""); got != nil {
+	past := allowanceNow.Add(-time.Hour)
+	if got := codemode.BlockingDeadline(allowanceNow, &past, &past, nil); got != nil {
 		t.Fatalf("past-only deadline = %v, want nil", got)
 	}
 }

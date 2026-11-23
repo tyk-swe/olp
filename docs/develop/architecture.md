@@ -110,7 +110,7 @@ refresh progresses independently with monotonic freshness and generation fences.
 Historical remote-secret lookup occurs outside short authorized database
 transactions, followed by revocation revalidation.
 
-Worker health belongs to `observability/workerhealth`. Reporters receive their
+Worker health belongs to `platform/workerhealth`. Reporters receive their
 task and region explicitly and can write through a caller-owned transaction.
 Application shutdown waits for every registered worker, including workflow
 recovery, before closing its dependencies.
@@ -689,7 +689,7 @@ unreadable target quotas skip dispatch.
 
 ### Durable provisional exposure
 
-Finite asynchronous and agent work shares `limits.DebitStore`; feature owners
+Finite asynchronous and agent work shares `debits.Store` in `limits/debits`; feature owners
 retain their lifecycle and provider evidence. Each intent records every
 applicable accounting boundary, including currently uncapped boundaries, in
 both cost and charge bases. Dispatch is fenced once after admission. Ordinary

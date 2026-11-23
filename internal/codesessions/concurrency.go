@@ -56,7 +56,7 @@ func codeCapacityOutcome(candidate codemode.Candidate, fullAccount string) codem
 	}
 	return codemode.Candidate{
 		AccountID: candidate.AccountID, Available: candidate.Available, Cooldown: candidate.Cooldown,
-		Busy: true, Position: candidate.Position, Score: candidate.Score, Band: candidate.Band, ResetAt: candidate.ResetAt,
+		Busy: true, Position: candidate.Position, Score: candidate.Score,
 	}
 }
 

@@ -106,10 +106,10 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	insert := `INSERT INTO olp.code_decisions(id,attempt_id,project_id,route_id,route_revision_id,api_key_id,binding_id,root_id,chosen_account_id,reason,band,evidence,evidence_observed_at,skipped,recovery_envelope,recovery_ordinal)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
+	insert := `INSERT INTO olp.code_decisions(id,attempt_id,project_id,route_id,route_revision_id,api_key_id,binding_id,root_id,chosen_account_id,reason,skipped,recovery_envelope,recovery_ordinal)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 	skipped := `[{"account_id":"` + other + `","class":"cooldown"}]`
-	if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), attempt, project, route, revision, key, binding, binding, account, "chosen", nil, "passive", time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC), skipped, "codex_usage_limit_reached", 1); err != nil {
+	if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), attempt, project, route, revision, key, binding, binding, account, "chosen", skipped, "codex_usage_limit_reached", 1); err != nil {
 		t.Fatal(err)
 	}
 	var document []byte
@@ -120,16 +120,16 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 	if err := json.Unmarshal(document, &decision); err != nil {
 		t.Fatal(err)
 	}
-	if decision.Reason != codemode.DecisionChosen || decision.Band != nil || decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidencePassive ||
+	if decision.Reason != codemode.DecisionChosen ||
 		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != other || decision.Skipped[0].Class != codemode.SkipCooldown ||
 		decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 {
 		t.Fatalf("decision projection = %s", document)
 	}
-	if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), attempt, project, route, revision, key, binding, binding, account, "pin", nil, nil, nil, "[]", nil, nil); err == nil {
+	if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), attempt, project, route, revision, key, binding, binding, account, "pin", "[]", nil, nil); err == nil {
 		t.Fatal("second decision for one attempt accepted")
 	}
 	for range 2 {
-		if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), nil, project, route, revision, key, binding, binding, account, "connection", nil, nil, nil, "[]", nil, nil); err != nil {
+		if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), nil, project, route, revision, key, binding, binding, account, "connection", "[]", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -137,10 +137,9 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 		name string
 		tail []any
 	}{
-		{"unknown reason", []any{"guessed", nil, nil, nil, "[]", nil, nil}},
-		{"evidence without observation time", []any{"chosen", nil, "passive", nil, "[]", nil, nil}},
-		{"free-form recovery envelope", []any{"chosen", nil, nil, nil, "[]", "raw error body", nil}},
-		{"skipped not an array", []any{"chosen", nil, nil, nil, "{}", nil, nil}},
+		{"unknown reason", []any{"guessed", "[]", nil, nil}},
+		{"free-form recovery envelope", []any{"chosen", "[]", "raw error body", nil}},
+		{"skipped not an array", []any{"chosen", "{}", nil, nil}},
 	}
 	for _, rejectedInsert := range rejected {
 		fresh := uuid.NewString()

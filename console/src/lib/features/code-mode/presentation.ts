@@ -274,7 +274,6 @@ type CodeSkipClass = CodeDecision['skipped'][number]['class'];
 const skipClassLabels: Record<CodeSkipClass, string> = {
   cooldown: 'in cooldown',
   busy: 'at the account generation limit',
-  band: 'lower allowance band',
   weight: 'weighted score',
   tree: 'tree account served',
   unavailable: 'allowance exhausted'

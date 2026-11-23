@@ -126,22 +126,22 @@ func (e A2ATaskToolCallbackPricingState) Valid() bool {
 
 // Defines values for AdmissionPriority.
 const (
-	AdmissionPriorityCritical AdmissionPriority = "critical"
-	AdmissionPriorityHigh     AdmissionPriority = "high"
-	AdmissionPriorityLow      AdmissionPriority = "low"
-	AdmissionPriorityNormal   AdmissionPriority = "normal"
+	Critical AdmissionPriority = "critical"
+	High     AdmissionPriority = "high"
+	Low      AdmissionPriority = "low"
+	Normal   AdmissionPriority = "normal"
 )
 
 // Valid indicates whether the value is a known member of the AdmissionPriority enum.
 func (e AdmissionPriority) Valid() bool {
 	switch e {
-	case AdmissionPriorityCritical:
+	case Critical:
 		return true
-	case AdmissionPriorityHigh:
+	case High:
 		return true
-	case AdmissionPriorityLow:
+	case Low:
 		return true
-	case AdmissionPriorityNormal:
+	case Normal:
 		return true
 	default:
 		return false
@@ -1471,54 +1471,6 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	}
 }
 
-// Defines values for CodeDecisionBand.
-const (
-	CodeDecisionBandExhausted   CodeDecisionBand = "exhausted"
-	CodeDecisionBandHealthy     CodeDecisionBand = "healthy"
-	CodeDecisionBandLessThannil CodeDecisionBand = "<nil>"
-	CodeDecisionBandLow         CodeDecisionBand = "low"
-	CodeDecisionBandUnknown     CodeDecisionBand = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the CodeDecisionBand enum.
-func (e CodeDecisionBand) Valid() bool {
-	switch e {
-	case CodeDecisionBandExhausted:
-		return true
-	case CodeDecisionBandHealthy:
-		return true
-	case CodeDecisionBandLessThannil:
-		return true
-	case CodeDecisionBandLow:
-		return true
-	case CodeDecisionBandUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CodeDecisionEvidence.
-const (
-	CodeDecisionEvidenceActive      CodeDecisionEvidence = "active"
-	CodeDecisionEvidenceLessThannil CodeDecisionEvidence = "<nil>"
-	CodeDecisionEvidencePassive     CodeDecisionEvidence = "passive"
-)
-
-// Valid indicates whether the value is a known member of the CodeDecisionEvidence enum.
-func (e CodeDecisionEvidence) Valid() bool {
-	switch e {
-	case CodeDecisionEvidenceActive:
-		return true
-	case CodeDecisionEvidenceLessThannil:
-		return true
-	case CodeDecisionEvidencePassive:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CodeDecisionReason.
 const (
 	Chosen     CodeDecisionReason = "chosen"
@@ -1542,7 +1494,6 @@ func (e CodeDecisionReason) Valid() bool {
 
 // Defines values for CodeDecisionSkippedClass.
 const (
-	CodeDecisionSkippedClassBand        CodeDecisionSkippedClass = "band"
 	CodeDecisionSkippedClassBusy        CodeDecisionSkippedClass = "busy"
 	CodeDecisionSkippedClassCooldown    CodeDecisionSkippedClass = "cooldown"
 	CodeDecisionSkippedClassTree        CodeDecisionSkippedClass = "tree"
@@ -1553,8 +1504,6 @@ const (
 // Valid indicates whether the value is a known member of the CodeDecisionSkippedClass enum.
 func (e CodeDecisionSkippedClass) Valid() bool {
 	switch e {
-	case CodeDecisionSkippedClassBand:
-		return true
 	case CodeDecisionSkippedClassBusy:
 		return true
 	case CodeDecisionSkippedClassCooldown:
@@ -3414,25 +3363,25 @@ func (e ExternalCredentialReferenceStore) Valid() bool {
 
 // Defines values for FallbackCondition.
 const (
-	FallbackConditionBudget        FallbackCondition = "budget"
-	FallbackConditionContentFilter FallbackCondition = "content_filter"
-	FallbackConditionContextWindow FallbackCondition = "context_window"
-	FallbackConditionExhausted     FallbackCondition = "exhausted"
-	FallbackConditionRateLimit     FallbackCondition = "rate_limit"
+	Budget        FallbackCondition = "budget"
+	ContentFilter FallbackCondition = "content_filter"
+	ContextWindow FallbackCondition = "context_window"
+	Exhausted     FallbackCondition = "exhausted"
+	RateLimit     FallbackCondition = "rate_limit"
 )
 
 // Valid indicates whether the value is a known member of the FallbackCondition enum.
 func (e FallbackCondition) Valid() bool {
 	switch e {
-	case FallbackConditionBudget:
+	case Budget:
 		return true
-	case FallbackConditionContentFilter:
+	case ContentFilter:
 		return true
-	case FallbackConditionContextWindow:
+	case ContextWindow:
 		return true
-	case FallbackConditionExhausted:
+	case Exhausted:
 		return true
-	case FallbackConditionRateLimit:
+	case RateLimit:
 		return true
 	default:
 		return false
@@ -10000,19 +9949,12 @@ type CodeDecision struct {
 	ApiKeyId openapi_types.UUID `json:"api_key_id"`
 
 	// AttemptId Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.
-	AttemptId nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
-
-	// Band Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
-	Band            nullable.Nullable[CodeDecisionBand] `json:"band"`
-	BindingId       openapi_types.UUID                  `json:"binding_id"`
-	ChosenAccountId openapi_types.UUID                  `json:"chosen_account_id"`
-	CreatedAt       time.Time                           `json:"created_at"`
-
-	// Evidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
-	Evidence           nullable.Nullable[CodeDecisionEvidence] `json:"evidence"`
-	EvidenceObservedAt nullable.Nullable[time.Time]            `json:"evidence_observed_at"`
-	Id                 openapi_types.UUID                      `json:"id"`
-	ProjectId          openapi_types.UUID                      `json:"project_id"`
+	AttemptId       nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	BindingId       openapi_types.UUID                    `json:"binding_id"`
+	ChosenAccountId openapi_types.UUID                    `json:"chosen_account_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
 
 	// Reason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
 	Reason CodeDecisionReason `json:"reason"`
@@ -10028,21 +9970,15 @@ type CodeDecision struct {
 	Skipped []struct {
 		AccountId openapi_types.UUID `json:"account_id"`
 
-		// Class Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+		// Class Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, and weight means the weighted score picked another account of the same tier.
 		Class CodeDecisionSkippedClass `json:"class"`
 	} `json:"skipped"`
 }
 
-// CodeDecisionBand Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
-type CodeDecisionBand string
-
-// CodeDecisionEvidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
-type CodeDecisionEvidence string
-
 // CodeDecisionReason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
 type CodeDecisionReason string
 
-// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, and weight means the weighted score picked another account of the same tier.
 type CodeDecisionSkippedClass string
 
 // CodeDecisionList defines model for CodeDecisionList.
@@ -10193,9 +10129,6 @@ type CodeRoute struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
-	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
-
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
 
@@ -10256,9 +10189,6 @@ type CodeRouteList struct {
 type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
-
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
-	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
@@ -10502,9 +10432,6 @@ type ConfigurationCodeRoute struct {
 type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
-
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
-	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`

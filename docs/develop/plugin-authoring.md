@@ -26,13 +26,11 @@ compatibility aliases remain at the old paths.
 | `github.com/tyk-swe/olp/sdk/inference` | `github.com/tyk-swe/olp/inference` |
 | `github.com/tyk-swe/olp/openapi` | `github.com/tyk-swe/olp/management` and `github.com/tyk-swe/olp/guardrails` |
 
-The contract sources moved next to their generated clients. The management
-contract now lives at `management/management.json`, the inference contract
-at `inference/inference.json`, and the guardrails contract at
-`guardrails/guardrails.json`. The first-party plugin programs moved next to
-the adapter module each one serves, so the program that used to build from
-`plugins/claude` now builds from `internal/claudeauth/claude`, and the
-coding plan programs build from folders under `internal/codeplans`.
+The management contract lives at `management/management.json`, the inference
+contract at `inference/inference.json`, and the guardrails contract at
+`guardrails/guardrails.json`. Each first-party plugin program builds from a
+folder next to the adapter module it serves, such as
+`internal/claudeauth/claude` and the folders under `internal/codeplans`.
 
 ## A minimal plugin
 

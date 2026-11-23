@@ -102,7 +102,6 @@ func TestDecisionValidateRejectsContentFreeInvariantBreaks(t *testing.T) {
 		"unknown class":               {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: "prompt_body"}}},
 		"chosen also skip":            {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionPin, Skipped: []codemode.SkippedAccount{{AccountID: "chosen", Class: codemode.SkipTree}}},
 		"duplicate skip":              {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: codemode.SkipTree}, {AccountID: "other", Class: codemode.SkipWeight}}},
-		"evidence unpinned":           {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Evidence: new(codemode.AllowanceEvidencePassive)},
 		"bad ordinal":                 {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryOrdinal: new(0)},
 		"chosen without attempt":      {ChosenAccountID: "chosen", Reason: codemode.DecisionChosen},
 		"pin without attempt":         {ChosenAccountID: "chosen", Reason: codemode.DecisionPin},

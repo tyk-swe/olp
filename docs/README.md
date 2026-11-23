@@ -54,6 +54,6 @@ remaining guides cover the implementation contracts behind a change.
 | Review performance measurement status | [Performance](develop/performance.md) |
 | Review qualification status and outstanding external checks | [Qualification](develop/qualification.md) |
 
-The seven retained console screenshots live in [assets](assets/). The provider,
+The eight retained console screenshots live in [images](images/). The provider,
 console and external-secrets guides link to the screenshot that belongs to each
 workflow.

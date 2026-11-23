@@ -52,7 +52,7 @@ func threadBlockers(evidence ThreadAccountEvidence) []threadBlocker {
 		if evidence.CooldownRetryAt != nil && !yield(threadBlocker{observedAt: evidence.CooldownObservedAt, deadline: evidence.CooldownRetryAt}) {
 			return
 		}
-		for exhaustion := range allowanceExhaustions(evidence.Allowance, false, "") {
+		for exhaustion := range allowanceExhaustions(evidence.Allowance) {
 			if !yield(threadBlocker{observedAt: &exhaustion.observedAt, deadline: exhaustion.resetsAt}) {
 				return
 			}

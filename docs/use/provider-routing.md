@@ -34,7 +34,7 @@ protocol and authentication mechanism used to reach that connection.
    providers (providers without a provider profile). Review the generated
    drafts before publishing them individually or in bulk.
 
-![Reviewed models grouped under one published route name](../assets/provider-model-comparison.png)
+![Reviewed models grouped under one published route name](../images/provider-model-comparison.png)
 
 ### Reviewed vendor contracts
 
@@ -268,7 +268,7 @@ original credentials and block explicit revocation until durable deletion record
 Workers claim only runnable capacity, revalidate claims immediately before bounded
 poll/delete and yield silently on lease takeover.
 
-![Credential pool](../assets/provider-credential-pool.png)
+![Credential pool](../images/provider-credential-pool.png)
 
 ## Scoped routing policies
 
@@ -634,7 +634,7 @@ nor a request an unconfined plugin carried whose outcome is unknown; see
 
 ## Explain and observe
 
-![Route preview](../assets/provider-routing-preview.png)
+![Route preview](../images/provider-routing-preview.png)
 
 `POST /api/v1/routing/simulate` and draft/playground preview share the execution
 planner. Supply operation/surface/mode/preferences, optional key/seed/native request.

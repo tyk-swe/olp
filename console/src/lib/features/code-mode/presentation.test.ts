@@ -385,7 +385,6 @@ describe('code account decisions', () => {
     expect(skipClassLabel('unavailable')).toBe('allowance exhausted');
     expect(skipClassLabel('tree')).toBe('tree account served');
     expect(skipClassLabel('weight')).toBe('weighted score');
-    expect(skipClassLabel('band')).toBe('lower allowance band');
   });
 });
 
