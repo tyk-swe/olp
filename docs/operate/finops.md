@@ -247,8 +247,7 @@ and `charge_lines` from the exact decomposition produced by
 `olp.price_usage_lines`. Each line has a `quantity` in its unit (`1000000 Tokens`, `Requests`, `Calls` or `Units`),
 a `list_unit_price` that already includes the window and batch multipliers,
 and a `contracted_unit_price` that also includes the discount. A fact can have no
-stored lines when it was written before migration 0067 or when the line-total
-guard did not match the fact totals. It then falls back to a single `attempt`
+stored lines when the line-total guard did not match the fact totals. It then falls back to a single `attempt`
 component line priced from the fact totals. The manifest counts such facts in
 `fallback_line_attempts`. Line amounts are exact, while accounting rounds each
 attempt to 12 decimal places, so `accounting_totals` can differ slightly from
@@ -536,10 +535,7 @@ streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
 with two million rows, 100,000 aggregates and a one-minute import budget. Each
 day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
-no results records an invoiced zero. Migration 0141 keeps OpenAI and Anthropic
-days imported before per-day coverage only when they hold imported costs,
-because an empty fetched day cannot be told apart from an import gap, so the
-others report `not_imported`. On success the import schedules one hour
+no results records an invoiced zero. On success the import schedules one hour
 out. When AWS or Azure reaches the pass budget after completing a period, it
 continues the remaining periods on the next worker scan. An individual period
 that exceeds the limits still fails and backs off. Google schedules the next

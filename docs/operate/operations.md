@@ -13,8 +13,8 @@ Check the existing FOCUS dataset view for purchased, allocated and unused totals
 provisional state and incomplete coverage. Pending edits apply at UTC period
 boundaries; removing a draft amount does not cancel the current obligation.
 
-Migration 0073 recovers supported history from published runtime snapshots and
-retained facts/hourly evidence. The FOCUS worker catches up in bounded batches;
+The FOCUS worker builds history from published runtime snapshots and retained
+facts/hourly evidence and catches up in bounded batches;
 incomplete historical or partial export coverage is reported explicitly. Keep
 `commitment_schedules`, `commitment_periods` and `commitment_usage` in the normal
 whole-schema backup. Allocation context remains available for the lifetime of retained hourly
@@ -165,8 +165,7 @@ partial usage/uncertainty first; unsupported templates remain, with bounded
 maintenance/savepoints. See [retained accounting](../develop/architecture.md#retained-generation-accounting).
 
 Retained identity includes caller, immutable revisions, selected route target,
-slot and credential version. Migration 0062 backfills targets only where historical
-evidence proves a unique match; null/ambiguous pins refuse dispatch. Never repair
+slot and credential version. Null or ambiguous pins refuse dispatch. Never repair
 using mutable current configuration. Retired budget groups retain policy-free
 historical UUIDs for late settlement; same-name replacements are distinct.
 Audio duration is recorded to microseconds; invalid duration is missing billing
@@ -414,11 +413,9 @@ Verify readiness, generation convergence, backlog, usage completeness,
 provider probes, and latency before resuming admission. There is no rollback:
 a binary refuses a database whose schema is newer than its own, and migrations
 never run in reverse. Never edit
-migration history or checksums. The runner checks the recorded checksums and
-rejects gaps except for two upgrade paths from historical merges. It can apply
-the delegation migrations after the parallel code migrations. If Google billing
-is already applied, it records the AWS billing migration because the Google
-migration already includes its constraint change. Failed migrations roll back
+migration history or checksums. The runner checks the recorded checksums,
+rejects gaps and refuses a database created before the `0001_schema.sql`
+baseline, which needs a fresh installation. Failed migrations roll back
 in the same transaction as their history updates.
 
 ## Database deadlines and privileges
