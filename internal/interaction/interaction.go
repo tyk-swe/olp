@@ -12,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
@@ -26,7 +25,6 @@ const (
 type Config struct {
 	Provider                      connectors.Config
 	ProviderID, RevisionID, Model string
-	Policy                        *contentpolicy.Policy
 	MaxBodyBytes, MaxEventBytes   int
 }
 type Context struct {
@@ -50,7 +48,6 @@ type Template struct {
 	config   Config
 	profile  connectors.Profile
 	wire     wire.Format
-	policy   *contentpolicy.Compiled
 	defaults map[string]json.RawMessage
 	origins  []connectors.DefaultProvenance
 	serving  oif.ServingIdentity
@@ -91,21 +88,6 @@ func Compile(config Config) (*Template, error) {
 	if err != nil {
 		return nil, incompatible("target_capability", "/profile", "generation_dialect", "The profile has no implemented generation dialect.")
 	}
-	policy := config.Policy.Clone()
-	if contentpolicy.Validate(policy) != nil {
-		return nil, incompatible("policy_conflict", "/content_policy", "valid_policy", "The content policy is invalid.")
-	}
-	if policy != nil {
-		for _, rule := range policy.Rules {
-			if rule.Action != contentpolicy.ActionBlock {
-				return nil, incompatible("policy_conflict", "/content_policy", "semantic_preservation", "Strict execution cannot apply semantic mutation policies.")
-			}
-		}
-	}
-	compiled, err := contentpolicy.Compile(policy)
-	if err != nil {
-		return nil, incompatible("policy_conflict", "/content_policy", "valid_policy", "The content policy cannot be compiled.")
-	}
 	defaults, origins, err := provider.DefaultsFor("generation", config.Model)
 	if err != nil {
 		return nil, incompatible("target_capability", "/defaults", "default_collision", "Configured native defaults collide or lack an operation schema.")
@@ -119,9 +101,9 @@ func Compile(config Config) (*Template, error) {
 	if config.MaxBodyBytes < 1 || config.MaxBodyBytes > 64<<20 || config.MaxEventBytes < 1 || config.MaxEventBytes > 64<<20 {
 		return nil, incompatible("target_capability", "/limits", "bounded_buffering", "Strict body and event limits must be positive and bounded.")
 	}
-	config.Provider, config.Policy = provider, policy
+	config.Provider = provider
 	serving := provider.ServingIdentity(config.ProviderID, config.RevisionID, config.Model)
-	return &Template{config: config, profile: profile, wire: encodedWire, policy: compiled, defaults: defaults, origins: origins, serving: serving}, nil
+	return &Template{config: config, profile: profile, wire: encodedWire, defaults: defaults, origins: origins, serving: serving}, nil
 }
 func (p *Plan) Prepared() oif.Prepared    { return p.prepared }
 func (p *Plan) Body() []byte              { return p.prepared.Document().Bytes() }

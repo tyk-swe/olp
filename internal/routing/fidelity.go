@@ -3,9 +3,7 @@ package routing
 import (
 	"bytes"
 	"errors"
-	"fmt"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
@@ -66,23 +64,4 @@ func validateFidelity(f RouteFidelity) error {
 	default:
 		return errFidelityMode
 	}
-}
-
-var ErrFidelityPolicyConflict = errors.New("redaction requires a transformed route; strict routes preserve input and output")
-
-func ValidateRouteFidelity(f RouteFidelity, policy *contentpolicy.Policy) error {
-	if err := validateFidelity(f); err != nil {
-		return err
-	}
-	if err := contentpolicy.Validate(policy); err != nil {
-		return err
-	}
-	if f.Strict() && policy != nil {
-		for _, rule := range policy.Rules {
-			if rule.Action == contentpolicy.ActionRedact {
-				return fmt.Errorf("rule %s: %w", rule.ID, ErrFidelityPolicyConflict)
-			}
-		}
-	}
-	return nil
 }

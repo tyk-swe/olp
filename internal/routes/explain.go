@@ -31,13 +31,12 @@ const fallbackStandby = "standby"
 // shared circuit state the gateways read, but never reserves state or contacts
 // a provider: classifier predicates use the labels the caller supplies.
 type simulation struct {
-	ctx              context.Context
-	snapshot         *routing.Snapshot
-	input            simulationInput
-	inputs           *routinginputs.Inputs
-	now              time.Time
-	demand           *routing.TokenDemand
-	inspectionBudget inspectionBudget
+	ctx      context.Context
+	snapshot *routing.Snapshot
+	input    simulationInput
+	inputs   *routinginputs.Inputs
+	now      time.Time
+	demand   *routing.TokenDemand
 	// named is the route the request names; every leg parses the request as
 	// addressed to it, as the gateway parses it once.
 	named     string

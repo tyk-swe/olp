@@ -224,9 +224,9 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 			JOIN olp.route_revisions v ON v.id=d.based_on_revision_id
 			LEFT JOIN olp.routing_policies p ON p.scope='route-draft' AND p.scope_id=d.id
 			WHERE d.id=$1 AND
-			ROW(d.slug,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.fidelity,d.behavior,COALESCE(p.policy,$2::jsonb))
+			ROW(d.slug,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.fidelity,d.behavior,COALESCE(p.policy,$2::jsonb))
 			IS NOT DISTINCT FROM
-			ROW(v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.fidelity,v.behavior,COALESCE(v.routing_policy,$2::jsonb))
+			ROW(v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.fidelity,v.behavior,COALESCE(v.routing_policy,$2::jsonb))
 		)`, d.ID, defaultPolicy).Scan(&unchanged); err != nil {
 			return result, err
 		}

@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -37,7 +35,6 @@ type DraftInput struct {
 	OverallTimeoutMS int             `json:"overall_timeout_ms"`
 	MaxAttempts      int             `json:"max_attempts"`
 	Targets          []TargetInput   `json:"targets"`
-	ContentPolicy    json.RawMessage `json:"content_policy"`
 	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
 	ProjectID        *string         `json:"project_id"`
 }
@@ -67,19 +64,6 @@ func ValidateAndNormalizeDraftInput(ctx context.Context, q database.Queryer, in 
 	}
 	if in.MaxAttempts < 1 || in.MaxAttempts > maxAttempts {
 		return nil, httpkit.Invalid("max_attempts", "Use an attempt budget from 1 to 32767.")
-	}
-	if len(in.ContentPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(in.ContentPolicy), []byte("null")) {
-		policy, err := contentpolicy.Decode(in.ContentPolicy)
-		if err != nil {
-			return nil, httpkit.Invalid("content_policy", err.Error())
-		}
-		encoded, err := json.Marshal(policy)
-		if err != nil {
-			return nil, err
-		}
-		in.ContentPolicy = encoded
-	} else {
-		in.ContentPolicy = nil
 	}
 	var fidelityErr error
 	in.Fidelity, fidelityErr = normalizedFidelity(in.Fidelity)
@@ -190,13 +174,6 @@ func validateDraftBehavior(ctx context.Context, q database.Queryer, in *DraftInp
 	route := routing.Route{Slug: in.Slug, Operations: in.Operations, OverallTimeout: int64(in.OverallTimeoutMS), MaxAttempts: in.MaxAttempts, Fidelity: fidelity, Behavior: behavior}
 	for _, t := range targets {
 		route.Targets = append(route.Targets, routing.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID, Tags: t.Tags, Shadow: t.Shadow})
-	}
-	if len(in.ContentPolicy) > 0 {
-		policy, err := contentpolicy.Decode(in.ContentPolicy)
-		if err != nil {
-			return httpkit.Invalid("content_policy", err.Error())
-		}
-		route.ContentPolicy = policy
 	}
 	if err := route.ValidatePassthrough(); err != nil {
 		return PassthroughAccessError(err)

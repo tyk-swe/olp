@@ -110,15 +110,7 @@
               <td
                 ><strong>{request.route}</strong><small
                   >{request.operation} · {request.surface}</small
-                >{#if request.policy_decisions.length}<small
-                    >Policy: {[
-                      ...new Set(
-                        request.policy_decisions.map(
-                          (decision) => decision.outcome
-                        )
-                      )
-                    ].join(', ')}</small
-                  >{/if}</td
+                ></td
               >
               <td
                 ><span

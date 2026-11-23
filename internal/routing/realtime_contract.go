@@ -7,14 +7,12 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
 type realtimeContractConfig struct {
 	Provider connectors.Config
 	Model    string
-	Policy   *contentpolicy.Policy
 }
 
 type RealtimeTemplate struct {
@@ -45,7 +43,6 @@ func compileWebRTCContract(c realtimeContractConfig) (*RealtimeTemplate, error) 
 
 func compileRealtimeTemplate(c realtimeContractConfig, webrtc bool) (*RealtimeTemplate, error) {
 	c.Provider = c.Provider.Clone()
-	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, realtimeRefuse("target_capability", "/profile", "explicit_profile", "Strict realtime requires a registered versioned provider profile.")
@@ -70,9 +67,6 @@ func compileRealtimeTemplate(c realtimeContractConfig, webrtc bool) (*RealtimeTe
 		if _, err := c.Provider.RealtimeCallsURL(c.Model); err != nil {
 			return nil, realtimeRefuse("resource_affinity", "/model", "realtime_address", "This target cannot address its native realtime model.")
 		}
-	}
-	if c.Policy != nil && len(c.Policy.Rules) > 0 {
-		return nil, realtimeRefuse("policy_conflict", "/content_policy", "inspectable_policy", "Realtime frames cannot be admitted with a content policy this relay cannot enforce.")
 	}
 	if len(c.Provider.SemanticHeaders) > 0 || len(c.Provider.QuerySettings) > 0 {
 		return nil, realtimeRefuse("target_capability", "/provider", "unchanged_realtime_handshake", "Strict realtime has no qualified provider handshake overrides or implicit defaults.")

@@ -16,3 +16,7 @@ func (s *Server) CheckRouteFidelity(ctx context.Context, route *routing.Route) *
 	}
 	return nil
 }
+
+func PolicyUnavailable(code, message string) *fault.Error {
+	return &fault.Error{Status: http.StatusUnprocessableEntity, Type: "invalid_request_error", Code: code, Message: message}
+}

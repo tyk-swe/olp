@@ -24,8 +24,7 @@ it.each([
         json({
           cache_result: result,
           cache_lookup_reason: reason,
-          attempts: [],
-          policy_decisions: []
+          attempts: []
         }),
       ['read', 'usage']
     );

@@ -76,19 +76,6 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
 		return nil, err
 	}
-	if t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == wire.Bedrock) {
-		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
-	}
-	if t.policy.HasOutput() {
-		if err := outputRequestCoverage(t.wire, effective); err != nil {
-			return nil, err
-		}
-	}
-	if t.policy.HasInput() {
-		if err := checkInputCoverage(t.wire, effective); err != nil {
-			return nil, err
-		}
-	}
 	// Hosting wrappers may only perform the reviewed address/model/API-revision
 	// binding. Semantic preparation is already complete and its document retained.
 	if t.profile.Hosting == "vertex-anthropic" || t.profile.Hosting == "bedrock-anthropic-invoke" {

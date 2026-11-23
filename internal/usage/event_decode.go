@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -356,18 +355,5 @@ func (w wireEvent) decodeAuthority(event *Event) error {
 		return err
 	}
 	event.GuardrailDecisions = w.GuardrailDecisions
-	if w.PolicyDecisions != nil {
-		for i, d := range *w.PolicyDecisions {
-			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
-				return fmt.Errorf("request metadata field policy_decisions %d is incomplete", i)
-			}
-			event.PolicyDecisions = append(event.PolicyDecisions, contentpolicy.Decision{
-				RuleID: *d.RuleID, Phase: *d.Phase, Action: *d.Action, Outcome: *d.Outcome,
-			})
-		}
-		if err := contentpolicy.ValidateDecisions(event.PolicyDecisions); err != nil {
-			return fmt.Errorf("request metadata field policy_decisions is invalid: %w", err)
-		}
-	}
 	return nil
 }

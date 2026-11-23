@@ -43,7 +43,7 @@ func (x *Call) envelope(out *Outcome, status int, completedAt time.Time) events.
 		EndUserDigest:        x.endUserDigest,
 		BudgetGroupID:        x.budgetGroupID,
 		Attribution:          x.attribution,
-		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions,
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(),
 		UserID:      x.userID,
 		Family:      string(x.family),
 		Mode:        x.mode,
@@ -171,7 +171,7 @@ func (x *Call) captureInputDocument() map[string]json.RawMessage {
 			body = document.Bytes()
 		}
 	}
-	if len(body) == 0 && x.generation.parsed != nil && (x.Route == nil || x.Route.ContentPolicy == nil) {
+	if len(body) == 0 && x.generation.parsed != nil {
 		if document := x.generation.parsed.OIF().Document(); document.Valid() {
 			body = document.Bytes()
 		}

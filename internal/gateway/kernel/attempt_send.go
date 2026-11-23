@@ -29,9 +29,6 @@ func (run attemptRun) prepare() (attemptPlan, *attemptEnd) {
 		return attemptPlan{}, ended(ClassProtocol, nil)
 	}
 	x.guard.input = prepared.guardrailSegments
-	for _, decision := range prepared.policyDecisions {
-		recordDecision(x, decision)
-	}
 	reader := providerinvoke.NewResponseReader(prepared.config, prepared.wire, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
 	responseRequest, err := wire.NewRequest(prepared.wire, x.generation.parsed.Route, reader.Streaming(), prepared.document)
 	if err != nil {

@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -415,7 +415,7 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 	}
 }
 
-func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
+func TestPreparationFollowsSourceChanges(t *testing.T) {
 	for _, transformed := range []bool{false, true} {
 		name := "automatic"
 		if transformed {
@@ -427,10 +427,14 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 			provider := x.Snapshot().Provider(attempt.ProviderID)
 			provider.Kind = "openai_compatible"
 			if transformed {
-				x.Route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
-					ID: "redact", Phase: contentpolicy.PhaseInput, Pattern: "first|second",
-					Action: contentpolicy.ActionRedact, Replacement: "filtered",
-				}}}
+				engine, err := guardrails.Compile(
+					[]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}},
+					map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"redact","pattern":"first|second","replacement":"filtered"}]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				x.guard.engine, x.guard.ctx = engine, t.Context()
 			}
 			assertRequest := func(want string, reply int64) {
 				t.Helper()
@@ -462,14 +466,6 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 			}
 			x.generation.parsed = next
 			assertRequest(second, 16)
-			x.useRoute(&routing.Route{
-				Slug: "fallback", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
-				ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
-					ID: "redact", Phase: contentpolicy.PhaseInput, Pattern: "second",
-					Action: contentpolicy.ActionRedact, Replacement: "routed",
-				}}},
-			}, usage.ViaFallback)
-			assertRequest("routed", 16)
 		})
 	}
 }

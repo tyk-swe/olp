@@ -400,7 +400,6 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 			Supply:                tighterRetainedSupply(prior.Supply, live.Limits.Supply),
 		}
 	}
-	route.ContentPolicy = liveRoute.ContentPolicy
 	route.Policy = liveRoute.Policy
 	route.Budget = tighterRetainedCosts(route.Budget, liveRoute.Budget)
 	route.MaxBodyBytes = tighterRetainedLimit(route.MaxBodyBytes, liveRoute.MaxBodyBytes)

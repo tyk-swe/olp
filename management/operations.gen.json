@@ -553,7 +553,6 @@
           "properties": {
             "api_version": {
               "enum": [
-                "openllmproxy.dev/config/v1",
                 "openllmproxy.dev/config/v2"
               ],
               "type": "string"
@@ -3020,16 +3019,6 @@
         },
         "ConfigurationRouteEntry": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "type": "integer"
@@ -3166,7 +3155,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -3216,58 +3205,6 @@
             "max_attempts",
             "targets",
             "routing_policy"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },
@@ -4314,9 +4251,6 @@
                 "decision_model",
                 "typesafe"
               ]
-            },
-            "policy": {
-              "$ref": "#/$defs/ContentPolicy"
             },
             "configuration": {
               "type": "object",
@@ -8646,9 +8580,6 @@
               "type": "string",
               "format": "uuid"
             },
-            "policy": {
-              "$ref": "#/$defs/ContentPolicy"
-            },
             "configuration": {
               "type": "object",
               "additionalProperties": true
@@ -8672,58 +8603,6 @@
             "type",
             "project_id"
           ]
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
-          ],
-          "type": "object"
         }
       }
     }
@@ -12612,16 +12491,6 @@
       "$defs": {
         "CreateRouteDraftRequest": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "minimum": 0,
@@ -12744,7 +12613,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -12791,58 +12660,6 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },
@@ -13531,16 +13348,6 @@
       "$defs": {
         "CreateRouteDraftRequest": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "minimum": 0,
@@ -13663,7 +13470,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -13710,58 +13517,6 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },
@@ -27393,7 +27148,6 @@
           "properties": {
             "api_version": {
               "enum": [
-                "openllmproxy.dev/config/v1",
                 "openllmproxy.dev/config/v2"
               ],
               "type": "string"
@@ -29860,16 +29614,6 @@
         },
         "ConfigurationRouteEntry": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "type": "integer"
@@ -30006,7 +29750,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -30056,58 +29800,6 @@
             "max_attempts",
             "targets",
             "routing_policy"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },
@@ -31154,9 +30846,6 @@
                 "decision_model",
                 "typesafe"
               ]
-            },
-            "policy": {
-              "$ref": "#/$defs/ContentPolicy"
             },
             "configuration": {
               "type": "object",
@@ -38134,16 +37823,6 @@
       "$defs": {
         "ReplaceRouteDraftRequest": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "type": "integer"
@@ -38256,7 +37935,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -38304,58 +37983,6 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },
@@ -45862,9 +45489,6 @@
               "minLength": 1,
               "maxLength": 100
             },
-            "policy": {
-              "$ref": "#/$defs/ContentPolicy"
-            },
             "configuration": {
               "type": "object",
               "additionalProperties": true
@@ -45886,58 +45510,6 @@
           "required": [
             "name"
           ]
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
-          ],
-          "type": "object"
         }
       }
     }
@@ -48430,16 +48002,6 @@
       "$defs": {
         "UpdatePublishedRouteRequest": {
           "properties": {
-            "content_policy": {
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/ContentPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "max_attempts": {
               "format": "int32",
               "type": "integer"
@@ -48553,7 +48115,7 @@
               ]
             },
             "passthrough": {
-              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+              "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
@@ -48601,58 +48163,6 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets"
-          ],
-          "type": "object"
-        },
-        "ContentPolicy": {
-          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-          "properties": {
-            "rules": {
-              "items": {
-                "$ref": "#/$defs/ContentPolicyRule"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "rules"
-          ],
-          "type": "object"
-        },
-        "ContentPolicyRule": {
-          "properties": {
-            "action": {
-              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-              "enum": [
-                "block",
-                "redact"
-              ],
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "pattern": {
-              "description": "Go RE2 expression; must not match the empty string.",
-              "type": "string"
-            },
-            "phase": {
-              "enum": [
-                "input",
-                "output"
-              ],
-              "type": "string"
-            },
-            "replacement": {
-              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "phase",
-            "pattern",
-            "action"
           ],
           "type": "object"
         },

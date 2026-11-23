@@ -186,11 +186,7 @@
               <details>
                 <summary>Routing policy</summary>
                 <pre>{JSON.stringify(revision.routing_policy, null, 2)}</pre>
-              </details>
-              {#if revision.content_policy}<details>
-                  <summary>Content policy</summary>
-                  <pre>{JSON.stringify(revision.content_policy, null, 2)}</pre>
-                </details>{/if}</td
+              </details></td
             ><td data-label="Activated"
               >{formatDate(revision.activated_at)}<br /><small
                 >By {revision.activated_by}</small

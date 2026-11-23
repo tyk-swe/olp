@@ -68,7 +68,6 @@ type draft struct {
 	OverallTimeoutMS int
 	MaxAttempts      int
 	Targets          []routing.PublishedTarget
-	ContentPolicy    []byte
 	Fidelity         []byte
 	Behavior         []byte
 	BasedOnRevision  *string
@@ -81,13 +80,13 @@ type draft struct {
 	ProjectName      *string
 }
 
-const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity,d.behavior"
+const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity,d.behavior"
 const draftFrom = " FROM olp.route_drafts d JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects pr ON pr.id=d.project_id"
 
 func scanDraft(row pgx.Row) (*draft, error) {
 	var d draft
 	var operations, targets []byte
-	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName, &d.Fidelity, &d.Behavior); err != nil {
+	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName, &d.Fidelity, &d.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &d.Operations); err != nil {
@@ -248,7 +247,7 @@ func (d *draft) summary() map[string]any {
 }
 
 func (d *draft) detail(live map[string]*resolved) map[string]any {
-	return behaviorJSON(map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}, d.Behavior)
+	return behaviorJSON(map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}, d.Behavior)
 }
 
 func (s *Server) draftDetail(ctx context.Context, q database.Queryer, d *draft) (httpkit.Reply, error) {

@@ -11,11 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
-func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {
+func TestRegexRuleIdentifiersAreBounded(t *testing.T) {
 	for _, tc := range []struct {
 		id    string
 		valid bool
@@ -29,55 +28,45 @@ func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {
 		{"rule.name", false},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			policy := &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: tc.id, Phase: contentpolicy.PhaseInput, Pattern: "sample", Action: contentpolicy.ActionBlock}}}
-			policyErr := contentpolicy.Validate(policy)
-			_, detectorErr := compilePatterns([]Pattern{{ID: tc.id, Pattern: "sample"}}, "sample", "")
-			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
-				t.Errorf("id %q valid=%t, policy error=%v, detector error=%v", tc.id, tc.valid, policyErr, detectorErr)
+			_, err := compilePatterns([]Pattern{{ID: tc.id, Pattern: "sample"}}, "sample", "")
+			if (err == nil) != tc.valid {
+				t.Errorf("id %q valid=%t, error=%v", tc.id, tc.valid, err)
 			}
 		})
 	}
 }
 
-func TestRuleSizeLimitsAgreeWithContentPolicy(t *testing.T) {
+func TestRegexRuleSizesAreBounded(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		patternBytes int
 		replacement  string
 		valid        bool
 	}{
-		{name: "total at limit", patternBytes: contentpolicy.MaxTotalPatternBytes, valid: true},
-		{name: "total above limit", patternBytes: contentpolicy.MaxTotalPatternBytes + 1},
-		{name: "replacement at limit", patternBytes: 1, replacement: strings.Repeat("é", contentpolicy.MaxReplacementChars), valid: true},
-		{name: "replacement above limit", patternBytes: 1, replacement: strings.Repeat("é", contentpolicy.MaxReplacementChars+1)},
+		{name: "total at limit", patternBytes: maxTotalPatternBytes, valid: true},
+		{name: "total above limit", patternBytes: maxTotalPatternBytes + 1},
+		{name: "replacement at limit", patternBytes: 1, replacement: strings.Repeat("é", maxReplacementChars), valid: true},
+		{name: "replacement above limit", patternBytes: 1, replacement: strings.Repeat("é", maxReplacementChars+1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text := strings.Repeat("a", tc.patternBytes)
-			count := (len(text) + contentpolicy.MaxPatternBytes - 1) / contentpolicy.MaxPatternBytes
+			count := (len(text) + maxPatternBytes - 1) / maxPatternBytes
 			patterns := slices.Collect(func(yield func(Pattern) bool) {
 				for i := range count {
-					start := i * contentpolicy.MaxPatternBytes
-					pattern := text[start:min(start+contentpolicy.MaxPatternBytes, len(text))]
+					start := i * maxPatternBytes
+					pattern := text[start:min(start+maxPatternBytes, len(text))]
 					if !yield(Pattern{ID: fmt.Sprintf("rule%d", i), Pattern: pattern, Replacement: &tc.replacement}) {
 						return
 					}
 				}
 			})
-			policy := &contentpolicy.Policy{Rules: slices.Collect(func(yield func(contentpolicy.Rule) bool) {
-				for _, pattern := range patterns {
-					if !yield(contentpolicy.Rule{ID: pattern.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Pattern: pattern.Pattern, Replacement: tc.replacement}) {
-						return
-					}
-				}
-			})}
-			policyErr := contentpolicy.Validate(policy)
 			config, err := json.Marshal(RegexConfig{Rules: patterns})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, detectorErr := ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
-			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
-				t.Fatalf("valid=%t, policy error=%v, detector error=%v", tc.valid, policyErr, detectorErr)
+			_, err = ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
 			}
 		})
 	}

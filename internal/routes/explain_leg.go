@@ -36,10 +36,10 @@ func resolveSimulationAttribution(input simulationInput, key *inspectionKeyConte
 }
 
 func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, semantic interaction.Context, inspectionRequest *wire.Request, unary *oif.Request, mediaRequest *media.Request, counted *simulatedDemand, workflow bool, workflowCapability *routing.WorkflowCapability) (routing.PrepareCandidate, map[string]*interactionInspection) {
-	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
+	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, workflow)
 	prepare := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
 	if unary != nil {
-		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, route.Slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, route.Slug), *unary, semantic, input.ClientContract, m.demand)
 	}
 	if !operationregistry.PolicyFor(input.Operation).BoundedWork {
 		prior := prepare
@@ -63,7 +63,7 @@ func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKe
 		}
 	}
 	if mediaRequest != nil {
-		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand)
 	}
 	return prepare, inspections
 }

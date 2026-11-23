@@ -5,7 +5,6 @@ import {
   listRoutes,
   selectActiveRoutes,
   simulateRouting,
-  hasOutputRules,
   inspectionDialects
 } from '#lib/features/routes/index.js';
 import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
@@ -219,11 +218,6 @@ export class PlaygroundState {
   strictSelected = $derived(
     this.selectedRoute?.latest_revision?.fidelity?.mode === 'strict'
   );
-  outputPolicyActive = $derived(
-    hasOutputRules(
-      this.selectedRoute?.latest_revision?.content_policy?.rules ?? []
-    )
-  );
   routeOperations = $derived(
     this.selectedRoute?.latest_revision?.operations ?? null
   );
@@ -248,9 +242,7 @@ export class PlaygroundState {
       operationKnown: this.operationKnown
     })
   );
-  streamSelectable = $derived(
-    this.activeOperation === 'generation' && !this.outputPolicyActive
-  );
+  streamSelectable = $derived(this.activeOperation === 'generation');
   simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
     mutationFn: (input: InspectRoutingInput) => inspectRouting(input)

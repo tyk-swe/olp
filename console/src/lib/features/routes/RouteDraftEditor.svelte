@@ -7,7 +7,6 @@
   import RouteFidelityEditor from './RouteFidelityEditor.svelte';
   import RouteToolExecutionEditor from './RouteToolExecutionEditor.svelte';
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
-  import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import {
     focusErrorSummary,
@@ -177,7 +176,6 @@
       <RouteToolExecutionEditor {editor} />
       <RoutePassthroughEditor {editor} />
       <RouteTargets {editor} />
-      <ContentPolicyEditor {editor} />
 
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>

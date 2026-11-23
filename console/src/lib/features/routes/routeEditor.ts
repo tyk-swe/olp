@@ -63,15 +63,6 @@ export type RouteModelOption = {
   lifecycle: ProviderModelInventory['lifecycle'];
 };
 
-export type EditablePolicyRule = {
-  id: string;
-  phase: 'input' | 'output';
-  action: 'block' | 'redact';
-  pattern: string;
-  replacement: string;
-};
-
-export type ContentPolicy = components['schemas']['ContentPolicy'];
 export type RouteBehavior = components['schemas']['RouteBehavior'];
 export type RouteSelector = components['schemas']['RouteSelector'];
 export type FallbackCondition = components['schemas']['FallbackCondition'];
@@ -114,7 +105,6 @@ export type RouteEditorValues = {
   overallTimeoutMs: number;
   maxAttempts: number;
   targets: EditableTarget[];
-  contentPolicyRules: EditablePolicyRule[];
   projectId?: string;
   /** Every draft the console saves states its fidelity; strict is the default. */
   fidelity: components['schemas']['RouteFidelity'];
@@ -373,74 +363,6 @@ export function retiringTargets(
     .length;
 }
 
-const policyRuleId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const POLICY_MAX_RULES = 64;
-const POLICY_MAX_PATTERN_BYTES = 512;
-const POLICY_MAX_PATTERN_TOTAL_BYTES = 16 * 1024;
-const POLICY_MAX_REPLACEMENT_CHARS = 128;
-
-export function policyRulesFrom(
-  policy: ContentPolicy | null | undefined
-): EditablePolicyRule[] {
-  return (policy?.rules ?? []).map((rule) => ({
-    id: rule.id,
-    phase: rule.phase,
-    action: rule.action,
-    pattern: rule.pattern,
-    replacement: rule.replacement ?? ''
-  }));
-}
-
-export function hasOutputRules(rules: { phase: string }[]): boolean {
-  return rules.some((rule) => rule.phase === 'output');
-}
-
-export function validateContentPolicy(
-  rules: EditablePolicyRule[]
-): string | null {
-  if (rules.length > POLICY_MAX_RULES)
-    return `At most ${POLICY_MAX_RULES} content policy rules are allowed.`;
-  const seen = new Set<string>();
-  const encoder = new TextEncoder();
-  let patternBytes = 0;
-  for (const rule of rules) {
-    if (!policyRuleId.test(rule.id))
-      return `Rule id “${rule.id || '?'}” must start with a letter and use at most 64 letters, digits, underscores, or hyphens.`;
-    if (seen.has(rule.id))
-      return `Rule id “${rule.id}” is used more than once.`;
-    seen.add(rule.id);
-    const patternLength = encoder.encode(rule.pattern).length;
-    if (patternLength < 1 || patternLength > POLICY_MAX_PATTERN_BYTES)
-      return `Rule “${rule.id}” needs a RE2 pattern of 1–${POLICY_MAX_PATTERN_BYTES} bytes.`;
-    patternBytes += patternLength;
-    if (
-      rule.action === 'redact' &&
-      [...rule.replacement].length > POLICY_MAX_REPLACEMENT_CHARS
-    )
-      return `Rule “${rule.id}” replacement is limited to ${POLICY_MAX_REPLACEMENT_CHARS} characters.`;
-  }
-  if (patternBytes > POLICY_MAX_PATTERN_TOTAL_BYTES)
-    return `Content policy patterns may not exceed ${POLICY_MAX_PATTERN_TOTAL_BYTES} bytes combined.`;
-  return null;
-}
-
-export function buildContentPolicy(
-  rules: EditablePolicyRule[]
-): ContentPolicy | null {
-  if (!rules.length) return null;
-  return {
-    rules: rules.map((rule) => ({
-      id: rule.id,
-      phase: rule.phase,
-      pattern: rule.pattern,
-      action: rule.action,
-      ...(rule.action === 'redact' && rule.replacement
-        ? { replacement: rule.replacement }
-        : {})
-    }))
-  };
-}
-
 export function validateRouteEditor(values: RouteEditorValues): string | null {
   // Matches the server's route slug format.
   if (!validRouteSlug(values.slug)) {
@@ -473,11 +395,7 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   ) {
     return 'Every target needs a priority from 0 to 32767, a weight from 1 to 1000000, and a timeout from 1 ms up to the overall deadline.';
   }
-  return (
-    validateTargetRoles(values.targets) ??
-    validateRouteBehavior(values) ??
-    validateContentPolicy(values.contentPolicyRules)
-  );
+  return validateTargetRoles(values.targets) ?? validateRouteBehavior(values);
 }
 
 const targetTag = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -535,8 +453,6 @@ export function validateRouteBehavior(
       return 'A pass-through route makes exactly one attempt.';
     if (values.fidelity.mode === 'transformed')
       return 'A pass-through route cannot declare translation.';
-    if (values.contentPolicyRules.length)
-      return 'A pass-through route cannot carry a content policy.';
     if (
       behavior.fallbacks.length ||
       behavior.selectors.length ||
@@ -661,7 +577,6 @@ export function buildCreateRouteDraftInput(
     operations: values.operations,
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
-    content_policy: buildContentPolicy(values.contentPolicyRules),
     fidelity: values.fidelity,
     ...behaviorFields(values.behavior),
     targets: values.targets.map((target) => {
@@ -690,7 +605,6 @@ export function buildReplaceRouteDraftInput(
     operations: values.operations,
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
-    content_policy: buildContentPolicy(values.contentPolicyRules),
     fidelity: values.fidelity,
     ...behaviorFields(values.behavior),
     targets: values.targets.map((target) => ({

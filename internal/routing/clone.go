@@ -188,7 +188,6 @@ func cloneProvider(provider Provider) Provider {
 	return p
 }
 func cloneRoute(r Route) Route {
-	r.compiledContentPolicy = nil
 	r.Operations = slices.Clone(r.Operations)
 	r.Targets = slices.Clone(r.Targets)
 	for i := range r.Targets {
@@ -197,7 +196,6 @@ func cloneRoute(r Route) Route {
 	}
 	r.Policy = r.Policy.Clone()
 	r.ProjectID = copyPointer(r.ProjectID)
-	r.ContentPolicy = r.ContentPolicy.Clone()
 	r.Behavior = cloneBehavior(r.Behavior)
 	return r
 }

@@ -441,10 +441,8 @@ live upon activation. Key/policy graphs coordinate only their own proven parent
 writes; a foreign parent or policy edit still invalidates a saved plan.
 
 `openllmproxy_guardrail` manages project-scoped `builtin.regex` definitions,
-conditional immutable policy revisions, UUID import and retirement. Compose a
-route's `content_policy` from
-`jsondecode(openllmproxy_guardrail.filter.definition).policy` to review and
-publish a selected copy. Existing serving revisions stay pinned; foreign saved
+conditional immutable policy revisions, UUID import and retirement. Existing
+serving revisions stay pinned; foreign saved
 plans are refused before dependent publication. Retained guardrail history can
 prevent project deletion. See [Named guardrails](../use/guardrails.md).
 

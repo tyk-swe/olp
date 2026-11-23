@@ -39,10 +39,6 @@ func (s *Snapshot) ReadOnly() *View {
 		provider.metadata = s.Providers[id].metadata
 		owned.Providers[id] = provider
 	}
-	for slug, route := range owned.Routes {
-		route.compiledContentPolicy = s.Routes[slug].compiledContentPolicy.Clone()
-		owned.Routes[slug] = route
-	}
 	return &View{snapshot: owned}
 }
 
@@ -55,9 +51,7 @@ func (v *View) HasBodyLimits() bool    { return v != nil && v.snapshot.HasBodyLi
 
 func (v *View) FindRoute(slug string) (Route, bool) {
 	route, ok := v.snapshot.Routes[slug]
-	copy := cloneRoute(route)
-	copy.compiledContentPolicy = route.compiledContentPolicy.Clone()
-	return copy, ok
+	return cloneRoute(route), ok
 }
 func (v *View) Route(slug string) Route { route, _ := v.FindRoute(slug); return route }
 func (v *View) FindProvider(id string) (Provider, bool) {

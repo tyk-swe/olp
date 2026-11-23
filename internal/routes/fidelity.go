@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -25,24 +23,11 @@ func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(f)
 }
 
-// ValidateFidelityPolicy is shared by draft validation, activation and
-// configuration promotion so a direct draft SQL write cannot evade the rule.
-func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
-	f, err := routing.DecodeFidelity(fidelity)
-	if err != nil {
+func ValidateFidelity(fidelity json.RawMessage) error {
+	if _, err := routing.DecodeFidelity(fidelity); err != nil {
 		return httpkit.Invalid("fidelity", err.Error())
 	}
-	var policy *contentpolicy.Policy
-	if len(rawPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(rawPolicy), []byte("null")) {
-		policy, err = contentpolicy.Decode(rawPolicy)
-		if err != nil {
-			return httpkit.Invalid("content_policy", err.Error())
-		}
-	}
-	if err = routing.ValidateRouteFidelity(f, policy); errors.Is(err, routing.ErrFidelityPolicyConflict) {
-		return httpkit.Fail(422, "fidelity_policy_conflict", err.Error())
-	}
-	return err
+	return nil
 }
 
 // compileDraftExecution checks the same configured links used by release
@@ -72,12 +57,6 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 	}
 	if snapshot.Guardrails, err = snapshot.Guardrails.WithStaged(staged); err != nil {
 		return err
-	}
-	if len(d.ContentPolicy) > 0 {
-		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
-		if err != nil {
-			return err
-		}
 	}
 	if err = snapshot.ValidateRouteContracts(route); err != nil {
 		if refusal := httpkit.ContractProblem(err); refusal != nil {

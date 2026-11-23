@@ -93,7 +93,6 @@ var categoryID = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
 // Revision is an immutable, fully resolved definition in a serving release.
 // Credential fields in Configuration are references, never secret values.
 type Revision struct {
-	LegacyRuleID  string          `json:"legacy_rule_id,omitempty"`
 	ID            string          `json:"id"`
 	GuardrailID   string          `json:"guardrail_id"`
 	ProjectID     string          `json:"project_id"`
@@ -184,7 +183,6 @@ type Evaluation struct {
 	Route                string    `json:"route,omitempty"`
 	Phase                Phase     `json:"phase"`
 	Segments             []Segment `json:"segments"`
-	LegacyInputTexts     []string  `json:"-"`
 	CompressionExemptIDs []string  `json:"-"`
 	WorkflowRecovery     bool      `json:"-"`
 	// InternalModel prevents recursive evaluator invocations. It is not accepted

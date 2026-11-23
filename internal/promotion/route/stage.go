@@ -114,7 +114,7 @@ func stage(ctx context.Context, tx pgx.Tx, p authz.Principal, r Route, state Sta
 	}
 	in := routes.DraftInput{
 		Behavior: r.Behavior, Slug: r.Slug, Operations: r.Operations, OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
-		ContentPolicy: r.ContentPolicy, Fidelity: r.Fidelity, Targets: targetInputs,
+		Fidelity: r.Fidelity, Targets: targetInputs,
 	}
 	targets, err := routes.ValidateAndNormalizeDraftInput(ctx, tx, &in, projectID, nil)
 	if err != nil {

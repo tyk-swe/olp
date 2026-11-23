@@ -183,20 +183,6 @@
       </ul>
     </div>
   {/if}
-  {#if data.policy_decisions.length}<div class="policy-decisions">
-      <p class="eyebrow">Content policy decisions</p>
-      <ul>
-        {#each data.policy_decisions as decision (`${decision.rule_id}-${decision.phase}-${decision.outcome}`)}
-          <li>
-            <code>{decision.rule_id}</code>
-            {decision.phase} · {decision.action} · {decision.outcome}
-          </li>
-        {/each}
-      </ul>
-      <small
-        >Metadata only — matched request or response text is never stored.</small
-      >
-    </div>{/if}
 </section>
 
 <style>

@@ -7,7 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-func ContractInput(request *Request, call *UpstreamCall, effective *Request, budget func(int) error) (mediacontract.Input, error) {
+func ContractInput(request *Request, call *UpstreamCall, effective *Request) (mediacontract.Input, error) {
 	owned := map[staging.Handle]bool{}
 	for _, handle := range request.Uploads() {
 		owned[handle] = true
@@ -23,13 +23,12 @@ func ContractInput(request *Request, call *UpstreamCall, effective *Request, bud
 	}
 	document, _ := request.origin.(JSONSource)
 	return mediacontract.Input{
-		Route:        request.route,
-		Mode:         effective.Mode(),
-		Source:       document.Document,
-		JSON:         call.json(),
-		Parts:        parts,
-		CallerParts:  callerParts,
-		PolicyBudget: budget,
+		Route:       request.route,
+		Mode:        effective.Mode(),
+		Source:      document.Document,
+		JSON:        call.json(),
+		Parts:       parts,
+		CallerParts: callerParts,
 	}, nil
 }
 

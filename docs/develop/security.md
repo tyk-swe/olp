@@ -242,8 +242,8 @@ user-agent family, never request bodies, credentials, or content. See
 - OLP serves plain HTTP. Terminate TLS at the edge, and route only the prefixes
   in [edge routing](../operate/deployment.md#edge-routing) to it.
 - The private listener is unauthenticated. Never expose it publicly.
-- [Content policy](../use/guardrails.md#legacy-route-content-policy) shapes prompts and outputs; it is not a security
-  control.
+- [`builtin.regex` guardrails](../use/guardrails.md) are bounded text filters and
+  not a security control.
 - Administrators of one installation are trusted. Project boundaries separate
   members' access within the installation; installation-wide principals see
   every project.

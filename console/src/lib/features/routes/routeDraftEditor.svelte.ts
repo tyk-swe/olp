@@ -49,15 +49,12 @@ import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
   emptyBehavior,
-  hasOutputRules,
   modesFor,
   parseSelectors,
-  policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   routeLifecycleWarnings as findRouteLifecycleWarnings,
   toRouteModelOptions,
   validateRouteEditor,
-  type EditablePolicyRule,
   type EditableTarget,
   type RouteBehavior
 } from '#lib/features/routes/routeEditor.js';
@@ -118,8 +115,6 @@ export class RouteDraftEditorState {
   /** The route's selectors as the operator types them, in JSON. */
   selectorsText = $state('[]');
   selectors = $derived(parseSelectors(this.selectorsText));
-  policyRules = $state<EditablePolicyRule[]>([]);
-  outputPolicyActive = $derived(hasOutputRules(this.policyRules));
   sync = $state(initialConcurrentEdit());
   policyDirty = $state(false);
   policyBusy = $state(false);
@@ -170,7 +165,6 @@ export class RouteDraftEditorState {
     overallTimeoutMs: this.overallTimeoutMs,
     maxAttempts: this.maxAttempts,
     targets: this.targets,
-    contentPolicyRules: this.policyRules,
     projectId: this.projectId,
     fidelity: this.fidelity,
     behavior: {
@@ -214,7 +208,6 @@ export class RouteDraftEditorState {
     this.targets = [];
     this.behavior = emptyBehavior();
     this.selectorsText = '[]';
-    this.policyRules = [];
     this.sync = initialConcurrentEdit();
     this.policyDirty = false;
     this.policyBusy = false;
@@ -321,31 +314,6 @@ export class RouteDraftEditorState {
   removeTarget = (index: number) => {
     this.targets = this.targets.filter(
       (_, targetIndex) => targetIndex !== index
-    );
-    this.touch();
-  };
-  addPolicyRule = () => {
-    const usedIds = this.policyRules.map((rule) => rule.id);
-    const id =
-      this.policyRules
-        .map((_, index) => `rule-${index + 1}`)
-        .find((candidate) => !usedIds.includes(candidate)) ??
-      `rule-${this.policyRules.length + 1}`;
-    this.policyRules = [
-      ...this.policyRules,
-      {
-        id,
-        phase: 'input',
-        action: this.fidelity.mode === 'strict' ? 'block' : 'redact',
-        pattern: '',
-        replacement: ''
-      }
-    ];
-    this.touch();
-  };
-  removePolicyRule = (index: number) => {
-    this.policyRules = this.policyRules.filter(
-      (_, ruleIndex) => ruleIndex !== index
     );
     this.touch();
   };
@@ -590,7 +558,6 @@ export class RouteDraftEditorState {
         run_limits: current.run_limits ?? null
       };
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
-      this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,
         priority: target.priority,
@@ -616,8 +583,6 @@ export class RouteDraftEditorState {
       const modes = modesFor(this.simulationOperation);
       if (!modes.includes(this.simulationMode))
         this.simulationMode = modes[0] ?? 'unary';
-      if (this.outputPolicyActive && this.simulationMode === 'streaming')
-        this.simulationMode = 'unary';
       if (
         this.simulationDialect &&
         !(this.inspectionDialects as string[]).includes(this.simulationDialect)

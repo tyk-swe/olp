@@ -51,7 +51,7 @@ func (d externalDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 		return Verdict{}, errEvaluation
 	}
 	r := d.definition
-	return d.evaluator.Evaluate(ctx, Revision{LegacyRuleID: r.LegacyRuleID, ID: r.ID, GuardrailID: r.GuardrailID, ProjectID: r.ProjectID, Name: r.Name, Type: r.Type, Configuration: slices.Clone(r.Configuration), TimeoutMS: r.TimeoutMS, OnError: r.OnError}, d.spec, e)
+	return d.evaluator.Evaluate(ctx, Revision{ID: r.ID, GuardrailID: r.GuardrailID, ProjectID: r.ProjectID, Name: r.Name, Type: r.Type, Configuration: slices.Clone(r.Configuration), TimeoutMS: r.TimeoutMS, OnError: r.OnError}, d.spec, e)
 }
 
 // ExternalRunner shares transport pools, but breakers belong to one immutable

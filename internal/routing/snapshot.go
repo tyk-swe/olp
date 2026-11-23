@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -178,23 +176,19 @@ type Target struct {
 
 // Route is the latest published revision of one slug.
 type Route struct {
-	guardrailMigrated     bool
-	compiledContentPolicy *contentpolicy.Compiled
-	ID                    string    `json:"id"`
-	Slug                  string    `json:"slug"`
-	Operations            []string  `json:"operations"`
-	OverallTimeout        int64     `json:"overall_timeout"`
-	MaxAttempts           int       `json:"max_attempts"`
-	Targets               []Target  `json:"targets"`
-	RoutingID             string    `json:"routing_id"`
-	RevisionID            string    `json:"revision_id,omitempty"`
-	Revision              int       `json:"revision,omitempty"`
-	PublishedAt           time.Time `json:"published_at,omitempty"`
-	Policy                *Policy   `json:"policy,omitempty"`
-	ProjectID             *string   `json:"project_id,omitempty"`
-
-	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
-	Fidelity      RouteFidelity         `json:"fidelity"`
+	ID             string        `json:"id"`
+	Slug           string        `json:"slug"`
+	Operations     []string      `json:"operations"`
+	OverallTimeout int64         `json:"overall_timeout"`
+	MaxAttempts    int           `json:"max_attempts"`
+	Targets        []Target      `json:"targets"`
+	RoutingID      string        `json:"routing_id"`
+	RevisionID     string        `json:"revision_id,omitempty"`
+	Revision       int           `json:"revision,omitempty"`
+	PublishedAt    time.Time     `json:"published_at,omitempty"`
+	Policy         *Policy       `json:"policy,omitempty"`
+	ProjectID      *string       `json:"project_id,omitempty"`
+	Fidelity       RouteFidelity `json:"fidelity"`
 	Behavior
 }
 
@@ -321,7 +315,7 @@ func (s *Snapshot) validate() error {
 		if r.OverallTimeout < 1 || r.MaxAttempts < 1 || len(r.Operations) == 0 || len(r.Targets) == 0 {
 			return fmt.Errorf("route %q has no serving budget or targets", slug)
 		}
-		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
+		if err := validateFidelity(r.Fidelity); err != nil {
 			return fmt.Errorf("route %q fidelity: %w", slug, err)
 		}
 		if err := r.ValidatePassthrough(); err != nil {
@@ -367,7 +361,6 @@ func (s *Snapshot) Compile() error {
 	next := *s
 	next.Providers = compileProviderMetadata(s.Providers)
 	next.CodePaidConnections = compileProviderMetadata(s.CodePaidConnections)
-	next.Routes = maps.Clone(s.Routes)
 	next.Guardrails = s.Guardrails.Clone()
 	if err := next.compileGuardrails(); err != nil {
 		return err
@@ -391,8 +384,7 @@ func (s *Snapshot) Compile() error {
 	next.webrtc = make(map[string]map[string]*RealtimeTemplate)
 	next.duplex = make(map[string]map[string]*duplexcontract.Template)
 	for slug, r := range next.Routes {
-		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]
-		templates, policy, err := next.compileRouteExecution(r)
+		templates, err := next.compileRouteExecution(r)
 		if err != nil {
 			return fmt.Errorf("route %q interaction: %w", slug, err)
 		}
@@ -427,8 +419,6 @@ func (s *Snapshot) Compile() error {
 			return fmt.Errorf("route %q duplex: %w", slug, err)
 		}
 		next.duplex[slug] = duplex
-		r.compiledContentPolicy = policy
-		next.Routes[slug] = r
 	}
 	*s = next
 	return nil

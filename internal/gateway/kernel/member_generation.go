@@ -91,10 +91,6 @@ func (g *MemberGeneration) Run(ctx context.Context, parsed ParsedRequest, emit f
 		s.Finish(x, out, out.Err.Status)
 		return out
 	}
-	if e := s.enforceCompletionOutput(x, out.Completion); e != nil {
-		s.Finish(x, out, e.Status)
-		return &Outcome{Err: e}
-	}
 	s.Finish(x, out, http.StatusOK)
 	return out
 }

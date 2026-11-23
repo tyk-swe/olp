@@ -168,14 +168,14 @@ func ObservedPrincipal(slots []RevisionSlot) string {
 // route revision. Target array order is retained; the position field does not
 // reorder it.
 type RouteRevision struct {
-	ID, Slug, RevisionID                                 string
-	Revision                                             int
-	OverallTimeout                                       int64
-	MaxAttempts                                          int
-	PublishedAt                                          time.Time
-	ProjectID                                            *string
-	Operations, Targets, Policy, ContentPolicy, Fidelity []byte
-	Behavior                                             []byte
+	ID, Slug, RevisionID                  string
+	Revision                              int
+	OverallTimeout                        int64
+	MaxAttempts                           int
+	PublishedAt                           time.Time
+	ProjectID                             *string
+	Operations, Targets, Policy, Fidelity []byte
+	Behavior                              []byte
 }
 
 // DecodeRouteRevision reconstructs a route without checking ownership,
@@ -198,11 +198,6 @@ func DecodeRouteRevision(revision RouteRevision) (Route, error) {
 	if len(revision.Policy) > 0 {
 		if err = json.Unmarshal(revision.Policy, &route.Policy); err != nil {
 			return Route{}, fmt.Errorf("route %s policy: %w", revision.Slug, err)
-		}
-	}
-	if len(revision.ContentPolicy) > 0 {
-		if err = json.Unmarshal(revision.ContentPolicy, &route.ContentPolicy); err != nil {
-			return Route{}, fmt.Errorf("route %s content policy: %w", revision.Slug, err)
 		}
 	}
 	route.Fidelity, err = DecodeFidelity(revision.Fidelity)

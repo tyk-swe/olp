@@ -368,7 +368,7 @@ A content-filter refusal is a typed upstream error, such as `content_filter` or
 against provider health, and reaches the caller as a `400` with code
 `content_filter` unless a fallback serves the request.
 
-A fallback route runs with its own targets, policy, content policy and fidelity,
+A fallback route runs with its own targets, policy and fidelity,
 and the caller still sees the route it named in the response's `model`. The key
 must be allowed to use the fallback route; otherwise the plan records
 `fallback_route_forbidden` and moves to the next fallback. A route that is no
@@ -460,8 +460,7 @@ keeps the key's seed.
 
 A target declared `{"shadow": {"sample_rate": 0.05}}` never serves callers. It
 is planned with the request under every hard constraint the request is subject
-to, including region, data collection, zero data retention and the route's
-content policy, and a sample of eligible requests, chosen deterministically from
+to, including region, data collection and zero data retention, and a sample of eligible requests, chosen deterministically from
 the request's identifier, is mirrored to it after the caller's response
 completes. Shadow attempts run in their own admission pool
 (`OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS`) under the route's deadline and are

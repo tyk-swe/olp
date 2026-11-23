@@ -9,38 +9,33 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Definition struct {
-	Configuration    json.RawMessage       `json:"configuration"`
-	TimeoutMS        int64                 `json:"timeout_ms"`
-	OnError          guardrails.OnError    `json:"on_error"`
-	ActiveRevisionID *string               `json:"active_revision_id"`
-	ID               string                `json:"id"`
-	ProjectID        string                `json:"project_id"`
-	Name             string                `json:"name"`
-	Type             guardrails.Kind       `json:"type"`
-	ETag             string                `json:"etag"`
-	RevisionID       string                `json:"revision_id"`
-	Revision         int64                 `json:"revision"`
-	Policy           *contentpolicy.Policy `json:"policy"`
-	RetiredAt        *time.Time            `json:"retired_at"`
+	Configuration    json.RawMessage    `json:"configuration"`
+	TimeoutMS        int64              `json:"timeout_ms"`
+	OnError          guardrails.OnError `json:"on_error"`
+	ActiveRevisionID *string            `json:"active_revision_id"`
+	ID               string             `json:"id"`
+	ProjectID        string             `json:"project_id"`
+	Name             string             `json:"name"`
+	Type             guardrails.Kind    `json:"type"`
+	ETag             string             `json:"etag"`
+	RevisionID       string             `json:"revision_id"`
+	Revision         int64              `json:"revision"`
+	RetiredAt        *time.Time         `json:"retired_at"`
 }
 
 type Saved struct{ ID, RevisionID string }
 
-const selected = "SELECT g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,g.etag::text,v.id::text,v.revision,v.policy,g.retired_at,v.configuration,v.timeout_ms,v.on_error,g.active_revision_id::text FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.latest_revision_id"
+const selected = "SELECT g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,g.etag::text,v.id::text,v.revision,g.retired_at,v.configuration,v.timeout_ms,v.on_error,g.active_revision_id::text FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.latest_revision_id"
 
 func scan(row pgx.Row) (Definition, error) {
 	var value Definition
-	var policy []byte
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &policy, &value.RetiredAt, &value.Configuration, &value.TimeoutMS, &value.OnError, &value.ActiveRevisionID); err != nil {
-		return Definition{}, err
-	}
-	return value, json.Unmarshal(policy, &value.Policy)
+	err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &value.RetiredAt, &value.Configuration, &value.TimeoutMS, &value.OnError, &value.ActiveRevisionID)
+	return value, err
 }
 
 func load(ctx context.Context, q database.Queryer, id string) (Definition, error) {
@@ -67,24 +62,10 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d D
 	if err != nil {
 		return Saved{}, err
 	}
-	policy, err := json.Marshal(storedPolicy(d.legacy))
-	if err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,policy,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,'{}',$4,$5,$6,$7)", saved.RevisionID, saved.ID, revision, actor, d.configuration, d.timeout, d.onError); err != nil {
 		return Saved{}, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,policy,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", saved.RevisionID, saved.ID, revision, policy, actor, d.configuration, d.timeout, d.onError); err != nil {
-		return Saved{}, err
-	}
-	if d.legacy == nil {
-		return saved, nil
-	}
-	return saved, Activate(ctx, tx, actor, saved.ID, saved.RevisionID)
-}
-
-func storedPolicy(legacy *contentpolicy.Policy) *contentpolicy.Policy {
-	if legacy == nil {
-		return &contentpolicy.Policy{Rules: []contentpolicy.Rule{}}
-	}
-	return legacy
+	return saved, nil
 }
 
 func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d Draft) (Saved, int64, error) {

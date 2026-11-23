@@ -147,13 +147,6 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	if err != nil {
 		return unaryAdmission{}, err
 	}
-	decisions, err := plan.CheckInput()
-	for _, decision := range decisions {
-		recordDecision(x, decision)
-	}
-	if err != nil {
-		return unaryAdmission{}, err
-	}
 	evidence, err := x.prepareOperationGuardrails(plan)
 	if err != nil {
 		return unaryAdmission{guardrailDecisions: evidence}, err
@@ -179,9 +172,6 @@ func (x *Call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrail
 	parallel, parallelErr := x.guard.engine.Unavailable(guardrails.InputParallel)
 	x.guard.record(parallel.Decisions)
 	evidence := guardrails.MergeEvidence(result.Decisions, parallel.Decisions)
-	if x.guard.engine.HasLegacyInput() {
-		return evidence, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
-	}
 	if unavailable != nil {
 		return evidence, unavailable
 	}
@@ -245,7 +235,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 			session.semantic = err
 			return nil, err
 		}
-		return prepared.candidate, nil
+		return prepared, nil
 	}
 	_, _, failure := session.selectPlan(ctx, options)
 	return failure

@@ -1807,7 +1807,6 @@
         "properties": {
           "api_version": {
             "enum": [
-              "openllmproxy.dev/config/v1",
               "openllmproxy.dev/config/v2"
             ],
             "type": "string"
@@ -2563,16 +2562,6 @@
       },
       "ConfigurationRouteEntry": {
         "properties": {
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "max_attempts": {
             "format": "int32",
             "type": "integer"
@@ -2709,7 +2698,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -3213,58 +3202,6 @@
             "type": "array"
           }
         },
-        "type": "object"
-      },
-      "ContentPolicy": {
-        "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
-        "properties": {
-          "rules": {
-            "items": {
-              "$ref": "#/components/schemas/ContentPolicyRule"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "rules"
-        ],
-        "type": "object"
-      },
-      "ContentPolicyRule": {
-        "properties": {
-          "action": {
-            "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
-            "enum": [
-              "block",
-              "redact"
-            ],
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "pattern": {
-            "description": "Go RE2 expression; must not match the empty string.",
-            "type": "string"
-          },
-          "phase": {
-            "enum": [
-              "input",
-              "output"
-            ],
-            "type": "string"
-          },
-          "replacement": {
-            "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "phase",
-          "pattern",
-          "action"
-        ],
         "type": "object"
       },
       "ContinueGrantEnrollmentRequest": {
@@ -4053,16 +3990,6 @@
       },
       "CreateRouteDraftRequest": {
         "properties": {
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "max_attempts": {
             "format": "int32",
             "minimum": 0,
@@ -4185,7 +4112,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -6906,30 +6833,6 @@
         "required": [
           "parameter",
           "cursor"
-        ],
-        "type": "object"
-      },
-      "PolicyDecision": {
-        "description": "Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.",
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "phase": {
-            "type": "string"
-          },
-          "rule_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "rule_id",
-          "phase",
-          "action",
-          "outcome"
         ],
         "type": "object"
       },
@@ -10540,16 +10443,6 @@
       },
       "ReplaceRouteDraftRequest": {
         "properties": {
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "max_attempts": {
             "format": "int32",
             "type": "integer"
@@ -10662,7 +10555,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -11118,13 +11011,6 @@
               "null"
             ]
           },
-          "policy_decisions": {
-            "description": "Metadata-only content policy decisions recorded for this request.",
-            "items": {
-              "$ref": "#/components/schemas/PolicyDecision"
-            },
-            "type": "array"
-          },
           "route": {
             "type": "string"
           },
@@ -11327,7 +11213,6 @@
           "started_at",
           "attempt_count",
           "attribution",
-          "policy_decisions",
           "origin",
           "payload_captured"
         ],
@@ -11596,16 +11481,6 @@
               "null"
             ]
           },
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -11746,7 +11621,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -11807,7 +11682,6 @@
           "etag",
           "operations",
           "targets",
-          "content_policy",
           "created_at",
           "updated_at",
           "fidelity",
@@ -12284,9 +12158,6 @@
       },
       "RouteRevisionDiffResponse": {
         "properties": {
-          "content_policy_changed": {
-            "type": "boolean"
-          },
           "from_revision": {
             "format": "int32",
             "type": "integer"
@@ -12366,7 +12237,6 @@
           "routing_policy_changed",
           "routing_policy_before",
           "routing_policy_after",
-          "content_policy_changed",
           "from_revision",
           "to_revision",
           "slug_changed",
@@ -12415,16 +12285,6 @@
           "activated_by": {
             "format": "uuid",
             "type": "string"
-          },
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "id": {
             "format": "uuid",
@@ -12545,7 +12405,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -12608,7 +12468,6 @@
           "activated_at",
           "operations",
           "targets",
-          "content_policy",
           "fidelity",
           "fallbacks",
           "selectors",
@@ -16323,7 +16182,6 @@
               "not_inspected",
               "not_evaluated",
               "incompatible",
-              "blocked",
               "transformed",
               "admitted"
             ]
@@ -19743,7 +19601,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -24121,16 +23979,6 @@
       },
       "UpdatePublishedRouteRequest": {
         "properties": {
-          "content_policy": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ContentPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "max_attempts": {
             "format": "int32",
             "type": "integer"
@@ -24244,7 +24092,7 @@
             ]
           },
           "passthrough": {
-            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.",
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PassthroughConfig"
@@ -24374,9 +24222,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "policy": {
-            "$ref": "#/components/schemas/ContentPolicy"
-          },
           "configuration": {
             "type": "object",
             "additionalProperties": true
@@ -24409,9 +24254,6 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100
-          },
-          "policy": {
-            "$ref": "#/components/schemas/ContentPolicy"
           },
           "configuration": {
             "type": "object",
@@ -24530,9 +24372,6 @@
             "format": "int64",
             "minimum": 1
           },
-          "policy": {
-            "$ref": "#/components/schemas/ContentPolicy"
-          },
           "retired_at": {
             "type": [
               "string",
@@ -24573,7 +24412,6 @@
           "etag",
           "revision_id",
           "revision",
-          "policy",
           "retired_at"
         ]
       },
@@ -24593,9 +24431,6 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1
-          },
-          "policy": {
-            "$ref": "#/components/schemas/ContentPolicy"
           },
           "created_at": {
             "type": "string",
@@ -24623,7 +24458,6 @@
           "id",
           "guardrail_id",
           "revision",
-          "policy",
           "created_at"
         ]
       },
@@ -24727,9 +24561,6 @@
               "decision_model",
               "typesafe"
             ]
-          },
-          "policy": {
-            "$ref": "#/components/schemas/ContentPolicy"
           },
           "configuration": {
             "type": "object",
@@ -39386,7 +39217,7 @@
                 }
               }
             },
-            "description": "Request or route is invalid, or the route enforces an output content policy"
+            "description": "Request or route is invalid"
           },
           "503": {
             "content": {

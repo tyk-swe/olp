@@ -121,14 +121,11 @@ func (run unaryRun) decode(sent unarySent) (operationplan.Result, events.Attempt
 	result, err := sent.plan.Decode(sent.raw)
 	measured := sent.fact
 	measured.Usage = accountingUsage(result.Usage)
-	for _, decision := range result.Decisions {
-		recordDecision(run.x, decision)
-	}
 	if err == nil {
 		return result, measured, nil
 	}
 	var incompatible *oif.Incompatibility
-	if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
+	if errors.As(err, &incompatible) && incompatible.Code == "policy_conflict" {
 		return result, measured, ended(classPolicy, &AttemptFailure{policyCode: incompatible.Code})
 	}
 	return result, measured, ended(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})

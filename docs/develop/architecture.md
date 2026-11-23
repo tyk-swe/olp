@@ -22,7 +22,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/domain/contentpolicy/`; matching console features |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/platform/database/` |
 | Egress, secrets and telemetry | `internal/platform/egress/`, `internal/platform/secrets/`, `internal/observability/`, `internal/platform/telemetry/` |
@@ -121,7 +121,7 @@ a complete set of derived contracts only after every target succeeds. Runtime
 owns installation and live credentials. Management boundaries translate routing
 validation failures to HTTP problems.
 
-`Snapshot.Clone`, `connectors.Config.Clone` and `contentpolicy.Policy.Clone` give
+`Snapshot.Clone` and `connectors.Config.Clone` give
 new owners independent mutable configuration. Immutable plugin profiles may be
 shared. Connector configuration constructs serving identities for every operation;
 provider management reads health statistics from observability, which the gateway
