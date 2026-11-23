@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 )
 
 func TestCodeAccountEndpoints(t *testing.T) {

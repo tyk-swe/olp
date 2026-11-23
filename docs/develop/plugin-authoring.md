@@ -30,7 +30,7 @@ The management contract lives at `management/management.json`, the inference
 contract at `inference/inference.json`, and the guardrails contract at
 `guardrails/guardrails.json`. Each first-party plugin program builds from a
 folder next to the adapter module it serves, such as
-`internal/claudeauth/claude` and the folders under `internal/codeplans`.
+`internal/codemode/claudeauth/claude` and the folders under `internal/codemode/codeplans`.
 
 ## A minimal plugin
 

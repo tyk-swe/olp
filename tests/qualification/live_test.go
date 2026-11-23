@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/antigravityauth"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/codemode/antigravityauth"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeplans"
+	"github.com/tyk-swe/olp/internal/codemode/codexauth"
 )
 
 func TestResearchAbsentPreservesLegacySnapshotDigest(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 )
 
 func (s *Store) ObserveCooldownClass(ctx context.Context, accountID, model string, classification codeadapter.Classification, observedAt time.Time) error {

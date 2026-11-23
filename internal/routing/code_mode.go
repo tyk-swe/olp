@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 )
 

@@ -17,7 +17,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
+| Code mode | `internal/codemode/` (vocabulary, with `codeadapter/`, `codeclient/`, `codewire/`, `codeadmin/`, the plan profiles and plugins in `codeplans/`, and the subscription auth plugins in `claudeauth/`, `codexauth/` and `antigravityauth/` beneath it), `internal/codesessions/` (account selection and bindings, with allowance observation in `codeallowance/` and account management in `codeaccounts/`), with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
 | Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/contracts/` (the strict contract compilers `interaction/`, `unary/`, `duplex/` and `media/`), `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
@@ -67,7 +67,7 @@ are refused before any planner runs.
 activation and grant enrollment changes. Promotion writes drafts through the
 narrower `provider.Drafts` interface it declares. The stored configuration
 document and the kind registry live in `providers/connection`, upstream probes
-in `providers/probe`, and code accounts in `providers/codeaccounts`. Network
+in `providers/probe`, and code accounts in `codesessions/codeaccounts`. Network
 steps run outside mutation locks, with authority and slot identity checked again
 before commit. Personal grant enrollment remains a separate protocol.
 
