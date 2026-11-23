@@ -11,6 +11,7 @@ import BillingImportSection from './BillingImportSection.svelte';
 import type { BillingImport } from './billing';
 import { ProviderEditor } from './providerEditor.svelte';
 import { ProviderWizardState } from './providerWizard.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const spec: ProviderKindCapability = {
   kind: 'openai_compatible',
@@ -109,7 +110,7 @@ async function wizard(): Promise<ProviderWizardState> {
   onTestFinished(() => unmount(component));
   flushSync();
   const state = ready.mock.results[0].value;
-  await vi.waitFor(() => expect(state.draft).not.toBeNull());
+  await eventually(() => expect(state.draft).not.toBeNull());
   return state;
 }
 
@@ -270,7 +271,7 @@ describe('provider wizard', () => {
     expect(state.providerId).toBe('');
     expect(state.wizardStep).toBe(1);
     expect(state.probe).toBeNull();
-    await vi.waitFor(() => expect(state.draft?.name).toBe(''));
+    await eventually(() => expect(state.draft?.name).toBe(''));
   });
 
   it('offers manual model declaration when discovery returns no models', async () => {
@@ -296,7 +297,7 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
     await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    await vi.waitFor(() => expect(state.wizardProvider?.id).toBe(provider.id));
+    await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
 
     await state.discoverWizardProvider();
     expect(state.errorMessage).toContain('Use the manual identifier fallback');
@@ -336,7 +337,7 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
     await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    await vi.waitFor(() => expect(state.wizardProvider?.id).toBe(provider.id));
+    await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
 
     await state.activateWizardProvider();
     expect(state.errorMessage).toBe('Unavailable');
@@ -434,7 +435,7 @@ async function providerEditorState() {
   onTestFinished(() => unmount(component));
   flushSync();
   const state = ready.mock.results[0].value;
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(state.view.draft.name).toBe(editorProvider.name)
   );
   return state;
@@ -633,15 +634,15 @@ it('clears a billing import delete conflict after loading the new version', asyn
       (item) => item.textContent?.trim() === label
     );
 
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button(target, 'Run now')).toHaveProperty('disabled', false)
   );
   button(target, 'Remove')?.click();
-  await vi.waitFor(() => expect(button(document, 'Delete')).toBeDefined());
+  await eventually(() => expect(button(document, 'Delete')).toBeDefined());
   button(document, 'Delete')?.click();
-  await vi.waitFor(() => expect(button(target, 'Reload')).toBeDefined());
+  await eventually(() => expect(button(target, 'Reload')).toBeDefined());
   button(target, 'Reload')?.click();
-  await vi.waitFor(() => {
+  await eventually(() => {
     expect(target.querySelector('dd')?.textContent).toBe('No');
     expect(target.querySelector('[role="alert"]')).toBeNull();
     expect(button(target, 'Run now')).toHaveProperty('disabled', true);

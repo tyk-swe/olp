@@ -7,6 +7,7 @@ import ReconciliationPanel from './ReconciliationPanel.svelte';
 import type { ReconciliationReport } from './reconciliation.js';
 import RoutingReportsPage from './RoutingReportsPage.svelte';
 import UsageDetails from './UsageDetails.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -124,7 +125,7 @@ it('applies the same supported filters to both reports and distinguishes missing
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('tbody tr')?.textContent).toContain('0 / 5')
   );
   expect(target.querySelector('tbody tr')?.textContent).toContain(
@@ -139,7 +140,7 @@ it('applies the same supported filters to both reports and distinguishes missing
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => {
+  await eventually(() => {
     const applied = queries.mock.calls.filter(
       ([, query]) => query.get('route') === 'chosen-route'
     );
@@ -207,7 +208,7 @@ it('shows the invoice currencies when a mixed-currency day has no total', async 
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() => {
+  await eventually(() => {
     const invoice = target.querySelector('tbody td:nth-child(3)');
     expect(invoice?.textContent).toBe('Multiple currencies (EUR, USD)');
   });

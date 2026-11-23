@@ -14,6 +14,7 @@ import type { ManagementOperation } from '#lib/management/requirements.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import ToolCallDetailPage from './ToolCallDetailPage.svelte';
 import MCPServerEditor from './MCPServerEditor.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const server: MCPServer = {
   id: 'server',
@@ -71,7 +72,7 @@ it('resolves held amounts from the call screen and shows the resulting recorded 
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() => expect(target.querySelector('form')).not.toBeNull());
+  await eventually(() => expect(target.querySelector('form')).not.toBeNull());
   const inputs = target.querySelectorAll('input');
   inputs[0].value = evidence;
   inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
@@ -81,7 +82,7 @@ it('resolves held amounts from the call screen and shows the resulting recorded 
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(resolve).toHaveBeenCalledWith({
       outcome: 'settled',
       evidence_digest: evidence,
@@ -89,7 +90,7 @@ it('resolves held amounts from the call screen and shows the resulting recorded 
       observed_charge: '0'
     })
   );
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Outcome settled')
   );
   expect(target.querySelector('form')).toBeNull();
@@ -179,7 +180,7 @@ it.each(['streamable_http', 'stdio'])(
     target
       .querySelector('form')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(saved).toHaveBeenCalled());
+    await eventually(() => expect(saved).toHaveBeenCalled());
     expect(writes).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'Tools',
@@ -284,7 +285,7 @@ it.each(['OAuth', 'Entra', 'delegation'] as const)(
     target
       .querySelector('form')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    await eventually(() => expect(saved).toHaveBeenCalledOnce());
     const body = await writes.mock.calls[0][0].json();
     expect(body).not.toHaveProperty(
       mode === 'delegation' ? 'delegation_private_key' : 'entra_client_secret'
@@ -349,9 +350,9 @@ it.each(['save', 'conflict', 'retire'] as const)(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
-    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    await eventually(() => expect(button('Edit')).toBeDefined());
     button('Edit')?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
         'Original'
       )
@@ -360,8 +361,8 @@ it.each(['save', 'conflict', 'retire'] as const)(
       button('Retire server')?.click();
       flushSync();
       button('Confirm retire server')?.click();
-      await vi.waitFor(() => expect(target.textContent).toContain('Retired'));
-      await vi.waitFor(() => expect(target.querySelector('form')).toBeNull());
+      await eventually(() => expect(target.textContent).toContain('Retired'));
+      await eventually(() => expect(target.querySelector('form')).toBeNull());
       return;
     }
     const name = target.querySelector('form input') as HTMLInputElement;
@@ -383,12 +384,12 @@ it.each(['save', 'conflict', 'retire'] as const)(
     target
       .querySelector('form')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    await eventually(() => expect(writes).toHaveBeenCalledOnce());
     expect(writes.mock.calls[0][0].headers.get('If-Match')).toBe('"before"');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
+    await eventually(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'My draft'
     );
@@ -442,16 +443,16 @@ it('clears remote task state on navigation and ignores the previous task respons
     [...target.querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === 'Fetch remote status'
     );
-  await vi.waitFor(() => expect(fetchRemote()).toBeDefined());
+  await eventually(() => expect(fetchRemote()).toBeDefined());
   fetchRemote()?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Remote state working')
   );
   fetchRemote()?.click();
-  await vi.waitFor(() => expect(remote).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(remote).toHaveBeenCalledTimes(2));
   params.set('taskId', 'second');
   flushSync();
-  await vi.waitFor(() => expect(target.textContent).toContain('second'));
+  await eventually(() => expect(target.textContent).toContain('second'));
   expect(target.textContent).not.toContain('Remote state working');
   pending.resolve(json({ id: 'first', status: { state: 'completed' } }));
   await pending.promise;
@@ -504,7 +505,7 @@ it('allows a new bearer credential after removing the previous one without leavi
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
   expect(await writes.mock.calls[0][0].json()).toHaveProperty(
     'credential',
     null
@@ -520,7 +521,7 @@ it('allows a new bearer credential after removing the previous one without leavi
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(saved).toHaveBeenCalledTimes(2));
   expect(await writes.mock.calls[1][0].json()).toHaveProperty(
     'credential',
     'replacement'
@@ -569,28 +570,28 @@ it('serializes remote status fetching and cancellation', async () => {
     [...target.querySelectorAll('button')].find(
       (item) => item.textContent?.trim() === label
     );
-  await vi.waitFor(() => expect(button('Fetch remote status')).toBeDefined());
+  await eventually(() => expect(button('Fetch remote status')).toBeDefined());
   button('Cancel remote task')?.click();
   flushSync();
   button('Fetch remote status')?.click();
-  await vi.waitFor(() => expect(reads).toHaveBeenCalledOnce());
+  await eventually(() => expect(reads).toHaveBeenCalledOnce());
   expect(button('Confirm cancel remote task')?.disabled).toBe(true);
   button('Confirm cancel remote task')?.click();
   expect(cancels).not.toHaveBeenCalled();
   status.resolve(json({ id: 'task', status: { state: 'working' } }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button('Confirm cancel remote task')?.disabled).toBe(false)
   );
   button('Confirm cancel remote task')?.click();
-  await vi.waitFor(() => expect(cancels).toHaveBeenCalledOnce());
+  await eventually(() => expect(cancels).toHaveBeenCalledOnce());
   expect(button('Fetch remote status')?.disabled).toBe(true);
   button('Fetch remote status')?.click();
   expect(reads).toHaveBeenCalledOnce();
   cancelled.resolve(json({ id: 'task', status: { state: 'canceled' } }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Remote state canceled')
   );
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button('Fetch remote status')?.disabled).toBe(false)
   );
 });
@@ -622,7 +623,7 @@ function mountServers(operations: ManagementOperation[]) {
 
 it('offers read-only members inspection but no server create or edit controls', async () => {
   const { target, button } = mountServers(['read']);
-  await vi.waitFor(() => expect(button('View')).toBeDefined());
+  await eventually(() => expect(button('View')).toBeDefined());
 
   expect(button('New server')).toBeUndefined();
   expect(button('Edit')).toBeUndefined();
@@ -633,9 +634,9 @@ it('keeps an edited server draft when the operator declines to discard it', asyn
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
   const { target, button } = mountServers(['read', 'configure']);
-  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
       'Original'
     )
@@ -711,9 +712,9 @@ it('retries publication refresh after a saved write without submitting the write
     [...target.querySelectorAll('button')].find(
       (item) => item.textContent?.trim() === name
     );
-  await vi.waitFor(() => expect(button('Open')).toBeDefined());
+  await eventually(() => expect(button('Open')).toBeDefined());
   button('Open')?.click();
-  await vi.waitFor(() => expect(target.querySelector('form')).not.toBeNull());
+  await eventually(() => expect(target.querySelector('form')).not.toBeNull());
   const name = target.querySelector<HTMLInputElement>('form input');
   expect(name).not.toBeNull();
   if (!name) return;
@@ -723,13 +724,13 @@ it('retries publication refresh after a saved write without submitting the write
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(button('Retry refresh')?.disabled).toBe(false));
+  await eventually(() => expect(button('Retry refresh')?.disabled).toBe(false));
   expect(writes).toHaveBeenCalledOnce();
   expect(name.value).toBe('Saved');
   expect(target.textContent).toContain('Draft saved.');
   recovered();
   button('Retry refresh')?.click();
-  await vi.waitFor(() => expect(button('Retry refresh')).toBeUndefined());
+  await eventually(() => expect(button('Retry refresh')).toBeUndefined());
   expect(writes).toHaveBeenCalledOnce();
   expect(target.textContent).not.toContain(
     'Write saved, but refreshing failed.'
@@ -874,7 +875,7 @@ it('shows the latest personal grant result after saving authorization settings',
     [...target.querySelectorAll('button')].find(
       (item) => item.textContent?.trim() === label
     );
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('select option[value="server"]')).not.toBeNull()
   );
   const selection = target
@@ -884,22 +885,22 @@ it('shows the latest personal grant result after saving authorization settings',
   if (!selection) return;
   selection.value = configured.id;
   selection.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button('Save authorization settings')).toBeDefined()
   );
   button('Save authorization settings')
     ?.closest('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain(
       'Personal authorization configuration saved'
     )
   );
   window.history.replaceState(null, '', '#grant.token');
   window.dispatchEvent(new HashChangeEvent('hashchange'));
-  await vi.waitFor(() => expect(button('Claim enrollment')).toBeDefined());
+  await eventually(() => expect(button('Claim enrollment')).toBeDefined());
   button('Claim enrollment')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain(
       'Enrollment claimed. Authorization is pending'
     )

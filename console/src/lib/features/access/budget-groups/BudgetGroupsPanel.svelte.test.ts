@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import BudgetGroupsPanel from './BudgetGroupsPanel.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -55,7 +56,7 @@ it('keeps an edited budget group when another group is retired', async () => {
     [...target.querySelectorAll('button')].find(
       (item) => item.textContent?.trim() === label
     );
-  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();
   flushSync();
   const name = target.querySelector<HTMLInputElement>(
@@ -69,19 +70,19 @@ it('keeps an edited budget group when another group is retired', async () => {
   button('Retire budget group')?.click();
   flushSync();
   button('Confirm retire budget group')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(retired).toHaveBeenCalledExactlyOnceWith(
       '/api/v1/budget-groups/retiring'
     )
   );
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelectorAll('tbody tr')).toHaveLength(1)
   );
   expect(
     target.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.value
   ).toBe('Unsaved group name');
   button('Save')?.click();
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
   expect(new URL(saved.mock.calls[0][0].url).pathname).toBe(
     '/api/v1/budget-groups/editing'
   );
@@ -136,7 +137,7 @@ it.each(['create', 'edit'] as const)(
       [...document.querySelectorAll('button')].find(
         (x) => x.textContent?.trim() === label
       )!;
-    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    await eventually(() => expect(button('Edit')).toBeDefined());
     button(mode === 'create' ? 'New group' : 'Edit').click();
     flushSync();
     if (mode === 'create') {
@@ -156,7 +157,7 @@ it.each(['create', 'edit'] as const)(
     select.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
     button(mode === 'create' ? 'Create group' : 'Save').click();
-    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    await eventually(() => expect(saved).toHaveBeenCalledOnce());
     expect(await saved.mock.calls[0][0].json()).toHaveProperty(
       'cost_basis',
       'charge'

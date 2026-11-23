@@ -37,6 +37,7 @@ export default defineConfig({
     })
   ],
   test: {
+    pool: 'vmThreads',
     allowOnly: false,
     clearMocks: true,
     restoreMocks: true,

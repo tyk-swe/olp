@@ -4,6 +4,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import GuardrailPreview from './GuardrailPreview.svelte';
 import type { PreviewEntry } from './api';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const notice =
   'This preview shows only guardrails you can view. Full-policy compatibility is not shown.';
@@ -196,7 +197,7 @@ async function mountPreview(
     if (!region) throw new Error('Missing preview result');
     return region;
   };
-  await vi.waitFor(() => expect(target.querySelector('form')).not.toBeNull());
+  await eventually(() => expect(target.querySelector('form')).not.toBeNull());
   function select(index: number, value: string) {
     const field = target.querySelectorAll('select')[index];
     if (!field) throw new Error(`Missing selection ${index}`);
@@ -218,7 +219,7 @@ async function mountPreview(
       expect(button?.disabled).toBe(false);
       button?.click();
       flushSync();
-      await vi.waitFor(() => {
+      await eventually(() => {
         expect(requested).toHaveBeenLastCalledWith(route);
         expect(result().textContent).toContain('Serving release 41');
       });

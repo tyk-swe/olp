@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import GuardrailsPage from './GuardrailsPage.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const original = {
   id: 'original',
@@ -154,7 +155,7 @@ for (const editor of [
         flushSync();
       };
       flushSync();
-      await vi.waitFor(() => expect(button('Original')).toBeDefined());
+      await eventually(() => expect(button('Original')).toBeDefined());
       click('Original');
       if (destination === 'new-from-new') click(editor.create);
       rename('First save');
@@ -181,7 +182,7 @@ for (const editor of [
         click('Original');
       if (!destination.endsWith('untouched')) rename('Current edits');
       release.resolve();
-      await vi.waitFor(() => expect(button(editor.save).disabled).toBe(false));
+      await eventually(() => expect(button(editor.save).disabled).toBe(false));
       expect(target.querySelector('input')?.value).toBe(
         destination.endsWith('untouched') ? 'Original' : 'Current edits'
       );
@@ -192,7 +193,7 @@ for (const editor of [
       if (destination !== 'unchanged')
         expect(target.textContent).not.toMatch(/draft saved/i);
       save();
-      await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(2));
+      await eventually(() => expect(writes).toHaveBeenCalledTimes(2));
       const [request, body] = writes.mock.calls[1];
       const newDestination =
         destination === 'new' ||
@@ -213,7 +214,7 @@ for (const editor of [
       expect(body.name).toBe(
         destination.endsWith('untouched') ? 'Original' : 'Current edits'
       );
-      await vi.waitFor(() => expect(button(editor.save).disabled).toBe(false));
+      await eventually(() => expect(button(editor.save).disabled).toBe(false));
       if (reselected) {
         expect(target.querySelector('[role=alert]')?.textContent).toContain(
           'Reload before saving'
@@ -229,7 +230,7 @@ for (const editor of [
       }
       rename('Another edit');
       save();
-      await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(3));
+      await eventually(() => expect(writes).toHaveBeenCalledTimes(3));
       expect(writes.mock.calls[2][0].headers.get('If-Match')).toBe(
         `"${newDestination ? 'created' : id}-saved-etag"`
       );
@@ -303,7 +304,7 @@ it('replaces an attachment atomically and retains its displayed revision when pu
     flushSync();
   }
   flushSync();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Attached revision pinned')
   );
   const select = target.querySelector('select');
@@ -314,7 +315,7 @@ it('replaces an attachment atomically and retains its displayed revision when pu
   flushSync();
   click('Replace attachment');
   click('Confirm replace attachment');
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Incompatible policy revision')
   );
   expect(writes).toHaveBeenCalledExactlyOnceWith(
@@ -395,13 +396,13 @@ it.each(['loaded', 'pending'])(
       flushSync();
     }
     flushSync();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Attached revision pinned')
     );
     click('Inspect pinned revision');
-    await vi.waitFor(() => expect(reads).toHaveBeenCalledOnce());
+    await eventually(() => expect(reads).toHaveBeenCalledOnce());
     if (inspection === 'loaded')
-      await vi.waitFor(() =>
+      await eventually(() =>
         expect(target.textContent).toContain(oldPolicy.name)
       );
     const select = target.querySelector('select');
@@ -412,12 +413,12 @@ it.each(['loaded', 'pending'])(
     flushSync();
     click('Replace attachment');
     click('Confirm replace attachment');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Attached revision next')
     );
     pending.resolve(json(oldPolicy));
     await pending.promise;
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(
         [...target.querySelectorAll('button')].find(
           (item) => item.textContent?.trim() === 'Inspect pinned revision'
@@ -426,7 +427,7 @@ it.each(['loaded', 'pending'])(
     );
     expect(target.textContent).not.toContain(oldPolicy.name);
     click('Inspect pinned revision');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Replacement policy contents')
     );
     expect(target.textContent).not.toContain(oldPolicy.name);
@@ -493,11 +494,11 @@ it.each(
       flushSync();
     };
     flushSync();
-    await vi.waitFor(() => expect(button('Original')).toBeDefined());
+    await eventually(() => expect(button('Original')).toBeDefined());
     const kind = tab === 'checks' ? 'check' : 'policy';
     click(`Retire ${kind}`);
     click(`Confirm retire ${kind}`);
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(retired).toHaveBeenCalledExactlyOnceWith(
         `/api/v1/${path}/original`
       )
@@ -512,7 +513,7 @@ it.each(
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
     retirement.resolve(new Response(null, { status: 204 }));
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(
         button('Original')?.closest('tr')?.textContent?.toLowerCase()
       ).not.toContain(`retire ${kind}`)
@@ -529,7 +530,7 @@ it.each(
       ?.dispatchEvent(
         new SubmitEvent('submit', { bubbles: true, cancelable: true })
       );
-    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    await eventually(() => expect(writes).toHaveBeenCalledOnce());
     expect(writes.mock.calls[0][0].method).toBe(
       destination === 'new' ? 'POST' : 'PUT'
     );
@@ -600,25 +601,25 @@ it('retries a failed policy save and activation with the same idempotency key', 
     flushSync();
   };
   flushSync();
-  await vi.waitFor(() => expect(button('Original')).toBeDefined());
+  await eventually(() => expect(button('Original')).toBeDefined());
   click('Original');
   save();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('[role=alert]')?.textContent).toContain(
       'Response lost'
     )
   );
   save();
-  await vi.waitFor(() => expect(keys).toHaveBeenCalledTimes(2));
-  await vi.waitFor(() => expect(button('Activate revision')).toBeDefined());
+  await eventually(() => expect(keys).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(button('Activate revision')).toBeDefined());
   click('Activate revision');
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('[role=alert]')?.textContent).toContain(
       'Response lost'
     )
   );
   click('Activate revision');
-  await vi.waitFor(() => expect(keys).toHaveBeenCalledTimes(4));
+  await eventually(() => expect(keys).toHaveBeenCalledTimes(4));
   const [saveKey, saveRetryKey, activateKey, activateRetryKey] =
     keys.mock.calls.map((call) => call[0]);
   expect(saveKey).toBeTruthy();

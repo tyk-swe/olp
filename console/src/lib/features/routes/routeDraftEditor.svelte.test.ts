@@ -8,6 +8,7 @@ import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';
 import { RouteDraftEditorState } from './routeDraftEditor.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));
 
@@ -133,7 +134,7 @@ async function editor(): Promise<RouteDraftEditorState> {
   onTestFinished(() => unmount(component));
   flushSync();
   const state = ready.mock.results[0].value;
-  await vi.waitFor(() => expect(state.slug).toBe(draft.slug));
+  await eventually(() => expect(state.slug).toBe(draft.slug));
   return state;
 }
 
@@ -184,7 +185,7 @@ describe('route draft editor', () => {
     state.slug = 'first-edit';
     state.touch();
     const saving = state.save(draft);
-    await vi.waitFor(() => expect(replace).toHaveBeenCalledOnce());
+    await eventually(() => expect(replace).toHaveBeenCalledOnce());
 
     state.slug = 'later-edit';
     state.touch();
@@ -268,7 +269,7 @@ describe('route draft editor', () => {
     load.mockImplementation(() => json(remote));
     await state.reload();
     flushSync();
-    await vi.waitFor(() => expect(state.slug).toBe('remote'));
+    await eventually(() => expect(state.slug).toBe('remote'));
     expect(state.hasUnsavedChanges).toBe(false);
     expect(state.concurrentNotice).toBeNull();
   });
@@ -323,7 +324,7 @@ it.each([
     const current = { ...draft, operations: [template.operation] };
     load.mockImplementation(() => json(current));
     const state = await editor();
-    await vi.waitFor(() => expect(state.dialects.isSuccess).toBe(true));
+    await eventually(() => expect(state.dialects.isSuccess).toBe(true));
     state.simulationSurface = template.surface ?? 'openai';
     state.simulationMode = mode;
     const target = document.createElement('div');

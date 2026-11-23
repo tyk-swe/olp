@@ -3,6 +3,7 @@ import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import RouteFixtureChecks from './RouteFixtureChecks.svelte';
 import type { RouteFixturePlan, RouteFixtureReport } from './api.js';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -111,7 +112,7 @@ it('compares the selected local file and shows the assertion and omitted classif
   expect(button.disabled).toBe(false);
   button.click();
 
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('Fixture assertions failed')
   );
   expect(target.textContent).toContain('Structured example');

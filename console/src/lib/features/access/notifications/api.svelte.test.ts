@@ -31,6 +31,7 @@ import {
   type NotificationDestination,
   type NotificationRule
 } from './api';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 const destination: NotificationDestination = {
   id: 'destination-id',
@@ -152,7 +153,7 @@ describe('saved destination test', () => {
         (button) => button.textContent?.trim() === label
       );
     const click = async (label: string, inDialog = true) => {
-      const button = await vi.waitFor(() => {
+      const button = await eventually(() => {
         const scope = inDialog ? target.querySelector('dialog') : target;
         const found = scope ? findButton(label, scope) : undefined;
         expect(found?.disabled).toBe(false);
@@ -166,12 +167,12 @@ describe('saved destination test', () => {
     expect(send).not.toHaveBeenCalled();
     const confirm = await click('Send test');
     confirm?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Result pending.')
     );
     await click('Refresh status');
     await click('Retry same test');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain(
         'Delivery unconfirmed. The receiver may have accepted the test.'
       )
@@ -182,7 +183,7 @@ describe('saved destination test', () => {
     await click('Start a new test');
     expect(send).toHaveBeenCalledTimes(2);
     await click('Send test');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Test delivered.')
     );
     expect(send).toHaveBeenCalledTimes(3);
@@ -219,21 +220,21 @@ describe('notification delivery history', () => {
         (cell) => cell.textContent
       );
 
-    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 10001'));
+    await eventually(() => expect(names()[0]).toBe('Delivery 10001'));
     expect(requestPage).toHaveBeenCalledTimes(1);
     expect(names()).toHaveLength(50);
     expect(button('Previous')?.disabled).toBe(true);
     expect(button('Next')?.disabled).toBe(false);
 
     button('Next')?.click();
-    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 9951'));
+    await eventually(() => expect(names()[0]).toBe('Delivery 9951'));
     expect(requestPage).toHaveBeenCalledTimes(2);
     expect(names()).toHaveLength(50);
     expect(target.textContent).toContain('Page 2');
     expect(button('Previous')?.disabled).toBe(false);
 
     button('Previous')?.click();
-    await vi.waitFor(() => expect(names()[0]).toBe('Delivery 10001'));
+    await eventually(() => expect(names()[0]).toBe('Delivery 10001'));
     expect(target.textContent).toContain('Page 1');
   });
 
@@ -248,9 +249,9 @@ describe('notification delivery history', () => {
     );
     const { target, button } = renderDeliveries();
 
-    await vi.waitFor(() => expect(button('Next')?.disabled).toBe(false));
+    await eventually(() => expect(button('Next')?.disabled).toBe(false));
     button('Next')?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.querySelector('[role="alert"]')?.textContent).toContain(
         'Deliveries are unavailable.'
       )
@@ -259,13 +260,13 @@ describe('notification delivery history', () => {
     expect(button('Next')?.disabled).toBe(true);
 
     button('Retry')?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Older delivery')
     );
     expect(button('Next')?.disabled).toBe(true);
     expect(button('Previous')?.disabled).toBe(false);
     button('Previous')?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain(delivery.rule_name)
     );
     expect(target.textContent).not.toContain('Older delivery');
@@ -355,7 +356,7 @@ describe.each([
           ? [destination, projectDestination]
           : [rule, projectRule];
 
-      await vi.waitFor(() => {
+      await eventually(() => {
         expect(rowActions(projectRow.name)).toEqual(
           expect.arrayContaining(actions)
         );
@@ -370,11 +371,11 @@ describe.each([
             (button) => button.textContent?.trim() === 'Disable'
           );
         disable(globalRow.name)?.click();
-        await vi.waitFor(() =>
+        await eventually(() =>
           expect(disable(projectRow.name)?.disabled).toBe(true)
         );
         toggle.resolve(json({ ...globalRow, enabled: false }));
-        await vi.waitFor(() =>
+        await eventually(() =>
           expect(disable(projectRow.name)?.disabled).toBe(false)
         );
       }

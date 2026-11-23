@@ -7,6 +7,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import TemplatesPage from './TemplatesPage.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,7 +61,7 @@ it('requires confirmation before publishing template placements and displays ski
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(
       [...target.querySelectorAll('button')].some(
         (item) => item.textContent?.trim() === 'Apply template'
@@ -76,7 +77,7 @@ it('requires confirmation before publishing template placements and displays ski
   expect(apply).not.toHaveBeenCalled();
   expect(target.textContent).toContain('publish generated routes immediately');
   button('Confirm apply template')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.textContent).toContain('No active price')
   );
   expect(apply.mock.calls[0][0].headers.get('Idempotency-Key')).toBeTruthy();
@@ -136,9 +137,9 @@ it.each(['draft', 'conflict', 'project'] as const)(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
-    await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
+    await eventually(() => expect(button('Inspect and edit')).toBeDefined());
     button('Inspect and edit')?.click();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(
         (target.querySelector('form input') as HTMLInputElement)?.value
       ).toBe('original')
@@ -173,12 +174,12 @@ it.each(['draft', 'conflict', 'project'] as const)(
     target
       .querySelector('form')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    await eventually(() => expect(writes).toHaveBeenCalledOnce());
     expect(writes.mock.calls[0][0].headers.get('If-Match')).toBe('"before"');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
+    await eventually(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'my-draft'
     );
@@ -244,11 +245,11 @@ it.each([false, true])(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === label
       );
-    await vi.waitFor(() => expect(button('Apply template')).toBeDefined());
+    await eventually(() => expect(button('Apply template')).toBeDefined());
     button('Apply template')?.click();
     flushSync();
     button('Confirm apply template')?.click();
-    await vi.waitFor(() => expect(button('Apply template')).toBeDefined());
+    await eventually(() => expect(button('Apply template')).toBeDefined());
     expect(applied).toHaveBeenCalledOnce();
     expect((await client.fetchQuery(options)).items).toEqual([placed]);
   }
@@ -296,7 +297,7 @@ function mountTemplates(operations: ManagementOperation[]) {
 
 it('offers read-only members inspection but no template create or edit controls', async () => {
   const { target, button } = mountTemplates(['read']);
-  await vi.waitFor(() => expect(button('Inspect')).toBeDefined());
+  await eventually(() => expect(button('Inspect')).toBeDefined());
 
   expect(button('New template')).toBeUndefined();
   expect(button('Inspect and edit')).toBeUndefined();
@@ -307,9 +308,9 @@ it('keeps an edited template draft when the operator declines to discard it', as
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
   const { target, button } = mountTemplates(['read', 'configure']);
-  await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
+  await eventually(() => expect(button('Inspect and edit')).toBeDefined());
   button('Inspect and edit')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(
       (target.querySelector('form input') as HTMLInputElement)?.value
     ).toBe('stored')
