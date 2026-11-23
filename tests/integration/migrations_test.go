@@ -4,11 +4,9 @@ package integration_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,71 +15,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/platform/database"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.Database(t)
-	user, project, provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	statements := []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'allowance@example.invalid', 'Allowance', 'owner', $2)`, []any{user, uuid.NewString()}},
-		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'allowance-migration', $2, $3)`, []any{project, uuid.NewString(), user}},
-		{`INSERT INTO olp.providers(id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, 'allowance-migration', 'plugin', 'active', '{}', $2, $3, $4)`, []any{provider, uuid.NewString(), uuid.NewString(), user}},
-		{`INSERT INTO olp.provider_credentials(id, provider_id, version) VALUES($1, $2, 1)`, []any{credential, provider}},
-		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, allowance, etag, created_by) VALUES($1, $2, $3, $4, 'principal', 'account', '["model"]', $5, $6, $7)`, []any{account, project, provider, credential, `{"windows":[{"limit_id":"codex","window":"primary","used_percent":25,"remaining_percent":75,"window_minutes":300,"resets_at":"2036-11-05T15:00:00Z","observed_at":"2026-11-05T10:00:00Z"},{"limit_id":"codex","window":"secondary","used_percent":10,"remaining_percent":90,"window_minutes":null,"resets_at":null,"observed_at":"2026-11-05T10:00:00Z"}],"credits":{"has_credits":true,"unlimited":false,"balance":"12.5","observed_at":"2026-11-05T10:00:00Z"},"remaining_tokens":null,"remaining_requests":null,"remaining_percent":75,"resets_at":"2036-11-05T15:00:00Z","observed_at":"2026-11-05T10:00:00Z"}`, uuid.NewString(), user}},
-	}
-	for _, statement := range statements {
-		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	migration, err := os.ReadFile("../../internal/platform/database/migrations/0137_code_allowance_observation.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
-		t.Fatal(err)
-	}
-	var document []byte
-	if err = pool.QueryRow(t.Context(), `SELECT allowance FROM olp.code_accounts WHERE id=$1`, account).Scan(&document); err != nil {
-		t.Fatal(err)
-	}
-	var allowance codemode.Allowance
-	if err = json.Unmarshal(document, &allowance); err != nil {
-		t.Fatal(err)
-	}
-	if len(allowance.Windows) != 2 {
-		t.Fatalf("windows = %s", document)
-	}
-	primary := allowance.Windows[0]
-	if primary.Unit != codemode.AllowanceUnitPercent || primary.Evidence != codemode.AllowanceEvidencePassive || primary.UsedValue != nil || primary.RemainingValue != nil {
-		t.Fatalf("primary window not backfilled: %s", document)
-	}
-	if primary.UsedPercent != 25 || primary.RemainingPercent != 75 || primary.ResetsAt == nil || !primary.ResetsAt.Equal(time.Date(2036, 11, 5, 15, 0, 0, 0, time.UTC)) {
-		t.Fatalf("primary window values changed: %s", document)
-	}
-	if allowance.Windows[1].Unit != codemode.AllowanceUnitPercent || allowance.Windows[1].Evidence != codemode.AllowanceEvidencePassive || allowance.Credits == nil || allowance.Credits.Balance == nil || *allowance.Credits.Balance != "12.5" {
-		t.Fatalf("secondary window or credits changed: %s", document)
-	}
-	var available bool
-	if err = pool.QueryRow(t.Context(), `SELECT olp.code_account_available(a) FROM olp.code_accounts a WHERE id=$1`, account).Scan(&available); err != nil {
-		t.Fatal(err)
-	}
-	if !available {
-		t.Fatalf("account with remaining allowance became unavailable: %s", document)
-	}
-}
-
-func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
+func TestCodeDecisionsKeepRecordsContentFree(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	user, project, provider, credential, account, other, key, route, revision, binding, attempt := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -153,138 +92,6 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 	}
 }
 
-func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
-	t.Helper()
-	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA IF NOT EXISTS olp;
-		CREATE TABLE IF NOT EXISTS olp.migrations (
-			version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
-		)`); err != nil {
-		t.Fatal(err)
-	}
-	directory := "../../internal/platform/database/migrations"
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if name >= version {
-			return
-		}
-		var applied bool
-		if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.migrations WHERE version=$1)`, name).Scan(&applied); err != nil {
-			t.Fatal(err)
-		}
-		if applied {
-			continue
-		}
-		applyHistoricalMigration(t, pool, name)
-	}
-}
-
-func applyHistoricalMigration(t *testing.T, pool *pgxpool.Pool, name string) {
-	t.Helper()
-	sql, err := os.ReadFile(filepath.Join("../../internal/platform/database/migrations", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
-		t.Fatalf("%s: %v", name, err)
-	}
-	checksum := sha256.Sum256(sql)
-	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.EmptyDatabase(t)
-	migrateBefore(t, pool, "0127")
-	user, provider := uuid.NewString(), uuid.NewString()
-	legacy := []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'billing-gap@example.invalid', 'Billing gap', 'owner', $2)`, []any{user, uuid.NewString()}},
-		{`INSERT INTO olp.providers(id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, 'billing-gap', 'plugin', 'active', '{}', $2, $3, $4)`, []any{provider, uuid.NewString(), uuid.NewString(), user}},
-		{`INSERT INTO olp.provider_billing_imports(provider_id, source, scope, etag, created_by, last_success_at, imported_from, imported_through)
-			VALUES($1, 'openai_costs', '{}', $2, $3, now() - interval '1 day', '2026-10-01', '2026-10-26')`, []any{provider, uuid.NewString(), user}},
-		{`INSERT INTO olp.provider_invoiced_costs(provider_id, day, line_item, currency, amount, source)
-			VALUES($1, '2026-10-05', 'gpt', 'USD', 5, 'openai_costs'), ($1, '2026-10-24', 'gpt', 'USD', 7, 'openai_costs')`, []any{provider}},
-	}
-	for _, statement := range legacy {
-		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	migrateBefore(t, pool, "0141")
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_billing_days SET last_success_at=now() WHERE provider_id=$1 AND day='2026-10-17'`, provider); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	var covered []string
-	if err := pool.QueryRow(t.Context(), `SELECT COALESCE(array_agg(day::text ORDER BY day), '{}') FROM olp.provider_billing_days WHERE provider_id=$1`, provider).Scan(&covered); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(covered, ",") != "2026-10-05,2026-10-17,2026-10-24" {
-		t.Fatalf("covered days = %v, want fetched invoice days and the day refetched after the upgrade", covered)
-	}
-	var invoicedKept bool
-	var from, through string
-	if err := pool.QueryRow(t.Context(), `SELECT (SELECT sum(amount)=12 FROM olp.provider_invoiced_costs WHERE provider_id=$1),
-		COALESCE(imported_from::text, ''), COALESCE(imported_through::text, '') FROM olp.provider_billing_imports WHERE provider_id=$1`, provider).Scan(&invoicedKept, &from, &through); err != nil {
-		t.Fatal(err)
-	}
-	if !invoicedKept || from != "2026-10-24" || through != "2026-10-24" {
-		t.Fatalf("invoiced kept=%t imported_from=%q imported_through=%q", invoicedKept, from, through)
-	}
-}
-
-func TestUpgradeRefusesGuardrailFieldsOutsideTheirType(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.EmptyDatabase(t)
-	migrateBefore(t, pool, "0142")
-	user, guardrail, revision := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	tx, err := pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
-	for _, statement := range []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'stray-guardrail@example.invalid', 'Stray guardrail', 'owner', $2)`, []any{user, uuid.NewString()}},
-		{`INSERT INTO olp.guardrails(id, name, type, latest_revision_id, etag, created_by) VALUES($1, 'stray', 'lakera', $2, $3, $4)`, []any{guardrail, revision, uuid.NewString(), user}},
-		{`INSERT INTO olp.guardrail_revisions(id, guardrail_id, revision, policy, created_by, configuration, timeout_ms, on_error)
-			VALUES($1, $2, 1, '{}', $3, '{"endpoint":"https://guard.example.invalid","credential_ref":"key","content_egress":true,"threshold":0}', 1000, 'fail_closed')`, []any{revision, guardrail, user}},
-		{`UPDATE olp.guardrails SET active_revision_id=$2 WHERE id=$1`, []any{guardrail, revision}},
-	} {
-		if _, err := tx.Exec(t.Context(), statement.sql, statement.args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(t.Context(), pool); err == nil || !strings.Contains(err.Error(), guardrail+" lakera.threshold") {
-		t.Fatalf("upgrade with a stray lakera threshold: %v", err)
-	}
-	if _, err := pool.Exec(t.Context(), `WITH fixed AS (
-			INSERT INTO olp.guardrail_revisions(id, guardrail_id, revision, policy, created_by, configuration, timeout_ms, on_error)
-			SELECT $3, guardrail_id, 2, policy, created_by, configuration-'threshold', timeout_ms, on_error FROM olp.guardrail_revisions WHERE id=$2
-			RETURNING id)
-		UPDATE olp.guardrails SET active_revision_id=(SELECT id FROM fixed), latest_revision_id=(SELECT id FROM fixed) WHERE id=$1`, guardrail, revision, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.EmptyDatabase(t)
@@ -311,71 +118,23 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	if err != nil || first != second {
 		t.Fatalf("installation identity changed from %s to %s: %v", first, second, err)
 	}
-	var checksum []byte
-	const missing = "0018_code_count_observations.sql"
-	if err := pool.QueryRow(t.Context(), "DELETE FROM olp.migrations WHERE version=$1 RETURNING checksum", missing).Scan(&checksum); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(t.Context(), pool); err == nil || !strings.Contains(err.Error(), missing) {
-		t.Fatalf("expected migration to reject the unsafe gap at %s, got %v", missing, err)
-	}
-	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", missing, checksum); err != nil {
-		t.Fatal(err)
-	}
 	if _, err = pool.Exec(t.Context(), "UPDATE olp.migrations SET checksum='changed'"); err != nil {
 		t.Fatal(err)
 	}
 	if database.Migrate(t.Context(), pool) == nil {
 		t.Fatal("migrate accepted a changed checksum")
 	}
-}
-
-func TestMigrationsBackfillDelegationAfterCodeMigrations(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.EmptyDatabase(t)
-	migrateBefore(t, pool, "0104_agent_delegation.sql")
-	for _, name := range []string{
-		"0104_code_pool_weights.sql", "0105_code_health_observations.sql", "0106_code_initial_recovery.sql",
-		"0107_code_alias_pins.sql", "0108_code_reference_owners.sql", "0109_code_portable_recovery.sql",
-		"0110_code_model_pools.sql", "0111_code_paid_targets.sql", "0112_code_paid_fallback.sql", "0113_code_definite_availability.sql",
-	} {
-		applyHistoricalMigration(t, pool, name)
+	if _, err := database.Installation(t.Context(), pool); err == nil {
+		t.Fatal("installation accepted a changed checksum")
 	}
-	if err := database.Migrate(t.Context(), pool); err != nil {
+	if _, err = pool.Exec(t.Context(), "DELETE FROM olp.migrations; INSERT INTO olp.migrations(version,checksum) VALUES('0168_retire_allowance_ordering.sql','old')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Installation(t.Context(), pool); err != nil {
-		t.Fatal(err)
+	if err := database.Migrate(t.Context(), pool); err == nil || !strings.Contains(err.Error(), "baseline") {
+		t.Fatalf("migrate upgraded a pre-baseline history: %v", err)
 	}
-}
-
-func TestMigrationsKeepGoogleBillingWhenAWSHistoryIsMissing(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.EmptyDatabase(t)
-	migrateBefore(t, pool, "0124_aws_cur.sql")
-	applyHistoricalMigration(t, pool, "0125_google_billing.sql")
-	provider := uuid.NewString()
-	if _, err := pool.Exec(t.Context(), `WITH owner AS (
-		INSERT INTO olp.users(id,email,display_name,role,etag)
-		VALUES($1,'billing@example.invalid','Owner','owner',$2) RETURNING id
-	), connection AS (
-		INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
-		SELECT $3,'historical-billing','plugin','active','{}',$4,$5,id FROM owner RETURNING id,created_by
-	)
-	INSERT INTO olp.provider_billing_imports(provider_id,source,scope,etag,created_by)
-	SELECT id,'google_bigquery','{}',$6,created_by FROM connection`,
-		uuid.NewString(), uuid.NewString(), provider, uuid.NewString(), uuid.NewString(), uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Installation(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	var source string
-	if err := pool.QueryRow(t.Context(), "SELECT source FROM olp.provider_billing_imports WHERE provider_id=$1", provider).Scan(&source); err != nil || source != "google_bigquery" {
-		t.Fatalf("Google billing import after upgrade = %q, %v", source, err)
+	if _, err := database.Installation(t.Context(), pool); err == nil || !strings.Contains(err.Error(), "baseline") {
+		t.Fatalf("installation accepted a pre-baseline history: %v", err)
 	}
 }
 
@@ -470,154 +229,9 @@ func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
 	}
 }
 
-func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
+func TestNotificationBudgetEvidenceFreezesSubjectAtDelivery(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
-	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-	closeAfter := created.Add(72 * time.Hour)
-	deadline := created.Add(10 * time.Minute)
-	keyID, providerID, model := uuid.NewString(), uuid.NewString(), "batch-model"
-	template, err := usage.Encode(&usage.Event{
-		EventID: uuid.NewString(), RequestID: uuid.NewString(), RuntimeGenerationID: uuid.NewString(),
-		APIKeyID: keyID, ProviderID: &providerID, RouteSlug: "batch-migration", UpstreamModel: &model,
-		Operation: "generation", Surface: "openai", RequestStartedAt: created, RequestCompletedAt: created, ObservedAt: created,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct {
-		adapter  string
-		legacy   string
-		want     batches.Submission
-		source   *string
-		deadline time.Time
-	}{
-		{"together", `{"input_file_id":"file-up","local_input_file_id":"file-local","endpoint":"/v1/chat/completions","completion_window":"24h","client_metadata":{"team":"a"},"creator_deadline":"` + deadline.Format(time.RFC3339Nano) + `"}`,
-			batches.FilesSubmission{InputFileID: "file-up", LocalInputFileID: "file-local", Endpoint: "/v1/chat/completions", CompletionWindow: "24h", ClientMetadata: json.RawMessage(`{"team":"a"}`)}, new("file-up"), deadline},
-		{"gemini_managed", `{"gemini_file":"files/managed","local_input_file_id":"file-local","endpoint":"/v1/chat/completions","gemini_metadata":{"status":"validating"},"creator_deadline":"` + created.Add(-time.Minute).Format(time.RFC3339Nano) + `"}`,
-			batches.GeminiManagedSubmission{GeminiFile: "files/managed", LocalInputFileID: "file-local", Endpoint: "/v1/chat/completions", Metadata: json.RawMessage(`{"status":"validating"}`)}, new("files/managed"), closeAfter},
-		{"gemini", `{"gemini_file":"files/native","local_input_file_id":"file-native"}`,
-			batches.GeminiFileSubmission{GeminiFile: "files/native", LocalInputFileID: "file-native"}, new("files/native"), closeAfter},
-		{"gemini", `{"gemini_inline":true}`, batches.GeminiInlineSubmission{}, nil, closeAfter},
-		{"vertex", `{"vertex_label":"0190abc"}`, batches.VertexSubmission{Label: "0190abc"}, nil, closeAfter},
-		{"bedrock", `{"bedrock_client_request_token":"token","create_body":{"jobName":"job"}}`,
-			batches.BedrockSubmission{ClientRequestToken: "token", CreateBody: json.RawMessage(`{"jobName":"job"}`)}, nil, closeAfter},
-		{"anthropic", `{"anthropic":true}`, batches.AnthropicSubmission{}, nil, closeAfter},
-	}
-	ids := make([]uuid.UUID, len(cases))
-	for i, c := range cases {
-		ids[i] = uuid.New()
-		digest := sha256.Sum256(ids[i][:])
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.batch_settlements(
-			resource_id, kind, adapter, api_key_id, route_slug, route_revision_id, provider_id, provider_revision_id,
-			target_id, slot_id, surface, submission_digest, line_operation, template, state, cursor,
-			next_attempt_at, close_after, created_at, creator_deadline)
-			VALUES($1, 'batch', $2, $3, 'batch-migration', $4, $5, $6, 'primary', $7, 'openai', $8, 'generation', $9,
-			'submission_unknown', jsonb_build_object('phase', 'output', 'line', 3, 'submission', $10::jsonb), $11, $12, $11, $11)`,
-			ids[i], c.adapter, keyID, uuid.New(), providerID, uuid.New(), uuid.New(), digest[:], template, c.legacy, created, closeAfter); err != nil {
-			t.Fatal(err)
-		}
-	}
-	migration, err := os.ReadFile("../../internal/platform/database/migrations/0142_batch_submission.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), string(migration)); err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := batches.NewStore(pool).Claim(t.Context(), time.Now(), len(cases)+1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := make(map[uuid.UUID]batches.Settlement, len(claimed))
-	for _, settlement := range claimed {
-		byID[settlement.ResourceID] = settlement
-	}
-	for i, c := range cases {
-		got, ok := byID[ids[i]]
-		if !ok {
-			t.Fatalf("%s %s: migrated settlement was not claimable", c.adapter, c.legacy)
-		}
-		if reflect.TypeOf(got.Submission) != reflect.TypeOf(c.want) || !equalJSON(t, got.Submission, c.want) {
-			t.Errorf("%s submission = %#v, want %#v", c.adapter, got.Submission, c.want)
-		}
-		if !got.CreatorDeadline.Equal(c.deadline) {
-			t.Errorf("%s creator deadline = %s, want %s", c.adapter, got.CreatorDeadline, c.deadline)
-		}
-		if got.Cursor != (batches.Cursor{Phase: batches.PhaseOutput, Line: 3}) {
-			t.Errorf("%s cursor = %#v", c.adapter, got.Cursor)
-		}
-		var source *string
-		var legacy bool
-		if err := pool.QueryRow(t.Context(), `SELECT submission_source, cursor ? 'submission' FROM olp.batch_settlements WHERE resource_id=$1`, ids[i]).Scan(&source, &legacy); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(source, c.source) || legacy {
-			t.Errorf("%s submission_source = %v, legacy cursor kept = %v", c.adapter, source, legacy)
-		}
-	}
-}
-
-func equalJSON(t *testing.T, got, want any) bool {
-	t.Helper()
-	decode := func(value any) any {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded any
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			t.Fatal(err)
-		}
-		return decoded
-	}
-	return reflect.DeepEqual(decode(got), decode(want))
-}
-
-func TestCommitmentObservedDayMigrationRestatesExistingOutliers(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.Database(t)
-	if _, err := pool.Exec(t.Context(), `DROP FUNCTION olp.dirty_commitment_observed_days() CASCADE`); err != nil {
-		t.Fatal(err)
-	}
-	fixture := newUsageFixture(t, pool)
-	day := fixture.observedAt.UTC().Truncate(24 * time.Hour).Add(-72 * time.Hour)
-	schedule, period := uuid.NewString(), uuid.NewString()
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules(id,provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at) VALUES($1,$2,$3,'fixture','openai_compatible',10,'USD','day',$4)`, schedule, fixture.providerID, uuid.NewString(), day); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_periods(id,schedule_id,bucket_start,bucket_end,amount) VALUES($1,$2,$3::timestamptz,$3::timestamptz+interval '24 hours',10)`, period, schedule, day); err != nil {
-		t.Fatal(err)
-	}
-	for _, observed := range []time.Time{day.Add(time.Hour), day.Add(25 * time.Hour), day.Add(26 * time.Hour)} {
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_usage(attempt_id,period_id,observed_at,weight,eligible,complete,payload) VALUES($1,$2,$3,1,true,true,'{}')`, uuid.NewString(), period, observed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var bucketBefore int64
-	if err := pool.QueryRow(t.Context(), `SELECT version FROM olp.focus_dirty_days WHERE day=$1`, day).Scan(&bucketBefore); err != nil {
-		t.Fatal(err)
-	}
-	migration, err := os.ReadFile("../../internal/platform/database/migrations/0144_focus_observed_commitment_days.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), string(migration)); err != nil {
-		t.Fatal(err)
-	}
-	var bucketAfter, observedVersion int64
-	if err := pool.QueryRow(t.Context(), `SELECT (SELECT version FROM olp.focus_dirty_days WHERE day=$1),(SELECT version FROM olp.focus_dirty_days WHERE day=$1::date+1)`, day).Scan(&bucketAfter, &observedVersion); err != nil {
-		t.Fatal(err)
-	}
-	if bucketAfter != bucketBefore || observedVersion <= bucketBefore {
-		t.Fatalf("migration bucket version %d -> %d, outlier version %d", bucketBefore, bucketAfter, observedVersion)
-	}
-}
-
-func TestNotificationBudgetEvidenceUpgradeFreezesLegacySubject(t *testing.T) {
-	t.Parallel()
-	pool, _ := harness.EmptyDatabase(t)
-	migrateBefore(t, pool, "0147")
 	user, key, nextKey, destination, rule := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, s := range []struct {
 		sql  string
@@ -632,9 +246,6 @@ func TestNotificationBudgetEvidenceUpgradeFreezesLegacySubject(t *testing.T) {
 		if _, err := pool.Exec(t.Context(), s.sql, s.args...); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,window_id,threshold_percent,accrued,limit_amount,status) VALUES($1,$2,2,75,80,100,'pending')`, uuid.NewString(), rule); err != nil {
 		t.Fatal(err)
@@ -651,6 +262,6 @@ func TestNotificationBudgetEvidenceUpgradeFreezesLegacySubject(t *testing.T) {
 		t.Fatal("partial budget identity snapshot accepted")
 	}
 	if count != 2 || !preserved {
-		t.Fatalf("legacy and old-writer evidence changed after retarget: rows=%d preserved=%t", count, preserved)
+		t.Fatalf("delivery evidence changed after retarget: rows=%d preserved=%t", count, preserved)
 	}
 }

@@ -16,6 +16,19 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+const baseline = "0001_schema.sql"
+
+var errPreBaseline = errors.New("olp database predates the " + baseline + " baseline and cannot be upgraded; migrate a new empty database")
+
+type migrationRecord struct {
+	Version  string
+	Checksum []byte
+}
+
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // Migrate takes a transaction-scoped installation lock. PostgreSQL rolls back
 // both DDL and history on failure; rerunning the same migration is the recovery
 // path.
@@ -42,30 +55,30 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	applied, latest, err := appliedMigrations(ctx, tx)
+	applied, err := verifiedHistory(ctx, tx)
 	if err != nil {
 		return err
 	}
-	_, googleBillingApplied := applied["0125_google_billing.sql"]
+	latest := ""
+	if len(applied) > 0 {
+		latest = slices.Max(applied)
+	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if _, ok := applied[name]; ok {
+		if slices.Contains(applied, name) {
 			continue
 		}
-		superseded := name == "0124_aws_cur.sql" && googleBillingApplied
-		if name < latest && !superseded && !canBackfillDelegation(name, applied) {
+		if name < latest {
 			return fmt.Errorf("olp migration history is not a sequential prefix: missing %s before %s", name, latest)
 		}
 		sql, err := migrations.ReadFile("migrations/" + name)
 		if err != nil {
 			return err
 		}
-		checksum := sha256.Sum256(sql)
-		if !superseded {
-			if _, err := tx.Exec(ctx, string(sql)); err != nil {
-				return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
-			}
+		if _, err := tx.Exec(ctx, string(sql)); err != nil {
+			return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
 		}
+		checksum := sha256.Sum256(sql)
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
 			return err
 		}
@@ -76,55 +89,31 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return tx.Commit(ctx)
 }
 
-func appliedMigrations(ctx context.Context, tx pgx.Tx) (map[string]struct{}, string, error) {
-	rows, err := tx.Query(ctx, "SELECT version,checksum FROM olp.migrations")
+func verifiedHistory(ctx context.Context, q querier) ([]string, error) {
+	rows, err := q.Query(ctx, "SELECT version,checksum FROM olp.migrations")
 	if err != nil {
-		return nil, "", err
+		return nil, errors.New("cannot read olp migration history")
 	}
-	defer rows.Close()
-	applied := make(map[string]struct{})
-	var latest string
-	for rows.Next() {
-		var name string
-		var stored []byte
-		if err := rows.Scan(&name, &stored); err != nil {
-			return nil, "", err
-		}
-		sql, err := migrations.ReadFile("migrations/" + name)
+	records, err := pgx.CollectRows(rows, pgx.RowToStructByPos[migrationRecord])
+	if err != nil {
+		return nil, errors.New("cannot read olp migration history")
+	}
+	if len(records) > 0 && !slices.ContainsFunc(records, func(r migrationRecord) bool { return r.Version == baseline }) {
+		return nil, errPreBaseline
+	}
+	versions := make([]string, 0, len(records))
+	for _, record := range records {
+		sql, err := migrations.ReadFile("migrations/" + record.Version)
 		if err != nil {
-			return nil, "", errors.New("database requires a newer olp binary")
+			return nil, errors.New("database schema is newer than this olp binary")
 		}
 		checksum := sha256.Sum256(sql)
-		if !slices.Equal(stored, checksum[:]) {
-			return nil, "", fmt.Errorf("migration checksum mismatch: %s", name)
+		if !slices.Equal(record.Checksum, checksum[:]) {
+			return nil, fmt.Errorf("olp migration checksum mismatch: %s", record.Version)
 		}
-		applied[name] = struct{}{}
-		latest = max(latest, name)
+		versions = append(versions, record.Version)
 	}
-	return applied, latest, rows.Err()
-}
-
-func canBackfillDelegation(name string, applied map[string]struct{}) bool {
-	switch name {
-	case "0104_agent_delegation.sql", "0105_a2a_tasks.sql", "0106_delegation_consent.sql", "0107_agent_route_runs.sql",
-		"0108_trace_spans.sql", "0109_a2a_task_bounds.sql", "0110_delegation_retention.sql", "0111_agent_delegated_tools.sql",
-		"0112_mcp_delegation_attribution.sql", "0113_agent_oauth_grants.sql":
-	default:
-		return false
-	}
-	for later := range applied {
-		if later <= name {
-			continue
-		}
-		switch later {
-		case "0104_code_pool_weights.sql", "0105_code_health_observations.sql", "0106_code_initial_recovery.sql",
-			"0107_code_alias_pins.sql", "0108_code_reference_owners.sql", "0109_code_portable_recovery.sql",
-			"0110_code_model_pools.sql", "0111_code_paid_targets.sql", "0112_code_paid_fallback.sql", "0113_code_definite_availability.sql":
-		default:
-			return false
-		}
-	}
-	return true
+	return versions, nil
 }
 
 // Installation returns the installation identity once the database holds
@@ -138,32 +127,11 @@ func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rows, err := pool.Query(ctx, "SELECT version,checksum FROM olp.migrations")
+	applied, err := verifiedHistory(ctx, pool)
 	if err != nil {
-		return "", errors.New("cannot read olp migration history")
+		return "", err
 	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var version string
-		var stored []byte
-		if err = rows.Scan(&version, &stored); err != nil {
-			return "", errors.New("cannot read olp migration history")
-		}
-		data, err := migrations.ReadFile("migrations/" + version)
-		if err != nil {
-			return "", errors.New("database schema is newer than this olp binary")
-		}
-		checksum := sha256.Sum256(data)
-		if !slices.Equal(stored, checksum[:]) {
-			return "", errors.New("olp migration checksum mismatch")
-		}
-		count++
-	}
-	if err = rows.Err(); err != nil {
-		return "", errors.New("cannot read olp migration history")
-	}
-	if count != len(entries) {
+	if len(applied) != len(entries) {
 		return "", errors.New("olp migrations are pending; run olp migrate using the migration role")
 	}
 	return id, nil

@@ -236,7 +236,6 @@ report it as `Unused`. This is monetary allocation, not physical utilization.
 Unpriced or incomplete metering keeps coverage incomplete, even when all cost is
 currently unallocated. Open periods remain provisional.
 
-Migration 0073 preserves the existing report calculation for historical periods.
 Published snapshots and retained accounting evidence support historical FOCUS
 regeneration; missing historical evidence is explicitly incomplete. Full-period
 allocation context remains available for retained hourly reporting.

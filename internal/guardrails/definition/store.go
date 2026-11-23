@@ -62,7 +62,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d D
 	if err != nil {
 		return Saved{}, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,policy,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,'{}',$4,$5,$6,$7)", saved.RevisionID, saved.ID, revision, actor, d.configuration, d.timeout, d.onError); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.RevisionID, saved.ID, revision, actor, d.configuration, d.timeout, d.onError); err != nil {
 		return Saved{}, err
 	}
 	return saved, nil

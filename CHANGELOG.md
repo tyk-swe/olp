@@ -81,6 +81,10 @@ semantic versioning and take their source from root `package.json`. The
   `content_policy_blocked`, usage records drop `policy_decisions`, and
   configuration import accepts only `openllmproxy.dev/config/v2`. Express each
   former rule as a `builtin.regex` guardrail with a policy and attachment.
+- The migration history is squashed into one `0001_schema.sql` baseline that
+  also drops the retired content policy columns and the route guardrail
+  migration trigger. `olp migrate` and startup refuse a database migrated by an
+  earlier build, so start a fresh installation in a new empty database.
 
 ### Fixed
 
