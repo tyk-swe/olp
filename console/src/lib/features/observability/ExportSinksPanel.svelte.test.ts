@@ -4,6 +4,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import ExportSinksPanel from './ExportSinksPanel.svelte';
 import type { ExportSink } from './api';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -68,18 +69,18 @@ it('deletes a sink only after the deletion is confirmed', async () => {
   );
   const target = renderPanel();
 
-  await vi.waitFor(() => expect(button(target, 'Delete')).toBeDefined());
+  await eventually(() => expect(button(target, 'Delete')).toBeDefined());
   button(target, 'Delete')?.click();
-  await vi.waitFor(() => expect(button(document, 'Cancel')).toBeDefined());
+  await eventually(() => expect(button(document, 'Cancel')).toBeDefined());
   button(document, 'Cancel')?.click();
   flushSync();
   await Promise.resolve();
   expect(deleted).not.toHaveBeenCalled();
 
   button(target, 'Delete')?.click();
-  await vi.waitFor(() => expect(button(document, 'Delete sink')).toBeDefined());
+  await eventually(() => expect(button(document, 'Delete sink')).toBeDefined());
   button(document, 'Delete sink')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(deleted).toHaveBeenCalledExactlyOnceWith(
       `/api/v1/observability/sinks/${sink.export_sink_id}`
     )
@@ -87,7 +88,7 @@ it('deletes a sink only after the deletion is confirmed', async () => {
   expect(button(target, 'Disable')?.disabled).toBe(true);
   expect(button(target, 'Delete')?.disabled).toBe(true);
   deletion.resolve(new Response(null, { status: 204 }));
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button(target, 'Disable')?.disabled).toBe(false)
   );
 });
@@ -118,7 +119,7 @@ it('refreshes a delivery lookup when the same attempt is submitted again', async
   );
   const target = renderPanel();
 
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button(target, 'Delivery lookup')).toBeDefined()
   );
   button(target, 'Delivery lookup')?.click();
@@ -129,8 +130,8 @@ it('refreshes a delivery lookup when the same attempt is submitted again', async
   flushSync();
   button(target, 'Look up')?.click();
   const result = () => target.querySelector('.delivery-lookup')?.textContent;
-  await vi.waitFor(() => expect(result()).toContain('Pending'));
+  await eventually(() => expect(result()).toContain('Pending'));
 
   button(target, 'Look up')?.click();
-  await vi.waitFor(() => expect(result()).toContain('Accepted by sink'));
+  await eventually(() => expect(result()).toContain('Accepted by sink'));
 });

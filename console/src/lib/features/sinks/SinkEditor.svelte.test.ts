@@ -6,6 +6,7 @@ import type { ManagementOperation } from '#lib/management/requirements.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import SinkEditor from './SinkEditor.svelte';
 import type { Sink } from './api';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -53,7 +54,7 @@ it('preserves the signing credential when editing other fields and supports expl
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
   expect(writes.mock.calls[0][0]).toMatchObject({ name: 'Renamed facts' });
   expect(writes.mock.calls[0][0]).not.toHaveProperty('credential');
   expect(writes.mock.calls[0][1]).toBe('"observed-version"');
@@ -73,7 +74,7 @@ it('preserves the signing credential when editing other fields and supports expl
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(saved).toHaveBeenCalledTimes(2));
   expect(writes.mock.calls[1][0]).toHaveProperty('credential', null);
   expect(writes.mock.calls[1][1]).toBe('"saved-version"');
 });
@@ -128,7 +129,7 @@ it.each(['refresh', 'conflict'])(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
-    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    await eventually(() => expect(button('Edit')).toBeDefined());
     button('Edit')?.click();
     flushSync();
     const name = target.querySelector('form input') as HTMLInputElement;
@@ -140,7 +141,7 @@ it.each(['refresh', 'conflict'])(
     );
     if (trigger === 'refresh') {
       button('Refresh delivery counts')?.click();
-      await vi.waitFor(() =>
+      await eventually(() =>
         expect(target.querySelector('tbody strong')?.textContent).toBe(
           'Other operator'
         )
@@ -152,12 +153,12 @@ it.each(['refresh', 'conflict'])(
     target
       .querySelector('form')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    await eventually(() => expect(writes).toHaveBeenCalledOnce());
     expect(writes.mock.calls[0][0].headers.get('If-Match')).toBe('"before"');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
+    await eventually(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'My draft'
     );
@@ -211,7 +212,7 @@ function mountSinks(operations: ManagementOperation[]) {
 
 it('offers no create or edit controls to a member who cannot write exports', async () => {
   const { target, button } = mountSinks(['read']);
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('tbody strong')?.textContent).toBe(
       'Signed facts'
     )
@@ -226,7 +227,7 @@ it('keeps an edited draft when the operator declines to discard it', async () =>
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
   const { target, button } = mountSinks(['read', 'settings']);
-  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();
   flushSync();
   const name = () => target.querySelector('form input') as HTMLInputElement;
@@ -249,7 +250,7 @@ it('clears a new draft when the operator accepts discarding it', async () => {
     vi.fn(() => true)
   );
   const { target, button } = mountSinks(['read', 'settings']);
-  await vi.waitFor(() => expect(button('New export')).toBeDefined());
+  await eventually(() => expect(button('New export')).toBeDefined());
   button('New export')?.click();
   flushSync();
   const name = () => target.querySelector('form input') as HTMLInputElement;

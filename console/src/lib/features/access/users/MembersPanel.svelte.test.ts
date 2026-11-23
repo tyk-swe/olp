@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import MembersPanel from './MembersPanel.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -70,7 +71,7 @@ it('changes a member role only after the change is confirmed', async () => {
     flushSync();
   };
 
-  await vi.waitFor(() => expect(button('Change access')).toBeDefined());
+  await eventually(() => expect(button('Change access')).toBeDefined());
   button('Change access')?.click();
   flushSync();
   chooseOperator();
@@ -83,7 +84,7 @@ it('changes a member role only after the change is confirmed', async () => {
   flushSync();
   chooseOperator();
   button('Save and sign them out')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(patched).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ role: 'operator' })
     )
@@ -91,6 +92,6 @@ it('changes a member role only after the change is confirmed', async () => {
   expect(button('Deactivate')?.disabled).toBe(true);
   expect(button('Reactivate')?.disabled).toBe(true);
   write.resolve(json({ ...member, role: 'operator', etag: 'saved' }));
-  await vi.waitFor(() => expect(button('Deactivate')?.disabled).toBe(false));
+  await eventually(() => expect(button('Deactivate')?.disabled).toBe(false));
   expect(button('Reactivate')?.disabled).toBe(false);
 });

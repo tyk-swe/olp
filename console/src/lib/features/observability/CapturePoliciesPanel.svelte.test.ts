@@ -4,6 +4,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
 import type { CapturePolicy } from './api';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -74,23 +75,23 @@ it('keeps the stored expiry when an edit leaves the expiry picker untouched', as
       (item) => item.textContent?.trim() === label
     );
 
-  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(button('Save capture policy')?.disabled).toBe(false)
   );
   button('Save capture policy')?.click();
-  await vi.waitFor(() => expect(patched).toHaveBeenCalledOnce());
+  await eventually(() => expect(patched).toHaveBeenCalledOnce());
   const [path, body] = patched.mock.calls[0];
   expect(path).toBe(`/api/v1/observability/capture-policies/${policy.id}`);
   expect(body).toMatchObject({ sink: policy.sink, sample_ratio: '0.5' });
   expect(body).not.toHaveProperty('expires_at');
 
-  await vi.waitFor(() => expect(button('Disable')?.disabled).toBe(false));
+  await eventually(() => expect(button('Disable')?.disabled).toBe(false));
   button('Disable')?.click();
-  await vi.waitFor(() => expect(patched).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(patched).toHaveBeenCalledTimes(2));
   expect(button('Disable')?.disabled).toBe(true);
   expect(button('Delete')?.disabled).toBe(true);
   toggle.resolve(json({ ...policy, enabled: false }));
-  await vi.waitFor(() => expect(button('Delete')?.disabled).toBe(false));
+  await eventually(() => expect(button('Delete')?.disabled).toBe(false));
 });

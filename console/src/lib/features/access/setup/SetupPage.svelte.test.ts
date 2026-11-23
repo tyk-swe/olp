@@ -3,6 +3,7 @@ import { getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import SetupPage from './SetupPage.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -30,7 +31,7 @@ it('holds the owner form until the server can read a setup token', async () => {
     await unmount(harness);
   });
 
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('[role="alert"] h2')?.textContent).toBe(
       'No setup token on the server'
     )
@@ -38,7 +39,7 @@ it('holds the owner form until the server can read a setup token', async () => {
   expect(target.querySelector('#setup-token')).toBeNull();
 
   target.querySelector<HTMLButtonElement>('[role="alert"] button')?.click();
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('#setup-token')).not.toBeNull()
   );
 });

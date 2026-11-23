@@ -7,6 +7,7 @@ import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
 import { confirmAction } from '#lib/components/confirm.js';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('#lib/components/confirm.js', () => ({ confirmAction: vi.fn() }));
 
@@ -96,7 +97,7 @@ describe('resource submissions', () => {
     });
     flushSync();
     const provider = target.querySelector<HTMLSelectElement>('#code-provider');
-    await vi.waitFor(() => expect(provider?.options.length).toBe(2));
+    await eventually(() => expect(provider?.options.length).toBe(2));
     if (!provider) throw new Error('Provider selection is missing');
     provider.value = 'provider';
     provider.dispatchEvent(new Event('change', { bubbles: true }));
@@ -106,7 +107,7 @@ describe('resource submissions', () => {
     ).toBe(true);
 
     lookup.resolve(json({ title: 'Provider lookup failed', status: 503 }, 503));
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toMatch(/Cancel\s+and reopen to retry\./)
     );
     expect(

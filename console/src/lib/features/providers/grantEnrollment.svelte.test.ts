@@ -5,6 +5,7 @@ import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { GrantEnrollment, GrantEnrollmentCompletion } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const provider = { id: 'provider-id', etag: 'provider-version' };
 const enrollment: GrantEnrollment = {
@@ -232,7 +233,7 @@ describe('provider grant enrollment', () => {
     );
     const { state, completed } = grant();
     const pending = state.start(provider);
-    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     authLifecycle.establishSession({
       user: {
@@ -248,7 +249,7 @@ describe('provider grant enrollment', () => {
     gate.abort();
     await pending;
 
-    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    await eventually(() => expect(cancel).toHaveBeenCalledOnce());
     expect(state.enrollment).toBeNull();
     expect(state.busy).toBe('');
     expect(completed).not.toHaveBeenCalled();

@@ -4,6 +4,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { MCPCatalogPreview, MCPServer } from './api';
 import MCPServersPage from './MCPServersPage.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const server: MCPServer = {
   id: 'server',
@@ -71,7 +72,7 @@ function render(approve: () => Response) {
     await unmount(harness);
   });
   const click = async (name: string) => {
-    const button = await vi.waitFor(() => {
+    const button = await eventually(() => {
       const found = [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
@@ -99,8 +100,8 @@ it('keeps a refused approval visible after the server reloads', async () => {
   await page.click('Edit');
   await page.click('Preview live catalog');
   await page.click('Approve and certify');
-  await vi.waitFor(() => expect(page.reads).toHaveBeenCalledTimes(4));
-  await vi.waitFor(() =>
+  await eventually(() => expect(page.reads).toHaveBeenCalledTimes(4));
+  await eventually(() =>
     expect(page.target.textContent).toContain(
       'The MCP server changed. Preview the live catalog again.'
     )
@@ -113,7 +114,7 @@ it('asks before approval discards unsaved server edits', async () => {
   vi.stubGlobal('confirm', confirm);
   const page = render(() => json(server));
   await page.click('Edit');
-  const name = await vi.waitFor(() => {
+  const name = await eventually(() => {
     const found = page.target.querySelector('form input');
     if (!(found instanceof HTMLInputElement)) throw new Error('Missing name');
     return found;

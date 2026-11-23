@@ -12,6 +12,7 @@ import {
   resolvePlaygroundPlan
 } from './playgroundState.svelte';
 import { playgroundTemplates } from './templates';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 vi.mock(import('#lib/features/routes/api.js'), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -126,7 +127,7 @@ describe('playground composer', () => {
         (option) => option.value
       );
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(values('#playground-routes option')).toEqual(['route-a']);
       expect(
         values('select option').filter((value) => value === 'route-a')
@@ -313,7 +314,7 @@ describe('playground composer', () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(state.completedRequest?.model).toBe('route-a');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.mutation.data?.output_text).toBe('Hello back')
     );
   });
@@ -350,7 +351,7 @@ describe('playground composer', () => {
     await state.submit(submitEvent());
     expect(state.validationError).toBe('');
     expect(handler).toHaveBeenCalledOnce();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.mutation.data?.output_text).toBe('Done')
     );
   });
@@ -429,20 +430,20 @@ describe('playground composer', () => {
     const state = playground();
     state.model = publishedRoute.slug;
     state.input = 'Hello';
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.selectedRoute?.slug).toBe(publishedRoute.slug)
     );
     flushSync();
     state.toggleStream(true);
-    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+    await eventually(() => expect(state.streamCheck).toBe('ok'));
 
     state.routing = '{"ignore":["provider-a"]}';
     await state.submit(submitEvent());
     expect(handler).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(state.streamCheck).toBe('unsupported'));
+    await eventually(() => expect(state.streamCheck).toBe('unsupported'));
 
     state.routing = '{"ignore":[]}';
-    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+    await eventually(() => expect(state.streamCheck).toBe('ok'));
     await state.submit(submitEvent());
     expect(handler).toHaveBeenCalledOnce();
   });

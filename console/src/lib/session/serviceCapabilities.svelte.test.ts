@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
 import { useServiceCapabilities } from './serviceCapabilities.svelte';
+import { eventually } from '../../../tests/unit/support/eventually.js';
 
 function capabilities() {
   const ready = vi.fn(
@@ -36,7 +37,7 @@ describe('service capabilities', () => {
     response.resolve(
       json({ local_login_enabled: true, oidc_login_enabled: false })
     );
-    await vi.waitFor(() => expect(state.pending).toBe(false));
+    await eventually(() => expect(state.pending).toBe(false));
 
     expect(state.localLoginEnabled).toBe(true);
     expect(state.gatewayAvailable).toBe(true);
@@ -65,7 +66,7 @@ describe('service capabilities', () => {
       );
     serve(response);
     const state = capabilities();
-    await vi.waitFor(() => expect(state.pending).toBe(false));
+    await eventually(() => expect(state.pending).toBe(false));
 
     expect(state.localLoginEnabled).toBe(true);
     expect(state.gatewayAvailable).toBe(false);
@@ -75,7 +76,7 @@ describe('service capabilities', () => {
     expect(state.notificationsActive).toBe(true);
     expect(state.payloadCaptureActive).toBe(true);
     await state.retry();
-    await vi.waitFor(() => expect(state.localLoginEnabled).toBe(false));
+    await eventually(() => expect(state.localLoginEnabled).toBe(false));
 
     expect(state.gatewayAvailable).toBe(true);
     expect(state.limitsEnforced).toBe(true);

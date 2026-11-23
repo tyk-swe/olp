@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import SettingsPage from './SettingsPage.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const setting = {
   key: 'retention.usage_days',
@@ -74,18 +75,18 @@ it('rebases a draft edited during a save onto the returned etag', async () => {
       ['Save', 'Saving…'].includes(item.textContent?.trim() ?? '')
     );
   flushSync();
-  await vi.waitFor(() => expect(input().value).toBe('30'));
+  await eventually(() => expect(input().value).toBe('30'));
   edit('45');
   save();
   await pending.promise;
   edit('60');
   release.resolve();
-  await vi.waitFor(() => expect(saveButton()?.disabled).toBe(false));
+  await eventually(() => expect(saveButton()?.disabled).toBe(false));
   expect(input().value).toBe('60');
   save();
-  await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(writes).toHaveBeenCalledTimes(2));
   const [request, body] = writes.mock.calls[1];
   expect(request.headers.get('If-Match')).toBe('"etag-2"');
   expect(body.value).toBe('60');
-  await vi.waitFor(() => expect(saveButton()).toBeUndefined());
+  await eventually(() => expect(saveButton()).toBeUndefined());
 });

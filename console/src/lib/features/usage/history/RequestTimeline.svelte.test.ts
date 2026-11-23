@@ -5,6 +5,7 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import { getRequest } from './api.js';
 import RequestTimeline from './RequestTimeline.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,7 +46,7 @@ it.each([
       await unmount(setup.mock.results[0].value);
       await unmount(harness);
     });
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.querySelector('p.muted')?.textContent?.trim()).toBe(
         `Response cache: ${result}${suffix}`
       )

@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import ConfigurationPanel from './ConfigurationPanel.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -57,12 +58,12 @@ it('retires the ready plan when external credential bindings change', async () =
   artifact.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   click('Plan');
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(
       target.querySelector('[data-testid="promotion-plan"]')
     ).not.toBeNull()
   );
-  await vi.waitFor(() => expect(button('Apply')).toBeDefined());
+  await eventually(() => expect(button('Apply')).toBeDefined());
   const external = target.querySelectorAll<HTMLTextAreaElement>('textarea')[1];
   expect(external).toBeDefined();
   external.value =
@@ -72,13 +73,13 @@ it('retires the ready plan when external credential bindings change', async () =
   expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
   expect(button('Apply')).toBeUndefined();
   click('Plan');
-  await vi.waitFor(() => expect(plans).toHaveBeenCalledTimes(2));
-  await vi.waitFor(() =>
+  await eventually(() => expect(plans).toHaveBeenCalledTimes(2));
+  await eventually(() =>
     expect(
       target.querySelector('[data-testid="promotion-plan"]')
     ).not.toBeNull()
   );
-  await vi.waitFor(() => expect(button('Apply')).toBeDefined());
+  await eventually(() => expect(button('Apply')).toBeDefined());
 });
 
 it('ignores a deferred plan result after the artifact changed', async () => {
@@ -127,7 +128,7 @@ it('ignores a deferred plan result after the artifact changed', async () => {
   flushSync();
   setArtifact('first');
   click('Plan');
-  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(true));
+  await eventually(() => expect(button('Plan')?.disabled).toBe(true));
   setArtifact('second');
   release(
     json({
@@ -137,7 +138,7 @@ it('ignores a deferred plan result after the artifact changed', async () => {
       conflicts: []
     })
   );
-  await vi.waitFor(() => expect(button('Plan')?.disabled).toBe(false));
+  await eventually(() => expect(button('Plan')?.disabled).toBe(false));
   expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
   expect(button('Apply')).toBeUndefined();
   click('Plan');
@@ -187,14 +188,14 @@ it('keeps Apply and Plan disabled until a conflict refresh finishes', async () =
   artifact.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   button('Plan')?.click();
-  await vi.waitFor(() => expect(button('Apply')?.disabled).toBe(false));
+  await eventually(() => expect(button('Apply')?.disabled).toBe(false));
   button('Apply')?.click();
-  await vi.waitFor(() => expect(plans).toHaveBeenCalledTimes(2));
+  await eventually(() => expect(plans).toHaveBeenCalledTimes(2));
   expect(button('Apply')?.disabled).toBe(true);
   expect(button('Plan')?.disabled).toBe(true);
   expect(applies).toHaveBeenCalledOnce();
   refresh.resolve(planResponse('refreshed'));
-  await vi.waitFor(() => expect(button('Apply')?.disabled).toBe(false));
+  await eventually(() => expect(button('Apply')?.disabled).toBe(false));
   expect(target.textContent).toContain('Digest refreshed');
   expect(target.querySelector('[role="alert"]')?.textContent).toBe('Conflict');
 });

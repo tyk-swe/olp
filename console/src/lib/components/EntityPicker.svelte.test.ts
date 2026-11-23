@@ -3,6 +3,7 @@ import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
 import PickerProbe from './test/PickerProbe.svelte';
+import { eventually } from '../../../tests/unit/support/eventually.js';
 
 const person = {
   id: '00000000-0000-4000-8000-000000000002',
@@ -46,7 +47,7 @@ function render(operations: Parameters<typeof serve>[1]) {
 it('lists people by name and hands back the chosen ID', async () => {
   const { target, picked } = render(['access_read']);
 
-  const select = await vi.waitFor(() => {
+  const select = await eventually(() => {
     const found = target.querySelector<HTMLSelectElement>('select#probe');
     expect(found?.textContent).toContain('Dana Developer');
     return found;
@@ -62,7 +63,7 @@ it('lists people by name and hands back the chosen ID', async () => {
 it('falls back to typing an ID when the role cannot list people', async () => {
   const { target } = render([]);
 
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('input#probe')).not.toBeNull()
   );
   expect(target.querySelector('select#probe')).toBeNull();

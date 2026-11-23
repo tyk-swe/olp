@@ -154,5 +154,19 @@ export default [
         }
       ]
     }
+  },
+  {
+    files: testFiles,
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'vi',
+          property: 'waitFor',
+          message:
+            'Use eventually from tests/unit/support/eventually.ts. vi.waitFor polls every 50ms, which dominates the console unit budget.'
+        }
+      ]
+    }
   }
 ];

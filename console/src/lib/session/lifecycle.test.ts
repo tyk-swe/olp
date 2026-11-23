@@ -4,6 +4,7 @@ import { ApiProblem } from '#lib/management/http.js';
 import { clearCsrfToken, getCsrfToken } from './csrf';
 import { AuthenticationLifecycle } from './lifecycle';
 import type { AuthenticatedSession } from './state';
+import { eventually } from '../../../tests/unit/support/eventually.js';
 
 const alice: AuthenticatedSession = {
   user: {
@@ -129,7 +130,7 @@ describe('authentication lifecycle', () => {
     const pending = Promise.withResolvers<AuthenticatedSession>();
     const firstLogin = vi.fn(() => pending.promise);
     const first = lifecycle.authenticate(firstLogin);
-    await vi.waitFor(() => expect(firstLogin).toHaveBeenCalledOnce());
+    await eventually(() => expect(firstLogin).toHaveBeenCalledOnce());
 
     await lifecycle.authenticate(async () => bob);
     pending.resolve(alice);
@@ -280,7 +281,7 @@ describe('authentication lifecycle', () => {
     const otherTab = new BroadcastChannel('olp-authentication');
     try {
       otherTab.postMessage('changed');
-      await vi.waitFor(() =>
+      await eventually(() =>
         expect(lifecycle.snapshot().user).toEqual(bob.user)
       );
       expect(previous.signal.aborted).toBe(true);
@@ -309,7 +310,7 @@ describe('authentication lifecycle', () => {
     const otherTab = new BroadcastChannel('olp-authentication');
     try {
       otherTab.postMessage('rotated');
-      await vi.waitFor(() =>
+      await eventually(() =>
         expect(getCsrfToken()).toBe('rotated-in-another-tab')
       );
       await lifecycle.handleResponse(
